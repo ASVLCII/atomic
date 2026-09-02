@@ -224,11 +224,25 @@ export function handleBrokerSend(
   // supervisor frame or an exact recorded reply may resolve across groups.
 	const liveWorkflowTarget = sessions.has(trimmedTo) ? undefined : resolveLiveWorkflowStage?.(trimmedTo);
 	const exactIdTarget = sessions.get(trimmedTo) ?? liveWorkflowTarget;
-  const reachableAcrossGroups = supervisorSend || Boolean(message.replyTo);
   const visibleCandidates = Array.from(sessions.values(), (session) => session.info).filter(
-	(info) => reachableAcrossGroups || sessionsShareGroup(info, fromSession.info),
+	(info) => sessionsShareGroup(info, fromSession.info) ||
+      (supervisorSend && info.id === fromSession.supervisorId) ||
+      (message.replyTo !== undefined && (
+        pendingQuestions.matchesReply(fromSession.info.id, info.id, message.replyTo) ||
+        isVerticalBypass({ replyTo: message.replyTo, sender: fromSession.info, target: info, supervisorCache })
+      )),
   );
   const candidates = visibleCandidates.filter(isAgentRecipient);
+  // Preserve explicit named-reply collision rejection without exposing hidden identities (#2603).
+  if (expectedRecipientId !== undefined && !exactIdTarget && Array.from(sessions.values()).some(
+    ({ info }) => isAgentRecipient(info) && info.name === trimmedTo &&
+      !candidates.some((candidate) => candidate.id === info.id),
+  )) {
+    write(socket, { type: "delivery_failed", messageId, attemptId,
+      reason: "Reply target cannot be resolved safely; use the exact sender ID",
+    });
+    return;
+  }
   const resolution = exactIdTarget
     ? ({ kind: "resolved", session: exactIdTarget.info } as const)
     : resolveSessionTarget(candidates, trimmedTo);

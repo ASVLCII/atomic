@@ -8,6 +8,7 @@ import { hasPendingDurableResumeTransition } from "../runs/background/durable-re
 import { quitAllRuns, quitRun } from "../runs/background/quit.js";
 import { pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
 import { workflowHasPausedStages, workflowHasPausedState } from "../runs/background/workflow-lifecycle-aggregate.js";
+import { isRunIdPrefix } from "../shared/run-id.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import { store } from "../shared/store.js";
 import { workflowRunResumeCandidate } from "../shared/workflow-artifacts.js";
@@ -33,7 +34,7 @@ import {
 	resumePickerLiveUpdateOptions,
 } from "./workflow-resume-picker-rows.js";
 import { classifyDurableResumeShadow, reconcileDurableResumeShadow } from "./workflow-resume-shadow.js";
-import { overlaySurfaceFromContext, resolveRunId, resolveStageTarget } from "./workflow-targets.js";
+import { isResolvedRunId, overlaySurfaceFromContext, resolveRunId, resolveStageTarget } from "./workflow-targets.js";
 
 export type { WorkflowRunControlDeps } from "./workflow-durable-resume-command.js";
 
@@ -88,7 +89,7 @@ export async function handleRunControlCommand(
 			return true;
 		}
 		const resolved = resolveRunId(target);
-		if (resolved.kind === "malformed") {
+		if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 			fail(resolved.message);
 			return true;
 		}
@@ -161,7 +162,7 @@ export async function handleRunControlCommand(
 			return true;
 		}
 		const resolved = resolveRunId(target!);
-		if (resolved.kind === "malformed") {
+		if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 			fail(resolved.message);
 			return true;
 		}
@@ -268,7 +269,7 @@ export async function handleRunControlCommand(
 				}
 				if (picked.result.kind === "live") {
 					const resolved = resolveRunId(picked.result.runId);
-					if (resolved.kind !== "exact") {
+					if (!isResolvedRunId(resolved)) {
 						fail(`Run not found: ${picked.result.runId}`);
 						return true;
 					}
@@ -335,8 +336,9 @@ export async function handleRunControlCommand(
 				return true;
 			}
 			const localResolution = resolveRunId(target);
-			const localBeforePreparation =
-				localResolution.kind === "exact" ? store.runs().find((run) => run.id === localResolution.runId) : undefined;
+			const localBeforePreparation = isResolvedRunId(localResolution)
+				? store.runs().find((run) => run.id === localResolution.runId)
+				: undefined;
 			const exactBeforePreparation = localBeforePreparation?.id === target ? localBeforePreparation : undefined;
 			const shadow =
 				localBeforePreparation === undefined
@@ -386,30 +388,36 @@ export async function handleRunControlCommand(
 			} else {
 				const localIsDurableResumeShadow = shadow === "eligible";
 				let durable: readonly ResumableWorkflowEntry[] = [];
+				let completed: readonly ResumableWorkflowEntry[] = backend.listCompletedWorkflows();
 				let preparationError: string | undefined;
 				const needsDurablePreparation =
 					localBeforePreparation === undefined ||
+					isRunIdPrefix(target) ||
 					localIsDurableResumeShadow ||
 					!backend.isWorkflowLoadable(localBeforePreparation.id);
 				if (needsDurablePreparation) {
 					await ensureWorkflowResourcesVisible();
 					const runtime = deps.runtimeForContext(ctx);
 					try {
-						durable = await runtime.prepareDurableResumable(target);
+						const catalog = isRunIdPrefix(target) ? await runtime.prepareDurableCatalog?.() : undefined;
+						durable = catalog?.resumable ?? (await runtime.prepareDurableResumable(target));
+						completed =
+							catalog?.completed ??
+							(await runtime.prepareCompletedDurable?.()) ??
+							backend.listCompletedWorkflows();
 					} catch (error) {
 						preparationError = error instanceof Error ? error.message : String(error);
 					}
 				}
+				if (preparationError !== undefined && isRunIdPrefix(target)) {
+					fail(`Failed to resolve workflow resume target: ${preparationError}`);
+					return true;
+				}
 				const loadableRuns = topLevelWorkflowRuns(store.runs()).filter(
 					(run) => backend.isWorkflowLoadable(run.id) && !reconcileDurableResumeShadow(run, store, { backend }),
 				);
-				const combined = resolveWorkflowResumeTarget(
-					target,
-					loadableRuns,
-					durable,
-					backend.listCompletedWorkflows(),
-				);
-				if (combined.kind === "malformed") {
+				const combined = resolveWorkflowResumeTarget(target, loadableRuns, durable, completed);
+				if (combined.kind === "malformed" || combined.kind === "ambiguous") {
 					fail(combined.message);
 					return true;
 				}
@@ -427,7 +435,7 @@ export async function handleRunControlCommand(
 			}
 		} else {
 			const resolved = resolveRunId(target);
-			if (resolved.kind === "malformed") {
+			if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 				fail(resolved.message);
 				return true;
 			}
