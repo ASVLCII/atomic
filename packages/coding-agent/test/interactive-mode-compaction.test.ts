@@ -3,20 +3,20 @@ import type { Usage } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Container, getKeybindings, setKeybindings, Text } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { VerbatimCompactionResult } from "../src/core/compaction/index.ts";
-import { KeybindingsManager } from "../src/core/keybindings.ts";
+import type { VerbatimCompactionResult } from "../src/core/compaction/index.js";
+import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	createCustomMessage,
 	createVerbatimCompactionMessage,
 	VERBATIM_COMPACTION_PREFIX,
-} from "../src/core/messages.ts";
-import type { SessionEntry } from "../src/core/session-manager.ts";
+} from "../src/core/messages.js";
+import type { SessionEntry } from "../src/core/session-manager.js";
 import {
-	compactionBoundaryFromMessage,
 	CompactionBoundaryMessageComponent,
-} from "../src/modes/interactive/components/compaction-boundary-message.ts";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
-import { getMarkdownTheme, initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
+	compactionBoundaryFromMessage,
+} from "../src/modes/interactive/components/compaction-boundary-message.js";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { getMarkdownTheme, initTheme, theme } from "../src/modes/interactive/theme/theme.js";
 
 const previousKeybindings = getKeybindings();
 
@@ -694,18 +694,13 @@ describe("compaction boundary component", () => {
 	});
 
 	it("projects the authoritative count onto a persisted boundary whose details only carry stats (#2052)", () => {
-		const message = createVerbatimCompactionMessage(
-			result.compactedText,
-			1_200,
-			new Date(1).toISOString(),
-			{
-				strategy: "verbatim-lines",
-				parameters: result.parameters,
-				promptVersion: result.promptVersion,
-				rung: result.rung,
-				stats: result.stats,
-			},
-		);
+		const message = createVerbatimCompactionMessage(result.compactedText, 1_200, new Date(1).toISOString(), {
+			strategy: "verbatim-lines",
+			parameters: result.parameters,
+			promptVersion: result.promptVersion,
+			rung: result.rung,
+			stats: result.stats,
+		});
 		const component = compactionBoundaryFromMessage(message, true);
 		const text = stripVTControlCharacters(component.render(200).join("\n"));
 		expect(text).toContain("Compacted from 1,200 tokens");

@@ -8,8 +8,8 @@ import {
 	setKeptTailTokenEstimate,
 } from "../src/core/compaction/compaction-boundary.js";
 import { runVerbatimCompaction, targetKeepLines } from "../src/core/compaction/compaction-runner.js";
-import { reconstructCompactedTranscript, validateDeletedRanges } from "../src/core/compaction/deleted-ranges.js";
 import type { VerbatimCompactionPreparation } from "../src/core/compaction/compaction-types.js";
+import { reconstructCompactedTranscript, validateDeletedRanges } from "../src/core/compaction/deleted-ranges.js";
 import {
 	buildRangePlannerPrompt,
 	extractDeletedRanges,
@@ -553,5 +553,59 @@ describe("compaction rung whole-context stats (#2052)", () => {
 		// Dropping the tail makes the reduction honestly reflect the content loss.
 		expect(result.stats.tokensAfter).toBeLessThan(result.stats.tokensBefore);
 		expect(result.stats.percentReduction).toBeGreaterThan(0);
+	});
+
+	it("drops an unregistered kept tail in fresh compaction (P1 regression #3010)", async () => {
+		// A directly constructed preparation with kept tail messages but NO
+		// registered estimate in the WeakMap. With no registered estimate the
+		// fresh rung must conservatively drop the tail rather than assume it fits.
+		const prep: VerbatimCompactionPreparation = {
+			firstKeptEntryId: "tail",
+			region: createNumberedRegion("[User]: retained\n"),
+			regionEntryIds: ["a", "b"],
+			keptTailMessageCount: 2,
+			tokensBefore: 100,
+			parameters: { compression_ratio: 0.5, preserve_recent: 2, query: "q" },
+			settings: DEFAULT_COMPACTION_SETTINGS,
+		};
+		// No setKeptTailTokenEstimate call — simulates a directly constructed prep
+		const small = { ...model, contextWindow: 100 };
+		const result = await runVerbatimCompaction(
+			prep,
+			small,
+			run({
+				streamFn: createFauxStreamFn([{ error: "provider unavailable" }]).streamFn,
+				urgency: "load_bearing",
+			}),
+		);
+		expect(result.rung).toBe("fresh");
+		expect(result.keptTail).toBe(false);
+		// The unregistered tail contributes no estimate anywhere; nothing fabricates a count.
+		expect(getKeptTailTokenEstimate(prep)).toBe(0);
+	});
+
+	it("keeps a zero-message tail in fresh compaction without a registered estimate (P1 regression #3010)", async () => {
+		// An empty tail cannot be oversized: with no kept messages the fresh rung
+		// keeps the tail even though nothing is registered in the WeakMap.
+		const prep: VerbatimCompactionPreparation = {
+			firstKeptEntryId: null,
+			region: createNumberedRegion("[User]: retained\n"),
+			regionEntryIds: ["a", "b"],
+			keptTailMessageCount: 0,
+			tokensBefore: 100,
+			parameters: { compression_ratio: 0.5, preserve_recent: 2, query: "q" },
+			settings: DEFAULT_COMPACTION_SETTINGS,
+		};
+		const small = { ...model, contextWindow: 100 };
+		const result = await runVerbatimCompaction(
+			prep,
+			small,
+			run({
+				streamFn: createFauxStreamFn([{ error: "provider unavailable" }]).streamFn,
+				urgency: "load_bearing",
+			}),
+		);
+		expect(result.rung).toBe("fresh");
+		expect(result.keptTail).toBe(true);
 	});
 });

@@ -1,7 +1,7 @@
 import type { RetryCallbacks, RetryPolicy } from "@bastani/pi-ai";
 import type { Api, Model, Usage } from "@bastani/pi-ai/compat";
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { getKeptTailTokenEstimate } from "./compaction-boundary.js";
+import { getKeptTailTokenEstimate, hasKeptTailTokenEstimate } from "./compaction-boundary.js";
 import type {
 	BorrowedPlanner,
 	CompactedTranscript,
@@ -13,7 +13,6 @@ import type {
 } from "./compaction-types.js";
 import { MIN_COMPACTABLE_REGION_LINES } from "./compaction-types.js";
 import { reconstructCompactedTranscript, validateDeletedRanges } from "./deleted-ranges.js";
-import { widenToWholeContextStats } from "./whole-context-stats.js";
 import {
 	type BorrowFallbackPlanner,
 	createFallbackPlannerBorrower,
@@ -30,6 +29,7 @@ import {
 } from "./range-planner.js";
 import { writeSuccessDiagnosticSidecar } from "./range-planner-diagnostics.js";
 import { nextTrimOffset, rebaseTrimmedRanges, trimRegionHead } from "./region-trimming.js";
+import { widenToWholeContextStats } from "./whole-context-stats.js";
 
 export interface CompactionPlanOptions {
 	streamFn: StreamFn;
@@ -154,7 +154,12 @@ function buildFreshContextWindow(preparation: VerbatimCompactionPreparation, har
 	// way, and counting the reconstructed protected/marker text here would drop a
 	// tail that fits. A rebuilt context that still cannot be sent is the post-tool
 	// gate's problem, not a reason for this rung to discard more.
-	return { transcript: buildFreshTranscript(preparation), keptTail: getKeptTailTokenEstimate(preparation) <= limit };
+	// A kept tail with no registered estimate (a directly constructed
+	// preparation) is dropped conservatively rather than assumed to fit (P1 #3010).
+	const keptTail =
+		preparation.keptTailMessageCount === 0 ||
+		(hasKeptTailTokenEstimate(preparation) && getKeptTailTokenEstimate(preparation) <= limit);
+	return { transcript: buildFreshTranscript(preparation), keptTail };
 }
 
 /**

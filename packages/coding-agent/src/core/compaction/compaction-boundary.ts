@@ -39,10 +39,25 @@ const keptTailTokensByPreparation = new WeakMap<VerbatimCompactionPreparation, n
  * is returned. The old fallback of `tokensBefore - region.tokenEstimate` was
  * removed because it mixed the authoritative whole-context count with the
  * heuristic region estimate; when no explicit estimate exists the tail simply
- * contributes nothing rather than a wrong-numbered value.
+ * contributes nothing rather than a wrong-numbered value. Whether an estimate is
+ * registered at all is visible through `hasKeptTailTokenEstimate`, which the
+ * fresh rung uses to decide a tail whose size is unknown (P1 #3010).
  */
 export function getKeptTailTokenEstimate(preparation: VerbatimCompactionPreparation): number {
-	return keptTailTokensByPreparation.get(preparation) ?? 0;
+	const registered = keptTailTokensByPreparation.get(preparation);
+	return registered === undefined ? 0 : registered;
+}
+
+/**
+ * Whether an independent tail estimate is registered for this preparation.
+ *
+ * A preparation built by `prepareCompactionBoundary` always has one. A directly
+ * constructed preparation may not; the fresh rung treats a kept tail whose size
+ * is unregistered as unknown and drops it conservatively rather than assuming it
+ * fits (P1 #3010).
+ */
+export function hasKeptTailTokenEstimate(preparation: VerbatimCompactionPreparation): boolean {
+	return keptTailTokensByPreparation.has(preparation);
 }
 
 /**
