@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.19-alpha.11] - 2026-09-13
+
 ### Fixed
 
 - Repeated nested `ctx.workflow()` invocations use unambiguous Intercom boundary identities, preventing duplicate-owner and heavy-initialization warnings during model fallback while preserving route ownership checks.
