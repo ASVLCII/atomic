@@ -3,7 +3,9 @@ import { durableBackendForRun, durableRootRunIdForRun } from "../durable/run-own
 import { workflowInvocationIntercomGroup, workflowInvocationOwnsGroup } from "../shared/intercom-group.js";
 import { workflowPendingStageRouteCapability } from "../shared/pending-stage-route-capability.js";
 import {
+	createWorkflowBoundarySegmentsResolver,
 	stageMatchesPathPattern,
+	type WorkflowBoundarySegmentsResolver,
 	workflowBoundaryHops,
 	workflowBoundarySegments,
 } from "../shared/pending-stage-status.js";
@@ -128,6 +130,7 @@ export function registerPendingStageIntercomBridge(pi: WorkflowEventSurface, act
 		if (disposed) return;
 		const ownedRunIds = new Set<string>();
 		const runs = activeStore.runs();
+		const resolveBoundarySegments = createWorkflowBoundarySegmentsResolver(runs);
 		for (const run of runs) {
 			const rootRunId = durableRootRunIdForRun(runs, run.id);
 			if (rootRunId === undefined) continue;
@@ -161,7 +164,7 @@ export function registerPendingStageIntercomBridge(pi: WorkflowEventSurface, act
 						.map((stage) => ({
 							stageId: stage.id,
 							stageName: stage.name,
-							target: stageRouteTarget(runs, rootRunId, run.id, stage.id),
+							target: stageRouteTarget(runs, rootRunId, run.id, stage.id, resolveBoundarySegments),
 							lifecycle:
 								stage.sessionId === undefined && stage.sessionFile === undefined ? "pending" : "running",
 							// Keep agent identity for alias reactivation even after discovery eligibility ends.
@@ -178,7 +181,7 @@ export function registerPendingStageIntercomBridge(pi: WorkflowEventSurface, act
 					...nonAgentNodes(run).map((node) => ({
 						stageId: node.id,
 						stageName: node.name,
-						target: stageRouteTarget(runs, rootRunId, run.id, node.id),
+						target: stageRouteTarget(runs, rootRunId, run.id, node.id, resolveBoundarySegments),
 						lifecycle: "pending",
 						routeEligible: false,
 						recipientPurpose: "control",
@@ -340,8 +343,14 @@ export function registerPendingStageIntercomBridge(pi: WorkflowEventSurface, act
  * resolves to that child, else the materialized child-run id). Identical to the
  * roster announcement target, which is what the broker registers live aliases from.
  */
-function stageRouteTarget(runs: ReturnType<Store["runs"]>, rootRunId: string, runId: string, stageId: string): string {
-	const boundarySegments = runId === rootRunId ? [] : workflowBoundarySegments(runs, runId);
+function stageRouteTarget(
+	runs: ReturnType<Store["runs"]>,
+	rootRunId: string,
+	runId: string,
+	stageId: string,
+	resolveBoundarySegments: WorkflowBoundarySegmentsResolver = (id) => workflowBoundarySegments(runs, id),
+): string {
+	const boundarySegments = runId === rootRunId ? [] : resolveBoundarySegments(runId);
 	return formatWorkflowStageTarget(rootRunId, ...(boundarySegments ?? [runId]), stageId);
 }
 

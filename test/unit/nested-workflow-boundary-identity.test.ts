@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { workflowBoundarySegments } from "../../packages/workflows/src/shared/pending-stage-status.js";
+import {
+	createWorkflowBoundarySegmentsResolver,
+	workflowBoundarySegments,
+} from "../../packages/workflows/src/shared/pending-stage-status.js";
 import type { RunSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 
 // #3020: repeated ctx.workflow() calls must not advertise another owner's route on fallback.
@@ -61,3 +64,63 @@ test.each(["workflow:child", "first-boundary-id"])(
 		assert.deepEqual(workflowBoundarySegments(withoutFirstChild, children[1]!.id), ["child-1"]);
 	},
 );
+
+// PR #3026: one publication must reuse its roster index across nested stage targets.
+test("boundary resolver indexes the roster once for all nested runs", () => {
+	const runs: RunSnapshot[] = Array.from({ length: 32 }, (_, index) => ({
+		id: `run-${index}`,
+		name: "nested",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		...(index === 0 ? {} : { parentRunId: `run-${index - 1}`, parentStageId: "boundary" }),
+		stages: [{ id: "boundary", name: "child", status: "running", parentIds: [], toolEvents: [] }],
+	}));
+	let rosterReads = 0;
+	const roster = new Proxy(runs, {
+		get(target, key, receiver) {
+			if (typeof key === "string" && /^\d+$/.test(key)) rosterReads++;
+			return Reflect.get(target, key, receiver);
+		},
+	});
+	const resolve = createWorkflowBoundarySegmentsResolver(roster);
+	const indexedReads = rosterReads;
+	assert.ok(indexedReads > 0);
+	for (let index = 0; index < runs.length; index++) {
+		const expected = Array.from({ length: index }, () => "child");
+		assert.deepEqual(resolve(`run-${index}`), expected);
+		assert.deepEqual(resolve(`run-${index}`), expected);
+	}
+	assert.equal(resolve("missing"), undefined);
+	assert.equal(rosterReads, indexedReads, "resolving targets must not rescan the roster");
+});
+
+test("fresh publication resolver observes added siblings and broken lineage", () => {
+	const root: RunSnapshot = {
+		id: "root",
+		name: "root",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		stages: [{ id: "boundary", name: "child", status: "running", parentIds: [], toolEvents: [] }],
+	};
+	const child: RunSnapshot = {
+		id: "child-1",
+		name: "child",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		parentRunId: root.id,
+		parentStageId: "boundary",
+		stages: [],
+	};
+	const runs = [root, child];
+	assert.deepEqual(createWorkflowBoundarySegmentsResolver(runs)(child.id), ["child"]);
+	// Reuse the array deliberately: an array-identity cache would retain stale ownership.
+	runs.push({ ...child, id: "child-2" });
+	const withSibling = createWorkflowBoundarySegmentsResolver(runs);
+	assert.deepEqual(withSibling(child.id), [child.id]);
+	assert.deepEqual(withSibling("child-2"), ["child-2"]);
+	assert.equal(createWorkflowBoundarySegmentsResolver([child])(child.id), undefined);
+	assert.equal(createWorkflowBoundarySegmentsResolver([{ ...root, stages: [] }, child])(child.id), undefined);
+});
