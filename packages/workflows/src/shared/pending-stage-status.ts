@@ -24,9 +24,9 @@ export type WorkflowBoundarySegmentsResolver = (runId: string) => readonly strin
 
 /**
  * Depth-faithful boundary segments for `runId` (D8 clarification): one segment per
- * ancestor hop below the root, each the boundary-stage name when it is a valid single
- * segment, else that boundary's materialized child-run id. `[]` for the root run;
- * `undefined` when a parent or boundary link is missing from `runs`.
+ * ancestor hop below the root, each the boundary-stage name when it resolves to
+ * this child, else that boundary's materialized child-run id. `[]` for the root
+ * run; `undefined` when a parent or boundary link is missing from `runs`.
  */
 export function workflowBoundarySegments(runs: readonly RunSnapshot[], runId: string): readonly string[] | undefined {
 	const runById = new Map(runs.map((run) => [run.id, run]));
@@ -37,8 +37,21 @@ export function workflowBoundarySegments(runs: readonly RunSnapshot[], runId: st
 		const boundary = parent?.stages.find((stage) => stage.id === current?.parentStageId);
 		if (parent === undefined || boundary === undefined) return undefined;
 		const boundaryName = boundary.name;
+		// Match routing's ID-before-name precedence. Repeated ctx.workflow() calls
+		// share a name but have distinct boundary IDs; publishing that name for each
+		// child makes the broker's stage-name aliases collide across live owners.
+		const byId = parent.stages.filter((stage) => stage.id === boundaryName);
+		const matchingBoundaries = byId.length > 0 ? byId : parent.stages.filter((stage) => stage.name === boundaryName);
+		const matchingChildren = runs.filter(
+			(run) => run.parentRunId === parent.id && matchingBoundaries.some((stage) => stage.id === run.parentStageId),
+		);
 		segments.unshift(
-			boundaryName.length > 0 && !boundaryName.includes("/") && !boundaryName.includes("*")
+			boundaryName.length > 0 &&
+				!boundaryName.includes("/") &&
+				!boundaryName.includes("*") &&
+				matchingBoundaries.length === 1 &&
+				matchingChildren.length === 1 &&
+				matchingChildren[0]?.id === current.id
 				? boundaryName
 				: current.id,
 		);

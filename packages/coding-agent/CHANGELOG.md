@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Repeated nested `ctx.workflow()` invocations no longer collide on Intercom route ownership during model fallback.
+
 ## [0.9.19-alpha.10] - 2026-09-13
 
 ### Added

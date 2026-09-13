@@ -337,7 +337,7 @@ export function registerPendingStageIntercomBridge(pi: WorkflowEventSurface, act
 /**
  * Canonical id-form target for one stage of `runId`, depth-faithful per the D8
  * clarification: one boundary segment per ancestor hop (boundary-stage name when it
- * is a valid single segment, else the materialized child-run id). Identical to the
+ * resolves to that child, else the materialized child-run id). Identical to the
  * roster announcement target, which is what the broker registers live aliases from.
  */
 function stageRouteTarget(runs: ReturnType<Store["runs"]>, rootRunId: string, runId: string, stageId: string): string {
