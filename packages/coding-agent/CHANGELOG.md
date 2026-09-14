@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.20-alpha.1] - 2026-09-14
+
 ### Fixed
 
 - Workflow startup now reports its phase and age, and explicit cancellation releases waiting callers while retaining unfinished creation ownership. Cancelled queued reloads cannot start later; late SDK/binding results cannot attach or dispatch ([#3040](https://github.com/bastani-inc/atomic/issues/3040)).
