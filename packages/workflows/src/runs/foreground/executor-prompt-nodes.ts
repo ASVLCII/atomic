@@ -78,6 +78,11 @@ export function buildPromptNodeUiAdapter(input: {
 		const prompt = makePrompt(descriptor);
 		const replayKey = promptReplayKey(descriptor);
 		const durableTopology = input.durableTopologyForReplayKey?.(replayKey);
+		if (durableTopology?.status === "completed" && durableReplay === undefined) {
+			throw new Error(
+				`insufficient_state: missing durable UI answer for completed prompt ${durableTopology.stageId}`,
+			);
+		}
 		const stageId = durableTopology?.stageId ?? crypto.randomUUID();
 		const provisionalParentIds = input.tracker.onSpawn(stageId, descriptor.kind);
 		const replayDecision = input.replayIndex.decide({
