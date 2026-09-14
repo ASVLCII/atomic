@@ -97,8 +97,42 @@ afterEach(() => {
 
 describe("version-adoption telemetry", () => {
 	// #2498
-	it("exports the approved Atomic workers.dev endpoint with no env override", () => {
+	it("exports VERSION_ADOPTION_ENDPOINT as the approved workers.dev origin", () => {
 		expect(VERSION_ADOPTION_ENDPOINT).toBe(VERSION_ADOPTION_ORIGIN);
+	});
+
+	it("ignores hostile endpoint environment variables after a fresh module load", async () => {
+		const override = "https://override.invalid/x";
+		vi.stubEnv("ATOMIC_VERSION_ADOPTION_ENDPOINT", override);
+		vi.stubEnv("PI_VERSION_ADOPTION_ENDPOINT", override);
+		vi.stubEnv("ATOMIC_TELEMETRY_ENDPOINT", override);
+		vi.stubEnv("PI_TELEMETRY_ENDPOINT", override);
+		vi.stubEnv("ATOMIC_TELEMETRY_URL", override);
+		vi.stubEnv("PI_TELEMETRY_URL", override);
+
+		vi.doUnmock("../src/modes/interactive/interactive-mode-deps.ts");
+		vi.resetModules();
+
+		const { VERSION_ADOPTION_ENDPOINT: reloadedEndpoint } = await import("../src/config.ts");
+		const { InteractiveMode: ReloadedInteractiveMode } = await import("../src/modes/interactive/interactive-mode.ts");
+		const { SettingsManager: ReloadedSettingsManager } = await import("../src/core/settings-manager.ts");
+
+		expect(reloadedEndpoint).toBe("https://atomic-version-adoption.norin.workers.dev/v1/version-adoption");
+
+		const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 204 })));
+		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
+
+		const version = "1.2.3+abc";
+		const fn = Reflect.get(ReloadedInteractiveMode.prototype, "reportInstallTelemetry") as (
+			this: { settingsManager: ReturnType<typeof ReloadedSettingsManager.inMemory> },
+			version: string,
+		) => void;
+		fn.call({ settingsManager: ReloadedSettingsManager.inMemory() }, version);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchUrl(fetchMock.mock.calls[0]![0])).toBe(
+			`${VERSION_ADOPTION_ORIGIN}?version=${encodeURIComponent(version)}`,
+		);
 	});
 
 	it("pings once on the first interactive launch with fresh settings", () => {

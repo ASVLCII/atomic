@@ -154,7 +154,7 @@ Ctrl+G in main chat, embedded chat, and extension editor dialogs uses one shared
 
 Version-adoption telemetry measures whether releases reach real interactive launches and which versions stay in use. The metric is version-adoption pings / first-interactive-launch pings, not installs, users, MAU, or retention. Repeated eligible launches on several machines overcount. Opt-outs, offline mode, and dropped best-effort requests undercount.
 
-`enableInstallTelemetry` only controls that ping. It does not control update checks. Atomic still fetches the npm registry latest package metadata at `https://registry.npmjs.org/@bastani/atomic/latest` unless update checks are disabled or offline mode is on.
+`enableInstallTelemetry` controls this ping and Atomic's provider attribution headers; it does not control update checks. Atomic still fetches the npm registry latest package metadata at `https://registry.npmjs.org/@bastani/atomic/latest` unless update checks are disabled or offline mode is on.
 
 Atomic sends one GET to `https://atomic-version-adoption.norin.workers.dev/v1/version-adoption` with the running version as the `version` query parameter and the existing `atomic/<version> (<platform>; <runtime>; <arch>)` User-Agent. There is no request body, UUID, cookie, auth header, or user content.
 
