@@ -275,7 +275,7 @@ test("paused and quit startup stays observable; owner cancellation terminates st
 		const detail = inspectRun(runId, deps);
 		assert.ok(detail.ok);
 		const text = renderRunDetail(detail.detail, { now: Date.now() + 20_000, width: 120 });
-		assert.match(text, /startup reload-active \(20s in phase/);
+		assert.match(text, /startup reload-active \(20s total, 20s on current step; active\)/);
 		assert.match(text, /startup reload-queued/);
 		assert.equal((await pauseRun(runId, deps)).ok, true);
 		assert.equal(store.runs().find((r) => r.id === runId)?.status, "paused");

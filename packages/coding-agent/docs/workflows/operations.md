@@ -282,7 +282,7 @@ Use slash commands for graph connect and stage attach because those are interact
 
 ### Diagnosing a stage with an empty history
 
-Inspect `/workflow status <run-id>` or the workflow tool's `stage` / `stages` output. Live stages report `startup` with the current phase, seconds in that phase, and total startup age: model resolution, route authority, resource preparation, queued/active resource reload, SDK creation, extension binding, attachment, delivery readiness, and first dispatch. An allocated session ID is not proof of attachment; first dispatch is not proof of a provider response or reviewer approval.
+Inspect `/workflow status <run-id>` or the workflow tool's `stage` / `stages` output. Live stages report `startup` with the current phase, total startup age, and seconds on the current step, for example `startup reload-active (45s total, 45s on current step; active)`. Phases are model resolution, route authority, resource preparation, queued/active resource reload, SDK creation, extension binding, attachment, delivery readiness, and first dispatch. An allocated session ID is not proof of attachment; first dispatch is not proof of a provider response or reviewer approval.
 
 Slow startup is not automatically killed. Pause and graceful quit retain their resumable hold semantics; resume may still join the same pending creation and does not reset its age. Repeated pause/resume is not a startup restart.
 

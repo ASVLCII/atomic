@@ -30,5 +30,5 @@ export function formatStageStartup(startup: StageStartupSnapshot, now = Date.now
 		startup.state === "cancelled" && startup.ownershipPending
 			? "; cleanup pending — do not retry in-process; stop the owning Atomic process before fresh execution"
 			: "";
-	return `startup ${startup.phase} (${age}s in phase, ${total}s total; ${startup.state})${recovery}`;
+	return `startup ${startup.phase} (${total}s total, ${age}s on current step; ${startup.state})${recovery}`;
 }
