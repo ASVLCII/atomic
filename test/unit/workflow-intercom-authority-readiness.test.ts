@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { afterEach, test } from "vitest";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
@@ -7,6 +8,7 @@ import { registerPendingStageIntercomBridge } from "../../packages/workflows/src
 import { run } from "../../packages/workflows/src/runs/foreground/executor.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { testRunId } from "../helpers/run-id.js";
+import { spawnSyncCollect } from "../helpers/runtime.js";
 import { makeMockSession } from "./stage-runner-helpers.js";
 
 afterEach(() => setDurableBackend(undefined));
@@ -375,3 +377,26 @@ test("bridge retirement racing acknowledgement still fences startup before sessi
 		fixture.dispose();
 	}
 });
+
+// Bound the real Node/Jiti child independently of the test runner's own timer.
+const CANCELLATION_PROCESS_TIMEOUT_MS = 20_000;
+for (const settlement of ["retire", "reject"] as const) {
+	test(`public prompt cancelled during model lookup survives authority ${settlement}`, () => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/workflow-authority-cancelled-model.mjs", import.meta.url)),
+				settlement,
+			],
+			{
+				env: { ...process.env, NODE_OPTIONS: "" },
+				timeout: CANCELLATION_PROCESS_TIMEOUT_MS,
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		assert.equal(result.signalCode, null, result.stderr.toString());
+		assert.equal(result.exitCode, 0, result.stdout.toString() + result.stderr.toString());
+		assert.match(result.stdout.toString(), new RegExp(`SURVIVED_AUTHORITY_SETTLEMENT ${settlement}`));
+	});
+}

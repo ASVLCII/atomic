@@ -1314,12 +1314,12 @@ export class StageSessionController {
 		resumeOptions?: { restoreSavedModel?: boolean },
 	): Promise<StageSessionRuntime> {
 		const startGeneration = this.abortGeneration;
+		if (this.disposed || this.opts.signal?.aborted) throw this.staleCreationReason(startGeneration);
 		const authority = this.opts.routeAuthorityReady?.();
 		if (authority !== undefined) {
 			const wait = new AbortController();
 			this.routeAuthorityWait = wait;
 			try {
-				if (this.disposed || this.opts.signal?.aborted) throw this.staleCreationReason(startGeneration);
 				await raceAbort(authority.completion, wait.signal);
 				authority.assertCurrent();
 				if (this.disposed || this.opts.signal?.aborted || this.abortGeneration !== startGeneration)
