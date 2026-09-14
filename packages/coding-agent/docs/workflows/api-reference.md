@@ -532,6 +532,12 @@ readonly fallbackThinkingLevels?: readonly string[];
 
 Request/context incompatibility also advances it, including HTTP 400/413/422 bad, unprocessable, or payload-too-large requests; unsupported tools or parameters; context-length or context-window overflow; and `too large`, `invalid_request`, or `bad_request` errors. This lets the chain reach the current selected user model when no configured candidate can serve the request.
 
+Omitting `fallbackModels` is not a no-fallback setting. An explicit `fallbackModels: []` clears the authored stage fallback list but still retains the current Atomic-selected model as the final candidate. Stage sessions can also inherit main-chat fallback settings. There is currently no stage option that disables all of these fallback paths.
+
+For single-model troubleshooting, set `"fallbackModels": []` in the effective main-chat settings, select the desired model in the invoking session, use the same bare `provider/model` as the stage's `model`, and set `fallbackModels: []` on the stage. Matching candidates are deduplicated by model and reasoning suffix; use the session's thinking level rather than adding a suffix that creates another candidate. Inspect `modelAttempts`, the final `model`, and the stage transcript's assistant model identities before treating completion as success by the requested model.
+
+For a direct CLI probe, select `--model xai/grok-4.6:high` and set `"fallbackModels": []` in the effective main-chat settings. When scripting print mode without piped input, redirect stdin from `/dev/null` so the CLI does not wait for input before sending the request.
+
 If extension initialization fails and its session cannot be cleaned up, the stage stops without trying another model. Later prompts or attachment attempts on that stage also fail. Inspect both the initialization and cleanup errors and resolve the extension failure before starting a new run; changing fallback models does not fix a cleanup failure.
 
 A context overflow that the stage session's compaction has already failed to resolve is terminal for its candidate: it skips the same-candidate retry, because re-sending an identical request cannot fit a context compaction could not shrink, and advances straight to the next candidate.

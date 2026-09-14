@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Grok accepts the bundled bash tool schema for command execution and task waits, while local validation still rejects mixed inputs ([#3031](https://github.com/bastani-inc/atomic/issues/3031)).
+
 ## [0.9.19-alpha.11] - 2026-09-13
 
 ### Fixed
