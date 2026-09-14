@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Cold-start workflow stages wait for acknowledged Intercom route authority before connecting, preventing spurious ownership and heavy-initialization failures without weakening route ownership checks.
+
 ## [0.9.19] - 2026-09-13
 
 Cumulative release of the `0.9.19-alpha.1` through `0.9.19-alpha.11` prereleases. Per-change details remain in the unchanged prerelease sections below.
