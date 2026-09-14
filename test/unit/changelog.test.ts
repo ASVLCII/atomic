@@ -214,8 +214,8 @@ describe("changelog parsing", () => {
 	});
 });
 
-// AGENTS.md: "Each version section is immutable once released" and "New entries ALWAYS go
-// under ## [Unreleased]". Once a version is tagged, its published notes are fixed, so the
+// AGENTS.md: "A released section (`## [0.12.2]`) is immutable" and "New entries go under
+// `## [Unreleased]`". Once a version is tagged, its published notes are fixed, so the
 // released tail of every package changelog must still read exactly as it did at that tag.
 describe("released changelog sections", () => {
 	const changelogPaths = packageChangelogPaths();
