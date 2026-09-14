@@ -625,6 +625,9 @@ export function cachedStageId(runId: string, replayKey: string): string {
 function stageMetadataCheckpointId(replayKey: string, stage: StageSnapshot): string {
 	return `${stableCheckpointId("stage-meta", replayKey)}:${durableHash({
 		stageId: stage.id,
+		// Replay metadata may upgrade legacy topology while retaining identical timing.
+		// Keep it separate from the original execution record, stable across replays.
+		...(stage.replayed === true ? { replayed: true } : {}),
 		status: stage.status,
 		endedAt: stage.endedAt ?? 0,
 		durationMs: stage.durationMs ?? 0,
