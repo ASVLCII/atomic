@@ -62,6 +62,7 @@ export function buildPromptNodeUiAdapter(input: {
 	readonly preserveWorkflowExitSkippedReason: (stage: StageSnapshot, fallback: string) => void;
 	readonly classifyExecutorFailure: (error: unknown) => WorkflowFailure;
 	readonly durableTopologyForReplayKey?: (replayKey: string) => DurableStageTopology | undefined;
+	readonly durableTimingForStageId?: (stageId: string) => ReturnType<typeof stageTimingFields> | undefined;
 	/** Durably publish an unanswered prompt node before exposing its live wait. */
 	readonly onPendingStage?: (runId: string, snapshot: StageSnapshot) => Promise<void>;
 }): PromptNodeUiAdapter {
@@ -107,7 +108,9 @@ export function buildPromptNodeUiAdapter(input: {
 			replayKey,
 			status: shouldReplay ? "completed" : "running",
 			parentIds: Object.freeze(parentIds),
-			...(shouldReplay ? stageTimingFields(replaySource) : { startedAt: prompt.createdAt }),
+			...(shouldReplay
+				? stageTimingFields(durableReplay === undefined ? replaySource : input.durableTimingForStageId?.(stageId))
+				: { startedAt: prompt.createdAt }),
 			promptFootprint: { ...prompt },
 			toolEvents: [],
 			attachable: !shouldReplay,

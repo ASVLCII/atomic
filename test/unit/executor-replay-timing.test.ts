@@ -334,3 +334,50 @@ test("answered prompt replay preserves original timing", async () => {
 		source = store.runs().find((item) => item.id === result.runId)!;
 	}
 });
+
+// #3038: same-ID durable recovery must retain answered prompt timing in a fresh Store.
+test("durable answered prompt timing survives repeated fresh-Store recovery", async () => {
+	const backend = new InMemoryDurableBackend();
+	const store = createStore();
+	const runId = crypto.randomUUID();
+	let answers = 0;
+	const def = workflow({
+		name: "durable-prompt-timing",
+		description: "",
+		inputs: {},
+		outputs: {},
+		run: async (ctx) => {
+			assert.equal(await ctx.ui.confirm("confirm"), false);
+			answers++;
+			await ctx.stage("failure").prompt("fail");
+			return {};
+		},
+	});
+	const adapters = {
+		prompt: {
+			prompt: async () => {
+				throw new Error("resume-me");
+			},
+		},
+	};
+	const opts = { runId, durableBackend: backend, usePromptNodesForUi: true, adapters };
+	const initial = run(def, {}, { ...opts, store });
+	const pending = await waitForExecutorStagePendingPrompt(store);
+	store.resolveStagePendingPrompt(pending.runId, pending.stageId, pending.promptId, false);
+	const first = await initial;
+	assert.equal(first.status, "failed");
+	const original = first.stages.find((stage) => stage.name === "confirm")!;
+	assert.equal(typeof original.startedAt, "number");
+	assert.equal(typeof original.endedAt, "number");
+	assert.equal(typeof original.durationMs, "number");
+	for (let resume = 0; resume < 2; resume++) {
+		const result = await run(def, {}, { ...opts, store: createStore() });
+		assert.equal(result.status, "failed");
+		const prompt = result.stages.find((stage) => stage.name === "confirm")!;
+		assert.equal(prompt.id, original.id);
+		assert.equal(prompt.replayed, true);
+		assert.equal(prompt.promptAnswerState, "available");
+		assertTiming(prompt, original);
+	}
+	assert.equal(answers, 3, "the cached false answer returns on both recoveries without another prompt");
+});
