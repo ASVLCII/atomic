@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `/feedback` to draft privacy-scrubbed bug reports and enhancements, investigate bugs with one debugger run, and post reviewed drafts through your `gh` login ([#2799](https://github.com/bastani-inc/atomic/issues/2799)).
+
 ## [0.9.19] - 2026-09-13
 
 Cumulative release of the `0.9.19-alpha.2` through `0.9.19-alpha.6` prereleases. Per-change details remain in the unchanged prerelease sections below.
