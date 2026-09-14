@@ -360,4 +360,31 @@ describe("version-adoption nonblocking failure", () => {
 			process.off("unhandledRejection", onUnhandled);
 		}
 	});
+
+	it.each([400, 429, 503])(
+		"swallows a %s response without retrying or leaking unhandled rejection",
+		async (status) => {
+			const reasons: unknown[] = [];
+			const onUnhandled = (reason: unknown) => {
+				reasons.push(reason);
+			};
+			process.on("unhandledRejection", onUnhandled);
+			try {
+				const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status })));
+				vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
+				expect(() =>
+					reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION),
+				).not.toThrow();
+				await Promise.resolve();
+				await Promise.resolve();
+				expect(fetchMock).toHaveBeenCalledTimes(1);
+				expect(fetchUrl(fetchMock.mock.calls[0]![0])).toBe(
+					`${VERSION_ADOPTION_ORIGIN}?version=${encodeURIComponent(VERSION)}`,
+				);
+				expect(reasons).toEqual([]);
+			} finally {
+				process.off("unhandledRejection", onUnhandled);
+			}
+		},
+	);
 });
