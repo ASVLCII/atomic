@@ -3,7 +3,7 @@
 import type { ParallelFailFastScope } from "../runs/foreground/executor-types.js";
 import { RESUME_CONTINUATION_PROMPT } from "../shared/resume-continuation.js";
 import type { StageSnapshot } from "../shared/store-types.js";
-import { elapsedStageMs } from "../shared/timing.js";
+import { elapsedStageMs, stageTimingFields } from "../shared/timing.js";
 import type {
 	StageContext,
 	StageOptions,
@@ -642,11 +642,9 @@ export function recordCachedStageIntoStore(
 	parentIds?: readonly string[],
 	checkpoint?: DurableCompletedStageCheckpoint,
 ): void {
-	const now = Date.now();
 	const sourceStageId = checkpoint?.topology?.run?.runId === runId ? checkpoint.topology.stageId : undefined;
 	const stageId = sourceStageId ?? cachedStageId(runId, replayKey);
 	const result = checkpoint?.result ?? (typeof output === "string" ? output : JSON.stringify(output));
-	const endedAt = checkpoint?.endedAt ?? checkpoint?.completedAt ?? now;
 	const hasCurrentIdentity =
 		checkpoint?.topology?.sourceOrder !== undefined ||
 		checkpoint?.topology?.status !== undefined ||
@@ -661,9 +659,7 @@ export function recordCachedStageIntoStore(
 		name,
 		status: "completed",
 		parentIds: parentIds !== undefined ? Object.freeze([...parentIds]) : [],
-		startedAt: checkpoint?.startedAt ?? endedAt,
-		endedAt,
-		durationMs: checkpoint?.durationMs ?? 0,
+		...stageTimingFields(checkpoint),
 		result,
 		replayKey,
 		replayed: true,

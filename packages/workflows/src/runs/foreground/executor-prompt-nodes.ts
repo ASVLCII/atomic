@@ -6,8 +6,8 @@ import { requirePrimitivePromptAnswer } from "../../shared/prompt-answer.js";
 import { withPromptCallerStack } from "../../shared/prompt-callsite-context.js";
 import { stageUiBroker } from "../../shared/stage-ui-broker.js";
 import type { Store } from "../../shared/store.js";
-import type { StageSnapshot } from "../../shared/store-types.js";
-import { elapsedStageMs } from "../../shared/timing.js";
+import type { RunSnapshot, StageSnapshot } from "../../shared/store-types.js";
+import { elapsedStageMs, stageTimingFields } from "../../shared/timing.js";
 import type { WorkflowCustomUiFactory, WorkflowCustomUiOptions, WorkflowUIContext } from "../../shared/types.js";
 import type { WorkflowFailure } from "../../shared/workflow-failures.js";
 import type { ContinuationReplayIndex } from "./executor-continuation.js";
@@ -28,6 +28,24 @@ import type { StageControlRegistry } from "./stage-control-registry.js";
 
 export interface PromptNodeUiAdapter extends WorkflowUIContext {
 	replayDurable(request: DurableUiReplayRequest): Promise<void>;
+}
+
+function continuationPromptAnswer(store: Store, sourceRun: RunSnapshot, sourceStage: StageSnapshot) {
+	let run = sourceRun;
+	let stage = sourceStage;
+	const visited = new Set<string>();
+	while (!visited.has(stage.id)) {
+		visited.add(stage.id);
+		const answer = store.getStagePromptAnswer(run.id, stage.id);
+		if (answer !== undefined) return answer;
+		if (!stage.replayed || stage.replayedFromStageId === undefined || run.resumedFromRunId === undefined) break;
+		const parentRun = store.runs().find((candidate) => candidate.id === run.resumedFromRunId);
+		const parentStage = parentRun?.stages.find((candidate) => candidate.id === stage.replayedFromStageId);
+		if (parentRun === undefined || parentStage === undefined) break;
+		run = parentRun;
+		stage = parentStage;
+	}
+	return undefined;
 }
 
 export function buildPromptNodeUiAdapter(input: {
@@ -73,7 +91,7 @@ export function buildPromptNodeUiAdapter(input: {
 		const replaySource = replayDecision.source;
 		const continuationAnswer =
 			replayDecision.kind === "replay"
-				? input.activeStore.getStagePromptAnswer(input.opts.continuation!.source.id, replayDecision.source.id)
+				? continuationPromptAnswer(input.activeStore, input.opts.continuation!.source, replayDecision.source)
 				: undefined;
 		const replayAnswer = durableReplay === undefined ? continuationAnswer : { value: durableReplay.response };
 		const shouldReplay = replayAnswer !== undefined;
@@ -89,14 +107,12 @@ export function buildPromptNodeUiAdapter(input: {
 			replayKey,
 			status: shouldReplay ? "completed" : "running",
 			parentIds: Object.freeze(parentIds),
-			startedAt: prompt.createdAt,
+			...(shouldReplay ? stageTimingFields(replaySource) : { startedAt: prompt.createdAt }),
 			promptFootprint: { ...prompt },
 			toolEvents: [],
 			attachable: !shouldReplay,
 			...(shouldReplay
 				? {
-						endedAt: prompt.createdAt,
-						durationMs: 0,
 						promptAnswerState: promptAnswerStatus,
 						replayedFromStageId: replaySourceId,
 						replayed: true,
@@ -127,8 +143,10 @@ export function buildPromptNodeUiAdapter(input: {
 				pauseGate = undefined;
 				currentPauseGate?.resolve();
 				stageSnapshot.status = status;
-				stageSnapshot.endedAt = Date.now();
-				stageSnapshot.durationMs = elapsedStageMs(stageSnapshot, stageSnapshot.endedAt);
+				if (!shouldReplay) {
+					stageSnapshot.endedAt = Date.now();
+					stageSnapshot.durationMs = elapsedStageMs(stageSnapshot, stageSnapshot.endedAt);
+				}
 				input.activeStore.recordStageAttachable(input.runId, stageId, false);
 				input.activeStore.recordStageEnd(input.runId, stageSnapshot);
 				await input.opts.onStageEnd?.(input.runId, stageSnapshot);
@@ -138,6 +156,7 @@ export function buildPromptNodeUiAdapter(input: {
 						stageId,
 						status: stageSnapshot.status,
 						durationMs: stageSnapshot.durationMs,
+						endedAt: stageSnapshot.endedAt,
 						...(stageSnapshot.error !== undefined ? { error: stageSnapshot.error } : {}),
 						...(stageSnapshot.failureKind !== undefined ? { failureKind: stageSnapshot.failureKind } : {}),
 						...(stageSnapshot.failureCode !== undefined ? { failureCode: stageSnapshot.failureCode } : {}),
@@ -216,7 +235,7 @@ export function buildPromptNodeUiAdapter(input: {
 				name: stageSnapshot.name,
 				parentIds: stageSnapshot.parentIds,
 				...stageReplayFields(stageSnapshot),
-				ts: prompt.createdAt,
+				ts: stageSnapshot.startedAt,
 			});
 		}
 		if (shouldReplay) {
