@@ -214,6 +214,13 @@ export function createWorkflowStageFactory(input: {
 			models: input.opts.models,
 			executionMode: input.opts.executionMode,
 			defaultSessionDir: input.opts.defaultSessionDir,
+			onStartupChange(startup) {
+				// Never add a retired stage to a replacement run with the same identity.
+				const current = input.activeStore.runs().find((run) => run.id === input.runId);
+				if (!current?.stages.includes(stageSnapshot)) return;
+				stageSnapshot.startup = startup;
+				input.activeStore.recordStageStart(input.runId, stageSnapshot);
+			},
 			onModelFallbackMetaChange(meta) {
 				applyModelFallbackMeta(meta);
 				if (stageSnapshot.status === "running") input.activeStore.recordStageStart(input.runId, stageSnapshot);
