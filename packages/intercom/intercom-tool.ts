@@ -15,7 +15,7 @@ import {
   toError,
 } from "./intercom-utils.js";
 import type { ReplyTracker } from "./reply-tracker.js";
-import { resolveSessionTarget, resolveSessionTargetId } from "./session-target.js";
+import { resolveSessionTarget, resolveSessionTargetId, sessionTargetFailureReason } from "./session-target.js";
 import { normalizeGroup, normalizeGroups, validateRuntimeGroup } from "./group.js";
 import { parseWorkflowStageTarget, withWorkflowStageTargetFinalSegment } from "./workflow-stage-target.js";
 import { isRecoverableIntercomDisconnect } from "./recoverable-disconnect.js";
@@ -980,8 +980,29 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
             }
             const route = retryIdentities.replyRoute(retryIdentity);
             if (route === undefined) throw new RetryTokenError("invalid");
-            const replyTarget = to === undefined ? undefined : resolveSessionTarget([{ id: route.senderId }], to);
-            const replySendTo = replyTarget?.kind === "resolved" ? replyTarget.session.id : to ?? route.senderId;
+            let replySendTo = to ?? route.senderId;
+            if (to !== undefined) {
+              const listed = await connectedClient.listSessions();
+              const replyCandidates: Array<Pick<SessionInfo, "id" | "name">> = listed.some(
+                (session) => session.id === route.senderId,
+              )
+                ? listed
+                : [
+                    ...listed,
+                    {
+                      id: route.senderId,
+                      ...(route.senderName === undefined ? {} : { name: route.senderName }),
+                    },
+                  ];
+              const replyTarget = resolveSessionTarget(replyCandidates, to);
+              if (replyTarget.kind !== "resolved" && replyTarget.kind !== "not_found") {
+                throw new Error(sessionTargetFailureReason(to, replyTarget));
+              }
+              if (replyTarget.kind === "resolved" && replyTarget.session.id !== route.senderId) {
+                throw new Error("Reply target cannot be resolved safely; use the exact sender ID");
+              }
+              if (replyTarget.kind === "resolved") replySendTo = replyTarget.session.id;
+            }
             const replyLogicalTarget = to ?? route.senderId;
             const displayTarget = route.senderName || route.senderId;
             if (route.senderId === connectedClient.sessionId) {

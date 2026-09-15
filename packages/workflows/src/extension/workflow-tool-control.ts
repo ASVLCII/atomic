@@ -466,7 +466,11 @@ export async function workflowResumeAction(
 	const backend = getDurableBackend();
 	const exact = store.runs().find((run) => run.id === target.runId);
 	const shadow = exact === undefined ? "not_shadow" : classifyDurableResumeShadow(exact, store, { backend });
-	if (shadow === "eligible") return resumeDurableShadow(target.runId, deps, args.budget);
+	if (shadow === "eligible") {
+		const refusal = refuseStageScopedDurableResume(target.runId, args);
+		if (refusal !== undefined) return refusal;
+		return resumeDurableShadow(target.runId, deps, args.budget);
+	}
 	if (shadow === "ineligible") {
 		return {
 			action: "resume",
@@ -506,7 +510,11 @@ export async function workflowResumeAction(
 		!isPaused &&
 		run.exitReason !== "quit" &&
 		isWorkflowRunResumable(workflowRunResumeCandidate(run));
-	if (isDurableAuthorExit) return resumeDurableShadow(stageRunId, deps, args.budget);
+	if (isDurableAuthorExit) {
+		const refusal = refuseStageScopedDurableResume(stageRunId, args);
+		if (refusal !== undefined) return refusal;
+		return resumeDurableShadow(stageRunId, deps, args.budget);
+	}
 	if (isResumableContinuation) {
 		try {
 			await deps.ensureWorkflowResourcesLoaded();

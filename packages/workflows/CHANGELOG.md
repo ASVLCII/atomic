@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

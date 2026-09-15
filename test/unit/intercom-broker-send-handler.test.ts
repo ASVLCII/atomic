@@ -547,6 +547,57 @@ test("public reply metadata requires the exact broker-recorded reverse question 
 	assert.equal(pending.matchesReply(recipient.info.id, asker.info.id, "question"), true);
 });
 
+test("hidden same-name reply collisions refuse every letter case without disclosing the hidden id", () => {
+	// Regression: #2603 — session names resolve case-insensitively; hidden collision refusal must match.
+	for (const to of ["Parent", "parent", "PARENT"]) {
+		const selfSocket = {} as net.Socket;
+		const parentSocket = {} as net.Socket;
+		const hiddenSocket = {} as net.Socket;
+		const self = session("self", "self", selfSocket);
+		const parent = session("2603abcd-1111-4111-8111-111111111111", "Parent", parentSocket);
+		const hidden = session("hidden-private-id", "Parent", hiddenSocket);
+		self.info.group = "child";
+		parent.info.group = "parent";
+		hidden.info.group = "private";
+		const sessions = new Map<string, BrokerConnectedSession>([
+			[self.info.id, self],
+			[parent.info.id, parent],
+			[hidden.info.id, hidden],
+		]);
+		const pending = new PendingQuestionIndex();
+		pending.record(parent.info.id, self.info.id, "question");
+		const writes: Array<{ socket: net.Socket; message: BrokerMessage }> = [];
+		handleBrokerSend(
+			selfSocket,
+			{
+				type: "send",
+				to,
+				expectedRecipientId: parent.info.id,
+				requirePendingReply: true,
+				message: { ...message("answer", "answer"), replyTo: "question" },
+			},
+			self.info.id,
+			sessions,
+			new DeliveredMessageCache(),
+			(socket, outgoing) => {
+				writes.push({ socket, message: outgoing });
+				return true;
+			},
+			new SupervisorChannelCache(),
+			pending,
+		);
+		assert.doesNotMatch(JSON.stringify(writes), /hidden-private-id/);
+		assert.equal(
+			writes.filter((entry) => entry.message.type === "message").length,
+			0,
+			to,
+		);
+		const ack = writes.at(-1)?.message;
+		assert.equal(ack?.type, "delivery_failed", to);
+		assert.equal(pending.matchesReply(self.info.id, parent.info.id, "question"), true, to);
+	}
+});
+
 test("broker wire send keeps omitted retry fields compatible but rejects malformed present values", () => {
 	const sender = {} as net.Socket;
 	const recipient = {} as net.Socket;

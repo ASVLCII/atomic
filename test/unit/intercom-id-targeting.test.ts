@@ -454,6 +454,51 @@ describe("Intercom full session ID targeting", () => {
 		assert.ok(current.sent[0]?.messageId);
 	});
 
+	test("targeted reply prefix refuses exact name, custom ID, and UUID collisions without consuming the ask", async () => {
+		// Regression: #2603 — explicit reply prefixes must not canonicalize against only the pending sender.
+		const sender = session("2603abcd-1111-4111-8111-111111111111", "peer");
+		const self = session("self-session-id", "self");
+		const conflicts: Array<{ name: string; extra: SessionInfo }> = [
+			{ name: "name", extra: session("other", "2603abcd") },
+			{ name: "custom-id", extra: session("2603abcd", "other") },
+			{ name: "uuid", extra: session("2603abcd-2222-4222-8222-222222222222", "other") },
+		];
+		for (const conflict of conflicts) {
+			const replies = new ReplyTracker();
+			replies.recordIncomingMessage(sender, ask("question"));
+			const current = toolFixture(replies, [self, sender, conflict.extra]);
+			const result = await current.tool.execute(
+				`reply-conflict-${conflict.name}`,
+				{ action: "reply", to: "2603abcd", replyTo: "question", message: "answer" },
+				undefined,
+				undefined,
+				context,
+			);
+			assert.equal(result.isError, true, conflict.name);
+			assert.deepEqual(current.sent, [], conflict.name);
+			assert.equal(replies.listPending().length, 1, conflict.name);
+		}
+	});
+
+	test("a unique reply prefix still canonicalizes when the sender is listed", async () => {
+		const sender = session("ee903b5c-1111-4222-8333-123456789abc", "sender");
+		const self = session("self-session-id", "self");
+		const replies = new ReplyTracker();
+		replies.recordIncomingMessage(sender, ask("question-sender"));
+		const current = toolFixture(replies, [self, sender]);
+		const result = await current.tool.execute(
+			"reply-prefix-listed",
+			{ action: "reply", to: sender.id.slice(0, 8), message: "answer" },
+			undefined,
+			undefined,
+			context,
+		);
+		assert.equal(result.isError, false, result.content[0]?.text);
+		assert.equal(current.sent.length, 1);
+		assert.equal(current.sent[0]?.to, sender.id);
+		assert.equal(replies.listPending().length, 0);
+	});
+
 	test("an unknown target is not found", async () => {
 		const self = session("self-session-id", "self");
 		const recipient = session("ff014c6d-1111-4222-8333-123456789abc", "recipient");

@@ -285,6 +285,107 @@ describe("durable prefix resume namespace and stage scope", () => {
 		assert.equal("message" in result ? result.message : undefined, stageScopedDurableResumeMessage(root));
 	});
 
+	test("workflow tool prefix or exact id plus an existing restored-shadow stage refuses whole-root dispatch", async () => {
+		// Regression: #2603 — restored local shadows must not turn a stage selector into whole-root resume.
+		const backend = new InMemoryDurableBackend();
+		setDurableBackend(backend);
+		backend.registerWorkflow({
+			workflowId: root,
+			name: "fixture",
+			inputs: {},
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+		});
+		backend.recordCheckpoint({
+			kind: "tool",
+			workflowId: root,
+			checkpointId: "tool:seed",
+			name: "seed",
+			argsHash: "seed",
+			output: true,
+			completedAt: 2,
+		});
+		const entry = pausedDurableEntry(root);
+		const calls: unknown[] = [];
+		const runtime = {
+			prepareDurableCatalog: async () => ({ resumable: [entry], completed: [] }),
+			prepareDurableResumable: async () => [entry],
+			resumeDurableWorkflow: async (...args: unknown[]) => {
+				calls.push(args);
+				return { ok: true, runId: root, message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		for (const target of ["2603ABCD", root]) {
+			store.clear();
+			store.recordRunStart({
+				id: root,
+				name: "fixture",
+				inputs: {},
+				status: "paused",
+				exitReason: "quit",
+				resumable: true,
+				startedAt: 1,
+				stages: [{ id: "right", name: "right", status: "paused", parentIds: [], toolEvents: [] }],
+			});
+			const before = calls.length;
+			const result = await workflowResumeAction(
+				{ action: "resume", runId: target, stageId: "right", message: "right only" },
+				toolResumeDeps(runtime),
+			);
+			assert.equal(calls.length, before, target);
+			assert.equal("status" in result ? result.status : undefined, "noop", target);
+			assert.equal("runId" in result ? result.runId : undefined, root, target);
+			assert.equal("message" in result ? result.message : undefined, stageScopedDurableResumeMessage(root), target);
+		}
+	});
+
+	test("workflow tool prefix restored-shadow resume without a stage still dispatches the canonical root", async () => {
+		const backend = new InMemoryDurableBackend();
+		setDurableBackend(backend);
+		backend.registerWorkflow({
+			workflowId: root,
+			name: "fixture",
+			inputs: {},
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+		});
+		backend.recordCheckpoint({
+			kind: "tool",
+			workflowId: root,
+			checkpointId: "tool:seed",
+			name: "seed",
+			argsHash: "seed",
+			output: true,
+			completedAt: 2,
+		});
+		store.recordRunStart({
+			id: root,
+			name: "fixture",
+			inputs: {},
+			status: "paused",
+			exitReason: "quit",
+			resumable: true,
+			startedAt: 1,
+			stages: [{ id: "right", name: "right", status: "paused", parentIds: [], toolEvents: [] }],
+		});
+		const entry = pausedDurableEntry(root);
+		const calls: unknown[] = [];
+		const runtime = {
+			prepareDurableCatalog: async () => ({ resumable: [entry], completed: [] }),
+			prepareDurableResumable: async () => [entry],
+			resumeDurableWorkflow: async (...args: unknown[]) => {
+				calls.push(args);
+				return { ok: true, runId: root, message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		const result = await workflowResumeAction({ action: "resume", runId: "2603ABCD" }, toolResumeDeps(runtime));
+		assert.equal(calls.length, 1);
+		assert.equal("status" in result ? result.status : undefined, "running");
+		assert.equal("runId" in result ? result.runId : undefined, root);
+	});
+
 	test("workflow tool prefix durable resume without a stage still dispatches the canonical root", async () => {
 		const calls: unknown[] = [];
 		const runtime = {
