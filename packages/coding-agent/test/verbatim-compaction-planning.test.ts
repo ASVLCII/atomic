@@ -8,7 +8,10 @@ import {
 	setKeptTailTokenEstimate,
 } from "../src/core/compaction/compaction-boundary.js";
 import { runVerbatimCompaction, targetKeepLines } from "../src/core/compaction/compaction-runner.js";
-import type { VerbatimCompactionPreparation } from "../src/core/compaction/compaction-types.js";
+import type {
+	VerbatimCompactionPreparation,
+	VerbatimCompactionStats,
+} from "../src/core/compaction/compaction-types.js";
 import { reconstructCompactedTranscript, validateDeletedRanges } from "../src/core/compaction/deleted-ranges.js";
 import {
 	buildRangePlannerPrompt,
@@ -16,6 +19,7 @@ import {
 	planDeletedLineRanges,
 } from "../src/core/compaction/range-planner.js";
 import { createNumberedRegion } from "../src/core/compaction/transcript-serialization.js";
+import { widenToWholeContextStats } from "../src/core/compaction/whole-context-stats.js";
 import { buildSessionContext } from "../src/core/session-manager-history.js";
 import type { SessionEntry } from "../src/core/session-manager-types.js";
 import { planner, run } from "./compaction-planner-fixtures.js";
@@ -91,6 +95,18 @@ function preparation(): VerbatimCompactionPreparation {
 		tokensBefore: region.tokenEstimate + 5,
 		parameters: { compression_ratio: 0.5, preserve_recent: 2, query: "objective" },
 		settings: DEFAULT_COMPACTION_SETTINGS,
+	};
+}
+
+function regionStats(tokensBefore: number, tokensAfter: number): VerbatimCompactionStats {
+	return {
+		linesBefore: 10,
+		linesDeleted: 4,
+		linesKept: 6,
+		rangeCount: 1,
+		tokensBefore,
+		tokensAfter,
+		percentReduction: 99,
 	};
 }
 
@@ -607,5 +623,32 @@ describe("compaction rung whole-context stats (#2052)", () => {
 		);
 		expect(result.rung).toBe("fresh");
 		expect(result.keptTail).toBe(true);
+	});
+
+	it("keeps a genuine expansion negative and does not mutate the region stats (#2052)", () => {
+		const input = regionStats(10, 40);
+		const snapshot = structuredClone(input);
+		const widened = widenToWholeContextStats(input, 5, true);
+		expect(input).toEqual(snapshot);
+		expect(widened.linesBefore).toBe(10);
+		expect(widened.linesDeleted).toBe(4);
+		expect(widened.linesKept).toBe(6);
+		expect(widened.rangeCount).toBe(1);
+		expect(widened.tokensBefore).toBe(15);
+		expect(widened.tokensAfter).toBe(45);
+		expect(widened.percentReduction).toBe(Math.round((1 - 45 / 15) * 1000) / 10);
+		expect(widened.percentReduction).toBeLessThan(0);
+	});
+
+	it("reports zero percentReduction when the heuristic before-count is zero (#2052)", () => {
+		const empty = widenToWholeContextStats(regionStats(0, 0), 0, true);
+		expect(empty.tokensBefore).toBe(0);
+		expect(empty.tokensAfter).toBe(0);
+		expect(empty.percentReduction).toBe(0);
+
+		const afterOnly = widenToWholeContextStats(regionStats(0, 10), 0, true);
+		expect(afterOnly.tokensBefore).toBe(0);
+		expect(afterOnly.tokensAfter).toBe(10);
+		expect(afterOnly.percentReduction).toBe(0);
 	});
 });

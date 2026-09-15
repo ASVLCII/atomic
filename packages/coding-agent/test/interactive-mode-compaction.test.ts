@@ -1,22 +1,27 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Usage } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Container, getKeybindings, setKeybindings, Text } from "@earendil-works/pi-tui";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { VerbatimCompactionResult } from "../src/core/compaction/index.js";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
+	type CustomMessage,
 	createCustomMessage,
 	createVerbatimCompactionMessage,
 	VERBATIM_COMPACTION_PREFIX,
 } from "../src/core/messages.js";
-import type { SessionEntry } from "../src/core/session-manager.js";
+import { type SessionEntry, SessionManager } from "../src/core/session-manager.js";
 import {
 	CompactionBoundaryMessageComponent,
 	compactionBoundaryFromMessage,
 } from "../src/modes/interactive/components/compaction-boundary-message.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { getMarkdownTheme, initTheme, theme } from "../src/modes/interactive/theme/theme.js";
+import { assistantMsg, userMsg } from "./utilities.js";
 
 const previousKeybindings = getKeybindings();
 
@@ -694,17 +699,51 @@ describe("compaction boundary component", () => {
 	});
 
 	it("projects the authoritative count onto a persisted boundary whose details only carry stats (#2052)", () => {
-		const message = createVerbatimCompactionMessage(result.compactedText, 1_200, new Date(1).toISOString(), {
-			strategy: "verbatim-lines",
+		const details = {
+			strategy: "verbatim-lines" as const,
 			parameters: result.parameters,
 			promptVersion: result.promptVersion,
 			rung: result.rung,
 			stats: result.stats,
-		});
+		};
+		const snapshot = structuredClone(details);
+		const message = createVerbatimCompactionMessage(result.compactedText, 1_200, new Date(1).toISOString(), details);
+		expect(details).toEqual(snapshot);
+		expect("tokensBefore" in details).toBe(false);
 		const component = compactionBoundaryFromMessage(message, true);
 		const text = stripVTControlCharacters(component.render(200).join("\n"));
 		expect(text).toContain("Compacted from 1,200 tokens");
 	});
+
+	it.each([
+		[0, "0"],
+		[7, "7"],
+	] as const)(
+		"keeps an existing details.tokensBefore of %s rather than the argument (#2052)",
+		(existing, rendered) => {
+			const details = {
+				strategy: "verbatim-lines" as const,
+				parameters: result.parameters,
+				promptVersion: result.promptVersion,
+				rung: result.rung,
+				stats: result.stats,
+				tokensBefore: existing,
+			};
+			const snapshot = structuredClone(details);
+			const message = createVerbatimCompactionMessage(
+				result.compactedText,
+				1_200,
+				new Date(1).toISOString(),
+				details,
+			);
+			expect(details).toEqual(snapshot);
+			expect((message.details as { tokensBefore?: number }).tokensBefore).toBe(existing);
+			const component = compactionBoundaryFromMessage(message, true);
+			const text = stripVTControlCharacters(component.render(200).join("\n"));
+			expect(text).toContain(`Compacted from ${rendered} tokens`);
+			expect(text).not.toContain("Compacted from 1,200 tokens");
+		},
+	);
 
 	it("falls back to the heuristic stats count for a legacy boundary without an authoritative projection (#2052)", () => {
 		const legacy = createCustomMessage(
@@ -723,5 +762,61 @@ describe("compaction boundary component", () => {
 		const component = compactionBoundaryFromMessage(legacy, true);
 		const text = stripVTControlCharacters(component.render(200).join("\n"));
 		expect(text).toContain("Compacted from 100 tokens");
+	});
+});
+
+describe("compaction boundary JSONL reopen (#2052)", () => {
+	const tempDirs: string[] = [];
+	afterEach(() => {
+		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("renders the authoritative count after JSONL close/reopen without persisting details.tokensBefore", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-compaction-reopen-"));
+		tempDirs.push(cwd);
+		const manager = SessionManager.create(cwd, cwd);
+		manager.appendMessage(userMsg("historical user"));
+		manager.appendMessage(assistantMsg("historical answer"));
+		const firstKeptEntryId = manager.appendMessage(userMsg("kept tail"));
+		manager.appendMessage(assistantMsg("kept answer"));
+		const compactedText = "[User]: retained\n(filtered 1 lines)";
+		manager.appendCompaction(compactedText, firstKeptEntryId, 1_200, {
+			strategy: "verbatim-lines",
+			parameters: result.parameters,
+			promptVersion: result.promptVersion,
+			rung: result.rung,
+			stats: { ...result.stats, tokensBefore: 480, tokensAfter: 240, percentReduction: 50 },
+		});
+		manager.flush();
+
+		const file = manager.getSessionFile();
+		expect(file).toBeDefined();
+		type PersistedLine = {
+			type?: string;
+			tokensBefore?: number;
+			details?: { tokensBefore?: number; stats?: { tokensBefore?: number } };
+		};
+		const persisted = readFileSync(file!, "utf8")
+			.split("\n")
+			.filter((line) => line.length > 0)
+			.map((line) => JSON.parse(line) as PersistedLine);
+		const compactionLine = persisted.find((entry) => entry.type === "compaction");
+		expect(compactionLine?.tokensBefore).toBe(1_200);
+		expect(compactionLine?.details?.stats?.tokensBefore).toBe(480);
+		expect(compactionLine?.details?.tokensBefore).toBeUndefined();
+
+		const resumed = SessionManager.open(file!);
+		const boundary = resumed
+			.buildSessionContext()
+			.messages.find(
+				(message): message is CustomMessage =>
+					message.role === "custom" && (message as CustomMessage).customType === "compaction",
+			);
+		expect(boundary).toBeDefined();
+		const component = compactionBoundaryFromMessage(boundary!, true);
+		const text = stripVTControlCharacters(component.render(200).join("\n"));
+		expect(text).toContain("Compacted from 1,200 tokens");
+		expect(text).not.toContain("Compacted from 480 tokens");
+		expect(text).toContain("retained");
 	});
 });

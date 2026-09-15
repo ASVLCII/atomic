@@ -4,6 +4,8 @@ import { Agent, type StreamFn } from "@earendil-works/pi-agent-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { DEFAULT_COMPACTION_SETTINGS } from "../src/core/compaction/compaction.ts";
+import { getKeptTailTokenEstimate, prepareCompactionBoundary } from "../src/core/compaction/compaction-boundary.ts";
 import {
 	createExtensionRuntime,
 	type Extension,
@@ -113,6 +115,14 @@ describe("verbatim compaction extension hooks", () => {
 		agent.state.messages = manager.buildSessionContext().messages;
 	}
 
+	function independentPreparation(preserveRecent: number) {
+		const preparation = prepareCompactionBoundary(session.sessionManager.getBranch(), DEFAULT_COMPACTION_SETTINGS, {
+			preserve_recent: preserveRecent,
+		});
+		expect(preparation).toBeDefined();
+		return preparation!;
+	}
+
 	it("accepts a non-empty offline compactedText override and emits observe-only result", async () => {
 		await create(
 			extension((event) => {
@@ -137,32 +147,55 @@ describe("verbatim compaction extension hooks", () => {
 		const compactedText = "[User]: retained exactly\n(filtered 3 lines)";
 		await create(extension(() => ({ compactedText })));
 
+		const independent = independentPreparation(2);
+		const tail = getKeptTailTokenEstimate(independent);
+		expect(tail).toBeGreaterThan(0);
+
 		const compacted = await session.compact({ preserve_recent: 2 });
 		expect(compacted.rung).toBe("extension");
-		const prep = before[0].preparation;
-		// The frozen clone sent to the extension hook is a different object from
-		// the original preparation whose WeakMap entry carries the tail estimate,
-		// so recover the tail algebraically from the widened stats instead.
-		const tail = compacted.stats.tokensBefore - prep.region.tokenEstimate;
-		expect(tail).toBeGreaterThan(0);
-		// Tail added symmetrically: same tail on both before and after sides.
-		expect(compacted.stats.tokensBefore).toBe(prep.region.tokenEstimate + tail);
+		expect(compacted.stats.tokensBefore).toBe(independent.region.tokenEstimate + tail);
 		expect(compacted.stats.tokensAfter).toBe(Math.ceil(compactedText.length / 4) + tail);
 		expect(compacted.stats.percentReduction).toBe(
 			Math.round((1 - compacted.stats.tokensAfter / compacted.stats.tokensBefore) * 1000) / 10,
 		);
 		expect(compacted.stats.tokensAfter).toBeLessThan(compacted.stats.tokensBefore);
-		// The authoritative whole-context count travels on the result and the entry.
-		expect(compacted.tokensBefore).toBe(prep.tokensBefore);
-		expect(after[0].compactionEntry.tokensBefore).toBe(prep.tokensBefore);
+		expect(compacted.tokensBefore).toBe(independent.tokensBefore);
+		expect(after[0].compactionEntry.tokensBefore).toBe(independent.tokensBefore);
+	});
+
+	it("preserves a negative percentReduction when the extension replacement expands the region (#2052)", async () => {
+		const compactedText = Array.from(
+			{ length: 80 },
+			(_, index) => `expanded retained line ${index} with extra padding`,
+		).join("\n");
+		await create(extension(() => ({ compactedText })));
+
+		const independent = independentPreparation(2);
+		const tail = getKeptTailTokenEstimate(independent);
+		const expectedBefore = independent.region.tokenEstimate + tail;
+		const expectedAfter = Math.ceil(compactedText.length / 4) + tail;
+		expect(expectedAfter).toBeGreaterThan(expectedBefore);
+
+		const compacted = await session.compact({ preserve_recent: 2 });
+		expect(compacted.rung).toBe("extension");
+		expect(compacted.stats.tokensBefore).toBe(expectedBefore);
+		expect(compacted.stats.tokensAfter).toBe(expectedAfter);
+		expect(compacted.stats.percentReduction).toBe(Math.round((1 - expectedAfter / expectedBefore) * 1000) / 10);
+		expect(compacted.stats.percentReduction).toBeLessThan(0);
 	});
 
 	it("persists zero retention and includes that durable summary on repeated compaction", async () => {
 		const compactedText = "[User]: retained exactly\n(filtered 30 lines)";
 		await create(extension(() => ({ compactedText })));
 
+		const independent = independentPreparation(0);
+		expect(getKeptTailTokenEstimate(independent)).toBe(0);
+		expect(independent.firstKeptEntryId).toBeNull();
+
 		const first = await session.compact({ preserve_recent: 0 });
 		expect(first.firstKeptEntryId).toBeNull();
+		expect(first.stats.tokensBefore).toBe(independent.region.tokenEstimate);
+		expect(first.stats.tokensAfter).toBe(Math.ceil(compactedText.length / 4));
 		expect(session.sessionManager.buildSessionContext().messages).toHaveLength(1);
 
 		const long = Array.from({ length: 20 }, (_, index) => `new line ${index}`).join("\n");
