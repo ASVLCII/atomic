@@ -24,9 +24,11 @@ test("release tar preserves payload bytes without host metadata", async () => {
 		const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" });
 		assert.equal(listing.status, 0, listing.stderr);
 		const entries = [];
+		const metadata = [];
 		const reader = tar.extract();
 		reader.on("entry", (header, stream, next) => {
 			entries.push(header.name);
+			metadata.push(...Object.keys(header.pax ?? {}).filter((key) => /xattr|acl/iu.test(key)));
 			stream.on("end", next);
 			stream.resume();
 		});
@@ -36,6 +38,7 @@ test("release tar preserves payload bytes without host metadata", async () => {
 			reader.end(gunzipSync(readFileSync(archive)));
 		});
 		assert.deepEqual(entries.sort(), ["atomic/", "atomic/library"]);
+		assert.deepEqual(metadata, [], "archive must not retain host extended attributes");
 		mkdirSync(join(root, "extract"));
 		assert.equal(spawnSync("tar", ["-xzf", archive, "-C", join(root, "extract")]).status, 0);
 		assert.equal(readFileSync(join(root, "extract/atomic/library"), "utf8"), "sealed library");
