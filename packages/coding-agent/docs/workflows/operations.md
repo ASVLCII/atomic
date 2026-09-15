@@ -649,6 +649,8 @@ If installation reports **incomplete PostgreSQL runtime**, or macOS reports a mi
 
 To check a standalone runtime directly, set `runtime` to `node_modules/@bastani/atomic-natives/postgres-runtime` inside the extracted installation, then run `"$runtime/bin/postgres" --version` and `"$runtime/bin/pg_ctl" --version`. On Windows, run the corresponding `.exe` files in PowerShell. Both must succeed before using the runtime. npm installations retain automatic first-use library-link setup; if symlink creation is unavailable, Atomic copies the required libraries instead. An invalid link manifest or failed copy is reported rather than silently ignored.
 
+macOS and Linux runtime packages also carry the interpreter libraries required by their existing PostgreSQL language modules. Keep `lp`, `Frameworks`, `language-runtime.json`, and the provenance/license files with the runtime when relocating it. Atomic configures these packaged search paths for its child server without changing your shell environment. Release validation checks every bundled Mach-O/ELF image, and the extracted-runtime smoke test exercises the bundled PostgreSQL modules and language functions, not only executable version output.
+
 Pending-stage Intercom cleanup checks durable ownership only for runs with messages that need settlement. Repeated failures with the same message produce one warning per extension instance. Interactive hosts receive a display-only notification, never a console stack trace, even if notification delivery fails; headless hosts retain a console diagnostic. Pending messages are not discarded when cleanup fails.
 
 ```bash

@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { validateRuntimeDependencies } from "./postgres-runtime-dependencies.mjs";
+import { validateRuntimeSupplement } from "./postgres-runtime-supplement.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const licenseDirectory = join(scriptDirectory, "postgres-runtime-licenses");
@@ -351,8 +352,9 @@ export function validatePostgresRuntime(
 	if (!Object.hasOwn(POSTGRES_RUNTIME_ARTIFACTS, target))
 		throw new Error(`unsupported PostgreSQL runtime target: ${target}`);
 	validatePayload(root, target, standalone);
-	if (target.startsWith("darwin-")) {
+	if (target.startsWith("darwin-") || target.startsWith("linux-")) {
 		validateRuntimeDependencies(root, JSON.parse(readFileSync(join(root, "pg-symlinks.json"), "utf8")));
+		if (artifact.sha256 === POSTGRES_RUNTIME_ARTIFACTS[target].sha256) validateRuntimeSupplement(root, target);
 	}
 	const provenance = JSON.parse(readFileSync(join(root, "runtime-provenance.json"), "utf8"));
 	if (
@@ -445,6 +447,15 @@ export async function stagePostgresRuntime({
 			const license = join(packageDirectory, "LICENSE.md");
 			if (!existsSync(license)) throw new Error("artifact is missing upstream LICENSE.md");
 			upstreamLicense = license;
+		}
+
+		if (target.startsWith("darwin-") && artifact.sha256 === POSTGRES_RUNTIME_ARTIFACTS[target].sha256) {
+			const { supplementMacOSRuntime } = await import("./postgres-runtime-supplement.mjs");
+			await supplementMacOSRuntime(extracted, work, download);
+		}
+		if (target.startsWith("linux-") && artifact.sha256 === POSTGRES_RUNTIME_ARTIFACTS[target].sha256) {
+			const { supplementLinuxRuntime } = await import("./postgres-runtime-supplement.mjs");
+			await supplementLinuxRuntime(extracted, work, target, download);
 		}
 
 		// Validate all entrypoints, not just postgres: a mixed payload must fail here.

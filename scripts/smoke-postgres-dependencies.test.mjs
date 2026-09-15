@@ -74,6 +74,8 @@ test("the smoke CLI reaches usage validation with npm's linked layout and an emp
 			"smoke-postgres-process.mjs",
 			"stage-postgres-runtime.mjs",
 			"postgres-runtime-dependencies.mjs",
+			"postgres-runtime-supplement.mjs",
+			"relocate-postgres-macho.mjs",
 		]) {
 			copyFileSync(new URL(name, import.meta.url), join(root, "scripts", name));
 		}

@@ -375,7 +375,8 @@ function targetExecutable(target) {
 			: target.includes("x64")
 				? "/lib64/ld-linux-x86-64.so.2"
 				: "/lib/ld-linux-aarch64.so.1";
-		binary.write(loader, 32);
+		// Keep the ELF header intact now that dependency validation reads it.
+		binary.write(loader, 64);
 	}
 	return binary;
 }
