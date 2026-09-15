@@ -414,6 +414,37 @@ function npmArtifact(root, target, mutate = () => {}) {
 	};
 }
 
+// #3073: optional modules must not bypass the producer's promotion gate.
+test("rejects an unresolved module dependency before replacing an installed payload", async () => {
+	const root = temporaryDirectory("atomic-pg-closure-");
+	const packageRoot = packageDirectory(root);
+	mkdirSync(join(packageRoot, "postgres-runtime"));
+	writeFileSync(join(packageRoot, "postgres-runtime", "old"), "preserved");
+	const fixture = npmArtifact(root, "darwin-arm64", (native) => {
+		const dependency = Buffer.from("@loader_path/missing.dylib\0");
+		const binary = Buffer.alloc(32 + 24 + dependency.length);
+		binary.writeUInt32LE(0xfeedfacf, 0);
+		binary.writeUInt32LE(0x0100000c, 4);
+		binary.writeUInt32LE(1, 16);
+		binary.writeUInt32LE(0xc, 32);
+		binary.writeUInt32LE(24 + dependency.length, 36);
+		binary.writeUInt32LE(24, 40);
+		dependency.copy(binary, 56);
+		writeFileSync(join(native, "lib/module.dylib"), binary);
+	});
+	await assert.rejects(
+		stagePostgresRuntime({
+			target: "darwin-arm64",
+			packageRoot,
+			artifactFile: fixture.path,
+			artifact: fixture.artifact,
+			standalone: true,
+		}),
+		/incomplete PostgreSQL dependency closure/u,
+	);
+	assert.equal(readFileSync(join(packageRoot, "postgres-runtime", "old"), "utf8"), "preserved");
+});
+
 test("ordinary target staging merges physical and inherited links after relocating native root", async (t) => {
 	const root = temporaryDirectory("atomic-pg-inherited-");
 	const packageRoot = packageDirectory(root);

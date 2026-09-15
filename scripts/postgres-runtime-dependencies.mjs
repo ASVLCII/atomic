@@ -42,9 +42,8 @@ function imageDependencies(bytes) {
 }
 
 /**
- * Diagnostic for bundled 64-bit little-endian Mach-O images and fat containers.
- * Includes optional modules not loaded by entrypoint --version; not an ELF/PE validator.
- * Keep separate from installation: upstream's optional OAuth module currently lacks libcurl (#3073).
+ * Producer gate for bundled 64-bit little-endian Mach-O images and fat containers.
+ * Includes modules not loaded by entrypoint --version; not an ELF/PE validator.
  */
 export function validateRuntimeDependencies(root, links = []) {
 	const canonicalRoot = realpathSync(root);

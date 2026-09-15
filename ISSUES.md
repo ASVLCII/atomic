@@ -35,7 +35,7 @@ Expected: `No unresolved inbound asks.`
 
 The missing standalone aliases are repaired by materializing the existing manifest during standalone staging. Required extracted `postgres`, `pg_ctl`, and `initdb` entrypoints and isolated macOS/Linux lifecycle checks pass. Installation now checks those entrypoints before promotion; npm keeps manifest-based first-use hydration.
 
-The broader full-image requirement is **not satisfied**: upstream `@embedded-postgres/darwin-arm64@18.4.0-beta.17` contains `lib/libpq-oauth-18.dylib` importing `@loader_path/../lib/libcurl.4.dylib`, but contains no libcurl payload. This optional module is not loaded by the required entrypoints/lifecycle. Do not rewrite Mach-O load commands, substitute system libcurl, or re-sign/supply dependencies without authorization.
+The full-image requirement is **not satisfied**. The macOS producer now rejects the incomplete upstream payload before replacing a staged runtime. Upstream `@embedded-postgres/darwin-arm64@18.4.0-beta.17` lacks the libcurl required by `lib/libpq-oauth-18.dylib`. Supplying untouched universal libcurl and its Frameworks dependencies from the original EDB 18.4 distribution makes OAuth native loading pass, but then exposes nine language modules requiring absolute external Perl 5.42, Tcl 8.6 and Python 3.13 library paths. Latest Zonky 18.6 still ships those modules. No module removal, dependency rewriting or system installation was performed.
 
 Repeat the negative diagnostic against a standalone staged or extracted macOS runtime:
 
@@ -43,4 +43,4 @@ Repeat the negative diagnostic against a standalone staged or extracted macOS ru
 node --input-type=module -e 'import {validateRuntimeDependencies as validate} from "./scripts/postgres-runtime-dependencies.mjs"; validate(process.argv[1])' /path/to/postgres-runtime
 ```
 
-Expected current failure: `incomplete PostgreSQL dependency closure: lib/libpq-oauth-18.dylib -> @loader_path/../lib/libcurl.4.dylib` (exit 1). The diagnostic scans supported Mach-O images, including optional modules; it does not validate ELF/PE. Regression: `node --test scripts/postgres-runtime-dependencies.test.mjs`. Required native-loader preflight is deliberately separate from this failing all-image diagnostic. Full closure/readiness remains unresolved, not waived.
+Expected current failure: `incomplete PostgreSQL dependency closure: lib/libpq-oauth-18.dylib -> @loader_path/../lib/libcurl.4.dylib` (exit 1). The producer calls this gate for macOS; it scans Mach-O images, not ELF/PE. Regressions: `node --test scripts/postgres-runtime-dependencies.test.mjs scripts/stage-postgres-runtime.test.mjs`. Full closure/readiness remains unresolved, not waived. A complete relocatable language-pack supply and signing strategy is still required; the producer must not be bypassed to create a candidate.

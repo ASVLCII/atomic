@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { validateRuntimeDependencies } from "./postgres-runtime-dependencies.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const licenseDirectory = join(scriptDirectory, "postgres-runtime-licenses");
@@ -350,6 +351,9 @@ export function validatePostgresRuntime(
 	if (!Object.hasOwn(POSTGRES_RUNTIME_ARTIFACTS, target))
 		throw new Error(`unsupported PostgreSQL runtime target: ${target}`);
 	validatePayload(root, target, standalone);
+	if (target.startsWith("darwin-")) {
+		validateRuntimeDependencies(root, JSON.parse(readFileSync(join(root, "pg-symlinks.json"), "utf8")));
+	}
 	const provenance = JSON.parse(readFileSync(join(root, "runtime-provenance.json"), "utf8"));
 	if (
 		provenance.target !== target ||

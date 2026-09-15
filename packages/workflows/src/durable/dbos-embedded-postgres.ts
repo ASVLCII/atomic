@@ -361,8 +361,13 @@ export function hydrateBinaryLibraryLinks(
 	}
 	const canonicalRoot = realpathSync(manifestRoot);
 	const targets = new Map<string, string>();
+	const plannedSources = new Map<string, string>();
 	const plans = manifest.map(({ source, target }) => {
-		const absoluteSource = join(manifestRoot, source);
+		const sourcePath = join(manifestRoot, source);
+		// An earlier manifest entry can supply this source without writing it yet.
+		const absoluteSource = lstatSync(sourcePath, { throwIfNoEntry: false })
+			? sourcePath
+			: (plannedSources.get(source) ?? sourcePath);
 		const absoluteTarget = join(manifestRoot, target);
 		try {
 			for (const path of [absoluteSource, dirname(absoluteTarget)]) {
@@ -395,6 +400,7 @@ export function hydrateBinaryLibraryLinks(
 		} catch (cause) {
 			throw new Error(`incomplete PostgreSQL runtime: ${source} -> ${target}`, { cause });
 		}
+		plannedSources.set(target, absoluteSource);
 		return { absoluteSource, absoluteTarget };
 	});
 	for (const { absoluteSource, absoluteTarget } of plans) {

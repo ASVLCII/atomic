@@ -278,6 +278,34 @@ describe("embedded PostgreSQL runtime resolution", () => {
 		);
 	});
 
+	// #3073: npm manifests may refer to an alias created by an earlier entry.
+	test("hydrates safe ordered alias chains with native links and copy fallback", () => {
+		for (const copies of [false, true]) {
+			const root = runtime();
+			try {
+				mkdirSync(join(root, "lib"));
+				writeFileSync(join(root, "lib/base library"), "library");
+				const manifest =
+					'[{"source":"lib/base library","target":"lib/first"},{"source":"lib/first","target":"lib/second"}]';
+				writeFileSync(join(root, "pg-symlinks.json"), manifest);
+				hydrateBinaryLibraryLinks(
+					join(root, "bin/pg_ctl"),
+					copies
+						? () => {
+								throw new Error("no symlinks");
+							}
+						: symlinkSync,
+				);
+				hydrateBinaryLibraryLinks(join(root, "bin/pg_ctl"));
+				assert.equal(readFileSync(join(root, "lib/first"), "utf8"), "library");
+				assert.equal(readFileSync(join(root, "lib/second"), "utf8"), "library");
+				assert.equal(readFileSync(join(root, "pg-symlinks.json"), "utf8"), manifest);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		}
+	});
+
 	// #3073: hydration is idempotent and does not rewrite a permissive manifest.
 	test("preserves duplicate entries, order, extra fields and manifest raw text", () => {
 		const root = runtime();
