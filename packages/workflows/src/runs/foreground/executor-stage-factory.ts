@@ -3,12 +3,13 @@ import type { GraphFrontierTracker } from "../../engine/graph-inference.js";
 import type { EngineStageRuntimeOptions } from "../../engine/options.js";
 import type { RunBudgetController } from "../../engine/run-budget.js";
 import { resolveStageGroup, stageCanUseWorkflowPendingStageRoute } from "../../shared/intercom-group.js";
+import { workflowPendingStageRouteReady } from "../../shared/pending-stage-route-readiness.js";
 import { appendStageEnd, appendStageStart } from "../../shared/persistence-session-entries.js";
 import { buildStagePromptAdapter } from "../../shared/stage-prompt.js";
 import { stageUiBroker } from "../../shared/stage-ui-broker.js";
 import type { Store } from "../../shared/store.js";
 import type { StageSnapshot } from "../../shared/store-types.js";
-import { elapsedStageMs } from "../../shared/timing.js";
+import { elapsedStageMs, stageTimingFields } from "../../shared/timing.js";
 import type { StageOptions, WorkflowArtifact } from "../../shared/types.js";
 import type { WorkflowFailure } from "../../shared/workflow-failures.js";
 import type { ConcurrencyLimiter } from "../shared/concurrency.js";
@@ -65,14 +66,16 @@ export function createWorkflowStageFactory(input: {
 	readonly classifyExecutorFailure: (error: unknown) => WorkflowFailure;
 	readonly createMcpScope: (stageId: string, options: StageOptions | undefined) => StageMcpScope;
 	readonly takeTerminalArtifacts?: (replayKey: string) => readonly WorkflowArtifact[] | undefined;
-}): (name: string, options?: StageOptions, stageFailFastScope?: ParallelFailFastScope) => StageContextWithMeta {
-	return (name: string, options?: StageOptions, stageFailFastScope?: ParallelFailFastScope): StageContextWithMeta => {
+	readonly assertLiveWorkAllowed?: () => void;
+}): (
+	name: string,
+	options?: StageOptions,
+	stageFailFastScope?: ParallelFailFastScope,
+	prepareLiveOptions?: () => StageOptions | undefined,
+) => StageContextWithMeta {
+	return (name, options, stageFailFastScope, prepareLiveOptions): StageContextWithMeta => {
 		input.exit.throwIfWorkflowExitSelected();
-		options = stageOptionsWithGitWorktree(
-			stageOptionsWithInputDefaults(options, input.inputRuntimeDefaults),
-			input.workflowInvocationCwd,
-			input.gitWorktreeSetupCache,
-		);
+		options = stageOptionsWithInputDefaults(options, input.inputRuntimeDefaults);
 		const stageId = options?.durableStageId ?? crypto.randomUUID();
 		const provisionalParentIds = input.tracker.onSpawn(stageId, name);
 		const scopedParentIds =
@@ -96,6 +99,14 @@ export function createWorkflowStageFactory(input: {
 		const replaySource = replayDecision.kind === "replay" ? replayDecision.source : undefined;
 		const executeReplaySource = replayDecision.kind === "execute" ? replayDecision.source : undefined;
 		const shouldReplay = replaySource !== undefined;
+		if (!shouldReplay) {
+			input.assertLiveWorkAllowed?.();
+			options = stageOptionsWithGitWorktree(
+				prepareLiveOptions?.() ?? options,
+				input.workflowInvocationCwd,
+				input.gitWorktreeSetupCache,
+			);
+		}
 		const replayStageOptions: StageOptions | undefined =
 			executeReplaySource?.sessionFile === undefined
 				? options
@@ -126,12 +137,12 @@ export function createWorkflowStageFactory(input: {
 			pendingStageDeliveryAvailable,
 			...(shouldReplay
 				? {
-						startedAt: Date.now(),
-						endedAt: Date.now(),
-						durationMs: 0,
+						...stageTimingFields(replaySource),
 						...(replaySource.result !== undefined ? { result: replaySource.result } : {}),
 						...(replaySource.sessionId !== undefined ? { sessionId: replaySource.sessionId } : {}),
 						...(replaySource.sessionFile !== undefined ? { sessionFile: replaySource.sessionFile } : {}),
+						...(replaySource.model !== undefined ? { model: replaySource.model } : {}),
+						...(replaySource.thinkingLevel !== undefined ? { thinkingLevel: replaySource.thinkingLevel } : {}),
 						replayedFromStageId: replaySource.id,
 						replayed: true,
 					}
@@ -160,10 +171,8 @@ export function createWorkflowStageFactory(input: {
 
 		const applyModelFallbackMeta = (meta: ReturnType<InternalStageContext["__modelFallbackMeta"]>): void => {
 			if (meta.model !== undefined) stageSnapshot.model = meta.model;
-			if (meta.fastMode !== undefined) {
-				if (meta.fastMode) stageSnapshot.fastMode = true;
-				else delete stageSnapshot.fastMode;
-			}
+			if (meta.thinkingLevel !== undefined) stageSnapshot.thinkingLevel = meta.thinkingLevel;
+			else delete stageSnapshot.thinkingLevel;
 			if (meta.attemptedModels !== undefined) stageSnapshot.attemptedModels = meta.attemptedModels;
 			if (meta.modelAttempts !== undefined) stageSnapshot.modelAttempts = meta.modelAttempts;
 			if (meta.warnings !== undefined) {
@@ -191,6 +200,7 @@ export function createWorkflowStageFactory(input: {
 			stageOptions: stageOptionsForContext,
 			...(pendingStageDeliveryAvailable
 				? {
+						routeAuthorityReady: () => workflowPendingStageRouteReady(input.activeStore, input.runId),
 						pendingStageDelivery: createWorkflowPendingStageDelivery(
 							input.activeStore,
 							input.runId,
@@ -202,6 +212,13 @@ export function createWorkflowStageFactory(input: {
 			models: input.opts.models,
 			executionMode: input.opts.executionMode,
 			defaultSessionDir: input.opts.defaultSessionDir,
+			onStartupChange(startup) {
+				// Never add a retired stage to a replacement run with the same identity.
+				const current = input.activeStore.runs().find((run) => run.id === input.runId);
+				if (!current?.stages.includes(stageSnapshot)) return;
+				stageSnapshot.startup = startup;
+				input.activeStore.recordStageStart(input.runId, stageSnapshot);
+			},
 			onModelFallbackMetaChange(meta) {
 				applyModelFallbackMeta(meta);
 				if (stageSnapshot.status === "running") input.activeStore.recordStageStart(input.runId, stageSnapshot);
@@ -375,6 +392,7 @@ export function createWorkflowStageFactory(input: {
 					stageId,
 					status: stageSnapshot.status,
 					durationMs: stageSnapshot.durationMs,
+					endedAt: stageSnapshot.endedAt,
 					...(stageSnapshot.error !== undefined ? { error: stageSnapshot.error } : {}),
 					...(stageSnapshot.failureKind !== undefined ? { failureKind: stageSnapshot.failureKind } : {}),
 					...(stageSnapshot.failureCode !== undefined ? { failureCode: stageSnapshot.failureCode } : {}),

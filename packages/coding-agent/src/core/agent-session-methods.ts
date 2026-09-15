@@ -44,7 +44,7 @@ import type {
 	SessionStartEvent,
 	ToolDefinition,
 	ToolInfo,
-} from "./extensions/index.ts";
+} from "./extensions/index.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ExtensionProviderTransaction, ModelRuntime } from "./model-runtime.js";
 import type { PathMetadata } from "./package-manager.ts";
@@ -53,7 +53,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, SessionManager } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { BuildSystemPromptOptions } from "./system-prompt.ts";
-import type { BashOperations } from "./tools/bash.ts";
+import type { BashOperations } from "./tools/bash.js";
 
 export interface VerbatimCompactionApplyOptions {
 	/** Per-model planner credentials; a borrowed fallback uses its own, never the session model's. */
@@ -97,6 +97,7 @@ export interface RuntimeBuildOptions {
 	activeToolNames?: string[];
 	flagValues?: Map<string, boolean | string>;
 	includeAllExtensionTools?: boolean;
+	preserveRunner?: boolean;
 }
 
 export interface AgentSessionQueuePauseControl {
@@ -107,7 +108,7 @@ export interface AgentSessionQueuePauseControl {
 }
 
 export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl {
-	readonly orchestrationContext: import("./extensions/index.ts").OrchestrationContext | undefined;
+	readonly orchestrationContext: import("./extensions/index.js").OrchestrationContext | undefined;
 	readonly modelRuntime: ModelRuntime;
 	readonly state: AgentState;
 	readonly model: Model<Api> | undefined;
@@ -155,6 +156,11 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	subscribe(listener: AgentSessionEventListener): () => void;
 	_disconnectFromAgent(): void;
 	dispose(): void;
+	getAgentTaskHost(): import("./tasks/agent-adapter.js").AgentTaskHost;
+	closeSessionTasks(): Promise<void>;
+	/** Internal workflow pause: cancel owned execution without closing message admission. */
+	pauseTasks(): Promise<void>;
+	resumeTasks(): void;
 
 	getActiveToolNames(): string[];
 	getAllTools(): ToolInfo[];
@@ -172,8 +178,8 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	_continueQueuedAgentMessages(): Promise<void>;
 	_tryExecuteExtensionCommand(text: string): Promise<boolean>;
 	_expandSkillCommand(text: string): string;
-	steer(text: string, images?: ImageContent[]): Promise<void>;
-	followUp(text: string, images?: ImageContent[]): Promise<void>;
+	steer(text: string, images?: ImageContent[], options?: Pick<PromptOptions, "source">): Promise<void>;
+	followUp(text: string, images?: ImageContent[], options?: Pick<PromptOptions, "source">): Promise<void>;
 	sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
 		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
@@ -198,7 +204,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	_sendInterruptCustomMessageNow<T>(message: CustomMessage<T>, options?: SendMessageOptions): Promise<void>;
 	_ensureActiveInterruptQueueHold(): InterruptQueueHold;
 	_restoreAndClearActiveInterruptQueueHold(): void;
-	_queueAgentMessage(message: AgentMessage, delivery: "steer" | "followUp"): void;
+	_queueAgentMessage(message: AgentMessage, delivery: "steer" | "followUp" | "interrupt"): void;
 	_drainQueuedAgentMessages(): DrainedAgentQueues;
 	_restoreQueuedAgentMessages(queues: DrainedAgentQueues): void;
 	clearQueue(options?: ClearQueueOptions): { steering: string[]; followUp: string[] };
@@ -278,6 +284,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	_refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void;
 	_buildRuntime(options: RuntimeBuildOptions): void;
 	reload(options?: AgentSessionReloadOptions): Promise<void>;
+	completeStartupResources(resourceLoader: ResourceLoader): Promise<void>;
 
 	_isRetryableError(message: AssistantMessage): boolean;
 	_isFallbackableError(message: AssistantMessage): boolean;
@@ -336,6 +343,8 @@ export interface AgentSessionPublicSurface
 	extends Pick<
 		AgentSessionMethodSurface,
 		| "orchestrationContext"
+		| "getAgentTaskHost"
+		| "closeSessionTasks"
 		| "modelRuntime"
 		| "state"
 		| "model"
@@ -396,6 +405,7 @@ export interface AgentSessionPublicSurface
 		| "bindExtensions"
 		| "refreshCurrentModelFromRegistry"
 		| "reload"
+		| "completeStartupResources"
 		| "abortRetry"
 		| "setAutoRetryEnabled"
 		| "executeBash"
@@ -443,6 +453,8 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_terminatingToolCallIds: Set<string>;
 	_stopAfterTurnBlockedContinuation: boolean;
 	_pendingInterruptDeliveries: number;
+	_priorityInterruptPending: boolean;
+	_activePromptCount: number;
 	_activeInterruptQueueHold: InterruptQueueHold | undefined;
 	_queuedMessagesPaused: boolean;
 	_queuedMessagesPauseAbortBoundary: Promise<void> | undefined;
@@ -466,6 +478,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_recoverableLengthRecoveryAttempted: boolean;
 	_contextOverflowUnresolved: boolean;
 	_branchSummaryAbortController: AbortController | undefined;
+	_branchSummaryCompletion: Promise<void> | undefined;
 	_retryAbortController: AbortController | undefined;
 	_retryAttempt: number;
 	_retryPromise: Promise<void> | undefined;
@@ -485,7 +498,8 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_baseToolsOverride?: Record<string, AgentTool>;
 	_sessionStartEvent: SessionStartEvent;
 	_orchestrationContext?: OrchestrationContext;
-	_subagentPolicy?: import("./extensions/index.ts").SubagentChildPolicy;
+	_subagentPolicy?: import("./extensions/index.js").SubagentChildPolicy;
+	_subagentMessageAdmission?: import("./workflow-stage-admission.ts").WorkflowStageAdmissionBoundary;
 	_extensionUIContext?: ExtensionUIContext;
 	_extensionMode: ExtensionMode;
 	_disposed: boolean;
@@ -510,4 +524,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_lastAssistantMessage: AssistantMessage | undefined;
 	_tempStorageLease: import("./tools/session-temp-dir.ts").ProtectedPathLease | undefined;
 	_workflowStageAdmission: import("./workflow-stage-admission.ts").WorkflowStageAdmissionBoundary | undefined;
+	_agentTaskHost: import("./tasks/agent-adapter.js").AgentTaskHost | undefined;
+	_taskCompletionOutbox: import("./tasks/completion.js").TaskCompletionOutbox | undefined;
+	_taskAdmission: import("./workflow-stage-admission.ts").WorkflowStageAdmissionBoundary | undefined;
 }

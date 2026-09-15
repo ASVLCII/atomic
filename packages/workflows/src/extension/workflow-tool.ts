@@ -1,6 +1,7 @@
 import { getSupportedThinkingLevels } from "@bastani/pi-ai/compat";
 import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
+import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
 import { store } from "../shared/store.js";
 import type { WorkflowExecutionPolicy } from "../shared/types.js";
 import type { PiExecuteContext, WorkflowToolArgs } from "./public-types.js";
@@ -15,7 +16,6 @@ import { isWorkflowStageToolContext, resolveRunId, topLevelExpandedSnapshots } f
 import { workflowAnswerAction } from "./workflow-tool-answer.js";
 import { workflowGetResult } from "./workflow-tool-content.js";
 import {
-	workflowInterruptAction,
 	workflowPauseAction,
 	workflowQuitAction,
 	workflowReloadAction,
@@ -79,6 +79,7 @@ export function makeExecuteWorkflowTool(
 		signal?: AbortSignal,
 		onRunAccepted?: (runId: string) => void,
 	): Promise<WorkflowToolResult> {
+		signal?.throwIfAborted();
 		const action = args.action ?? "run";
 		const runId = args.runId ?? "";
 		if (isWorkflowStageToolContext(ctx)) {
@@ -91,7 +92,10 @@ export function makeExecuteWorkflowTool(
 			};
 		}
 		const policy: WorkflowExecutionPolicy = workflowPolicyFromContext(ctx);
-		const getRuntime = (): ExtensionRuntime => (typeof runtime === "function" ? runtime(ctx) : runtime);
+		const getRuntime = (): ExtensionRuntime => {
+			signal?.throwIfAborted();
+			return typeof runtime === "function" ? runtime(ctx) : runtime;
+		};
 		const awaitRequest = <T>(operation: Promise<T>): Promise<T> => raceWorkflowRequestAbort(operation, signal);
 		const ensureWorkflowResourcesVisible = async (): Promise<void> => {
 			try {
@@ -163,6 +167,7 @@ export function makeExecuteWorkflowTool(
 					{
 						toolControlRegistry,
 						owningRunStatus: (owningRunId) => statusByRunId.get(owningRunId),
+						resolveBoundarySegments: (runId) => workflowBoundarySegments(capturedRuns, runId),
 					},
 				);
 				const result = {
@@ -192,10 +197,10 @@ export function makeExecuteWorkflowTool(
 				return awaitRequest(workflowReloadAction(args, { reloadWorkflowResources }));
 			case "quit":
 				return awaitRequest(workflowQuitAction(args));
-			case "interrupt":
-				return awaitRequest(workflowInterruptAction(args));
 			case "resume":
-				return awaitRequest(workflowResumeAction(args, { getRuntime, policy, ensureWorkflowResourcesLoaded }));
+				return awaitRequest(
+					workflowResumeAction(args, { getRuntime, policy, ensureWorkflowResourcesLoaded, signal, onRunAccepted }),
+				);
 			default: {
 				const _exhaustive: never = action;
 				throw new Error(`Workflow extension: unknown action "${_exhaustive}"`);

@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 const testPath = join(root, ".github/workflows/test.yml");
 
 /** The work jobs the result gate must depend on, in file and `needs` order. */
-const WORK_JOBS = ["suites", "agent-suite", "release-archive", "static-checks"] as const;
+const WORK_JOBS = ["unit-tests", "integration-tests", "agent-suite", "release-archive", "static-checks"] as const;
 
 /** Job blocks keyed by job id, in file order. */
 async function jobs(): Promise<Map<string, string>> {
@@ -112,45 +112,31 @@ test("every work job the gate names exists and is otherwise independent", async 
 	}
 });
 
-/**
- * Per-job wall-clock caps replace the blanket 10/15 minute pair. A cap is a hang
- * detector, and it decays into a false-failure generator as the suites grow: the
- * 8-minute `suites` Linux cap was sized against a 230 s measurement, the job now
- * measures 400 s, and it cancelled a healthy run at 497 s on 31047506585 while
- * the same SHA passed on the pull_request event.
- *
- * A cap must cover the retries its job owns, because a retry replays only the
- * retryable steps: the budget is `setup + 2 x (retryable steps)`, not 2x the
- * whole job. `suites` owns TWO retryable steps (unit and integration), so its
- * worst legitimate run is roughly double its test time.
- *
- * Worst observed per step across runs 31085190975 and 31088323060:
- *   suites  Linux   setup  86 s, unit 355 s, integration 31 s ->  858 s (14.3 min)
- *   suites  Windows setup 232 s, unit 324 s, integration 44 s ->  968 s (16.1 min)
- *   agent-suite Linux   setup  72 s, suite 105 s             ->  282 s ( 4.7 min)
- *   agent-suite Windows setup 125 s, suite 208 s             ->  541 s ( 9.0 min)
- *
- * The former `suites` 13/14 pair sat BELOW both retry-inclusive figures, so a
- * genuine failure that triggered the retry was cancelled at the cap instead of
- * reporting a failure -- and GitHub withholds job logs until the whole run
- * completes, so the cancellation carried no test names. Both `suites` legs now
- * take a single 20-minute cap (1.40x Linux, 1.24x Windows): the per-platform
- * split encoded precision these shared 4-vCPU runners do not support, given
- * setup alone varied 73 s to 232 s across two samples of the same job.
- *
- * `agent-suite` and `release-archive` keep their pairs: agent-suite already
- * clears its retry-inclusive worst case at 1.70x/1.33x, and release-archive
- * runs no retryable step at all. The Windows `release-archive` cap is 9 minutes
- * because cold setup observed 152 s for `rust-toolchain` and 71 s for checkout,
- * followed by roughly 110 s native build and 40 s archive smoke.
- */
-test("each split job declares its own measured timeout", async () => {
+/** Measured headroom, including a full integration retry on both hosts; evidence lives in docs/ci.md. */
+test("each split job retains its measured timeout hang detector", async () => {
 	const workflow = await readText(testPath);
 	const blocks = await jobs();
+	// Runs 33997174167 / 33997819241, except Windows release-archive recalibrated for PR #2887:
+	// Run 34035777039, job 101493452122, was timeout-censored at 244s; run 34037177374 succeeded in 149s.
 	const caps: Record<string, [number, number]> = {
-		suites: [20, 20],
-		"agent-suite": [8, 12],
-		"release-archive": [5, 9],
+		// Run 34270757695: Linux job 102211457492 / Windows job 102211457215 were
+		// timeout-censored at 869s / 870s, including bounded retries and teardown.
+		"unit-tests": [Math.ceil((869 * 1.5) / 60), Math.ceil((870 * 1.5) / 60)],
+		// Linux run 34652319107 / job 103437056550: 135s setup before cancellation;
+		// five successful runs on September 11: at most 116s per attempt; allow 7s tail (6s + 1s margin).
+		// PR #2934, run 34275410217 / job 102227085985: 147s setup, 186.92s first
+		// attempt, 7s teardown. Both hosts reserve two attempts, then add 50% headroom.
+		"integration-tests": [
+			Math.ceil(((135 + 2 * 116 + 7) * 1.5) / 60),
+			Math.ceil(((147 + 2 * 186.92 + 7) * 1.5) / 60),
+		],
+		// Run 34270757695: jobs 102211457418 / 102211457032 reached 382s / 552s. Test steps
+		// passed without retry, but both jobs still exceeded their 6/9-minute caps.
+		"agent-suite": [Math.ceil((382 * 1.5) / 60), Math.ceil((552 * 1.5) / 60)],
+		// Linux run 34653564242 / job 103440964907: 49s setup + 84s censored build.
+		// Reserve another full 15s packaging (successful max rounded up), 5s smoke and 5s tail.
+		// The partial build is not a measured completion; docs/ci.md records this projection's limits.
+		"release-archive": [Math.ceil(((49 + 84 + 15 + 5 + 5) * 1.5) / 60), Math.ceil((244 * 1.5) / 60)],
 	};
 	for (const [job, [linux, windows]] of Object.entries(caps)) {
 		const block = blocks.get(job) as string;
@@ -170,16 +156,19 @@ test("each split job declares its own measured timeout", async () => {
 		assert.match(block, /timeout-minutes: \$\{\{ matrix\.timeout_minutes \}\}/u, job);
 		assert.match(block, /fail-fast: false/u, job);
 	}
-	assert.match(blocks.get("static-checks") as string, /^[ \t]+timeout-minutes: 6$/mu);
-	assert.match(blocks.get("test") as string, /^[ \t]+timeout-minutes: 5$/mu);
+	// Run 34873678170 / job 104075487913: all steps passed, but finalization hit the 3-minute cap at 182s.
+	const staticChecksTimeoutMinutes = Math.ceil((182 * 1.5) / 60);
+	// Match the job key, not Mintlify's separately indented five-minute step limit.
+	assert.match(
+		blocks.get("static-checks") as string,
+		new RegExp(`^ {4}timeout-minutes: ${staticChecksTimeoutMinutes}$`, "mu"),
+	);
+	assert.match(blocks.get("test") as string, /^[ \t]+timeout-minutes: 1$/mu);
 	// A cap is still a hang detector: it must bound a stuck job to minutes rather
-	// than GitHub's six-hour default. The former assertion was `< 15`, inherited
-	// from the blanket pair these caps replaced rather than from any measurement,
-	// and it is what forced Windows `suites` to 14 minutes -- below the 16.1 min
-	// a legitimate retried run needs. The bound is now the largest cap the
+	// than GitHub's six-hour default. The bound is the largest cap the current
 	// measurements justify, so raising one further has to come with new numbers.
 	for (const [, value] of workflow.matchAll(/^\s+timeout_minutes: (\d+)$/gmu)) {
-		assert.ok(Number(value) <= 20, `cap ${value} is too loose to detect a hang`);
+		assert.ok(Number(value) <= 22, `cap ${value} is too loose to detect a hang`);
 	}
 });
 
@@ -191,16 +180,40 @@ test("each split job declares its own measured timeout", async () => {
 test("build-consuming steps stay in the job that produced the build", async () => {
 	const blocks = await jobs();
 
-	const suites = jobSteps(blocks.get("suites") as string);
-	assert.ok(stepIndex(suites, "Build @bastani/atomic package") < stepIndex(suites, "Unit tests"));
-	assert.ok(stepIndex(suites, "Unit tests") < stepIndex(suites, "Integration tests"));
-	assert.match(namedStep(suites, "Integration tests"), /ATOMIC_REQUIRE_INSTALLED_NODE_SMOKE: "1"/u);
-	assert.match(blocks.get("suites") as string, /uses: actions\/setup-node@/u);
-	// The bundled subagent extension loads the Rust control plane at import, so
-	// both root suites are build-consuming steps for the native binding too.
-	assert.ok(stepIndex(suites, "Build native bindings for the root suites") < stepIndex(suites, "Unit tests"));
-	assert.ok(stepIndex(suites, "Build native bindings for the root suites") < stepIndex(suites, "Integration tests"));
-	assert.match(blocks.get("suites") as string, /uses: dtolnay\/rust-toolchain@/u);
+	for (const [job, suite] of [
+		["unit-tests", "Unit tests"],
+		["integration-tests", "Integration tests"],
+	]) {
+		const block = blocks.get(job) as string;
+		const steps = jobSteps(block);
+		assert.ok(stepIndex(steps, "Build @bastani/atomic package") < stepIndex(steps, suite));
+		assert.ok(stepIndex(steps, "Build native bindings for the root suites") < stepIndex(steps, suite));
+		assert.match(block, /uses: actions\/setup-node@/u);
+		assert.match(block, /uses: dtolnay\/rust-toolchain@/u);
+	}
+	const unit = blocks.get("unit-tests") as string;
+	const integration = blocks.get("integration-tests") as string;
+	assert.match(unit, /--no-retry-file flaky-test-suite-runner\.test\.ts/u);
+	assert.match(unit, /-- npm run test:unit/u);
+	assert.doesNotMatch(unit, /npm run test:integration/u);
+	assert.match(integration, /-- npm run test:integration/u);
+	assert.doesNotMatch(integration, /npm run test:unit/u);
+	for (const block of [unit, integration]) {
+		assert.equal(block.split("run-flaky-test-suite.ts").length - 1, 1);
+		const setup = jobSteps(block);
+		for (const [before, after] of [
+			["Install dependencies", "Alias @earendil-works/pi-ai"],
+			["Alias @earendil-works/pi-ai", "Build @bastani/pi-ai"],
+			["Build @bastani/pi-ai", "Build native bindings"],
+			["Build native bindings", "Build @bastani/atomic package"],
+		]) {
+			assert.ok(stepIndex(setup, before) < stepIndex(setup, after));
+		}
+	}
+	assert.match(
+		namedStep(jobSteps(blocks.get("integration-tests") as string), "Integration tests"),
+		/ATOMIC_REQUIRE_INSTALLED_NODE_SMOKE: "1"/u,
+	);
 
 	const agent = jobSteps(blocks.get("agent-suite") as string);
 	assert.ok(
@@ -244,7 +257,7 @@ test("build-consuming steps stay in the job that produced the build", async () =
 /**
  * Dependencies install with `npm ci --ignore-scripts` everywhere, so every work
  * job needs Node. Bun is still set up wherever a `scripts/*.ts`, the release
- * binary compiler, or a Bun-hosted test fixture runs -- which is all four. A job
+ * binary compiler, or a Bun-hosted test fixture runs -- which is all five. A job
  * that installs with npm but never sets Node up would fall back to whatever the
  * runner image happens to ship, which is the drift this guards against.
  */
@@ -268,17 +281,28 @@ test("every work job installs with npm ci and sets up both runtimes it uses", as
  * same artifact name, and three jobs previously emitted the identical
  * `test-diagnostics-<platform>` name.
  */
+function assertDiagnosticsPath(step: string): void {
+	assert.match(step, /^\s+path: \.ci-diagnostics\/\s*$/mu);
+	assert.match(step, /^\s+include-hidden-files: true\s*$/mu);
+}
+
 test("every diagnostics upload has a job-unique artifact name", async () => {
 	const uploads = [...(await jobs())].flatMap(([job, block]) =>
 		jobSteps(block)
 			.filter((step) => step.includes("actions/upload-artifact@"))
 			.map((step) => {
+				assert.match(step, /if: always\(\)/u);
+				assert.match(step, /retention-days: 14/u);
+				assert.match(step, /if-no-files-found: ignore/u);
+				assertDiagnosticsPath(step);
+				assert.throws(() => assertDiagnosticsPath(step.replace(/^\s+include-hidden-files: true\s*$/mu, "")));
+				assert.throws(() => assertDiagnosticsPath(step.replace("path: .ci-diagnostics/", "path: .")));
 				const name = /^\s+name: (.+)$/mu.exec(step);
 				assert.ok(name, `${job}: upload-artifact step declares no artifact name`);
 				return (name[1] as string).trim();
 			}),
 	);
-	assert.ok(uploads.length >= 2, "the flaky-suite jobs must still preserve their diagnostics");
+	assert.equal(uploads.length, 3, "unit, integration and package jobs must each preserve diagnostics");
 	assert.equal(new Set(uploads).size, uploads.length, `duplicate artifact names: ${uploads.join(", ")}`);
 	for (const name of uploads) assert.match(name, /^test-diagnostics-[a-z-]+-\$\{\{ matrix\.binary_platform \}\}$/u);
 });

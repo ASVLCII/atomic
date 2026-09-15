@@ -13,6 +13,7 @@ type ToolResult = {
 
 type Tool = {
 	description: string;
+	promptSnippet?: string;
 	parameters: { properties?: { to?: { description?: string } } };
 	execute(
 		id: string,
@@ -142,12 +143,30 @@ const context = {
 	hasUI: false,
 };
 
+test("list distinguishes a retained terminal child's reply capability from idle activity", async () => {
+	const current = fixture();
+	current.current.replyCapability = "terminal";
+	const result = await current.tool.execute("list", { action: "list" }, undefined, undefined, context);
+	assert.equal(result.isError, false);
+	assert.match(result.content[0]?.text ?? "", /idle, replyCapability: terminal/);
+	current.current.replyCapability = "live";
+	const live = await current.tool.execute("list", { action: "list" }, undefined, undefined, context);
+	assert.match(live.content[0]?.text ?? "", /idle, replyCapability: live/);
+});
+
 test("heavy tool guidance teaches exact known workflow-stage targets without replacing live sessions", () => {
 	const { tool } = fixture();
 	const guidance = `${tool.description}\n${tool.parameters.properties?.to?.description ?? ""}`;
-	assert.match(guidance, /`<runId>:<stageKey>`/);
-	assert.match(guidance, /pending stage.*queue automatically/i);
+	assert.ok(guidance.includes("`workflow:<rootRunId>/<segment>[/<segment>...]`"));
+	assert.match(guidance, /sticky for every future\s+stage/i);
+	assert.ok(guidance.includes("`workflow:<rootRunId>/**`"));
+	assert.match(guidance, /notInKnownSet/);
 	assert.match(guidance, /live session/i);
+	assert.match(guidance, /retries recoverable disconnects internally up to three times/);
+	assert.match(tool.promptSnippet ?? "", /retry reconnects internally/);
+	assert.match(tool.promptSnippet ?? "", /do not automatically repeat an unknown delivery outcome/);
+	assert.doesNotMatch(`${guidance}\n${tool.promptSnippet ?? ""}`, /retryToken/);
+	assert.doesNotMatch(JSON.stringify(tool.parameters), /retryToken/);
 });
 
 test("join is additive and leave without a group returns home", async () => {

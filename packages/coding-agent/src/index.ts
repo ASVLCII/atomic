@@ -1,3 +1,14 @@
+// Internal trusted-host task integration (not model authority).
+export { AgentTaskHost, type AgentTaskHostBinding, type AgentTaskRunnerFactory } from "./core/tasks/agent-adapter.js";
+export type { AgentIntent, OperationId, TaskId, TaskResult, WaitPolicy } from "./core/tasks/contracts.js";
+export { type AdmittedAgentTask, collectAgentTasks } from "./core/tasks/execution-scope.js";
+export { bindOwnerTaskStore, getOwnerTaskStore, OwnerTaskStore } from "./core/tasks/owner-store.js";
+export { renderTaskFooter, TaskList, taskListSections } from "./modes/interactive/components/task-list.js";
+export { TaskRow } from "./modes/interactive/components/task-row.js";
+export {
+	applyAssistantMessageDelta,
+	beginStreamingAssistantMessage,
+} from "./modes/interactive/streaming-assistant-message.ts";
 // Core session management
 
 export { type Args, parseArgs } from "./cli/args.ts";
@@ -7,7 +18,6 @@ export {
 	APP_TITLE,
 	CONFIG_DIR_NAME,
 	CONFIG_DIR_NAMES,
-	ENV_CODEX_FAST_MODE,
 	getAgentConfigPaths,
 	getAgentDir,
 	getAgentDirs,
@@ -48,7 +58,7 @@ export {
 	type PromptOptions,
 	parseSkillBlock,
 	type SessionStats,
-} from "./core/agent-session.ts";
+} from "./core/agent-session.js";
 // Auth and model runtime
 export { AuthStorage, readStoredCredential } from "./core/auth-storage.ts";
 export {
@@ -73,27 +83,6 @@ export {
 	createGatewayBindingFetch,
 	type GatewayBindingFetchOptions,
 } from "./core/cloudflare-gateway-binding.ts";
-export {
-	CODEX_FAST_MODE_SERVICE_TIER,
-	type CodexFastModeResolvedSettings,
-	type CodexFastModeScope,
-	formatCodexFastModeModelLabel,
-	getCodexFastModeScope,
-	hasSupportedCodexFastModeModel,
-	isCodexFastModeCandidateModelId,
-	isCodexFastModeEnabledForScope,
-	isCodexFastModeSupportedModel,
-	isCodexFastModeSupportedProvider,
-	shouldApplyCodexFastMode,
-	shouldApplyCodexFastModeForScope,
-	usesChatGptCodexTransport,
-	usesFirstPartyCodexRouting,
-	withCodexFastModeHeaders,
-} from "./core/codex-fast-mode.ts";
-export {
-	CODEX_FAST_MODE_ORIGINATOR,
-	CODEX_FAST_MODE_ROUTING_HEADER,
-} from "./core/codex-fast-mode-transport.ts";
 // Compaction
 export {
 	type BranchPreparation,
@@ -131,9 +120,34 @@ export {
 	type VerbatimCompactionPreparation,
 	type VerbatimCompactionResult,
 } from "./core/compaction/index.ts";
-export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.js";
 export { areExperimentalFeaturesEnabled } from "./core/experimental.ts";
 export { sessionScopedExtensionState } from "./core/extension-session-state.ts";
+export {
+	getModelFastRoute,
+	resolveUpstreamModelId,
+	usesChatGptCodexTransport,
+	usesFirstPartyCodexRouting,
+	withCodexFastRouteHeaders,
+	withFastRouteStreamOptions,
+} from "./core/fast-model-routing.ts";
+export {
+	CODEX_FAST_ROUTE_HEADER,
+	CODEX_FAST_ROUTE_ORIGINATOR,
+} from "./core/fast-model-routing-transport.ts";
+export {
+	copilotAdvertisedFastModelIds,
+	deriveFastModelVariants,
+	FAST_MODEL_ID_SUFFIX,
+	FAST_MODEL_SERVICE_TIER,
+	type FastModelVariantDerivation,
+	type FastModelVariantDiagnostic,
+	type FastModelVariantsOptions,
+	fastModelId,
+	isNativeFastRouteApi,
+	usesOpenAIFastServiceTier,
+	withFastModelVariants,
+} from "./core/fast-model-variants.ts";
 export {
 	parseFlattenedKeyPath,
 	reconstructFlattenedKeys,
@@ -146,6 +160,7 @@ export {
 	readRuntimeIntercomGroup,
 	runtimeIntercomGroupEnvKey,
 } from "./core/intercom-runtime-group.ts";
+export { keybindingIdentity } from "./core/keybinding-identity.js";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModelFallbackFailureKind,
@@ -271,6 +286,7 @@ export {
 } from "./core/session-manager-classification.ts";
 export type { DefaultProjectTrust } from "./core/settings-manager.ts";
 export {
+	type CompactionModelOverride,
 	type CompactionSettings,
 	type ImageSettings,
 	type PackageSource,
@@ -306,6 +322,8 @@ export {
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createFindToolDefinition,
+	createKillTool,
+	createKillToolDefinition,
 	createLocalBashOperations,
 	createLocalPowerShellOperations,
 	createLsToolDefinition,
@@ -326,6 +344,7 @@ export {
 	type FindToolOptions,
 	findToolSystemPromptContribution,
 	formatSize,
+	type KillToolOptions,
 	type LsOperations,
 	type LsToolDetails,
 	type LsToolInput,
@@ -353,6 +372,7 @@ export {
 	truncateHead,
 	truncateLine,
 	truncateTail,
+	type WriteFileOptions,
 	type WriteOperations,
 	type WriteToolInput,
 	type WriteToolOptions,
@@ -411,6 +431,7 @@ export {
 	type ChatTranscriptRenderer,
 	type ChatTranscriptRole,
 	CustomEditor,
+	type CustomEditorOptions,
 	CustomEntryComponent,
 	CustomMessageComponent,
 	chatEntriesFromAgentMessages,
@@ -453,6 +474,11 @@ export {
 	WorkingStatusComponent,
 	type WorkingStatusComponentOptions,
 } from "./modes/interactive/components/index.ts";
+export {
+	classifyChatCommand,
+	createSessionSkillAutocompleteProvider,
+	getSessionSkillCommands,
+} from "./modes/interactive/skill-command-autocomplete.ts";
 // Theme utilities for custom tools and extensions
 export {
 	getLanguageFromPath,
@@ -463,17 +489,9 @@ export {
 	initTheme,
 	Theme,
 	type ThemeColor,
-} from "./modes/interactive/theme/theme.ts";
+} from "./modes/interactive/theme/theme.js";
 // Run modes for programmatic SDK usage
 export { pickWhimsicalWorkingMessage } from "./modes/interactive/whimsical-messages.ts";
-// Experimental Harness factory
-export {
-	type BuildCodingAgentHarnessSystemPromptOptions,
-	buildCodingAgentHarnessSystemPrompt,
-	type CodingAgentHarnessTool,
-	type CreateCodingAgentHarnessOptions,
-	createCodingAgentHarness,
-} from "./server/create-harness.ts";
 export { createChildProcessEnvironment } from "./utils/child-process.ts";
 // Clipboard utilities
 export { copyToClipboard } from "./utils/clipboard.ts";

@@ -15,6 +15,8 @@ import { DefaultResourceLoader } from "../../packages/coding-agent/src/core/reso
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
 import type { ExtensionAPI, RegisteredCommand, ToolDefinition } from "../../packages/coding-agent/src/index.js";
 import {
+	getBrokerDeliveredMessagesKeyPath,
+	getBrokerDeliveredMessagesPath,
 	getBrokerPidPath,
 	getBrokerSocketPath,
 	getBrokerSpawnLockPath,
@@ -74,6 +76,8 @@ describe("intercom Atomic agent-dir paths", () => {
 				assert.equal(getBrokerSocketPath("darwin"), join(agentDir, "intercom", "broker.sock"));
 				assert.equal(getBrokerPidPath(), join(agentDir, "intercom", "broker.pid"));
 				assert.equal(getBrokerSpawnLockPath(), join(agentDir, "intercom", "broker.spawn.lock"));
+				assert.equal(getBrokerDeliveredMessagesPath(), join(agentDir, "intercom", "delivered-messages.sqlite"));
+				assert.equal(getBrokerDeliveredMessagesKeyPath(), join(agentDir, "intercom", "delivered-messages.key"));
 			},
 		);
 	});
@@ -86,11 +90,15 @@ describe("intercom Atomic agent-dir paths", () => {
 		withEnv({ HOME: home, ATOMIC_CODING_AGENT_DIR: atomicAgentDir, PI_CODING_AGENT_DIR: piAgentDir }, () => {
 			assert.equal(getBrokerSocketPath("linux"), join(atomicAgentDir, "intercom", "broker.sock"));
 			assert.equal(getBrokerPidPath(), join(atomicAgentDir, "intercom", "broker.pid"));
+			assert.equal(getBrokerDeliveredMessagesPath(), join(atomicAgentDir, "intercom", "delivered-messages.sqlite"));
+			assert.equal(getBrokerDeliveredMessagesKeyPath(), join(atomicAgentDir, "intercom", "delivered-messages.key"));
 		});
 
 		withEnv({ HOME: home, ATOMIC_CODING_AGENT_DIR: undefined, PI_CODING_AGENT_DIR: piAgentDir }, () => {
 			assert.equal(getBrokerSocketPath("linux"), join(piAgentDir, "intercom", "broker.sock"));
 			assert.equal(getBrokerPidPath(), join(piAgentDir, "intercom", "broker.pid"));
+			assert.equal(getBrokerDeliveredMessagesPath(), join(piAgentDir, "intercom", "delivered-messages.sqlite"));
+			assert.equal(getBrokerDeliveredMessagesKeyPath(), join(piAgentDir, "intercom", "delivered-messages.key"));
 		});
 	});
 
@@ -417,6 +425,11 @@ describe("lazy intercom registration", () => {
 		assert.match(modelVisibleText, /other local agent sessions/);
 		assert.doesNotMatch(modelVisibleText, /\bpi session\b/i);
 		assert.doesNotMatch(modelVisibleText, /\blocal pi sessions\b/i);
+		assert.match(modelVisibleText, /retries recoverable disconnects internally up to three times/);
+		assert.match(modelVisibleText, /Each new tool call is a new operation/);
+		assert.match(modelVisibleText, /do not automatically repeat an unknown delivery outcome/);
+		assert.doesNotMatch(modelVisibleText, /retryToken/);
+		assert.doesNotMatch(JSON.stringify(intercomTool.parameters), /retryToken/);
 	});
 
 	test("guides model-visible sends to live sessions and exact workflow-stage targets", () => {
@@ -429,9 +442,12 @@ describe("lazy intercom registration", () => {
 		const targetDescription = (intercomTool.parameters as { properties?: { to?: { description?: string } } })
 			.properties?.to?.description;
 		const guidance = `${intercomTool.description}\n${targetDescription ?? ""}`;
-		assert.match(guidance, /`<runId>:<stageKey>`/);
-		assert.match(guidance, /pending stage.*queue automatically/i);
+		assert.ok(guidance.includes("`workflow:<rootRunId>/<segment>[/<segment>...]`"));
+		assert.match(guidance, /sticky for every future\s+stage/i);
+		assert.ok(guidance.includes("`workflow:<rootRunId>/**`"));
+		assert.match(guidance, /notInKnownSet/);
 		assert.match(guidance, /live session/i);
+		assert.match(guidance, /retries recoverable disconnects internally up to three times/);
 	});
 
 	test("registers contact_supervisor when PI or ATOMIC subagent bridge metadata exists", () => {

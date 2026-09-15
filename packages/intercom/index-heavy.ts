@@ -1,3 +1,4 @@
+import { registerSubagentReplyCapability } from "./subagent-reply-capability.js";
 import { APP_NAME, type ExtensionAPI, type ExtensionContext } from "@bastani/atomic";
 import { appendFileSync } from "node:fs";
 import {
@@ -5,11 +6,12 @@ import {
 	type PendingStageMessageRequest,
 	type PendingStageMessageResult,
 	type PendingStageNotificationRequest,
+	type StickyLiveDeliveredNotice,
 } from "./broker/client.js";
 import { spawnBrokerIfNeeded } from "./broker/spawn.js";
 import { InlineMessageComponent } from "./ui/inline-message.js";
 import { loadConfig, type IntercomConfig } from "./config.ts";
-import type { SessionInfo, Message, WorkflowStageRosterAnnouncement } from "./types.js";
+import type { SessionInfo, Message, WorkflowStageRosterAnnouncement, WorkflowPossibleStageAnnouncement, WorkflowRunParentAnnouncement } from "./types.js";
 import { ReplyTracker } from "./reply-tracker.js";
 import { DEFAULT_REPLY_TIMEOUT_MS, ReplyWaiterRegistry } from "./reply-waiter.ts";
 import { registerContactSupervisorTool } from "./contact-supervisor-tool.js";
@@ -25,6 +27,9 @@ import { readSubagentMessageSource } from "./source-ownership.js";
 import {
   buildIncomingCustomMessage,
   createIncomingMessageSender,
+  frameDeliveryFeedback,
+  isDeliveryFeedback,
+  frameHistoricalSupervisorUpdate,
   framePreStartPendingStageMessage,
 } from "./incoming-message-delivery.js";
 import { InboundIdleQueue } from "./inbound-idle-queue.js";
@@ -34,6 +39,7 @@ import { InboundMessageAdmission } from "./inbound-message-admission.js";
 import { registerLateStageMessageRouter } from "./late-stage-message-router.js";
 import { retryStableDelivery } from "./stable-delivery-retry.js";
 import type { IntercomExtensionTestOverrides } from "./intercom-test-seams.js";
+import { admitActiveSessionInbound } from "./active-session-admission.js";
 import { admitWorkflowStageInbound } from "./workflow-stage-admission.js";
 import { bindWorkflowReplyTracker, preserveWorkflowReplyTracker } from "./workflow-reply-tracker.js";
 import { routeClosedWorkflowStageMessage } from "./closed-workflow-stage-message.js";
@@ -53,16 +59,22 @@ const INTERCOM_SESSION_ID_ENV = `${APP_NAME.toUpperCase()}_INTERCOM_SESSION_ID`;
 const PENDING_STAGE_ROUTE_EVENT = "atomic:workflow-pending-stage-route";
 const PENDING_STAGE_MESSAGE_EVENT = "atomic:workflow-pending-stage-message";
 const PENDING_STAGE_UNDELIVERABLE_EVENT = "atomic:workflow-pending-stage-undeliverable";
+const STICKY_LIVE_DELIVERED_EVENT = "atomic:workflow-sticky-live-delivered";
 
 interface PendingStageRouteRegistrationEvent {
 	readonly runId: string;
 	readonly group: string;
 	readonly capability: string;
 	readonly stages?: WorkflowStageRosterAnnouncement[];
+	readonly possibleStages?: WorkflowPossibleStageAnnouncement[];
+	readonly parent?: WorkflowRunParentAnnouncement;
 	completion?: Promise<void>;
 }
 
-type PendingStageRouteRegistration = Pick<PendingStageRouteRegistrationEvent, "group" | "capability" | "stages">;
+type PendingStageRouteRegistration = Pick<
+	PendingStageRouteRegistrationEvent,
+	"group" | "capability" | "stages" | "possibleStages" | "parent"
+>;
 
 interface PendingStageRouteClientState {
 	route: PendingStageRouteRegistration;
@@ -123,6 +135,7 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
   };
   let client: IntercomClient | null = null;
   let clientRegistrationGroup: string | null = null;
+  const replyCapability = registerSubagentReplyCapability(pi, () => client);
   const config: IntercomConfig = loadConfig();
   const legacyChildOrchestratorMetadata = readChildOrchestratorMetadata();
   let runtimeContext: ExtensionContext | null = null;
@@ -186,7 +199,10 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
   }
   function currentStatus(): string {
     const activeToolName = activeTools.values().next().value;
-    const lifecycleStatus = activeToolName ? `tool:${activeToolName}` : agentRunning ? "thinking" : "idle";
+    const stage = getLiveContext()?.orchestrationContext;
+    const lifecycleStatus = stage?.kind === "workflow-stage" && stage.messageAdmission?.isOpen() === false
+      ? `closed · reply: ${stage.lateMessageRouter === undefined ? "unavailable" : "post-mortem only"}`
+      : activeToolName ? `tool:${activeToolName}` : agentRunning ? "thinking" : "idle";
     return config.status ? `${lifecycleStatus} · ${config.status}` : lifecycleStatus;
   }
   function resolveSessionHomeGroup(): string {
@@ -224,6 +240,7 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
       startedAt: sessionStartedAt,
       lastActivity: Date.now(),
       status: currentStatus(),
+      replyCapability: replyCapability(),
       groups: [...currentIntercomGroups()],
       group: currentIntercomGroup(),
     };
@@ -335,18 +352,27 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
       ? `intercom({ action: "reply", message: "..." })`
       : undefined;
     const rawEntry = { from, message, replyCommand, bodyText, ...(channel ? { channel } : {}) };
-    const entry = receivedBeforeStageStart ? framePreStartPendingStageMessage(rawEntry) : rawEntry;
+    const framedEntry = isDeliveryFeedback(message) ? frameDeliveryFeedback(rawEntry) : frameHistoricalSupervisorUpdate(rawEntry);
+    const entry = receivedBeforeStageStart ? framePreStartPendingStageMessage(framedEntry) : framedEntry;
     if (receivedBeforeStageStart) {
       return sendIncomingMessage(entry, "prelude", messageGeneration, false);
     }
-    const stageClosed = liveContext.orchestrationContext?.kind === "workflow-stage"
-      && liveContext.orchestrationContext.messageAdmission?.isOpen() === false;
+    const stageAdmission = liveContext.orchestrationContext?.kind === "workflow-stage"
+      ? liveContext.orchestrationContext.messageAdmission
+      : undefined;
+    const stageClosed = stageAdmission?.isOpen() === false;
     if (stageClosed) {
       routeClosedWorkflowStageMessage(
         entry, inboundDeliveries, replyTracker, replyWaiters.pending(),
-        () => sendIncomingMessage(entry, "trigger", messageGeneration, false),
+        () => {
+          if (message.expectsReply === true && liveContext.orchestrationContext?.lateMessageRouter === undefined) {
+            throw new Error("Workflow stage is closed and cannot reply because post-mortem routing is unavailable. Contact a live stage or start new work with explicit context.");
+          }
+          return sendIncomingMessage(entry, isDeliveryFeedback(message) ? "prelude" : "trigger", messageGeneration, false);
+        },
         () => client,
         () => Boolean(getLiveContext(liveContext, messageGeneration)),
+        (runId) => stageAdmission.boundary.ownsSubagentRun(runId),
       );
       return;
     }
@@ -356,6 +382,17 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
     if (routeIncomingReply(replyWaiters.pending(), from, message)) {
       inboundDeliveries.commit(reservation);
       return;
+    }
+    if (isDeliveryFeedback(message)) {
+      // Correlated asks were resolved above. A refusal of a fire-and-forget
+      // send is feedback, not a new conversation to queue until parent idle.
+      return retryStableDelivery({
+        deliver: () => sendIncomingMessage(entry, "prelude", messageGeneration, false),
+        isCurrent: () => Boolean(getLiveContext(liveContext, messageGeneration)),
+      }).then(
+        () => inboundDeliveries.commit(reservation),
+        (error) => inboundDeliveries.release(reservation, toError(error)),
+      );
     }
     const replyContext = replyTracker.recordIncomingMessage(from, message);
     const commit = (): void => { inboundDeliveries.commit(reservation); };
@@ -367,21 +404,26 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
       replyContext,
       currentClient: () => client,
       commit,
+      failurePrefix: liveContext.subagentPolicy?.executionEnded === undefined ? undefined : "Subagent could not admit intercom ask",
     });
-    const stageDelivery = admitWorkflowStageInbound(
+    const activeDelivery = admitActiveSessionInbound(
       liveContext,
       (admissionBarrier) => {
         replyTracker.queueTurnContext(replyContext);
+        // Peer ask/send is priority input: cancel the receiver's supported active
+        // operation and continue the same task/stage with the message.
         return retryStableDelivery({
-          deliver: () => sendIncomingMessage(entry, "trigger", messageGeneration, false, undefined, admissionBarrier),
-          isCurrent: () => Boolean(getLiveContext(liveContext, messageGeneration)),
+          deliver: () => sendIncomingMessage(entry, "interrupt", messageGeneration, false, undefined, admissionBarrier),
+          isCurrent: () => Boolean(getLiveContext(liveContext, messageGeneration)) &&
+            liveContext.subagentPolicy?.executionEnded?.aborted !== true &&
+            liveContext.subagentPolicy?.messageAdmission?.isOpen() !== false,
         });
       },
       () => foregroundDetachHandoff.claim(from, message, messageGeneration, () => Boolean(getLiveContext(liveContext, messageGeneration))),
       release,
     );
-    if (stageDelivery !== false) {
-      void stageDelivery.then(commit, release);
+    if (activeDelivery !== false) {
+      void activeDelivery.then(commit, release);
       return;
     }
     return (async () => {
@@ -391,14 +433,19 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
           release(new Error("Intercom session retired before inbound delivery"));
           return;
         }
-        if (!activeContext.isIdle()) {
+        // Parent-addressed peers need not match an exact child handshake. Reach
+        // SDK admission while this owner is observing a task: persistence and
+        // model-queue insertion then yield its waits, never the child execution.
+        if (!activeContext.isIdle() && !activeContext.getAgentTaskHost?.().hasActiveTaskWaits) {
           if (!activeContext.hasUI) {
             const activeClient = client;
             if (!message.replyTo && activeClient?.isConnected()) {
               try {
+                const refusal = "Message not accepted: recipient was busy in non-interactive mode. Its task was not interrupted.";
                 const result = await activeClient.send(from.id, {
-                  text: "This agent is running in non-interactive mode and cannot respond to intercom messages while it is working. It will continue its current task and exit when done.",
+                  text: refusal,
                   replyTo: message.id,
+                  replyError: refusal,
                 });
                 if (result.delivered && getLiveContext(liveContext, messageGeneration)) {
                   replyTracker.markReplied(message.id);
@@ -434,6 +481,16 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
             onDelivered: () => { pendingIdleMessages.remove(entry); },
           });
           return;
+        }
+        // Observing parents still owe the exact child first refusal: its commit
+        // releases parallel/queued sibling observations as well as its own wait.
+        // Unrelated peers remain unclaimed and reach protected SDK admission.
+        if (!activeContext.isIdle()) {
+          const disposition = await foregroundDetachHandoff.claim(from, message, messageGeneration, () => Boolean(getLiveContext(liveContext, messageGeneration)));
+          if (disposition === "abandoned") {
+            release(new Error("Intercom session retired during foreground-owner admission"));
+            return;
+          }
         }
         replyTracker.queueTurnContext(replyContext);
         await retryStableDelivery({ deliver: () => sendIncomingMessage(entry, "trigger", messageGeneration, false), isCurrent: () => Boolean(getLiveContext(liveContext, messageGeneration)) });
@@ -558,6 +615,10 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
 			return reject(error);
 		}
 	}
+	function relayStickyLiveDelivered(notice: StickyLiveDeliveredNotice): void {
+		// The workflow bridge records the ledger entries for exactly these targets.
+		pi.events.emit(STICKY_LIVE_DELIVERED_EVENT, { handled: false, ...notice });
+	}
 	function handlePendingStageNotification(nextClient: IntercomClient, request: PendingStageNotificationRequest): void {
 		void admitPendingStageNotification(nextClient, request)
 			.catch(() => false)
@@ -583,6 +644,9 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
     });
 		nextClient.on("pending_stage_notification", (request: PendingStageNotificationRequest) => {
 			handlePendingStageNotification(nextClient, request);
+		});
+		nextClient.on("sticky_live_delivered", (notice: StickyLiveDeliveredNotice) => {
+			if (client === nextClient) relayStickyLiveDelivered(notice);
 		});
     nextClient.on("peer_disconnected", (notice: PeerDisconnectNotice) => {
       if (client !== nextClient) {
@@ -672,6 +736,9 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
     nextClient.on("error", () => {
       // Route-owner reconnect logic runs from the disconnect path.
     });
+    nextClient.on("sticky_live_delivered", (notice: StickyLiveDeliveredNotice) => {
+      if (state.client === nextClient) relayStickyLiveDelivered(notice);
+    });
   }
   async function ensurePendingStageRouteClient(
     runId: string,
@@ -701,7 +768,17 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
     if (!existing) pendingStageRouteClients.set(runId, state);
 	if (state.client?.isConnected()) {
 		state.route = route;
-		state.client.registerPendingStageRoute(runId, normalizeGroup(route.group), route.capability, route.stages);
+		state.client.registerPendingStageRoute(
+			runId,
+			normalizeGroup(route.group),
+			route.capability,
+			route.stages,
+			route.possibleStages,
+			route.parent,
+		);
+		// Route completion must observe broker processing, not merely enqueue a write.
+		// A list on another session's socket can overtake this roster update.
+		await state.client.listSessions();
 		return;
 	}
 	if (state.promise) {
@@ -715,7 +792,7 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
       state.client = nextClient;
       attachPendingStageRouteClientHandlers(runId, state, nextClient);
       await nextClient.connect(
-        { ...buildRegistration(), name: undefined, groups: [normalizeGroup(route.group)], group: normalizeGroup(route.group) },
+        { ...buildRegistration(), recipientPurpose: "control", name: undefined, groups: [normalizeGroup(route.group)], group: normalizeGroup(route.group) },
         undefined,
         undefined,
         readSubagentMessageSource(runtimeContext?.subagentPolicy),
@@ -724,7 +801,14 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
         await nextClient.disconnect();
         throw new Error("Intercom runtime no longer active");
       }
-      nextClient.registerPendingStageRoute(runId, normalizeGroup(route.group), route.capability, route.stages);
+      nextClient.registerPendingStageRoute(
+        runId,
+        normalizeGroup(route.group),
+        route.capability,
+        route.stages,
+        route.possibleStages,
+        route.parent,
+      );
       await nextClient.listSessions();
       if (!pendingStageRouteClientIsCurrent(runId, state, contextAtStart, generationAtStart)) {
         await nextClient.disconnect();
@@ -766,7 +850,15 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
   ): Promise<void> {
     const routeGroup = normalizeGroup(route.group);
     if (clientRegistrationGroup === routeGroup) {
-      activeClient.registerPendingStageRoute(runId, routeGroup, route.capability, route.stages);
+      activeClient.registerPendingStageRoute(
+        runId,
+        routeGroup,
+        route.capability,
+        route.stages,
+        route.possibleStages,
+        route.parent,
+      );
+      await activeClient.listSessions();
       return;
     }
     await ensurePendingStageRouteClient(runId, { ...route, group: routeGroup });
@@ -798,31 +890,44 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
       let connectFailed = false;
       await ownershipRecorded.promise;
 		const nextClient = new IntercomClient(currentSessionId);
-      const registration = buildRegistration();
       client = nextClient;
       attachClientHandlers(nextClient);
       try {
         await testOverrides.beforeConnectAttempt?.(reason);
         await spawnBrokerIfNeeded(config.brokerCommand, config.brokerArgs);
         const childMetadata = currentChildOrchestratorMetadata();
+        // Snapshot after startup awaits: execution may have ended while disconnected.
+        // connect writes registration synchronously, so no abort can interleave before that write.
         await nextClient.connect(
-          registration,
+          buildRegistration(),
           childMetadata?.supervisor,
           supervisorAuthorizations.ownerToken,
           readSubagentMessageSource(runtimeContext?.subagentPolicy),
+          // Origin controls workflow authority, not membership or child inheritance.
+          resolveSessionHomeGroup(),
         );
-        clientRegistrationGroup = normalizeGroup(registration.group);
+        clientRegistrationGroup = resolveSessionHomeGroup();
+        // Termination may have won while registration was in flight.
+        if (replyCapability() === "terminal") nextClient.updatePresence({ replyCapability: "terminal" });
         await supervisorAuthorizations.restore(nextClient);
         for (const [runId, route] of pendingStageRoutes) {
           await registerPendingStageRoute(nextClient, runId, route);
         }
         const orchestration = contextAtStart.orchestrationContext;
         if (orchestration?.kind === "workflow-stage" && orchestration.pendingStageDelivery !== undefined) {
-          await nextClient.registerLiveWorkflowStageRoute(
-            orchestration.workflowRunId,
-            [orchestration.workflowStageId, orchestration.workflowStageName],
-            orchestration.pendingStageDelivery.routeCapability,
+          // A stage name containing "/" or "*" is not a canonical path segment; register the
+          // always-valid stage-id key so the stage stays live-addressable without tripping the
+          // broker's single-segment key validation.
+          const liveStageKeys = [orchestration.workflowStageId, orchestration.workflowStageName].filter(
+            (stageKey) => !stageKey.includes("/") && !stageKey.includes("*"),
           );
+          if (liveStageKeys.length > 0) {
+            await nextClient.registerLiveWorkflowStageRoute(
+              orchestration.workflowRunId,
+              liveStageKeys,
+              orchestration.pendingStageDelivery.routeCapability,
+            );
+          }
         }
         if (!getLiveContext(contextAtStart, generationAtStart)) {
           await nextClient.disconnect();
@@ -881,6 +986,8 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
 		group: payload.group,
 		capability: payload.capability,
 		...(payload.stages === undefined ? {} : { stages: payload.stages }),
+		...(payload.possibleStages === undefined ? {} : { possibleStages: payload.possibleStages }),
+		...(payload.parent === undefined ? {} : { parent: payload.parent }),
 	});
     const completion = ensureConnected("background").then((activeClient) =>
       registerPendingStageRoute(activeClient, payload.runId, payload),
@@ -901,6 +1008,30 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
     if (!isPendingStageUndeliverableEvent(payload) || payload.handled) return;
     payload.handled = true;
     const actionable = `Pending workflow stage could not receive intercom message: ${payload.reason}`;
+    // The launching session commonly joins its own invocation group and steers stages
+    // from there, so the notice's recipient is the very session that owns the pending
+    // route. The broker refuses that as a self-send ("Session not found"), which would
+    // leave the durable entry unnotified forever; admit the notice locally instead.
+    const selfClient = client;
+    const notifiesThisSession =
+      selfClient !== null &&
+      selfClient.isConnected() &&
+      (payload.senderId === selfClient.sessionId ||
+        (payload.senderReturnAddress !== undefined && payload.senderReturnAddress === currentSessionId));
+    if (notifiesThisSession && selfClient.sessionId !== null) {
+      payload.completion = admitPendingStageNotification(selfClient, {
+        requestId: `local:${payload.notificationId}`,
+        from: { id: selfClient.sessionId, ...buildRegistration() },
+        message: {
+          id: payload.notificationId,
+          timestamp: Date.now(),
+          replyTo: payload.messageId,
+          replyError: actionable,
+          content: { text: actionable },
+        },
+      }).catch(() => false);
+      return;
+    }
 		payload.completion = pendingStageNotificationClient(payload.runId)
 			.then((activeClient) => {
 				const route = pendingStageRoutes.get(payload.runId);

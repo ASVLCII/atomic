@@ -1,0 +1,192 @@
+import type { AgentTaskHost, OperationId, WaitPolicy } from "@bastani/atomic";
+import type {
+	Cleanup,
+	ModelParallelResponse,
+	ModelSingleResponse,
+	Result,
+	TaskRecord,
+	TaskResult,
+	WaitOutcome,
+	YieldError,
+	YieldReason,
+} from "../../../../coding-agent/src/core/tasks/contracts.js";
+import type { AgentConfig } from "../../agents/agents.js";
+import type { RunSyncOptions, SingleResult, SubagentToolResult } from "../../shared/types.js";
+import { getSingleResultOutput } from "../../shared/utils.js";
+import type { SubagentExecutorRuntimeDeps } from "./subagent-executor-types.js";
+
+/** Project explicit user stops without changing the shared host cancellation record. */
+export function subagentTaskResultLabel(result: TaskResult): string {
+	return result.kind === "cancelled" && result.cause === "user" ? "killed (non-resumable)" : result.kind;
+}
+
+export function subagentTaskResponseText(response: ModelSingleResponse | ModelParallelResponse): string {
+	const outcomes = response.kind === "parallel" ? response.slots.map((slot) => slot.outcome) : [response];
+	const killed = outcomes.filter(
+		(outcome) =>
+			outcome.kind === "admitted" &&
+			outcome.observation.kind === "settled" &&
+			subagentTaskResultLabel(outcome.observation.result) === "killed (non-resumable)",
+	);
+	return `${killed.length ? `${killed.length} killed. These children cannot be resumed. Underlying host response:\n` : ""}${JSON.stringify(response)}`;
+}
+
+export function taskToolResult(response: ModelSingleResponse, host?: AgentTaskHost): SubagentToolResult {
+	return {
+		content: [{ type: "text", text: subagentTaskResponseText(response) }],
+		details: {
+			mode: "single",
+			results: [],
+			taskResponse: response,
+			taskRecords: taskResponseRecords(response, host),
+		},
+		...(response.kind === "unstarted" ? { isError: true } : {}),
+	};
+}
+
+/** Snapshot execution metadata for receipt playback, scoped to this response only. */
+export function taskResponseRecords(
+	response: ModelSingleResponse | ModelParallelResponse,
+	host?: AgentTaskHost,
+): TaskRecord[] {
+	const outcomes = response.kind === "parallel" ? response.slots.map((slot) => slot.outcome) : [response];
+	const ids = new Set(
+		outcomes.flatMap((outcome) => (outcome.kind === "admitted" ? [outcome.observation.taskId] : [])),
+	);
+	const watched = host?.watchOwnerTasks();
+	if (!watched?.ok) return [];
+	try {
+		return watched.value.snapshot.tasks.filter((task) => ids.has(task.ref.taskId));
+	} finally {
+		watched.value.dispose();
+	}
+}
+
+/** Bind the real foreground runner once; only its registered observation may yield. */
+export async function runAgentTask(input: {
+	host: AgentTaskHost;
+	cwd: string;
+	agents: AgentConfig[];
+	agent: string;
+	task: string;
+	intentTask?: string;
+	options: RunSyncOptions;
+	wait?: WaitPolicy;
+	runtime: SubagentExecutorRuntimeDeps;
+	onTerminal?: (result: SingleResult) => void;
+	schedule?: (dispatch: () => Promise<void>) => void;
+	outputText?: (result: SingleResult) => string;
+}): Promise<ModelSingleResponse> {
+	let yieldWait: ((reason: YieldReason) => Result<WaitOutcome, YieldError>) | undefined;
+	let pendingYield = false;
+	const registered = Promise.withResolvers<void>();
+	const started = await input.host.startAgentTask(
+		{ kind: "agent", agent: input.agent, task: input.intentTask ?? input.task, cwd: input.options.cwd ?? input.cwd },
+		`${input.options.runId}:${input.options.index ?? 0}` as OperationId,
+		(context) => {
+			const cleaned = Promise.withResolvers<Cleanup>();
+			let executionBound = false;
+			const result = registered.promise.then(async (): Promise<TaskResult> => {
+				try {
+					const child = await input.runtime.runSync(input.cwd, input.agents, input.agent, input.task, {
+						...input.options,
+						signal: context.signal,
+						taskExecution: {
+							signal: context.signal,
+							reportActivity: context.reportActivity,
+							bindTranscript: (session) =>
+								context.bindTranscript({
+									getSessionId: () => session.getSessionId(),
+									getEntries: () => session.getEntries(),
+									...(session.subscribe ? { subscribe: session.subscribe.bind(session) } : {}),
+									...(session.getStreamingMessage
+										? { getStreamingMessage: session.getStreamingMessage.bind(session) }
+										: {}),
+									...(input.options.intercomSessionName
+										? {
+												completionSource: {
+													runId: input.options.runId,
+													intercomTarget: input.options.intercomSessionName,
+												},
+											}
+										: {}),
+								}),
+							onExecution: (execution) => {
+								executionBound = true;
+								void execution.cleanup.then(cleaned.resolve, (error) =>
+									cleaned.resolve({
+										kind: "failed",
+										resources: [{ resource: "agent-session", code: "CleanupFailed", message: String(error) }],
+									}),
+								);
+							},
+							yieldTaskWait: () => {
+								if (yieldWait) yieldWait("intercom-coordination");
+								else pendingYield = true;
+							},
+						},
+					});
+					if (child.model !== undefined || child.thinking !== undefined)
+						context.reportActivity({
+							reportId: "terminal-model",
+							change: { kind: "model", model: child.model, thinking: child.thinking },
+						});
+					input.onTerminal?.(child);
+					const text = input.outputText?.(child) ?? getSingleResultOutput(child);
+					const bytes = Buffer.from(text);
+					context.reportActivity({
+						reportId: "terminal-output",
+						change: { kind: "output", offset: "0", bytesBase64: bytes.toString("base64") },
+					});
+					const output = {
+						ownerId: context.ref.ownerId,
+						taskId: context.ref.taskId,
+						artifactId: `output:${context.ref.taskId}`,
+						byteCount: String(bytes.length),
+						omittedRanges: [],
+					};
+					if (child.status === "killed") return { kind: "cancelled", cause: "user", output };
+					if (child.interrupted)
+						return {
+							kind: "cancelled",
+							cause: input.options.interruptSignal?.aborted ? "parent-handoff" : "owner-close",
+							output,
+						};
+					return child.status === "ok"
+						? { kind: "completed", output }
+						: {
+								kind: "failed",
+								code: "AgentFailed",
+								message: child.error ?? child.envelope ?? "Agent failed",
+								output,
+							};
+				} finally {
+					// A refusal before session admission has no session resources to reap.
+					if (!executionBound) cleaned.resolve({ kind: "reaped" });
+				}
+			});
+			return { result, cleanup: cleaned.promise };
+		},
+		input.schedule,
+	);
+	if (!started.ok) return { kind: "unstarted", reason: { kind: "rejected", error: started.error } };
+	// A queued execution has no runSync listener yet. Release its observation too,
+	// without spending a concurrency slot or cancelling its owner-bound execution.
+	const yieldForIntercom = () => {
+		if (yieldWait) yieldWait("intercom-coordination");
+		else pendingYield = true;
+	};
+	input.options.intercomDetachSignal?.addEventListener("abort", yieldForIntercom, { once: true });
+	if (input.options.intercomDetachSignal?.aborted) yieldForIntercom();
+	const observation = input.host.observeAgentLaunch(started.value.taskId, input.wait, (yieldRegistered) => {
+		yieldWait = yieldRegistered;
+		if (pendingYield) yieldRegistered("intercom-coordination");
+		registered.resolve();
+	});
+	registered.resolve();
+	const observed = await observation.finally(() =>
+		input.options.intercomDetachSignal?.removeEventListener("abort", yieldForIntercom),
+	);
+	if (!observed.ok) throw new Error(`${observed.error.code}: ${observed.error.message}`);
+	return { kind: "admitted", observation: observed.value };
+}

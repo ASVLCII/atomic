@@ -1,4 +1,4 @@
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 import { nextRetryDecision as codingAgentNextRetryDecision } from "../../packages/coding-agent/src/core/retry-policy.js";
 import type {
 	AgentSessionAdapter,
@@ -6,7 +6,7 @@ import type {
 	StageSessionCreateOptions,
 	StageSessionRuntime,
 } from "../../packages/workflows/src/runs/foreground/stage-runner.js";
-import type { WorkflowFastModeSettingsManager } from "../../packages/workflows/src/runs/foreground/stage-runner-types.js";
+import type { WorkflowSettingsManager } from "../../packages/workflows/src/runs/foreground/stage-runner-types.js";
 import { nextRetryDecision as workflowsNextRetryDecision } from "../../packages/workflows/src/runs/shared/retry.js";
 import {
 	assert,
@@ -19,7 +19,7 @@ import {
 } from "./stage-runner-helpers.js";
 
 const retrySettings = (
-	overrides: Partial<ReturnType<NonNullable<WorkflowFastModeSettingsManager["getRetrySettings"]>>> = {},
+	overrides: Partial<ReturnType<NonNullable<WorkflowSettingsManager["getRetrySettings"]>>> = {},
 ) => ({
 	enabled: true,
 	maxRetries: 2,
@@ -31,12 +31,11 @@ function sessionWithSettings(
 	settings: ReturnType<typeof retrySettings>,
 	prompt: StageSessionRuntime["prompt"],
 	overrides: Partial<StageSessionRuntime> = {},
-): { readonly session: StageSessionRuntime; readonly settingsManager: WorkflowFastModeSettingsManager } {
+): { readonly session: StageSessionRuntime; readonly settingsManager: WorkflowSettingsManager } {
 	const { session } = makeMockSession({ prompt, ...overrides });
 	return {
 		session,
 		settingsManager: {
-			getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
 			getRetrySettings: () => settings,
 		},
 	};
@@ -377,7 +376,6 @@ describe("createStageContext — thrown model failure retry", () => {
 		const created: string[] = [];
 		const settings = retrySettings();
 		const settingsManager = {
-			getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
 			getRetrySettings: () => settings,
 		};
 		const agentSession: AgentSessionAdapter = {
@@ -417,7 +415,6 @@ describe("createStageContext — thrown model failure retry", () => {
 			const created: string[] = [];
 			const settings = retrySettings();
 			const settingsManager = {
-				getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
 				getRetrySettings: () => settings,
 			};
 			const agentSession: AgentSessionAdapter = {
@@ -579,7 +576,7 @@ describe("createStageContext — thrown model failure retry", () => {
 			}),
 		) as InternalStageContext;
 		const prompt = ctx.prompt("go");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.equal(calls, 1), { interval: 1 });
 		assert.equal(calls, 1);
 		signalController.abort(workflowError);
 		await assert.rejects(prompt, workflowError);
@@ -601,7 +598,7 @@ describe("createStageContext — thrown model failure retry", () => {
 			makeOpts({ adapters: { agentSession }, stageOptions: { model: "anthropic/primary" } }),
 		) as InternalStageContext;
 		const prompt = ctx.prompt("go");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.equal(calls, 1), { interval: 1 });
 		await ctx.abort();
 		await assert.rejects(prompt, /stage aborted/);
 		assert.equal(calls, 1);
@@ -629,12 +626,12 @@ describe("createStageContext — thrown model failure retry", () => {
 			makeOpts({ adapters: { agentSession }, stageOptions: { model: "anthropic/primary" } }),
 		) as InternalStageContext;
 		const prompt = ctx.prompt("first");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.equal(calls, 1), { interval: 1 });
 		await ctx.__requestPause();
 		await new Promise((resolve) => setTimeout(resolve, 15));
 		assert.equal(calls, 1);
 		await ctx.__resume("resumed");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.equal(calls, 2), { interval: 1 });
 		assert.equal(calls, 2);
 		assert.equal(await prompt, "resumed answer");
 		assert.deepEqual(promptTexts, ["first", "resumed"]);
@@ -644,7 +641,6 @@ describe("createStageContext — thrown model failure retry", () => {
 		let creates = 0;
 		const settings = retrySettings({ baseDelayMs: 1000 });
 		const settingsManager = {
-			getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
 			getRetrySettings: () => settings,
 		};
 		const agentSession: AgentSessionAdapter = {
@@ -690,10 +686,10 @@ describe("createStageContext — thrown model failure retry", () => {
 			makeOpts({ adapters: { agentSession }, stageOptions: { model: "anthropic/primary" } }),
 		) as InternalStageContext;
 		const firstPrompt = ctx.prompt("first");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.equal(calls, 1), { interval: 1 });
 		await ctx.__requestPause();
 		await ctx.__resume("stale-resume");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.equal(calls, 2), { interval: 1 });
 		assert.equal(calls, 2);
 		await ctx.abort();
 		await assert.rejects(firstPrompt, /stage aborted/);
@@ -889,7 +885,7 @@ describe("createStageContext — continuation eligibility across admitted orderi
 		) as InternalStageContext;
 
 		const prompt = ctx.prompt("do it");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.deepEqual(probe.promptTexts, ["do it"]), { interval: 1 });
 		await ctx.__requestPause();
 		await new Promise((resolve) => setTimeout(resolve, 15));
 		await ctx.__resume("resumed");
@@ -913,7 +909,7 @@ describe("createStageContext — continuation eligibility across admitted orderi
 		) as InternalStageContext;
 
 		const prompt = ctx.prompt("do it");
-		await flushMicrotasks();
+		await vi.waitFor(() => assert.deepEqual(probe.promptTexts, ["do it"]), { interval: 1 });
 		await ctx.abort();
 
 		await assert.rejects(prompt, /stage aborted/);
@@ -954,8 +950,7 @@ describe("createStageContext — continuation eligibility across admitted orderi
 });
 
 describe("createStageContext — eager session creation walks the candidate chain", () => {
-	const eagerSettingsManager = (settings: ReturnType<typeof retrySettings>): WorkflowFastModeSettingsManager => ({
-		getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
+	const eagerSettingsManager = (settings: ReturnType<typeof retrySettings>): WorkflowSettingsManager => ({
 		getRetrySettings: () => settings,
 	});
 
@@ -991,12 +986,15 @@ describe("createStageContext — eager session creation walks the candidate chai
 		assert.equal(await ctx.prompt("go"), "fallback answer");
 	});
 
+	// #3020: joining a replacement candidate must not change fresh-walk behavior after terminal failure.
 	test("a terminal creation failure is not replayed to a later ensureSession", async () => {
 		let creates = 0;
+		const models: string[] = [];
 		const settings = retrySettings();
 		const agentSession: AgentSessionAdapter = {
 			async create(options) {
 				creates += 1;
+				models.push(modelFor(options));
 				// Three attempts on the primary plus three on the fallback exhaust
 				// the first walk; anything after that succeeds.
 				if (creates <= 6) throw new Error(`503 service unavailable during create ${modelFor(options)}`);
@@ -1022,6 +1020,7 @@ describe("createStageContext — eager session creation walks the candidate chai
 		// The cached rejection must not be handed to the next caller.
 		await ctx.__ensureSession();
 		assert.equal(creates, 7);
+		assert.equal(models.at(-1), "anthropic/primary", "a later fresh walk retries its primary first");
 	});
 
 	test("a paused eager creation resumes with the replacement objective", async () => {
@@ -1068,8 +1067,7 @@ describe("createStageContext — unresolved overflow is terminal for its candida
 	test("an already-unresolved overflow advances without retrying the same model", async () => {
 		const prompts: string[] = [];
 		const settings = retrySettings({ maxRetries: 2 });
-		const settingsManager: WorkflowFastModeSettingsManager = {
-			getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
+		const settingsManager: WorkflowSettingsManager = {
 			getRetrySettings: () => settings,
 		};
 		const agentSession: AgentSessionAdapter = {
@@ -1118,8 +1116,7 @@ describe("createStageContext — unresolved overflow is terminal for its candida
 
 describe("createStageContext — one creation gate across concurrent callers", () => {
 	const noRetry = retrySettings({ enabled: false });
-	const gateSettingsManager: WorkflowFastModeSettingsManager = {
-		getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
+	const gateSettingsManager: WorkflowSettingsManager = {
 		getRetrySettings: () => noRetry,
 	};
 
@@ -1223,8 +1220,7 @@ describe("createStageContext — pauses observed while a creation is in flight",
 			releaseCreate = resolve;
 		});
 		const settings = retrySettings();
-		const settingsManager: WorkflowFastModeSettingsManager = {
-			getCodexFastModeSettings: () => ({ chat: false, workflow: false }),
+		const settingsManager: WorkflowSettingsManager = {
 			getRetrySettings: () => settings,
 		};
 		const agentSession: AgentSessionAdapter = {

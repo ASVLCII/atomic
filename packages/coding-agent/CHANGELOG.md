@@ -6,6 +6,443 @@
 
 - Added an informational **Keybindings** row to `/settings` that shows the active agent directory's `keybindings.json` path and points to `/hotkeys`, the complete Keybindings documentation, and `/reload` without changing any shortcuts or editor behavior ([#2629](https://github.com/bastani-inc/atomic/issues/2629)).
 
+## [0.9.20-alpha.2] - 2026-09-15
+
+### Fixed
+
+- Bundled integration documentation is discoverable under the same `docs/` root in npm and binary installations, including the MCP setup guide at `docs/mcp.md`.
+
+## [0.9.20-alpha.1] - 2026-09-14
+
+### Fixed
+
+- Workflow startup now reports its phase and age, and explicit cancellation releases waiting callers while retaining unfinished creation ownership. Cancelled queued reloads cannot start later; late SDK/binding results cannot attach or dispatch ([#3040](https://github.com/bastani-inc/atomic/issues/3040)).
+
+## [0.9.19] - 2026-09-13
+
+Cumulative release of the `0.9.19-alpha.1` through `0.9.19-alpha.12` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- Overwriting an existing file with `write` requires this session to have observed the exact content being replaced. Missing or stale observations return typed `FILE_MUTATION_CONFLICT` errors with requester identity and recovery guidance. Creating files and overwriting files the session has read, written or edited remain supported ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- `WriteOperations` requires `readFile`, returning `undefined` only for absence, and `writeFile` accepts optional `WriteFileOptions`. Custom/remote implementations supply reads for generated-file and observation checks; existing writers may ignore the options but lose exclusive-create semantics ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- Workflow controls use `/workflow pause`, `/workflow quit` and `/workflow resume`; lifecycle pause events use `action: "pause"`. The workflow tool supports run, stage and durable-tool pause targets.
+- Bundled subagent terminal control is now `kill`, not `interrupt`, including calls using `runId`. Killed children cannot resume; launch a fresh child for follow-up work.
+- Bundled `code_search` requires `repoName` in `owner/repo` format and uses DeepWiki MCP without an Exa fallback. `fetch_content` requires a nonempty `urls` array instead of singular `url`; update existing calls. `web_search` is unchanged.
+- Intercom removed model-facing `retryToken` fields and owns bounded reconnect retries. Explicit `replyTo` selectors reject invalid or stale threads rather than falling back; use `action: "pending"` to select an unresolved question.
+
+### Added
+
+- Added owner-bound background shell and agent tasks with one execution per admitted attempt, observation-only yielding, retained output/transcripts, owner-scoped cancellation and independent cleanup. SDK contexts expose trusted task adapters, snapshot subscriptions and replay-safe completion delivery ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added per-call Bash/PowerShell foreground-first or background observation, `{ action: "wait", id, budgetMs }` for existing tasks, and `kill({ id })` for owned background shell tasks. Observation does not extend execution timeout or owner lifetime; unsupported background requests fail before execution.
+- Added shared `/tasks` inspection with a compact inline picker, fullscreen detail/transcript/input pages, paging, confirmed cancellation and stable selection. Main and attached stage chats show background counts below the composer and readable completion notifications.
+- Added a searchable `/agents` catalog with source grouping and configuration details.
+- Added supervised Windows ConPTY execution with Job Object containment before resume and confirmed cleanup, without an unsupervised fallback. The command SDK accepts direct-executable `shell: { program, args }` and `inheritEnv` controls.
+- Added workflow activity observers and typed lifecycle, activity, stage-completion and heartbeat hooks with ordered snapshots, bounded queues and reload-safe leases. The built-in Herdr reporter combines agent/task activity, workflow execution and approval waits, supports `herdr.enabled` opt-out, and reports parent session identity ([#2891](https://github.com/bastani-inc/atomic/issues/2891)).
+- Added `reason: "project_trust"` to UI prompt lifecycle events, including paired isolated-engine notifications, so integrations can observe trust decisions ([#2873](https://github.com/bastani-inc/atomic/issues/2873)).
+- Editable workflow-stage chats discover source-qualified skills and expand submissions once through stage admission. Graph cards show effective model/thinking identity, including fast suffixes and live fallbacks ([#1859](https://github.com/bastani-inc/atomic/pull/1859) by [@sina85](https://github.com/sina85)).
+- Added per-model compaction overrides for `reserveTokens` and `preserve_recent`, with non-negative safe-integer validation and fallback to ordinary settings/defaults across manual, automatic and post-tool compaction.
+- Extension widgets can opt into height-capped fullscreen viewports with local wheel scrolling, overflow-only scrollbars and scroll-position feedback. The workflow list uses local scrolling with configurable Alt+K/J shortcuts, labeled Option on macOS, while retaining Alt+PageUp/PageDown aliases and editor-binding precedence.
+
+### Changed
+
+- Built-in read, edit, write and shell tools prefer strict JSON-schema sampling where supported; other experimental hints remain opt-in.
+- Task receipts and details display resolved model/reasoning, grouped counts, themed status, recent activity, bounded previews and narrow-terminal layouts. Only active background work contributes to the footer; retained results remain in `/tasks`.
+- Native Windows owner-bound shell calls automatically yield after the owner's observation budget, normally ten seconds. PowerShell uses encoded transport; execution timeouts remain separate, and unsupported owned WSL bash stdin transport remains refused. Suspend opens a PowerShell subshell without freezing background tasks.
+- Guidance routes user questions through structured question tools when available, favors normal shell observation budgets over repeated short polls, and keeps blocking work local while overlapping independent delegation. Requests to work "quickly" select inline execution without hidden workflows or skipped validation.
+- Model-choice guidance consults eval documentation and Artificial Analysis; automation guidance uses PyAutoGUI for desktop, playwright-cli for browsers, and Herdr with supported fallbacks for terminals.
+- Open Claude Design starts with Fable 5.1 at medium, followed by Copilot Fable 5.1 and Astra at medium, with Fable-first OpenRouter fallbacks. Debugger uses Astra/Fable at medium and Sol at high; Goal/Ralph reviewers use Astra/Sol at high, and orchestration/research/design fallbacks use Fable at medium and Sol at high.
+- Intercom lists lead with exact session IDs and workflow paths. Sends and asks interrupt working recipients within the same task/generation, retaining ordered messages and completed side effects rather than restarting work.
+
+### Fixed
+
+- Restored offline embedded PostgreSQL discovery in compiled archives and all eight target-selected archive/npm runtimes, retaining scriptless installs and existing v18 clusters. Windows ARM64 still requires Windows 11 x64 emulation.
+- Embedded Postgres starts on Windows administrative accounts using restricted tokens while retaining exact-process shutdown. Early startup exit reports actual logs; Unicode environments, executable lookup, batch/explicit-command launchers and safe verbatim paths work without handle leaks or cross-process stream inheritance.
+- Rejected edits no longer authorize themselves on retry by recording a new snapshot tag. Drift, deletion, unreadable targets and permission changes return typed conflicts with exact requester identity and recovery guidance. Writes exclusively claim new paths, preserve observations after cancellation that follows a completed write, and retain standalone `local://` observations ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- Bounded noisy engine diagnostic history and routed stderr/MuPDF diagnostics through deferred, terminal-safe status output, preserving split Unicode and failure details without corrupting fullscreen or RPC JSON output ([#2964](https://github.com/bastani-inc/atomic/issues/2964)).
+- Fixed npm-installed task supervisor class initialization and missing upstream AI imports. First-load and Windows-reloaded TypeScript extensions share live host classes/singletons, including the upstream-compatible import, without losing dependency edits.
+- Workflow fallback releases failed-attempt Intercom ownership before replacement. Repeated nested workflow calls no longer collide during fallback ([#3020](https://github.com/bastani-inc/atomic/issues/3020)).
+- Foreground subagent waits yield to parent steering and Intercom messages without cancelling children. Parallel coordination preserves active/queued siblings, same-child messages precede completion, and queued-child cancellation cleans up unused worktrees and branches.
+- Task completion retries retain delivery identity without relaunching work, including restored outboxes, native shell settlement and `/tasks` cancellations. Foreground-only shells do not create duplicate background notifications or model turns.
+- Fixed yielded shell waits replaying the first output page, honored owner wait policies, disclosed retained output gaps, and bounded output pages to 1 MiB under a shared disk cap ([#2972](https://github.com/bastani-inc/atomic/pull/2972), [#2905](https://github.com/bastani-inc/atomic/pull/2905)).
+- Live transcripts stream updates without reopening, preserve historical paging and configured shortcuts, and reject stale task-detail results after selection changes. Long Windows transcripts reuse unchanged rendering to reduce CPU without dropping history.
+- Isolated sessions use the engine's task owner and inspector, with `/tasks` autocomplete and live metrics. Task rows reattach after transcript replacement, old owners clear on session switches, and inspection failures remain retryable instead of rejecting unhandled.
+- Stage pause cancels owned admitted/active tasks and waits for cleanup while preserving messages and sibling work; ordinary chat interruption leaves background tasks running. Explicit subagent kill and grouped cancellation outcomes remain consistent through parent-cancellation races.
+- Corrected SDK task Results, cursors, opaque leases, wait policies and cleanup races. Subscription disposal/overflow and throwing callbacks are contained; exact strings/numbers, bounded activity replay and protected settlement IDs survive native conversion, and NaN waits no longer panic ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Fixed macOS cleanup failing immediately on temporary unreaped process-group zombies while retaining bounded, confirmed cleanup.
+- Herdr registration survives reload and session replacement without stale runners or child shutdown clearing parent ownership. Failed identity reports retry, background tasks prevent false idle, output-cap continuations remain working, and settled workflow failures retain attention without a false active wait.
+- Navigation through `/tasks`, `/agents` and workflow graphs no longer creates false Herdr approval blocks. Answered prompts and acknowledged workflow blocks clear correctly even with slow observers; genuine pending approvals remain blocked.
+- Concurrent inline approvals retain the surviving prompt and input focus. Task navigation does not cancel queued questionnaires, isolated cancellation removes loading placeholders, and background counts coexist with questions and MCP context on narrow terminals.
+- Filled theme backgrounds survive nested resets and truncation, including completion cards. Workflow lists retain row caps and viewed-run anchors through clipping, live changes and resize.
+- Resume trust is prepared before disposing the outgoing session and retained on failed preflight. Startup and isolated trust waits reach eligible lifecycle observers without loading untrusted extensions or replaying dialogs ([#2873](https://github.com/bastani-inc/atomic/issues/2873)).
+- Internal-URL expansion rejects unsafe shell syntax while safely quoting bare resolved URLs; PowerShell apostrophes remain literal. Commands without resolved URLs are unchanged.
+- Intercom excludes non-agent routing/prompt/tool connections without hiding busy agents or invalidating connected aliases. Roster updates synchronize with broker acceptance; targeted replies keep exact correlation, and delivery retries preserve FIFO order without duplicate cards ([#2895](https://github.com/bastani-inc/atomic/pull/2895)).
+- Capped retry backoff with `retry.maxAgentDelayMs`, defaulting to 60 seconds, while preserving provider limits. Retry countdowns use Atomic's themed indicator ([#8826](https://github.com/earendil-works/pi/issues/8826)).
+- Fixed Anthropic object-union schemas and Grok acceptance of the bundled bash command/wait schema while local validation still rejects mixed inputs. Extension registration rejects missing or nonobject schema containers ([#2190](https://github.com/bastani-inc/atomic/pull/2190) by [@elefthei](https://github.com/elefthei), [#3031](https://github.com/bastani-inc/atomic/issues/3031), [#9300](https://github.com/earendil-works/pi/issues/9300)).
+- Updated patched Hono/js-yaml dependencies and provider SDKs; Google's consecutive tool-call limit returns an error. Extension model registries expose authenticated custom-provider streams, and Radius login chooses an available discovered model.
+- Settings writes preserve inherited `.pi` provenance, concurrent primary edits and explicit Atomic overrides instead of copying inherited values into `.atomic` ([#2299](https://github.com/bastani-inc/atomic/issues/2299)).
+- Direct steering/follow-up calls run extension input handlers before admission, preserving transformed text/images and RPC attribution. Tree navigation refuses active compaction/summarization without disturbing the current branch.
+- Stage skill autocomplete reuses shared attachment without repeated checkpoints, ended recoverable blocks resume rather than return snapshot-only success, and cancelled stage-chat pause avoids unhandled rejection.
+- Released unused alternate-folder Git watchers and timers without disturbing other chat footers ([#2926](https://github.com/bastani-inc/atomic/pull/2926)).
+- Restored the Gondolin example after legacy grep API removal, keeping search on the host and guest-only searches in the routed shell ([#2482](https://github.com/bastani-inc/atomic/pull/2482)).
+
+## [0.9.19-alpha.12] - 2026-09-13
+
+### Fixed
+
+- Grok accepts the bundled bash tool schema for command execution and task waits, while local validation still rejects mixed inputs ([#3031](https://github.com/bastani-inc/atomic/issues/3031)).
+
+## [0.9.19-alpha.11] - 2026-09-13
+
+### Fixed
+
+- Repeated nested `ctx.workflow()` invocations no longer collide on Intercom route ownership during model fallback.
+
+## [0.9.19-alpha.10] - 2026-09-13
+
+### Added
+
+- Extension widgets can opt into a height-capped fullscreen viewport with widget-local wheel scrolling, an overflow-only scrollbar, and scroll-position feedback in both in-process and isolated-engine sessions. Existing widgets retain their default behavior.
+- The main-chat workflow list supports local wheel scrolling with an overflow-only slim scrollbar and configurable Alt+K/J shortcuts, labeled Option on macOS. Alt+PageUp/PageDown remain aliases, configured editor bindings take precedence, and the list keeps its row cap and run anchors through clipping and resize.
+
+### Fixed
+
+- Workflow model fallback cleans up the failed attempt's Intercom ownership before registering its replacement, preventing duplicate live-stage ownership warnings without weakening route protections ([#3020](https://github.com/bastani-inc/atomic/issues/3020)).
+
+## [0.9.19-alpha.9] - 2026-09-12
+
+### Breaking Changes
+
+- Explicit Intercom `action: "reply"` selectors reject stale, unknown, empty, or sender-mismatched threads instead of falling back. Use `action: "pending"` and `replyTo: "<pending-ask-id>"` for unresolved questions.
+
+### Changed
+
+- Intercom agent lists put exact copyable session IDs and workflow paths first, with useful metadata and meaningful names secondary rather than redundant generated aliases.
+
+### Fixed
+
+- Intercom targeted replies now complete the requested ask when an unrelated message is active, rather than delivering a response with the wrong thread ID or refusing it.
+
+## [0.9.19-alpha.7] - 2026-09-12
+
+### Fixed
+
+- Reduced CPU work in long `/tasks` live transcripts on Windows by reusing unchanged message rendering during streaming, without dropping history or delaying live updates.
+
+## [0.9.19-alpha.6] - 2026-09-11
+
+### Breaking Changes
+
+- `write` no longer silently overwrites a file this session has never seen. Replacing an existing file now requires the session to have already observed exactly the content being replaced, checked under the same per-file mutation queue as the write. A session with no version of its own is refused with `no_prior_observation`; one whose recorded version no longer matches the file on disk is refused with `changed_since_observation` and told which line diverged, what it assumed was there, and what the file holds instead. Both carry the same `FILE_MUTATION_CONFLICT` code and requester identity as an `edit` conflict. Creating a new file, and overwriting one this session read, wrote, or edited, are unaffected ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- `WriteOperations` now requires a `readFile` member, and `writeFile` receives an optional third `WriteFileOptions` argument. `write` reads before every write to refuse generated files, to check that the session has observed what it is replacing, and to decide between creating and overwriting; routing that read through `WriteOperations` is what makes those checks see the filesystem a custom or remote implementation actually writes to, rather than local disk. `readFile` must report absence as `undefined` and reject for anything else, since a path that exists but cannot be read is not a free path. Existing `writeFile` implementations continue to typecheck and may ignore the new options argument, losing only exclusive-create semantics ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- Bundled `code_search` now requires `repoName` in `owner/repo` format alongside `query` and uses DeepWiki MCP for public-repository questions instead of Exa. Add the repository to existing calls. There is no Exa fallback; `web_search` is unchanged, and `maxTokens` remains a best-effort local output bound.
+
+### Changed
+
+- Shell guidance now favors the owner's normal observation budget over routine one-second yields and repeated short polls. Bash and PowerShell share this guidance; explicit budgets, background execution, and execution timeouts are unchanged.
+- Bundled delegation guidance now favors keeping immediately blocking work local and overlapping independent tasks, while preserving specialist and explicitly requested delegation.
+
+### Fixed
+
+- Fixed continuously noisy engines growing interactive diagnostic history without limit. Recent diagnostics retain their order and duplicates without removing normal chat or status messages.
+- Fixed damaged-PDF reads corrupting the fullscreen terminal with MuPDF diagnostics. Bounded diagnostics now appear in the TUI when interactive and use `console.log` otherwise; conversion failures also retain their diagnostic suffix ([#2964](https://github.com/bastani-inc/atomic/issues/2964)).
+- Routed RPC engine stderr through bounded, deferred status messages instead of synchronous filesystem writes or raw terminal output, preserving Unicode characters split across output chunks. Interactive MuPDF and engine diagnostic display neutralizes terminal controls without changing stored diagnostic text. RPC stdout remains JSON-only, and child diagnostics reach the interactive host without changing engine health ([#2964](https://github.com/bastani-inc/atomic/issues/2964)).
+- A rejected `edit` no longer hands back a snapshot tag that authorizes the same edit on retry. Building the rejection recorded the file's current content in the session's snapshot store and reported that tag in the error, so re-sending the identical edit with the reported tag was accepted even though the model had never read the changed file, silently overwriting whatever the other writer had just put there. The rejection now reports the tag without recording it, so the retry is rejected again and the model must re-read first. Drift recovery for tags the session did record is unchanged ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- An `edit` rejected because the file changed after the patch was prepared now reports which line diverged, what the edit assumed was there, what the file holds instead, and how large the target is, instead of a bare "content changed before write". A file deleted in that same window is reported as a missing target rather than a raw filesystem error, and no longer tells the model to re-read a file that is gone. A path that survives but stops being readable, because it was replaced by a directory, locked, or made inaccessible, is now reported as an unreadable target carrying the filesystem error code, instead of escaping as an untyped error. Rejections carry a stable `FILE_MUTATION_CONFLICT` code and the identity of the session, workflow stage, or subagent whose call was refused, so parallel workers editing one file are distinguishable ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- A `write` or hashline `edit` cancelled after its bytes had already reached disk no longer left the change unrecorded, which made the session's own file look like another agent's work on the next overwrite ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- `write` creating a file now claims the path exclusively (`O_EXCL`). A file that appears between `write` observing an absent path and its own write landing is reported as `target_exists`, describing what is there now, instead of being silently truncated ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- Standalone write tools retain their implicit observation store across `local://` writes, so overwriting a file the same tool just created no longer incorrectly fails with `no_prior_observation`.
+- Preserved typed `edit` conflicts when parent-directory permissions change after patch preparation. The rejection retains the original target identity and filesystem error code instead of escaping as a raw permission error ([#2329](https://github.com/bastani-inc/atomic/issues/2329)).
+- Fixed the Gondolin example failing to load after removal of the legacy grep tool API. It now registers only its supported file and shell overrides; the search tool remains on the host, and guest-only content searches use the routed shell ([#2482](https://github.com/bastani-inc/atomic/pull/2482)).
+
+## [0.9.19-alpha.5] - 2026-09-11
+
+### Changed
+
+- Open Claude Design now starts with Claude Fable 5.1 at medium effort, followed by Copilot Fable 5.1 and Astra at medium effort, with the same Fable-first order on OpenRouter.
+- Tuned bundled debugger, Goal, and Ralph reasoning efforts: debugger uses Astra/Fable at medium and Sol at high; Goal and Ralph reviewers use Astra/Sol at high; orchestration, Ralph research, and design use Fable at medium and Sol at high in their fallbacks. Ralph prompt refinement and other bundled agents retain their existing configurations.
+
+## [0.9.19-alpha.4] - 2026-09-10
+
+### Breaking Changes
+
+- Workflow controls, completion, help, and status hints use `/workflow pause`, `/workflow quit`, and `/workflow resume`. The workflow tool supports run, stage, and individual durable-tool pause targets; `/workflow pause [run-id|--all]` controls runs. Workflow lifecycle control events report `action: "pause"` for pause requests.
+- Renamed the bundled subagent `interrupt` action to `kill`. Migrate `subagent({ action: "interrupt", id })` to `subagent({ action: "kill", id })`, including calls using `runId`. The old action is no longer accepted. Kill terminally stops the child and cannot be resumed; follow-up work requires a fresh launch. Workflow controls use `/workflow pause`; parent cancellation behavior is unchanged.
+
+### Added
+
+- Added a model row to the `/workflow connect` graph node cards showing each stage's effective model and thinking level, including canonical fast model identity, with model-name truncation preserving the suffixes. Cards retain duration, status and dependencies in a six-row layout, reflect live fallbacks, and restore identity through durable resume ([#1859](https://github.com/bastani-inc/atomic/pull/1859) by [@sina85](https://github.com/sina85)).
+- Added `{ action: "wait", id, budgetMs }` to Bash and PowerShell for observing existing asynchronous tasks without rerunning commands. The observation budget is optional. Waits retain output and terminal metadata, follow owner observation policy, and release on cancellation or incoming messages without stopping execution or extending task lifetime.
+- Added the agent-callable `kill({ id })` tool for owned background bash and PowerShell tasks in main and workflow-stage chat. It cancels by task ID, preserves retained output and original outcomes, reports current cleanup state, and rejects other owners' tasks and subagents.
+- Added exact per-model overrides through `compaction.modelOverrides` for `compaction.reserveTokens` and Atomic's `compaction.preserve_recent` message count. Each field falls back to ordinary settings and then built-in defaults, with non-negative safe-integer validation. Manual, automatic, and post-tool compaction use the active model's budgets while retaining verbatim line compaction.
+
+### Fixed
+
+- First-loaded TypeScript extensions share the live host's classes and singletons when native import falls back to transformation, avoiding duplicate host evaluation and slow startup.
+- Fixed repeated yielded shell waits replaying the first output page instead of progressing through retained output while the task is still running ([#2972](https://github.com/bastani-inc/atomic/pull/2972)).
+- Preserved an explicit subagent kill when parent cancellation arrives during execution-capacity waiting, and kept grouped Intercom cancellation status consistent when a killed child has parent-cancelled siblings.
+- Embedded Postgres now starts on Windows administrative accounts. PostgreSQL refuses to run for a member of the Administrators or Power Users groups, so Atomic launches the retained server process with the same restricted access token `pg_ctl` uses, keeping exact-process shutdown semantics; non-administrative Windows accounts are unchanged. Postgres processes that exit during startup (including that administrator refusal on older builds) now fail fast with the actual server log instead of a readiness timeout.
+- Preserved embedded Postgres startup logs on regular Windows accounts, honored Unicode environment overrides on administrative launches, and prevented Windows handle leaks across repeated launches.
+- Preserved `PATH` lookup and relative executable paths for administrative Windows Postgres launches. Invalid launch inputs containing embedded NUL characters now fail before starting a process rather than using truncated paths, arguments, or environment values.
+- Fixed custom Windows Postgres `.cmd` and `.bat` launchers failing with arguments on administrative accounts, including launcher paths containing spaces. Batch arguments retain their existing quoting and line-break rejection.
+- Fixed explicit `cmd.exe` Postgres launchers and safe verbatim working directories on Windows administrative accounts. Concurrent Postgres launches no longer keep one another's log files open or expose them to unrelated commands starting at the same time.
+- Incoming Intercom send and ask messages now act as a priority interrupt queue for working subagents and live workflow stages: the receiver's current model call or cancellable tool is cancelled immediately and the message is processed within the same task, session, and stage generation. Admission survives consumed preflight input and overlapping SDK interrupt turns. Completed tool side effects are never replayed, the original task prompt is not repeated, multiple arrivals stay in arrival order with duplicate suppression, and exact ask/reply correlation survives the cancelled turn. Explicit user abort, host stop, and terminal/closed receivers still win: late input never restarts finished work.
+- Fixed a deadlock where an extension event hook awaiting an ordinary context-only message could wait behind an inbound Intercom delivery that was itself waiting for that event hook.
+- Inbound delivery retries after a transient persistence failure keep their original arrival position and remain part of both child and workflow-stage settlement, and a card appended before a failed flush is completed on retry instead of being appended a second time.
+
+## [0.9.19-alpha.3] - 2026-09-09
+
+### Fixed
+
+- Fixed `Failed to initialize class constructor` when npm-installed Node sessions create multiple task supervisors, preventing shell commands and subagent launches from failing during task-host initialization.
+- Fixed foreground subagent launches and explicit waits blocking parent user steering and incoming Intercom asks/sends. Admitted messages now release the waiting parent's observations in main and workflow-stage chat without cancelling children or affecting other owners.
+- Fixed PowerShell internal-URL path quoting so apostrophes and smart single quotes in resolved paths remain literal instead of allowing injected commands. Bash quoting, deliberate shell commands, and balanced command prefixes are unchanged.
+- Capped agent retry backoff with `retry.maxAgentDelayMs` (60 seconds by default), preserving independent provider retry limits ([#8826](https://github.com/earendil-works/pi/issues/8826)).
+- Rejected extension tools with missing or non-object parameter schema containers during registration instead of breaking provider requests ([#9300](https://github.com/earendil-works/pi/issues/9300)).
+- Workflow-stage pause now blocks new task launches, cancels active and admitted queued agents and commands, and waits for in-flight command admission and resource cleanup. Main-chat and sibling tasks stay unaffected; queued user and Intercom messages survive, and resume permits fresh work without restarting cancelled executions.
+- Fixed npm-installed Node startup failing with a missing upstream AI package after the retry-policy update. Core retry imports now use Atomic's declared AI dependency.
+- Fixed an unhandled rejection when session cancellation interrupts an in-flight stage-chat pause, while preserving pause error reporting and rejection for callers awaiting completion.
+- Fixed Windows extension reloads re-evaluating Atomic's host modules, avoiding duplicate host classes and long reload delays while preserving edits to extension dependencies. The supported `@earendil-works/pi-coding-agent` import also shares host identity with `@bastani/atomic` after reload.
+
+## [0.9.19-alpha.2] - 2026-09-08
+
+### Added
+
+- Added host-side workflow activity observation with ordered snapshots, publisher epochs, bounded observer queues and diagnostics, plus workflow_lifecycle, workflow_activity_changed, workflow_stage_completed, and workflow_heartbeat extension hooks typed as `WorkflowLifecycleEvent`, `WorkflowActivityChangedEvent`, `WorkflowStageCompletedEvent`, and `WorkflowHeartbeatEvent`. Initialization-time publications are retained until runner binding. Publisher and observer leases are fenced on reload, including pending hook handlers when an earlier handler is awaiting. Workflow runtime publication is a separate integration ([#2891](https://github.com/bastani-inc/atomic/issues/2891)).
+- Added the built-in Herdr reporter for eligible interactive panes, combining settled agent activity, approval prompts, and observed workflow roots under custom:atomic. Pane ownership and ordered sequences survive in-process reload/replacement; direct CLI delivery is serialized, coalesced, and bounded by a five-second timeout. Supports herdr.enabled opt-out, loaded reporter conflict deferral, and one-time parent session identity reporting. The full activity path is integration-tested against a fake Herdr CLI that records argv, proving the ordered working, blocked, working, idle reports and strictly increasing sequence numbers for a real workflow with a tool-only execution and a human-input prompt. The Herdr documentation gains a compatibility matrix for the tested minimum Herdr 0.8.2 / protocol 20: custom-source authority, equal/older sequence handling, the sequence high-water mark surviving release, release requiring a sequence, idle-after-working surfacing as done, unretained message and session identity for custom sources, and the fail-safe behaviour for missing environment variables, a stopped server, or an older CLI ([#2891](https://github.com/bastani-inc/atomic/issues/2891)).
+- Editable workflow stage chats now discover source-qualified skills from their own session catalog and expand `/skill:` submissions once through stage admission, preserving Enter/Ctrl+F delivery and literal human-input answers. Skill diagnostics remain in the stage chat; blocked, archived, and replayed stages stay read-only.
+- Added a searchable `/agents` catalog with source grouping and agent configuration details.
+- Added per-call `bash.wait` selection for immediate background or foreground-first observation with an optional millisecond budget. Omitted waits keep owner-configured automatic backgrounding, and execution timeouts remain independent. Unsupported background requests fail before launching a command.
+- Added the SDK-only owner-bound task foundation: opaque host/task/wait capabilities, one execution per admitted attempt, observation-only yields, independent cleanup acknowledgement, and snapshot-reconciled subscriptions. Existing CLI, workflow and subagent runners are unchanged; output storage and real-runner integration remain later work ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added trusted command start/input/output doors and an owner-aware bash/PTY execution seam. Commands remain alive after the 10000 ms foreground observation budget and are reaped with their owner; stdin distinguishes empty bytes from EOF and refuses backpressure before admission ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added a narrow trusted-host agent task adapter with per-launch runner factories, owner-scoped observation and cancellation, and workflow generation ownership that survives fallback session replacement. Real subagent producers and completion delivery remain unintegrated ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added owner-bound agent task hosts to runtime-created session contexts, single-subagent observation waits, and terminal completion intents delivered nonvisually through existing model admission with stable retry identity ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added an owner-bound task projection and shared compact task rows for main and attached stage chats, with stable live anchors after tool/turn completion, snapshot reattachment, bounded activity previews and a compact background-task footer. Host adapters opt in by binding their session's task store; producer migration remains separate ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added SDK task transcript references bound by the admitted runner, with task-scoped paging, original message/tool-call identities, and explicit unavailable history. Hidden reasoning is excluded; production subagent runners bind child history for the shared host inspector ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added a shared focused task inspector for owner-store hosts: stable grouped selection, retained transcript rendering, foreground waits, confirmed cancellation, and explicit stdin focus without replacing composer drafts ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Added `reason: "project_trust"` to `UIPromptStartEvent` and `UIPromptEndEvent` for the built-in `/trust` selector in both interactive modes, so status integrations can observe the wait. Isolated mode retains paired notifications until the current engine binds, keeping separate completed dialogs distinct without delaying the trust decision. ([#2873](https://github.com/bastani-inc/atomic/issues/2873))
+- Added supervised native Windows ConPTY shell execution with Job Object containment before resume, confirmed cleanup, and no unsupervised spawn fallback.
+- Added optional direct-executable `shell: { program, args }` and `inheritEnv` controls to the command SDK, including operation replay identity.
+
+### Changed
+
+- Built-in read, edit, write and shell tools now prefer strict JSON-schema sampling by default, falling back on providers without strict support. Atomic's other experimental tool hints retain their existing opt-in gate.
+- `/tasks` now opens as a compact inline picker like `/workflow connect`, with fullscreen detail, transcript, input, and confirmation pages. Returning from detail preserves selection.
+- Foreground and background subagent rows, task lists, and completion cards now display resolved model and reasoning settings, retaining them after completion.
+- `/tasks` in an attached stage chat is now a local inspection command, never a model message, including while an Escape interruption settles. Hosts without a task inspector report that it is unavailable.
+- Task lists and subagent detail views now use grouped counts, semantic status styling, pinned status/metrics/actions, recent tool activity, bounded response and shell-output previews, and narrow-terminal layouts. Finished tasks remain discoverable through `/tasks`; background bash receipts distinguish observation time from execution completion.
+- Default guidance now routes all user questions, including confirmations and approvals, through `ask_user_question` or an equivalent available question tool rather than prose-only prompts. Sessions without a usable question tool continue autonomously using best judgment.
+- Model-choice guidance now consults the eval docs and Artificial Analysis benchmark charts. Automation guidance uses PyAutoGUI for desktop CUA, playwright-cli for browsers, and prefers Herdr across macOS, Linux and Windows with installation guidance and tmux/psmux fallback.
+- Native Windows owner-bound `bash` and `powershell` calls now automatically yield after the owner's command observation budget (normally 10 seconds). Explicit per-call budgets override it; execution timeouts and the 30-second explicit foreground subagent default remain separate. PowerShell uses encoded command transport while retaining original command descriptions. Owned legacy Windows WSL `bash.exe` stdin transport remains refused; Atomic inside WSL stays on POSIX/Bash.
+- On native Windows, Suspend opens a PowerShell subshell and restores the same session on exit instead of freezing the process; background tasks continue running.
+
+### Fixed
+
+- Fixed Herdr registration disappearing during resource reload or in-process session replacement while workflow activity is recovering or unavailable. Reporter handoffs now preserve registration and release it only on quit, without requiring another prompt.
+- Fixed Herdr turning red again after every response for an already-observed workflow block. Interactive messages now acknowledge existing pane attention without resuming workflows; new blocks and open approval prompts still report blocked.
+- Prevented internal-URL shell expansion from turning quoted paths into executable syntax. Expansion now rejects commands containing quotes, substitutions, escapes, heredocs or other non-plain syntax; bare URLs remain safely quoted, and commands without resolved URLs are unchanged.
+- Fixed Herdr reporting idle while standalone subagents or background shell tasks are running. The parent reporter now observes owner-scoped task activity and reattaches on reload, retaining working status until all tasks settle without granting children pane ownership.
+- Open subagent transcripts now refresh from live session events, including streaming text and partial/final tool results. Shell transcript reads coalesce pending state updates instead of requiring the view to be reopened.
+- Discarded stale command detail results and read errors after task selection, focus, or inspector lifetime changes, preventing another task's output from appearing in the current view ([#2908](https://github.com/bastani-inc/atomic/pull/2908)).
+- Connected isolated interactive sessions to the engine's compact background-task indicator below the prompt box and command-opened `/tasks` inspector instead of opening an empty host-local task owner. Added `/tasks` autocomplete and live subagent activity, tool/token counts, and response previews inside task details.
+- Connected top-level POSIX model bash executions to their task owner so long-running shells appear in task inspection after their observation yields. Preserved cleared session environment variables in the supervised shell path; native Windows and child-agent bash retain their existing execution path.
+- Replaced raw JSON task-completion content with readable names, outcomes, errors, and available response excerpts. Background completions now show a visible notification in main and owning workflow-stage chat, using the existing persisted delivery identity rather than relying on a model reply.
+- Connected native shell settlement to completion delivery using retained receipts and snapshot reconciliation. Background shell cards show bounded output and exit status; foreground-only shells do not trigger duplicate notifications or model turns. Initial bash observation now designates the host so yielded commands update background counts.
+- Preserved pending transcript navigation and historical pages across background updates, and honored configured task keys before fallback navigation and stop shortcuts.
+- Restricted `/tasks` to background work and its retained results, and below-prompt counts to active background work. Workflow-stage chat now uses the same footer-only status and completion notifications as main chat. Transcript inspection has a separate bounded viewport with position and paging controls instead of nested chat boxes.
+- Kept active task status below MCP and above workflow background cards, including isolated sessions regardless of widget arrival order. Workflow-stage `/tasks` now appears in slash suggestions; selected skill suggestions use main-chat-style terminal-default backgrounds and accent text. Active counts and `/tasks` remain visible at narrow widths.
+- Pausing main or workflow-stage chat keeps background agents and shells running with the same identities. Closing a stage generation cancels only that owner's remaining work.
+- Remounted active task rows after session transcript replacement and cleared prior-session task rows and footer state before a replacement owner store binds ([#2907](https://github.com/bastani-inc/atomic/pull/2907)).
+- Honored owner command wait budgets and `until-settled` in supervised bash/PTY execution, disclosed retained output gaps, and bounded output pages to 1 MiB. Supervised file-spool writes now share a hard disk cap rather than overshooting between polls ([#2905](https://github.com/bastani-inc/atomic/pull/2905)).
+- Stopped task subscription event delivery when a reconciliation callback disposes observation, including events retained by the active drain ([#2902](https://github.com/bastani-inc/atomic/pull/2902)).
+- Failed `/tasks` inspection now displays a diagnostic and preserves the input for retry instead of leaving an unhandled editor submission rejection.
+- Workflow skill autocomplete no longer reattaches and checkpoints the stage for every completion request. Concurrent lazy discovery requests share one attachment.
+- Prepare resume trust before disposing the outgoing session, preserve it on failed preflight, and allow pending prompt observers up to 1,000 ms to settle without delaying dialog display or answers. Isolated resume uses child-local trust UI and forwards missing-directory overrides without serializing callbacks. ([#2873](https://github.com/bastani-inc/atomic/issues/2873))
+- Startup trust waits now reach existing prompt lifecycle handlers with a live session context, including isolated-engine and borrowed-source dialogs. Only trust-safe extensions load before authorization; approval retains their session and factories, starts newly authorized extensions once, and does not replay earlier waits. ([#2873](https://github.com/bastani-inc/atomic/issues/2873))
+- Intercom now hides internal workflow routing/control connections and refuses messages to non-agent recipients, including model-less `ctx.ui` prompts and `ctx.tool` nodes, without hiding agents busy in tools or awaiting human input. Connected agent aliases remain reachable after pending capability changes or stage completion, even with same-name non-agent nodes.
+- Preserved duplicate-agent routing beside same-name prompt/tool nodes, rejected malformed Intercom recipient purposes without breaking older hosts, and synchronized workflow roster-update completion with broker processing ([#2895](https://github.com/bastani-inc/atomic/pull/2895)).
+- Fixed Herdr parent session identity being dropped after a failed first report. Later activity includes the identity until CLI delivery succeeds, while shutdown still attempts release after failed delivery ([#2891](https://github.com/bastani-inc/atomic/issues/2891)).
+- Fixed child shutdown clearing the parent's Herdr indicator when a resource loader shares the reporter across sessions. Only the bound session can change activity or release the pane, including while acquisition waits for a predecessor. Owning shutdown permits an eligible successor to reuse the already-loaded reporter, with serialized retirement before the new identity reports and stale predecessor events fenced; genuine quit still releases the pane.
+- Fixed retiring reload runners releasing the new Herdr reporter when both share one `SessionManager`. Transaction commit retains the started runner, and stale shutdown, activity, approval, and start events cannot mutate or reclaim its binding. Candidate reporting is staged until preparation succeeds, so a rejected reload preserves the live reporter's approval state, continued work, and final quit cleanup ([#2925](https://github.com/bastani-inc/atomic/pull/2925)).
+- Corrected S1 SDK waits, foregrounding and cancellation to return promised Results, restored watch cursors and opaque subscription leases, applied configured agent wait budgets, and fixed cleanup/disposal races including external owner closure of settled tasks ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Preserved S1 cancellation attention consistently with native snapshots, made subscription overflow/reset observable through iterator completion without a required callback, and safely recorded non-Error runner/setup/cleanup rejections without blocking confirmed cleanup ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Contained arbitrary S1 reconciliation callback exceptions, including unprintable values, as safe `subscription.failure` diagnostics without interrupting native wake delivery or fallback polling ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Preserved exact JavaScript strings in S1 snapshots, titles and report replay, including isolated UTF-16 surrogates and embedded NUL, without changing the SDK's ordinary string types ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Bounded S1 activity replay to the latest 256 accepted report identities per task without retaining their full payload history. Identical retained reports remain duplicates, conflicts remain refused, and evicted IDs are fresh reports; terminal receipts never expire while the task record exists ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Prevented accepted S1 activity IDs such as `runner-outcome` from blocking runner settlement, independent cleanup and owner closure. Internal terminal IDs are allocated atomically without reserving caller IDs or changing report conflict/replay and cancellation rules ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Prevented accepted NaN S1 wait budgets, including owner-configured agent budgets, from panicking native scheduling. Observations remain releasable by yield, settlement, disposal and owner closure without changing other budgets or per-call precedence ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Restored task completion outboxes now retry unacknowledged terminal intents on initialization instead of waiting for another task to settle, retaining completion identity and current admission checks ([#2906](https://github.com/bastani-inc/atomic/pull/2906)).
+- Fixed unrelated settings changes copying inherited `.pi` fields into primary `.atomic` settings and changing their resource provenance. Scoped writes preserve newer primary-file edits, explicit Atomic overrides (including empty arrays), and inherited builtin-resource precedence ([#2299](https://github.com/bastani-inc/atomic/issues/2299)).
+- Automatic and summary retry countdowns now use Atomic's theme-aware `∀` indicator instead of a braille spinner, preserving cancellation and countdown updates.
+- Settled tasks now leave the compact footer immediately while remaining inspectable in `/tasks` and completion cards, so retained failures do not keep the live indicator red.
+- Opening `/tasks` in isolated mode no longer emits an approval prompt or incorrectly changes Herdr to blocked. Genuine approval reporting remains unchanged.
+- Filled theme backgrounds now survive nested and truncation resets, keeping long task-completion titles, previews, and expand hints shaded through the last column.
+- Owner-bound task notifications now order queued same-child Intercom messages before completion through the delivery outbox. Failed delivery keeps the terminal intent retryable without changing the execution outcome, replaying successful earlier messages, or relaunching the task.
+- Fixed `/workflow connect` falsely marking Herdr blocked, including after hiding the graph. Custom UI supports `purpose: "navigation"` without suppressing genuine approval events.
+- Parallel subagent communication now preserves active and queued siblings while only a blocking requester waits for its correlated reply. Foreground observation yielding no longer discards queued work or changes execution concurrency; cancellation and owner cleanup remain explicit.
+- Fixed leaked parallel subagent worktrees and branches when a queued child is cancelled before starting, including session/workflow-stage owner closure after observation yields. Live siblings retain their worktrees until execution finishes.
+- Fixed Anthropic Messages tool requests advertising root object-union parameter schemas without fields by projecting their branch fields into Anthropic-compatible object schemas ([#2190](https://github.com/bastani-inc/atomic/pull/2190) by [@elefthei](https://github.com/elefthei)).
+- Matched main and workflow-stage `/tasks` compact pickers, retaining model, reasoning, session cwd/branch, and MCP context even while the owner streams. Task navigation no longer produces a false main-chat input notice; genuine pending prompts keep their routing and clear the notice when answered or the graph is hidden.
+- Fixed concurrent inline approvals hiding one another when completed or canceled out of order. The surviving prompt or task picker stays visible and regains input after leaving the workflow graph, in both local and isolated interactive modes. Canceled isolated approvals no longer leave a dead loading component behind.
+- Released alternate-folder Git branch watchers, polling and retry timers when their last chat footer closes or changes folders, while preserving concurrent main/stage updates and ignoring stale refreshes after replacement ([#2926](https://github.com/bastani-inc/atomic/pull/2926)).
+- Finished workflow failures now let Herdr return to idle while retaining attention and the failed outcome. Pending decisions, budget approvals, and live execution keep their existing states.
+- Fixed resume requests for ended recoverable workflow blocks falling through to a snapshot-only response. Non-resumable targets and unchanged blocked snapshots no longer report success.
+- Fixed macOS background-command cleanup failing immediately when a terminated process group temporarily contains an unreaped zombie. Cleanup remains bounded and still requires confirmed group disappearance.
+- Updated the locked Hono and js-yaml dependencies to patched releases and refreshed provider SDKs against upstream Pi. Google's consecutive tool-call limit now returns an error stop reason.
+- Extension model registries now expose authenticated streaming calls through their configured custom providers, preserving runtime provider ownership ([#9272](https://github.com/earendil-works/pi/pull/9272)).
+- Tree navigation rejects active compaction or branch summarization before replacing the current operation's UI, leaving the active branch intact ([#9179](https://github.com/earendil-works/pi/pull/9179)).
+- Radius login now prefers the discovered balanced model and falls back to the account's first available model after catalog refresh.
+- Direct steering and follow-up calls now run extension input handlers before queue admission, preserving transformed text/images and RPC input-source attribution while consuming handled inputs.
+- Fixed subagents stopped with `x` in `/tasks` failing to notify the parent chat. Running and queued cancellations now deliver their confirmed terminal receipt once, without requiring a final child response, duplicating completion notices, or overwriting an outcome that already settled.
+- Fixed premature Herdr idle reports between repeated output-cap continuations by keeping the original prompt active until the complete continuation chain settles, including quiet provider waits. No heartbeat or inactivity timer is required.
+- Fixed false Herdr blocked status after an answered prompt when an earlier notification observer is slow, and while browsing the read-only `/agents` catalog. Genuine user decisions still report blocked.
+- Fixed Escape in `/tasks` and subagent transcript navigation cancelling a pending `ask_user_question`. Questionnaires now wait behind navigation and resume with their selection intact; ordinary questionnaire cancellation is unchanged.
+
+## [0.9.19-alpha.1] - 2026-09-06
+
+### Fixed
+
+- Restored offline embedded PostgreSQL discovery in compiled archives and bundled target-selected runtimes for all eight supported archive/npm platforms, preserving scriptless installs and existing v18 clusters. Windows ARM64 continues to require Windows 11 x64 emulation.
+
+## [0.9.18] - 2026-09-05
+
+Cumulative release of the `0.9.18-alpha.1` through `0.9.18-alpha.7` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- Replaced `/fast` with selectable canonical `-fast` model IDs. Removed its selector, `codexFastMode.chat`/`codexFastMode.workflow` settings, `ATOMIC_CODEX_FAST_MODE`, scope inheritance, toggle-state exports, settings-manager methods, and the environment-sourced settings-override layer without a compatibility shim. Select a fast model explicitly; effective settings now merge global then project settings.
+- Fast-routing APIs now live in `core/fast-model-routing.ts` and `core/fast-model-routing-transport.ts`, with package-root exports retained for the replacement APIs. `usesChatGptCodexTransport` and `usesFirstPartyCodexRouting` remain; `withCodexFastRouteHeaders` derives identity from route metadata rather than an enabled flag.
+- Cloudflare AI Gateway binding transport requires `binding.fetch()` and no longer falls back to `gateway(id).run(...)`.
+- `WorkflowPendingStageDelivery` now requires `fail(reason: Error): void` so delivery owners can settle exhausted recovery instead of leaving stages parked forever.
+- Removed the experimental remote-session lease API, transcript projection helpers, and harness factory. `@bastani/atomic/client` now re-exports the service-addressed `@earendil-works/pi-client` API.
+
+### Added
+
+- Added explicit fast model variants to `/model`, `--list-models`, workflow catalogs, scoped lists, session restore, fallback candidates, usage, and attempt records. Thinking suffixes remain supported. OpenAI and Codex variants send the base upstream ID with priority tier; Copilot exposes only account-advertised fast IDs and sends them without an OpenAI tier.
+- Added fast-specific `modelOverrides`, derivation APIs, `ModelRuntime.getFastModelVariantDiagnostics()`, and `getWarning()`. Existing provider, custom, or extension-owned IDs win collisions and produce actionable startup/catalog warnings. Route metadata, not a name suffix, grants fast behavior.
+- Added GPT-6-Astra across OpenAI, Codex, Bedrock, OpenRouter, and Vercel, including derived first-party fast variants, provider-specific pricing, long-context tiers, and provisional account-gated Copilot support. Added Gemini 3.8 Flash, Claude Fable 5.1, Copilot Claude Fable 5/5.1, and Baseten GLM-5.3-Fast with provider-owned metadata and availability.
+- Embedded PostgreSQL now supports offline durable storage on Linux musl x64/ARM64 and Windows ARM64. Windows ARM64 uses PostgreSQL x64 through Windows 11 emulation; installs and standalone archives carry only the matching runtime.
+- Added `supportsMidConvoEffort` and `compat.vllmPriority` custom-model settings, and transcript notices for dropped Anthropic thinking when cache-miss notices are enabled.
+- Added a clickable fullscreen `Jump to latest message` overlay with the configured shortcut. Holding Alt makes fullscreen mouse-wheel scrolling move five times as far ([upstream #9166](https://github.com/earendil-works/pi/pull/9166)).
+- Documented Zed terminal keybindings for Kitty-protocol modified keys ([#8828](https://github.com/earendil-works/pi/pull/8828)).
+
+### Changed
+
+- Updated Pi runtime dependencies to 0.85.1, preserving Atomic startup, client API, and footer watchers. Fullscreen search uses the cached index and visible-match highlighting introduced in Pi 0.85.0.
+- Startup paints the themed identity and focused editor before isolated-engine readiness. First submissions wait for optional resources, Escape cancels a waiting submission, and `/reload` retries extension failures without publishing failed candidates' host-managed state.
+- Compiled/bundled builds reuse native-imported builtin extension factories across reloads while editable extensions and workflows retain content-hash invalidation. Standalone builds use syntax-minified shared sidecars and bytecode launchers, including Windows.
+- Interactive model, thinking, cycling, and scoped-list selections save as startup defaults immediately. Selectors keep active choices marked while browsing; scoped lists use consistent toggles and strike through unavailable models. Removed Ctrl+S save-default UI.
+- The working indicator reads `Working`, preserving Atomic's animated status row. The centered jump overlay no longer consumes a transcript row, and workflow stage chat uses matching copy and shortcuts.
+- `ModelRuntime` enforces first-party Codex routing for standalone stream/complete calls too. Fast derivation excludes unsupported adapters and extension-owned transports, Copilot restore requires account entitlement and a base catalog model, and all provider catalog accessors agree on derived variants. Labels show the canonical model ID without a redundant fast badge.
+- Claude on Anthropic and Bedrock accepts PDF input through the bundled AI library, with visible placeholders elsewhere. Interactive sessions do not yet produce document blocks; Bedrock requires citations for full visual understanding.
+- Updated hashline edit guidance with worked examples, rejected-shape warnings, and a specification of native block resolution. Model-selection references record the August 26 DeepSWE snapshot, corrected prices and Pareto choices, and Fable 5.1's unmeasured status. Compaction docs explain why `preserve_recent` preserves text and tool exchanges but resets signed reasoning.
+- Capable Responses models use `prompt_cache_options.ttl: "30m"` for long retention; older models retain the 24-hour legacy control.
+
+### Fixed
+
+- Fixed Windows x64 and ARM64 archives crashing before startup in `0.9.18-alpha.1` ([#2781](https://github.com/bastani-inc/atomic/pull/2781)).
+- Restored startup resource listings, source-path expansion, slash-prefixed prompt labels, isolated-child extension inventory, deterministic collision labels, overlap warnings, and consistent hidden-resource handling across platforms.
+- Fixed in-memory forks during running tools, lost compaction boundaries after forks, session import filename collisions, RPC aborts not cancelling manual compaction, and concurrent `/share` exports overwriting temporary files.
+- Builtin tools resolve relative paths against an extension's `ctx.cwd`, including matching search hashline tags. Write confirmations no longer mislabel UTF-16 counts as bytes or discard user prose merely because it begins with `Successfully wrote to`.
+- Fixed Claude Fable thinking-level routing on Copilot, Fireworks GLM endpoint routing, Fable 5.1 prefix/model-switch recovery, exact reasoning-byte restoration, unsupported sampling fields and forced tool choices, fallback replay and serving-model billing, and persisted thinking-drop notices on resume. Custom Responses gateways can disable `max_output_tokens`.
+- Fixed managed fd/rg downloads behind GitHub API quotas, selected static musl archives on Linux x64/ARM64, and pinned darwin/x64 fd to 10.3.0. Fixed proxied plain-HTTP requests hanging after tool calls and signal-killed subprocesses appearing successful.
+- Fixed JPEG EXIF orientation detection, skills disappearing when bash exists without read, and model-refresh errors missing their status spacing. Jump-overlay clicks preserve other mouse reports in the same input chunk.
+- Raised branch-summary output to 4096 tokens, clamped to model limits, to avoid reasoning exhausting the previous cap ([#8845](https://github.com/earendil-works/pi/issues/8845)).
+- Resumed workflows cannot report completion or start replacement work while skipping their exact unfinished durable tool. Completed work remains cached and cancellation retains precedence.
+
+### Removed
+
+- Removed `/atomic`. Use `/workflow list`, `/changelog`, and `/hotkeys` instead.
+- Removed Ctrl+X copy-message/selection to avoid workflow-navigation conflicts. `/copy` and automatic mouse-selection copying remain.
+
+## [0.9.18-alpha.7] - 2026-09-05
+
+### Added
+
+- Fullscreen mouse-wheel scrolling moves five times as far while Alt is held, through the Pi TUI 0.85.1 update ([upstream #9166](https://github.com/earendil-works/pi/pull/9166)).
+
+### Changed
+
+- Updated Pi runtime dependencies to 0.85.1, preserving Atomic's CLI startup, published client API, and footer watcher behavior.
+
+## [0.9.18-alpha.6] - 2026-09-04
+
+### Breaking Changes
+
+- Replaced the `/fast` toggle with explicit selectable fast model identity. `/fast`, its selector UI, the `codexFastMode.chat`/`codexFastMode.workflow` settings, the `ATOMIC_CODEX_FAST_MODE` environment variable, chat-versus-workflow scope inheritance, and every public export tied to that toggle state are removed with no compatibility shim or migration. Select fast inference by choosing a fast model.
+- Removed the `ENV_CODEX_FAST_MODE`, `CODEX_FAST_MODE_SERVICE_TIER`, `CodexFastModeResolvedSettings`, `CodexFastModeScope`, `formatCodexFastModeModelLabel`, `getCodexFastModeScope`, `hasSupportedCodexFastModeModel`, `isCodexFastModeCandidateModelId`, `isCodexFastModeEnabledForScope`, `isCodexFastModeSupportedModel`, `isCodexFastModeSupportedProvider`, `shouldApplyCodexFastMode`, `shouldApplyCodexFastModeForScope`, `withCodexFastModeHeaders`, `CODEX_FAST_MODE_ORIGINATOR`, and `CODEX_FAST_MODE_ROUTING_HEADER` package exports, and the `getCodexFastModeSettings`/`setCodexFastModeSettings` settings-manager methods. `usesChatGptCodexTransport` and `usesFirstPartyCodexRouting` remain, now exported from `core/fast-model-routing.ts` alongside `getModelFastRoute`, `resolveUpstreamModelId`, `withFastRouteStreamOptions`, and `withCodexFastRouteHeaders`; `CODEX_FAST_ROUTE_ORIGINATOR` and `CODEX_FAST_ROUTE_HEADER` come from `core/fast-model-routing-transport.ts`. All of them remain importable from the package root.
+- Removed the environment-sourced runtime settings-override layer, which existed only to inherit the fast-mode toggle into child sessions. Effective settings are now the global-then-project merge.
+- Cloudflare AI Gateway binding transport no longer falls back to `gateway(id).run(...)`. `createGatewayBindingFetch` requires `binding.fetch()`.
+- `WorkflowPendingStageDelivery`, exported from the package root, now requires a `fail(reason: Error): void` member. A delivery owner that has run out of recovery calls it to settle the stage's pending delivery terminally; `ready()` has no timeout, so a delivery nobody can settle leaves its stage parked forever. Implementers of the interface must add `fail(reason)`.
+- Removed the experimental remote-session lease API, transcript projection helpers, and harness factory after Pi 0.85 replaced their underlying contracts. `@bastani/atomic/client` now re-exports the service-addressed `@earendil-works/pi-client` API.
+
+### Added
+
+- Embedded PostgreSQL now provisions durable DBOS storage offline at runtime on Linux musl x64/ARM64 and Windows ARM64. npm installs receive only the matching runtime through the platform-specific native package, standalone archives carry only their target runtime, and Windows ARM64 deliberately runs PostgreSQL x64 through Windows 11 x64 emulation rather than claiming native ARM64 support.
+- Added `supportsMidConvoEffort` to custom Anthropic Messages model compatibility settings.
+- Added transcript notices for Anthropic thinking blocks dropped during provider recovery when cache miss notices are enabled.
+- `models.json` now accepts `compat.vllmPriority` on `openai-completions` models. Atomic sends it as the top-level `priority` request field, which vLLM uses to order queued requests when it runs with `--scheduling-policy priority`; lower values are handled earlier and the server default is `0`. Set it on a background or batch model so its long prefills queue behind interactive sessions ([#9004](https://github.com/earendil-works/pi/pull/9004)).
+- Eligible providers now publish a second selectable model whose canonical ID is the base model ID plus `-fast`, for example `openai-codex/gpt-5.6-sol-fast`. It appears in `/model`, `atomic --list-models`, workflow model catalogs, and scoped-model lists next to its normal sibling, is persisted and restored by that exact ID, and accepts a thinking suffix (`openai-codex/gpt-5.6-sol-fast:medium`). Normal and fast IDs stay distinct fallback candidates, usage rows, and model-attempt records.
+- First-party OpenAI and OpenAI Codex models route fast requests by sending the **base** upstream model ID plus the fixed `service_tier: priority`, preserving the existing first-party Codex `originator: codex_cli_rs` and `x-codex-routing-hint` HTTP/SSE and WebSocket contract. GitHub Copilot exposes only the fast sibling IDs its OAuth account catalog advertises when the corresponding base catalog model exists, and sends those real suffixed IDs with no OpenAI service-tier field. Renamed providers, proxies, Azure OpenAI, OpenRouter, and generic OpenAI-compatible providers publish no synthetic fast variants.
+- A `models.json` `modelOverrides` entry keyed on a derived `-fast` model ID now applies to that derived entry, after derivation. Overriding the base model still flows through by inheritance; a fast-specific override wins over the inherited value, and the entry's routing metadata survives the override.
+- New `core/fast-model-variants.ts` exports (`deriveFastModelVariants`, `withFastModelVariants`, `fastModelId`, `usesOpenAIFastServiceTier`, `isNativeFastRouteApi`, `copilotAdvertisedFastModelIds`, `FAST_MODEL_ID_SUFFIX`, `FAST_MODEL_SERVICE_TIER`, and the `FastModelVariantDiagnostic`/`FastModelVariantDerivation`/`FastModelVariantsOptions` types), plus `ModelRuntime.getFastModelVariantDiagnostics()` and `ModelRuntime.getWarning()`.
+- A provider, `models.json` custom model, or extension that already owns an exact `-fast` model ID wins: Atomic keeps that model exactly as declared, suppresses the derived duplicate, and reports an actionable warning in the interactive startup notices and from `--list-models`. The interactive notice renders on every launch, and is re-read after deferred extension loading so a collision an extension provider introduces is reported too. Fast behavior comes only from explicit route metadata, never from the `-fast` suffix.
+- Added a clickable "Jump to latest message" label with the `tui.altScreen.bottom` shortcut to the fullscreen transcript while it is scrolled up ([#9080](https://github.com/earendil-works/pi/pull/9080) by [@rwachtler](https://github.com/rwachtler)).
+- Gemini 3.8 Flash is now selectable in Atomic on Google (`google/gemini-3.8-flash`), Google Vertex, GitHub Copilot, opencode zen, OpenRouter (`openrouter/google/gemini-3.8-flash` and its `:batch` variant), and the Vercel AI Gateway. Provider metadata follows the upstream catalogs: Google, Google Vertex, opencode zen, and OpenRouter currently advertise a 1,048,576-token context window and 65,536 maximum output tokens; models.dev advertises 1,000,000 and 64,000 for GitHub Copilot; the Vercel AI Gateway advertises 1,000,000 and 65,536. Google, Google Vertex, opencode zen, OpenRouter, and GitHub Copilot offer low, medium, and high; the Vercel AI Gateway publishes no per-model thinking levels, so its entry also offers off and minimal. Run `--list-models` for the current catalog and the models your account can access ([#9076](https://github.com/earendil-works/pi/issues/9076)).
+- Claude Fable 5 and Claude Fable 5.1 are now present in the generated GitHub Copilot catalog with models.dev limits, pricing, and reasoning metadata. Copilot account availability remains gated by the authenticated model picker.
+- Baseten's models.dev-backed catalog now includes `zai-org/GLM-5.3-Fast` with the limits, pricing, inputs, and reasoning levels models.dev advertises.
+- GPT-6-Astra is now selectable through OpenAI, OpenAI Codex, Amazon Bedrock, OpenRouter, and the Vercel AI Gateway. Atomic derives distinct `openai/gpt-6-astra-fast` and `openai-codex/gpt-6-astra-fast` identities through the existing fast-model catalog overlay. The Codex fast identity sends upstream model `gpt-6-astra` with `service_tier: priority` while preserving the `codex_cli_rs` originator, the `model=gpt-6-astra;tier=priority` routing hint, session restore identity, usage attribution, and 2× request-time price accounting. Bedrock publishes the direct, global, and US IDs unchanged and sends `low` through `max` reasoning effort. The current dynamic OpenRouter catalog contributes `openai/gpt-6-astra` and `openai/gpt-6-astra-pro`; Vercel contributes `openai/gpt-6-astra` and its own route-less `openai/gpt-6-astra-fast`. Astra accepts text and image input, supports 128,000 output tokens, and retains each provider's long-context pricing above 272,000 aggregate input tokens.
+- Added provisional GitHub Copilot Astra support. `github-copilot/gpt-6-astra-fast` is derived only when the OAuth account catalog advertises that exact ID, and sends the suffixed ID without an OpenAI priority tier. The fallback base entry uses known Astra capabilities and zero costs for unknown Copilot pricing; it does not establish service availability.
+
+### Changed
+
+- Updated all upstream Pi runtime dependencies to 0.85.0.
+- Reduced fullscreen transcript search latency on large transcripts through pi-tui 0.85.0's cached search index and visible-match highlighting.
+- Changed the default interactive working copy from `Working...` to `Working` (and `Working (esc Interrupt)` while resetting extension UI) while preserving Atomic's animated `∀` luminance ramp in its standalone status row. Custom editors may opt into placing the indicator in their top border.
+- Replaced the fullscreen transcript's dock-reserved `Jump to bottom` row with the centered `Jump to latest message` overlay, so scrolling up no longer shrinks the transcript viewport by one row.
+- Aligned the shared workflow-stage-chat jump indicator with that overlay: `↓ Jump to latest message · <tui.altScreen.bottom>`, matching upstream pi's shortcut display.
+- `ModelRuntime` now attaches the first-party ChatGPT Codex routing identity itself, so a standalone `stream()`/`complete()`/`streamSimple()`/`completeSimple()` request on a route-bearing fast Codex model sends `originator: codex_cli_rs` and `x-codex-routing-hint: model=<base-upstream-model>;tier=priority` exactly as an agent-session turn does, and installs the WebSocket handshake identity that only CLI entrypoints used to install. It is applied after auth headers are merged, because the routing wrapper mutates a header object that header merging would otherwise copy. A normal model still sends `originator: pi` and no hint even when a caller requests the priority tier, and an extension that supplies its own stream function for a model's API keeps full ownership of its transport.
+- `ModelRuntime.canRestoreUnknownModel()` takes an optional second `modelId` argument, and session restore now passes it. A GitHub Copilot `-fast` model ID is refused when the stored credential does not advertise it or when an advertised fast sibling has no corresponding base model in the catalog, so the existing `Could not restore model …` warning fires rather than silently constructing a route-less identity. It consults the same per-account lists the Copilot provider's own model filter uses, so a Copilot model the account advertises as ordinary still restores even when its name ends in `-fast`. Other providers keep the provider-scoped answer.
+- `withCodexFastRouteHeaders` no longer takes an `enabled` flag, and the runtime transport wrapper no longer derives identity from a caller flag or the final payload tier. Both paths derive the first-party Codex identity from the model's own `fastRoute` — added only when that route declares the priority tier and the model uses first-party Codex routing — and the routing hint names the route's upstream model ID instead of the canonical `-fast` ID. A caller or payload hook therefore cannot grant fast identity to a normal model.
+- No fast variant is derived for a model whose API is served by a registered extension's own stream function, including a natively registered provider. Atomic cannot enforce the route through a transport it does not serialize, so publishing a `-fast` choice the extension may not honor is the same hazard as publishing one for an adapter that cannot carry the tier. Such a provider keeps its normal models and its transport untouched.
+- Fast variants are derived only for models on an adapter that can actually carry `service_tier` (`openai-responses` and `openai-codex-responses`). An `openai`/`openai-codex` model on `openai-completions` no longer offers a `-fast` choice that would have silently sent an ordinary request.
+- `ModelRuntime.getProvider()` now returns the same published provider as `getProviders()`, so every catalog accessor agrees about derived `-fast` models. It is the registered provider behind a `{ ...provider, getModels }` overlay, so `auth`, `login`, `stream`, and `streamSimple` remain the same function references; use `getRegisteredNativeProvider()` when you need the exact registered object.
+- The chat footer, startup banner, workflow stage labels, and subagent result labels no longer append a separate `fast` marker. The selected model ID carries the `-fast` suffix itself, so a subagent renders as `codebase-analyzer (openai-codex/gpt-5.6-sol-fast · thinking medium)`.
+- The `edit` tool's model-facing hashline guidance now includes compact worked examples and anti-patterns for commonly rejected patch shapes, and correctly identifies native Rust tree-sitter block resolution as primary with the brace/indent heuristic as its fallback. The hashline reference documentation is now a specification covering inputs, verified tolerated shapes, outputs, worked examples, limits, literal error messages, and warnings.
+- OpenAI Responses models that advertise explicit prompt-cache support, including GPT-5.6 and GPT-6 Astra, now use `prompt_cache_options.ttl: "30m"` for long cache retention. Earlier Responses models retain `prompt_cache_retention: "24h"`; no-cache and short-cache requests continue to omit unsupported fields.
+
+- Interactive model and thinking selections, including cycling shortcuts, now automatically become startup defaults. Scoped-model cycle-list changes also save immediately. Removed the Ctrl+S save-default shortcuts and UI.
+
+### Fixed
+
+- Fixed configurable save keybindings in the model and thinking selectors ([#8797](https://github.com/earendil-works/pi/issues/8797)).
+- Fixed RPC abort requests reporting success without cancelling an in-progress manual compaction ([#8920](https://github.com/earendil-works/pi/issues/8920)).
+- Fixed forked sessions losing a compaction boundary that referenced a removed label ([#8989](https://github.com/earendil-works/pi/issues/8989)).
+- Fixed session imports overwriting an existing stored session with the same filename ([#8985](https://github.com/earendil-works/pi/issues/8985)).
+- Fixed fd and rg auto-downloads failing behind exhausted shared GitHub API quotas by resolving release versions from GitHub's web redirect ([#8708](https://github.com/earendil-works/pi/issues/8708)).
+- Fixed JPEG orientation detection stopping at a non-EXIF APP1 segment before the EXIF segment ([#8616](https://github.com/earendil-works/pi/issues/8616)).
+- Fixed model-invocable skills disappearing when the bash tool is available but the read tool is not ([#8552](https://github.com/earendil-works/pi/issues/8552)).
+- Fixed concurrent `/share` commands overwriting one another's temporary session export ([#8613](https://github.com/earendil-works/pi/issues/8613)).
+- Fixed resumed sessions omitting persisted notices for Anthropic thinking blocks dropped during provider recovery.
+- Fixed proxied plain-HTTP provider requests hanging after a tool call by tunneling them with CONNECT ([#8134](https://github.com/earendil-works/pi/issues/8134)).
+- Fixed GitHub Copilot Claude Fable models to run through the Anthropic Messages adapter, so a selected thinking level reaches the provider instead of being dropped ([#8961](https://github.com/earendil-works/pi/issues/8961)).
+- Fixed every Fireworks GLM model to use the OpenAI-compatible completions endpoint. Previously only the `glm-5p2` family did, so newer entries such as `glm-5p3` were served over the Anthropic-compatible endpoint ([#8978](https://github.com/earendil-works/pi/issues/8978)).
+- Fixed the `write` tool reporting UTF-16 code-unit counts as byte counts by removing the misleading count. Every write confirmation now reads `Successfully wrote to <path>` ([#8979](https://github.com/earendil-works/pi/issues/8979)).
+- Fixed the `write` tool mistaking user-authored lines beginning with `Successfully wrote to` for copied tool confirmation text and silently discarding them. A copied confirmation is now recognized only when it names the complete path the write was asked for, its resolved or cwd-relative form, or the copied snapshot's own path, so prose that merely shares a prefix or a basename is written through unchanged.
+- Restricted synthetic fast aliases and first-party Codex routing identity to the explicit OpenAI/OpenAI Codex model route, suppressed aliases over native extension transports, and prevented Copilot from restoring an advertised fast ID without its base catalog model.
+- Fixed signal-killed child processes reporting a null exit code that callers could mistake for success; Unix signals now use the shell convention `128 + signal`, with unknown signal names falling back to the non-zero status 128 ([#8994](https://github.com/earendil-works/pi/pull/8994)).
+- Fixed Linux managed-tool downloads to use statically linked musl archives for fd and ripgrep on both x64 and ARM64 ([#9070](https://github.com/earendil-works/pi/pull/9070) by [@charlesisworkinghard](https://github.com/charlesisworkinghard)).
+- Fixed a jump-to-latest click discarding other mouse reports delivered in the same terminal input chunk.
+- Fixed branch summaries failing when reasoning consumes a 2048-token output cap by raising the cap to 4096 tokens, clamped to the model's `maxTokens` ([#8845](https://github.com/earendil-works/pi/issues/8845)).
+- Pinned managed fd downloads on darwin/x64 to 10.3.0, matching upstream pi's known-good archive for that host ([#8708](https://github.com/earendil-works/pi/issues/8708)).
+- Fixed model catalog refresh errors in the `/model` selector rendering without the blank line used by the corresponding success status.
+
+- Resumed workflows can no longer report completion after changed control flow omits their unfinished durable tool. Normal returns and explicit completed exits require exact frontier consumption. New model/task and child-workflow execution, including stage/task worktree setup, is rejected while that frontier is pending; completed work stays cached and cancellation controls retain precedence.
+
+### Removed
+
+- Removed the Ctrl+X copy-message/selection action to avoid confusion with workflow navigation. `/copy` and automatic mouse-selection copying remain available.
+
 ## [0.9.18-alpha.5] - 2026-09-01
 
 ### Added

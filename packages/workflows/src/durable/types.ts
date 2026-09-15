@@ -76,6 +76,8 @@ export interface DurableWorkflowHandle {
 	readonly ownerExecutorId?: string;
 	/** Durable pre-start stage messages owned by this workflow run. */
 	readonly pendingStageMessages?: readonly PendingStageMessage[];
+	/** Possible stage targets from the D1 static scan, frozen at root-run admission (D10). */
+	readonly possibleStages?: readonly string[];
 }
 
 export type DurableWorkflowStatus = "running" | "paused" | "completed" | "failed" | "cancelled" | "blocked";
@@ -130,6 +132,8 @@ export interface DurableToolCheckpoint {
 	 * never used as a replay cache hit, so the call runs again on resume.
 	 */
 	readonly throwingFailureError?: string;
+	/** Inspection-only cancellation, never a replayable tool result. */
+	readonly cancelled?: true;
 	readonly completedAt: number;
 	/** Additive graph topology; omitted by pre-#1991 checkpoints. */
 	readonly topology?: DurableToolTopology;
@@ -250,7 +254,7 @@ export interface DurableStageCheckpoint {
 	readonly result?: string;
 	/** Completed stage/task model metadata used to hydrate replayed snapshots. */
 	readonly model?: string;
-	readonly fastMode?: boolean;
+	readonly thinkingLevel?: string;
 	readonly attemptedModels?: readonly string[];
 	readonly modelAttempts?: readonly WorkflowModelAttempt[];
 	/** Schema-backed task value; independent of assistant text. */
@@ -309,6 +313,8 @@ export interface DurableWorkflowMetadata {
 	readonly updatedAt: number;
 	/** Optional additive field; legacy metadata hydrates this as an empty collection. */
 	readonly pendingStageMessages?: readonly PendingStageMessage[];
+	/** Possible stage targets from the D1 static scan, frozen at root-run admission (D10). */
+	readonly possibleStages?: readonly string[];
 }
 
 /** Resume catalog entry loaded directly from DBOS metadata. */

@@ -1,8 +1,9 @@
-import { getDurableBackend } from "../durable/factory.js";
+import { type DurabilityWarningSink, getDurableBackend } from "../durable/factory.js";
 import { readWorkflowHeartbeatAnchor, recordWorkflowHeartbeatAnchor } from "../durable/workflow-heartbeat-anchor.js";
 import { cancellationRegistry } from "../runs/background/cancellation-registry.js";
 import type { StageAdapters } from "../runs/foreground/stage-runner.js";
 import type { SessionManager } from "../shared/persistence-restore.js";
+import { resolveBuiltinDefinitionSource } from "../shared/possible-stages.js";
 import { stageUiBroker } from "../shared/stage-ui-broker.js";
 import { store } from "../shared/store.js";
 import { readGraphStoreSnapshot } from "../shared/store-observation.js";
@@ -54,6 +55,19 @@ import { makeMcpPort, makePersistencePort } from "./workflow-ports.js";
 import { createWorkflowReloadCoordinator } from "./workflow-reload-coordinator.js";
 import { type WorkflowReloadReport, workflowReloadDiagnostics } from "./workflow-reload-report.js";
 
+interface DurabilityWarningContext extends PiModelContext {
+	readonly hasUI?: boolean;
+	readonly ui?: {
+		readonly notify?: (message: string, type?: "info" | "warning" | "error") => void;
+	};
+}
+
+function durabilityWarningSinkFromContext(ctx?: DurabilityWarningContext): DurabilityWarningSink | undefined {
+	if (ctx?.hasUI === false || typeof ctx?.ui?.notify !== "function") return undefined;
+	const notify = ctx.ui.notify.bind(ctx.ui);
+	return (message) => notify(message, "warning");
+}
+
 /**
  * Best-effort durable cadence-anchor store for workflow heartbeats.
  *
@@ -100,7 +114,7 @@ export interface WorkflowExtensionRuntimeState {
 	workflowHeartbeatSchedulerState: ReturnType<typeof createWorkflowHeartbeatSchedulerState>;
 	/** Seed lifecycle notification state before completed historical snapshots are inserted. */
 	beforeRestoreCompleted(snapshots: readonly RunSnapshot[]): void;
-	runtimeForContext(ctx?: PiModelContext): ExtensionRuntime;
+	runtimeForContext(ctx?: DurabilityWarningContext): ExtensionRuntime;
 	resetWorkflowDiscoveryForSession(): void;
 	ensureWorkflowConfigLoaded(): Promise<void>;
 	ensureWorkflowResourcesLoaded(): Promise<void>;
@@ -264,6 +278,15 @@ export function createWorkflowExtensionRuntimeState(
 
 	const hostStageSessionDir: { current: string | undefined } = { current: undefined };
 	const resolveDefaultStageSessionDir = (): string | undefined => hostStageSessionDir.current;
+	const discoveryRef: { current: DiscoveryResult | null } = { current: null };
+
+	/**
+	 * D1/D10: resolve a workflow definition's source path (discovery filePath,
+	 * else the builtin source probe) for the possible-stage scan at launch.
+	 */
+	const resolvePossibleStageEntry = (normalizedName: string): string | undefined =>
+		discoveryRef.current?.sources.find((source) => source.id === normalizedName)?.filePath ??
+		resolveBuiltinDefinitionSource(normalizedName);
 	const startupDiscovery = discoverStartupWorkflowsSync();
 	const runtimeRef: { current: ExtensionRuntime } = {
 		current: createExtensionRuntime({
@@ -274,11 +297,11 @@ export function createWorkflowExtensionRuntimeState(
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
+			resolvePossibleStageEntry,
 			resolveDefaultStageSessionDir,
 			beforeRestoreCompleted,
 		}),
 	};
-	const discoveryRef: { current: DiscoveryResult | null } = { current: null };
 	const configLoadRef: { current: ConfigLoadResult | null } = { current: null };
 	const runtimeProxy: ExtensionRuntime = {
 		get registry() {
@@ -323,9 +346,10 @@ export function createWorkflowExtensionRuntimeState(
 		},
 	};
 
-	function runtimeForContext(ctx?: PiModelContext): ExtensionRuntime {
+	function runtimeForContext(ctx?: DurabilityWarningContext): ExtensionRuntime {
 		const models = workflowModelCatalogFromContext(ctx);
-		if (models === undefined) return runtimeProxy;
+		const durabilityWarningSink = durabilityWarningSinkFromContext(ctx);
+		if (models === undefined && durabilityWarningSink === undefined) return runtimeProxy;
 		return createExtensionRuntime({
 			registry: runtimeRef.current.registry,
 			cwd: resolveCwd(),
@@ -334,7 +358,9 @@ export function createWorkflowExtensionRuntimeState(
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
-			models,
+			resolvePossibleStageEntry,
+			...(models === undefined ? {} : { models }),
+			...(durabilityWarningSink === undefined ? {} : { durabilityWarningSink }),
 			resolveDefaultStageSessionDir,
 			beforeRestoreCompleted,
 		});
@@ -375,6 +401,7 @@ export function createWorkflowExtensionRuntimeState(
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
+			resolvePossibleStageEntry,
 			resolveDefaultStageSessionDir,
 			beforeRestoreCompleted,
 		});

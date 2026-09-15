@@ -1,10 +1,29 @@
+---
+title: "Built-in tools"
+description: "The tools Atomic gives the model by default."
+---
+
 # Built-in tools
 
-Atomic enables these coding tools in normal sessions by default: `read`, `write`, `edit`, `bash`, `find`, and `search`.
+Atomic enables these coding tools in normal sessions by default: `read`, `write`, `edit`, `bash`, `kill`, `find`, and `search`.
+
+## `code_search`
+
+The bundled web-access extension provides `code_search` for questions about code, architecture, and APIs in a public GitHub repository. It uses DeepWiki MCP at `https://mcp.deepwiki.com/mcp` without an API key or local MCP configuration.
+
+```typescript
+code_search({ repoName: "facebook/react", query: "How does useEffect cleanup work?" })
+```
+
+Both `repoName` and `query` are required. Supply one repository in `owner/repo` format, not a GitHub URL or list, and a nonempty question. Existing query-only calls must add `repoName`. Questions are sent verbatim to DeepWiki's `ask_question` tool.
+
+Optional `maxTokens` defaults to 5000 and accepts integers from 1000 to 50000. It is a best-effort output bound of roughly four characters per token, plus a truncation notice, not a limit on DeepWiki's generation. Requests have a 60-second deadline and honor cancellation.
+
+Answers depend on DeepWiki's repository indexing and availability. Check the repository name when a question fails. Errors and empty responses do not fall back to Exa; use `web_search` for broader discovery or unavailable repositories. `web_search` retains its existing Exa and other provider support.
 
 ## Hashline editing anchors
 
-`read`, `search`, `write`, and successful `edit` results for local text files emit an editable hashline header:
+`read`, `search`, `write`, and successful `edit` results for local text files emit an editable, session-scoped hashline header:
 
 ```text
 [src/example.ts#A1B2]
@@ -12,7 +31,7 @@ Atomic enables these coding tools in normal sessions by default: `read`, `write`
 2:console.log(value);
 ```
 
-The four-character tag is a snapshot of the file content seen by the model. The `edit` tool accepts hashline scripts anchored to that tag:
+Use that header and the original line numbers to edit the existing file:
 
 ```text
 [src/example.ts#A1B2]
@@ -22,11 +41,19 @@ insert tail:
 +// done
 ```
 
-Supported hashline operations include `replace N..M:`, `replace block N:`, `delete N..M`, `delete block N`, `insert before N:`, `insert after N:`, `insert after block N:`, `insert head:`, and `insert tail:`. Safe lenient variants such as `replace N`, `replace N-M:`, `replace N M:`, `replace N…M:`, bare body rows, and `*** Begin Patch` envelopes are accepted. Bare body rows are auto-prefixed and reported as warnings. `*** Abort` stops parsing the remaining input, while apply-patch sentinels, `@@` hunk headers, bare numeric hunk headers, `delete` bodies, empty `replace`/`insert` bodies, and `-` diff rows are rejected with guidance instead of silently deleting content. Line numbers refer to the original tagged snapshot and do not shift within a call. Parallel `edit` calls that share a `[path#TAG]` are applied as one snapshot-anchored batch (the same merge as multiple hunks under one header), so a later sibling does not fail just because the first write minted a new tag. A follow-up `edit` that arrives after that batch has already committed still uses snapshot recovery for provably non-overlapping drift.
+Block operations resolve through Atomic's native Rust tree-sitter primitive, with the brace/indent heuristic only as a fallback when the native binding is unavailable. See the [`edit` hashline specification](/tools/edit) for every operation, verified tolerated input shape, output and recovery behavior, limits, worked examples, literal error messages, and warnings.
 
-Before writing, Atomic verifies the current file against the tagged snapshot. If the file drifted, `edit` first attempts a snapshot-based recovery for provably non-overlapping external changes and appends a warning when it preserves those changes; unknown tags, overlapping stale edits, and unrecoverable drift fail clearly with the current file hash (and anchor context for drifted files) and leave the file unchanged. Byte-identical no-op edits return a no-op warning without writing, and repeated identical no-ops escalate to an error to stop looped retries. Hashline snapshots are scoped to the active tool/session store, so tags emitted in another session or stale context do not authorize edits. One `edit` input may contain multiple `[PATH#TAG]` sections; Atomic preflights every section before writing, but this is preflight atomicity rather than transactional rollback, so a mid-batch filesystem write failure can leave earlier sections already written. Each successful `write` or `edit` returns a fresh tag for follow-up edits; hashline edit success output is compact and includes the refreshed header plus block-resolution/change metadata while the full diff remains in tool details. Plain `write` success output is likewise compact (`[path#TAG]` plus a byte-count summary), not a full reprint of the file. `write` strips copied hashline headers and `LINE:`/`*LINE:` display prefixes only when the pasted content matches a known current-store snapshot and notes when stripping occurred; complete copied output preserves whether that snapshot had a terminal newline. Literal or unknown hashline-looking content is preserved instead of being stripped.
+If a file or its parent directory becomes inaccessible after `edit` prepares a patch, the edit is refused with `FILE_MUTATION_CONFLICT:target_unreadable` and the filesystem error code, such as `EACCES`. No changes are written. Restore access, then read the file again before retrying.
 
-Hashline anchors must be positive safe integers. Inclusive numeric ranges are limited to 100,000 lines before expansion. An explicit `+TEXT` row that looks like a valid hunk header remains literal and emits a warning. Across whole-file, truncated, and range/offset reads of LF or CRLF text, numbered hashline output treats a terminal newline as a separator rather than an additional synthetic row; genuine blank lines, including one immediately before that newline, remain visible. Truncation totals and continuation selectors count real lines. Files using bare CR line endings retain their existing compatibility behavior and are outside this newline guarantee.
+## `write`
+
+`write` overwriting an existing file requires this session to have already observed exactly the content it is replacing, checked under the same per-file mutation queue that serializes the write itself. Creating a new file is unaffected, and so is overwriting a file this session read, wrote, or edited earlier. Where a session has no version of its own, the refusal is `no_prior_observation`; where it has one that no longer matches what is on disk, it is `changed_since_observation` and names the first diverging line, what the session assumed was there, and what the file holds instead. Both carry the same `FILE_MUTATION_CONFLICT` code and requester identity as an `edit` conflict, so a `write` that would have silently discarded another agent's file is reported rather than performed. Snapshots are per session, so a file read by a different session or a previous run does not authorize an overwrite here either. A write whose result is aborted after the bytes have already reached disk still records its snapshot, so retrying it is not mistaken for overwriting a stranger's file.
+
+Standalone `createWriteToolDefinition(cwd)` and `createWriteTool(cwd)` instances retain their own observations across `local://` writes, just as they do for plain paths, even when no `hashlineStore` is supplied. Separate instances still need an explicitly shared store to share observations.
+
+Creating a file claims the path exclusively. `write` asks the filesystem for create-or-fail semantics (`O_EXCL`) whenever it has just observed the path as absent, so a file that appears in the window between that check and the write is reported as `target_exists` with a description of what is there now, rather than being silently truncated. Overwrites do not request exclusivity, since they are replacing a file the session has already accounted for.
+
+`WriteOperations` carries the read `write` performs before every write. Custom implementations must supply it, and it must report absence as `undefined` while rejecting for anything else: a path that exists but cannot be read is not a free path, and reporting it as absent would present it as a fresh create and truncate it. Such a rejection surfaces as `target_unreadable`, including the filesystem error code when the backend supplies one. Routing the read through `WriteOperations` is what lets a remote or sandboxed implementation have these checks run against the filesystem its writes actually land on, instead of against local disk. An implementation that cannot express exclusive create may ignore that request and overwrite; it then loses only the race against writers outside Atomic, since the mutation queue already excludes writers inside it.
 
 ## `bash` and `bashInterceptor`
 
@@ -34,11 +61,23 @@ The `bash` tool executes shell commands in the session workspace, with optional 
 
 When explicitly enabled in settings, built-in bash interceptor rules block common shell substitutes for first-class tools (`cat`/`grep`/`find`/in-place `sed`/redirection, etc.) only when the corresponding tool is available. Enabled bash tool calls are also offered to `user_bash` extension handlers before local execution. Atomic checks the original command, the internal-URL-expanded command, configured-prefix forms, `spawnHook`-rewritten commands, and a leading `cd path && command` or `cd path; command`-stripped form only when structured `cwd` was omitted, so interceptors can route commands by effective working directory without overriding explicit `cwd`. The bash schema accepts `cwd`, `env`, `timeout`, and `pty`; `cwd` and `env` are honored by the local executor. Omitting `timeout` uses the 300-second default. An explicit timeout must be finite, greater than zero, and no more than Atomic's deliberate 3600-second ceiling; invalid values fail before execution instead of being defaulted or clamped. Valid fractional values are rounded down with a one-second floor. `bashInterceptor.enabled` defaults to `false`; interception is not auto-enabled.
 
+Shell internal-URL expansion is intentionally conservative: commands containing a resolved URL must use only plain unquoted words, spaces/tabs, and basic `;`, `|`, or `&` operators. For example, `printf %s local://notes.txt` is supported and the resolved path is shell-quoted automatically, including paths containing spaces or shell metacharacters. Quotes anywhere in such a command, substitutions, escapes, newlines, redirections and heredocs are rejected before execution; use a filesystem path instead for those forms. Commands without resolved internal URLs retain normal shell syntax. URL expansion in structured `cwd` and `env` values is unchanged.
+
+The `powershell` tool uses PowerShell single-quoted literals for resolved paths, doubling both ASCII apostrophes and PowerShell's smart single-quote delimiters (U+2018–U+201B). Bash keeps POSIX quoting, including when Bash runs on Windows. SDK adapters using `createBashToolDefinition` with custom PowerShell operations can set `shellDialect: "powershell"` for generated path literals; this option does not select the executable or rewrite deliberate shell code.
+
+Configured command prefixes and SDK `spawnHook` rewrites remain executable shell syntax, not a sandbox. Balanced setup commands such as quoted exports remain supported. A prefix that leaves a quote, substitution, or heredoc open across the following command can invalidate the generated path quoting; automatic URL expansion does not validate that composed shell context. Do not combine URL expansion with such wrappers. Use structured `cwd` and `env` for path data instead.
+
 ```json
 {
   "bashInterceptor": { "enabled": true }
 }
 ```
+
+## `kill`
+
+`kill({ id: taskId })` stops an owned background shell task launched by `bash` or `powershell`, including a command that automatically yielded. Pass its returned task ID verbatim, not a PID. The tool is owner-scoped in main and workflow-stage chat and does not cancel subagents or another owner's work.
+
+The result reports the cancellation decision and current execution and cleanup states. A request is not confirmation of termination. Repeated requests preserve the original cancellation decision; already-completed work retains its outcome. Cleanup failures are reported explicitly. See [Background tasks](/background-tasks#stop-a-shell-task-from-a-tool-call) for states, retained output, and `/tasks` controls.
 
 ## `find` and `search`
 
@@ -49,6 +88,29 @@ When explicitly enabled in settings, built-in bash interceptor rules block commo
 Directory `read` output renders an oh-my-pi-style depth-2 tree sorted by most-recent modification time, includes file sizes/relative ages, prunes `.git`/`node_modules`, and caps child directories to 12 entries with an elision marker while preserving the oldest shown entry. `read`, `write`, and `search` support local zip/jar/tar/tgz/gzip archive members without a Python dependency, including archive members literally named `raw`, `conflicts`, `1`, `L1`, or paths like `raw:notes.txt`, SQLite table/row selectors (`limit`, `offset`, `where`, `order`, `schema`, and `sampleRows` query parameters), `skill://` and source-backed `local://` selectors (which use the underlying filesystem path for mutable hashline labels/snapshots), and session-router-backed internal resources such as `artifact://`, `agent://`, `history://`, `issue://`, `pr://`, `rule://`, `mcp://`, and `vault://` when the host exposes a router. Workspace-scoped selectors (`local://`, built-in `skill://`, local archives, and SQLite selectors) reject lexical and symlink escapes outside the workspace or skill root. Existing non-SQLite `.db`/`.sqlite` files remain plain files; archive writes reject directory targets ending in `/`; archive writes return their resolved archive path, SQLite writes return source-path metadata, shebang writes are chmodded executable and report `madeExecutable`, SQLite table reads show schema plus a 5-row sample by default, SQLite query reads default to 20 rows with a 500 cap (raw `?q=` supports single-statement `SELECT` queries only, rejects `sqlite_%` internals, `pragma_*` table-valued functions, and dangerous keywords such as `ATTACH`, and is capped to 1000 rows via streaming iteration; table lists cap to 500 excluding `sqlite_%` tables, and table row counts probe at most 50,001 rows), table writes accept `{}` as `INSERT DEFAULT VALUES`, row writes parse non-empty JSON5-style objects including comments, and SQLite writes validate column names/scalar values before binding (empty SQLite row writes delete only when a row id is present). `conflict://<id>` and `conflict://*` writes splice conflict marker regions, expand `@ours`, `@theirs`, and `@base`, and return fresh hashline snapshot headers for resolved files; scoped conflict sides such as `conflict://1/ours` are read-only. Plain `write` refuses to overwrite generated-looking files when generated markers appear near the top of the file. `read` extracts readable text for HTML URLs and notebooks (`.ipynb` cells use 0-based `cell:N` IDs and preserve unknown top-level notebook fields), and routes PDFs plus Office/document formats (`.doc`, `.docx`, `.ppt`, `.pptx`, `.xls`, `.xlsx`, `.rtf`, `.epub`) through the same `markit-ai` converter path as oh-my-pi, including upstream unsupported-format messages when no converter is available. Extensionless URL downloads are decoded when the `Content-Type` identifies the document type. Oversized URL/resource/document reads return guidance plus structured details so collapsed renderers still surface the block reason. Successful `read` results consistently return `details.meta.source`/`sourcePath` (plus `truncation`/`limits` when truncation or list limits apply), and `read`/`search` accept line selectors such as `file.ts:5-16`, `file.ts:5+3`, `file.ts:5-16,960-973`, or `https://example.test/page:5-8`; bounded read selectors include one leading and three trailing context lines unless `:raw` is used for unformatted content, and out-of-range selectors report a clear beyond-EOF message instead of returning an empty success.
 
 Plain URL reads follow oh-my-pi's fetch-pipeline truncation contract: unselected URL output shows the first 300 rendered lines (capped at 50 KiB), preserves full-output artifact/truncation metadata when available, and does not hard-block solely because the rendered URL body is large. By default Atomic rejects private, localhost, cloud-metadata, numeric/short-form private-IP URL targets (for example `2130706433`, octal/hex dotted forms, and `127.1`), IPv4-compatible and IPv4-mapped IPv6, NAT64, 6to4 private-address forms, and the full IPv6 link-local `fe80::/10` range, revalidates each manual redirect, pins DNS-validated addresses for outbound fetches, and caps streamed URL bodies; `ATOMIC_ALLOW_PRIVATE_URL_READS=1` is a dev-only escape hatch for trusted local tests and must not be set from untrusted project configuration. Local text reads use the shared 3,000-line/50 KiB output cap, while search match/context lines use the upstream 512-character cap before emitting a truncation notice.
+
+## `ask_user_question`
+
+When `ask_user_question` or an equivalent question tool is available, all questions to the user must use that tool instead of plain text. This includes clarifications, preferences, confirmations, approvals, and permission to proceed, not just ambiguous requirements. Prefer `ask_user_question` when available; otherwise follow the equivalent tool's supported schema. In these sessions, do not end a progress update or final response with a prose-only "Proceed?".
+
+Ask only when a decision is needed. Do not ask again for already-authorized work. Group related questions in one call, up to four questions with two to four options each. For confirmations, state the concrete action and scope in the question and offer explicit proceed and decline options. For example, when this action needs approval, call `ask_user_question` with:
+
+```json
+{
+  "questions": [{
+    "header": "Merge approval",
+    "question": "Remove the stack grouping, then admin-merge the same seven PRs in dependency order without changing repository protections?",
+    "options": [
+      { "label": "Proceed", "description": "Remove the grouping and admin-merge those seven PRs in dependency order. Leave repository protections unchanged." },
+      { "label": "Do not proceed", "description": "Leave the grouping and PRs unchanged." }
+    ]
+  }]
+}
+```
+
+In a real confirmation, identify the target PRs in the question or immediately preceding context. This example explains question routing; it does not authorize merging any PRs.
+
+A cancelled or unanswered question is not approval. If no usable question tool is available, continue autonomously using best judgment and state evidence-backed assumptions rather than stopping just because the tool is missing. Preserve safety, authorization, and explicit approval gates. Workflow-authored `ctx.ui` gates and `workflow answer` for relaying actual user responses remain supported.
 
 ## Persisted tool output
 

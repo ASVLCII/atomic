@@ -7,7 +7,7 @@ import type { CustomMessage } from "../messages.ts";
 import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { SkillCatalog } from "../skill-catalog.ts";
-import type { SlashCommandInfo } from "../slash-commands.ts";
+import type { SlashCommandInfo } from "../slash-commands.js";
 import type { SourceInfo } from "../source-info.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type { RegisteredCommand } from "./command-types.ts";
@@ -21,6 +21,7 @@ import type {
 } from "./message-types.ts";
 import type { ProviderConfig } from "./provider-types.ts";
 import type { ToolDefinition, ToolInfo } from "./tool-types.ts";
+import type { WorkflowActivityHub } from "./workflow-activity-hub.js";
 
 export interface RegisteredTool {
 	definition: ToolDefinition;
@@ -38,6 +39,10 @@ export interface ExtensionFlag {
 export interface ExtensionShortcut {
 	shortcut: KeyId;
 	description?: string;
+	keybinding?: import("../keybindings.ts").Keybinding;
+	preferEditor?: boolean;
+	/** Resolved editor-owned keys; dispatch must yield only for input these keys accept. */
+	editorKeys?: KeyId[];
 	handler: (ctx: ExtensionContext) => Promise<void> | void;
 	extensionPath: string;
 }
@@ -88,6 +93,8 @@ export type SetLabelHandler = (entryId: string, label: string | undefined) => vo
  * Contains flag values (defaults set during registration, CLI values set after).
  */
 export interface ExtensionRuntimeState {
+	/** Shared by extension loading and its runner generation. */
+	workflowActivityHub: WorkflowActivityHub;
 	flagValues: Map<string, boolean | string>;
 	explicitFlagNames?: Set<string>;
 	/** Extension path that owns each active flag registration. */

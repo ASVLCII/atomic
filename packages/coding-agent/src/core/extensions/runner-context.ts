@@ -25,6 +25,8 @@ import type {
 	SubagentChildPolicy,
 } from "./types.ts";
 export interface ExtensionContextSource {
+	observeWorkflowActivity: ExtensionContext["observeWorkflowActivity"];
+	getExtensionPaths?(): string[];
 	assertActive(): void;
 	getUIContext(): ExtensionUIContext;
 	getMode(): ExtensionMode;
@@ -47,6 +49,7 @@ export interface ExtensionContextSource {
 	compact(options?: CompactOptions): void;
 	getSystemPrompt(): string;
 	getSkillCatalog?(): SkillCatalog;
+	getAgentTaskHost?(): import("../tasks/agent-adapter.js").AgentTaskHost;
 }
 
 export interface ExtensionCommandContextSource extends ExtensionContextSource {
@@ -105,12 +108,55 @@ export function copyScopedModels(scoped: readonly ScopedModel[]): readonly Scope
 	return Object.freeze(scoped.map((entry) => deepFrozenCopy(entry)));
 }
 
+// Private host/builtin bridge, also read by intercom/context-owner.ts. Separate
+// bundles share identity without exposing guarded capabilities or retaining UI.
+const CONTEXT_OWNERS_KEY = Symbol.for("atomic-coding-agent/extension-context-owners@1");
+const contextOwnerBag = globalThis as typeof globalThis & { [CONTEXT_OWNERS_KEY]?: WeakMap<ExtensionContext, object> };
+contextOwnerBag[CONTEXT_OWNERS_KEY] ??= new WeakMap<ExtensionContext, object>();
+const contextOwners = contextOwnerBag[CONTEXT_OWNERS_KEY];
+
+/** Internal lifecycle identity; contexts themselves are recreated for every dispatch. */
+export function getExtensionContextOwner(context: ExtensionContext): object {
+	return contextOwners.get(context) ?? context;
+}
+
+type ContextEffect = () => void | Promise<void>;
+const contextPublications = new WeakMap<object, (effect: ContextEffect) => void>();
+
+/** Keep builtin lifecycle effects behind the host's transactional publication boundary. */
+export function bindExtensionContextPublication(
+	context: ExtensionContext,
+	stage: ((effect: ContextEffect) => void) | undefined,
+): void {
+	const owner = getExtensionContextOwner(context);
+	if (stage) contextPublications.set(owner, stage);
+	else contextPublications.delete(owner);
+}
+
+export async function publishExtensionContextEffect(context: ExtensionContext, effect: ContextEffect): Promise<void> {
+	const stage = contextPublications.get(getExtensionContextOwner(context));
+	if (stage) stage(effect);
+	else await effect();
+}
+
 /**
  * Create an ExtensionContext for use in event handlers and tool execution.
  * Context values are resolved at call time, so host changes are reflected.
  */
-export function createExtensionContext(source: ExtensionContextSource): ExtensionContext {
-	return {
+export function createExtensionContext(source: ExtensionContextSource, owner: object = source): ExtensionContext {
+	const context: ExtensionContext = {
+		getExtensionPaths: () => {
+			source.assertActive();
+			return source.getExtensionPaths?.() ?? [];
+		},
+		...(source.getAgentTaskHost
+			? {
+					getAgentTaskHost: () => {
+						source.assertActive();
+						return source.getAgentTaskHost!();
+					},
+				}
+			: {}),
 		get ui() {
 			source.assertActive();
 			return source.getUIContext();
@@ -118,6 +164,10 @@ export function createExtensionContext(source: ExtensionContextSource): Extensio
 		get mode() {
 			source.assertActive();
 			return source.getMode();
+		},
+		observeWorkflowActivity: (observer) => {
+			source.assertActive();
+			return source.observeWorkflowActivity(observer);
 		},
 		get hasUI() {
 			source.assertActive();
@@ -208,15 +258,20 @@ export function createExtensionContext(source: ExtensionContextSource): Extensio
 				}
 			: {}),
 	};
+	contextOwners.set(context, owner);
+	return context;
 }
 
-export function createExtensionCommandContext(source: ExtensionCommandContextSource): ExtensionCommandContext {
+export function createExtensionCommandContext(
+	source: ExtensionCommandContextSource,
+	owner: object = source,
+): ExtensionCommandContext {
 	// Use property descriptors instead of object spread so the guarded getters from
 	// createExtensionContext() stay lazy. A spread would eagerly read them once and
 	// freeze old values into the returned object, bypassing stale-instance checks.
 	const context = Object.defineProperties(
 		{},
-		Object.getOwnPropertyDescriptors(createExtensionContext(source)),
+		Object.getOwnPropertyDescriptors(createExtensionContext(source, owner)),
 	) as ExtensionCommandContext;
 	context.getSystemPromptOptions = () => {
 		source.assertActive();
@@ -246,5 +301,6 @@ export function createExtensionCommandContext(source: ExtensionCommandContextSou
 		source.assertActive();
 		return source.reload();
 	};
+	contextOwners.set(context, owner);
 	return context;
 }

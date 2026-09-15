@@ -64,6 +64,7 @@ function stageContext(
 		getContextUsage: () => undefined,
 		compact: () => {},
 		getSystemPrompt: () => "",
+		observeWorkflowActivity: () => ({ dispose() {} }),
 	} satisfies ExtensionContext;
 }
 
@@ -191,7 +192,10 @@ test("a real foreground subagent inherits its workflow group and stays outside d
 		"child",
 		sessions,
 		new DeliveredMessageCache(),
-		(socket, brokerMessage) => writes.push({ socket, message: brokerMessage }),
+		(socket, brokerMessage) => {
+			writes.push({ socket, message: brokerMessage });
+			return true;
+		},
 		new SupervisorChannelCache(),
 	);
 	assert.equal(

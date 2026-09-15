@@ -32,7 +32,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, test } from "vitest";
 import { removeTempRootReleasingBroker } from "../helpers/detached-broker.js";
-import { bunExecutable, decodeStream, moduleDir, type SpawnedProcess, spawnProcess } from "../helpers/runtime.js";
+import {
+	bunExecutable,
+	decodeStream,
+	moduleDir,
+	type SpawnedProcess,
+	spawnProcess,
+	writeFileEnsuringDir,
+} from "../helpers/runtime.js";
 
 /**
  * Structural: this hook compiles and boots the whole coding-agent CLI in a child
@@ -93,10 +100,13 @@ interface RunDetailView {
 	readonly runId: string;
 	readonly name: string;
 	readonly status: string;
+	readonly error?: string;
 	readonly stages: readonly StageView[];
 	readonly tools?: readonly ToolNodeView[];
 	readonly resumable?: boolean;
 	readonly exitReason?: string;
+	readonly failedToolNodeId?: string;
+	readonly failedStageId?: string;
 	readonly result?: { readonly hang?: string; readonly sibling?: string };
 }
 
@@ -138,7 +148,7 @@ class RpcCli {
 	private buffered = "";
 	private stderr = "";
 
-	constructor(projectDir: string, agentDir: string, stateDir: string) {
+	constructor(projectDir: string, agentDir: string, stateDir: string, builtRuntime = false) {
 		const environment: Record<string, string | undefined> = { ...process.env };
 		// A suite that itself runs inside an Atomic engine session would otherwise
 		// leak its engine-child markers and its own fixture state directory.
@@ -146,7 +156,17 @@ class RpcCli {
 			if (key.startsWith("ATOMIC_") || key.startsWith("ISSUE_2078_")) delete environment[key];
 		}
 		this.child = spawnProcess({
-			cmd: [bunExecutable(), join(repositoryRoot, "packages/coding-agent/src/cli.ts"), ...CLI_ARGS],
+			cmd: builtRuntime
+				? [
+						process.execPath,
+						join(repositoryRoot, "packages/coding-agent/dist/cli.js"),
+						...CLI_ARGS,
+						"--provider",
+						"tool-abort-fixture",
+						"--model",
+						"fixture",
+					]
+				: [bunExecutable(), join(repositoryRoot, "packages/coding-agent/src/cli.ts"), ...CLI_ARGS],
 			cwd: projectDir,
 			env: {
 				...environment,
@@ -313,7 +333,7 @@ function toolNode(run: RunDetailView, name: string): ToolNodeView {
 	return node;
 }
 
-async function runScenario(): Promise<Evidence> {
+async function runScenario(control: "quit" | "pause" = "quit", omission?: "return" | "completed"): Promise<Evidence> {
 	const root = mkdtempSync(join(tmpdir(), "atomic-issue-2078-"));
 	const projectDir = join(root, "project");
 	const stateDir = join(root, "state");
@@ -322,6 +342,13 @@ async function runScenario(): Promise<Evidence> {
 	mkdirSync(stateDir, { recursive: true });
 	mkdirSync(agentDir, { recursive: true });
 	copyFileSync(fixturePath, join(projectDir, ".atomic/workflows", FIXTURE));
+	if (control === "pause") {
+		mkdirSync(join(projectDir, ".atomic/extensions"), { recursive: true });
+		copyFileSync(
+			join(moduleDir(import.meta.url), "fixtures/tool-abort-provider.ts"),
+			join(projectDir, ".atomic/extensions/tool-abort-provider.ts"),
+		);
+	}
 
 	const readState = (): FixtureState => {
 		const path = join(stateDir, STATE_FILE);
@@ -331,7 +358,7 @@ async function runScenario(): Promise<Evidence> {
 		return JSON.parse(readFileSync(path, "utf8")) as FixtureState;
 	};
 
-	const cli = new RpcCli(projectDir, agentDir, stateDir);
+	const cli = new RpcCli(projectDir, agentDir, stateDir, control === "pause");
 	try {
 		// 1. Launch. The launch returns at startup admission, so the callback is
 		//    only proven in flight once it says so itself. A run that ends first
@@ -363,14 +390,34 @@ async function runScenario(): Promise<Evidence> {
 		// 3. Quit. The state is read the instant the CLI answers, which is what
 		//    makes the durability-boundary ordering observable from outside.
 		const notificationsBeforeQuit = cli.notifications().length;
-		await cli.prompt("quit", `/workflow quit ${runId}`);
+		await cli.prompt("quit", control === "pause" ? `pause-tool ${runId}` : `/workflow quit ${runId}`);
 		const stateWhenQuitReturned = readState();
 		const quitNotifications = cli.notifications().slice(notificationsBeforeQuit);
+		if (control === "pause")
+			await cli.waitUntil(
+				() => cli.runEndings().some((ending) => ending.runId === runId && ending.status === "failed"),
+				"targeted tool abort to fail the run",
+			);
 
 		// 4. The cancelled node, rendered.
 		const quitSurface = await statusSurface(cli, "status-quit", runId);
 		const afterQuit = runDetail(quitSurface);
 		const renderedAfterQuit = quitSurface.content;
+
+		if (omission !== undefined) {
+			const source = readFileSync(fixturePath, "utf8");
+			const targetCall = 'const hung = await ctx.tool("hang-tool"';
+			assert.ok(source.includes(targetCall));
+			const earlyReturn =
+				omission === "return"
+					? 'return { hang: "omitted", sibling };'
+					: 'return ctx.exit({ status: "completed" });';
+			await writeFileEnsuringDir(
+				join(projectDir, ".atomic/workflows", FIXTURE),
+				source.replace(targetCall, `${earlyReturn}\n\t\t${targetCall}`),
+			);
+			await cli.prompt("change-flow", "/workflow reload");
+		}
 
 		// 5. Resume: the aborted call must run again while the settled sibling
 		//    replays. Whether that happens is the behavior under test, so the
@@ -378,9 +425,17 @@ async function runScenario(): Promise<Evidence> {
 		//    a run that quit did not pause simply never re-executes anything,
 		//    and the assertions below say so with the CLI's own words.
 		await cli.prompt("resume", `/workflow resume ${runId}`);
-		const reexecuted = await cli.settle(() => readState().hangExecutions > 1, RESUME_SETTLE_TIMEOUT_MS);
+		const reexecuted =
+			omission === undefined && (await cli.settle(() => readState().hangExecutions > 1, RESUME_SETTLE_TIMEOUT_MS));
 		if (reexecuted) await cli.waitUntil(() => !readState().hangRunning, "the re-executed callback to settle");
-		const afterResume = runDetail(await statusSurface(cli, "status-resumed", runId));
+		if (control === "pause")
+			await cli.waitUntil(
+				() => cli.runEndings().some((ending) => ending.runId !== runId),
+				"resumed continuation to settle",
+			);
+		const resumedRunId =
+			control === "pause" ? cli.runEndings().findLast((ending) => ending.runId !== runId)!.runId : runId;
+		const afterResume = runDetail(await statusSurface(cli, "status-resumed", resumedRunId));
 
 		return {
 			stateAfterReload,
@@ -395,7 +450,7 @@ async function runScenario(): Promise<Evidence> {
 		};
 	} finally {
 		await cli.stop();
-		removeTempRootReleasingBroker(root);
+		await removeTempRootReleasingBroker(root);
 	}
 }
 
@@ -486,6 +541,55 @@ describe("issue #2078 — quitting an in-flight ctx.tool through the real CLI", 
 		assert.deepEqual(evidence.afterResume.result, { hang: "aborted-then-reran-2", sibling: "sibling-ran-1" });
 	});
 });
+
+test(
+	"built Node runtime resumes an uncaught targeted tool pause without repeating completed callbacks",
+	async () => {
+		const observed = await runScenario("pause");
+		assert.equal(observed.afterQuit.status, "failed");
+		assert.equal(observed.afterQuit.failedStageId, undefined);
+		assert.equal(observed.afterQuit.failedToolNodeId, toolNode(observed.afterQuit, "hang-tool").id);
+		assert.equal(observed.afterResume.status, "completed");
+		assert.equal(toolNode(observed.afterResume, "hang-tool").id, toolNode(observed.afterQuit, "hang-tool").id);
+		assert.equal(toolNode(observed.afterResume, "sibling-tool").replayed, true);
+		assert.deepEqual(observed.finalState, {
+			siblingExecutions: 1,
+			hangExecutions: 2,
+			hangRunning: false,
+			hangObservedAbort: true,
+		});
+	},
+	REAL_CLI_SCENARIO_TIMEOUT_MS,
+);
+
+// PR #2864 discussion_r3939119993: use the built CLI and reload an actually edited definition.
+async function assertOmittedInterruptedTool(omission: "return" | "completed"): Promise<void> {
+	const observed = await runScenario("pause", omission);
+	assert.equal(observed.afterResume.status, "failed", observed.afterResume.error ?? "omitted frontier cannot succeed");
+	assert.match(observed.afterResume.error ?? "", /pending frontier was not consumed/);
+	assert.ok(observed.afterResume.error?.includes(toolNode(observed.afterQuit, "hang-tool").id));
+	assert.equal(observed.finalState.siblingExecutions, 1);
+	assert.equal(observed.finalState.hangExecutions, 1);
+	assert.equal(toolNode(observed.afterResume, "sibling-tool").replayed, true);
+	assert.equal(observed.afterResume.result, undefined);
+}
+
+// Literal declarations let the duration guard attribute each existing structural budget.
+test(
+	"built Node runtime refuses return after changed flow omits the interrupted tool",
+	async () => {
+		await assertOmittedInterruptedTool("return");
+	},
+	REAL_CLI_SCENARIO_TIMEOUT_MS,
+);
+
+test(
+	"built Node runtime refuses completed after changed flow omits the interrupted tool",
+	async () => {
+		await assertOmittedInterruptedTool("completed");
+	},
+	REAL_CLI_SCENARIO_TIMEOUT_MS,
+);
 
 test("the driver and the fixture agree on the state file name", () => {
 	const source = readFileSync(fixturePath, "utf8");

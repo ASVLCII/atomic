@@ -1,5 +1,5 @@
 import { CACHE_TTL_MS, detectCacheMiss } from "../../core/cache-stats.ts";
-import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.ts";
+import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.js";
 import { RemoteToolExecutionComponent } from "../interactive-engine/remote-renderer.ts";
 import type { JsonAgentSessionEvent } from "../json-event.ts";
 import { AtomicWorkingLoader } from "./components/atomic-working-status.ts";
@@ -20,6 +20,7 @@ import {
 	theme,
 } from "./interactive-mode-deps.ts";
 import { handleSummarizationRetryEvent } from "./interactive-summarization-retry-events.ts";
+import { disposeInteractiveTasks, refreshInteractiveTasks } from "./interactive-task-projection.js";
 import { applyAssistantMessageDelta, beginStreamingAssistantMessage } from "./streaming-assistant-message.ts";
 
 function createToolComponent(
@@ -48,9 +49,14 @@ function createToolComponent(
 }
 
 InteractiveModeBase.prototype.subscribeToAgent = function (this: InteractiveModeBase): void {
-	this.unsubscribe = this.session.subscribe(async (event) => {
+	refreshInteractiveTasks(this);
+	const unsubscribe = this.session.subscribe(async (event) => {
 		await this.handleEvent(event);
 	});
+	this.unsubscribe = () => {
+		unsubscribe();
+		disposeInteractiveTasks(this);
+	};
 };
 
 InteractiveModeBase.prototype.handleEvent = async function (
@@ -89,8 +95,10 @@ InteractiveModeBase.prototype.handleEvent = async function (
 			}
 			this.stopWorkingLoader();
 			if (this.workingVisible) {
-				this.loadingAnimation = this.createWorkingLoader();
-				this.statusContainer.addChild(this.loadingAnimation);
+				const loader = this.createWorkingLoader();
+				this.loadingAnimation = loader;
+				this.workingIndicatorEmbedded = this.setEditorWorkingStatusIndicator?.(loader) ?? false;
+				if (!this.workingIndicatorEmbedded) this.statusContainer.addChild(loader);
 			}
 			this.ui.requestRender();
 			break;
@@ -244,6 +252,7 @@ InteractiveModeBase.prototype.handleEvent = async function (
 					for (const [, component] of this.pendingTools.entries()) {
 						component.setArgsComplete();
 					}
+					this.maybeShowAssistantDiagnostics(this.streamingMessage);
 				}
 				this.streamingComponent = undefined;
 				this.streamingMessage = undefined;
@@ -311,12 +320,7 @@ InteractiveModeBase.prototype.handleEvent = async function (
 			if (!compactionInProgress && this.settingsManager.getShowTerminalProgress()) {
 				this.ui.terminal.setProgress(false);
 			}
-			if (this.loadingAnimation) {
-				this.loadingAnimation.stop();
-				this.loadingAnimation = undefined;
-				this.statusContainer.clear();
-				mountIdleStatus(this.statusContainer, this.settingsManager.getClearOnShrink());
-			}
+			if (this.loadingAnimation) this.stopWorkingLoader();
 			if (this.streamingComponent) {
 				this.chatContainer.removeChild(this.streamingComponent);
 				this.streamingComponent = undefined;
@@ -444,9 +448,9 @@ InteractiveModeBase.prototype.handleEvent = async function (
 			this.retryCountdown?.dispose();
 			const retryMessage = (seconds: number) =>
 				`Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (${keyText("app.interrupt")} Cancel)`;
-			this.retryLoader = new Loader(
+			this.retryLoader = new AtomicWorkingLoader(
 				this.ui,
-				(spinner) => theme.fg("warning", spinner),
+				undefined,
 				(text) => theme.fg("muted", text),
 				retryMessage(Math.ceil(event.delayMs / 1000)),
 			);

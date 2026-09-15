@@ -1,5 +1,10 @@
 import type { CallbackActivity, CallbackActivityKind } from "../../core/callback-activity.ts";
-import type { HostInputFormField, HostSessionPickerRow } from "../../core/extensions/ui-types.ts";
+import type {
+	HostInputFormField,
+	HostSessionPickerRow,
+	WidgetScrollRequest,
+	WidgetScrollState,
+} from "../../core/extensions/ui-types.ts";
 import type { KeyId } from "../../core/keybindings.ts";
 
 /**
@@ -40,6 +45,8 @@ export type EngineTerminalControl = { kind: "autowrap"; enabled: boolean };
 export interface EngineExtensionShortcut {
 	key: string;
 	description?: string;
+	/** Editor-owned input exclusions resolved in the engine and matched by the host. */
+	editorKeys?: KeyId[];
 }
 
 export type SerializableKeybindingsConfig = Record<string, KeyId | KeyId[]>;
@@ -71,6 +78,7 @@ export type InteractiveEngineMessage =
 			type: "engine_custom_open";
 			componentId: string;
 			overlay: boolean;
+			purpose?: "prompt" | "navigation";
 			deferInlineCustomUiFocus?: boolean;
 			handlesCtrlC?: boolean;
 			handlesInternalUiAction?: boolean;
@@ -78,9 +86,16 @@ export type InteractiveEngineMessage =
 			overlayOptions?: SerializableOverlayOptions;
 			widgetKey?: string;
 			widgetPlacement?: "aboveEditor" | "belowEditor";
+			widgetScroll?: { maxHeight: number; maxHeightFraction?: number };
 	  }
 	| { type: "engine_custom_close"; componentId: string }
-	| { type: "engine_custom_frame"; componentId: string; requestId: number; lines: string[] }
+	| {
+			type: "engine_custom_frame";
+			componentId: string;
+			requestId: number;
+			lines: string[];
+			scrollRequest?: WidgetScrollRequest;
+	  }
 	| { type: "engine_custom_input_result"; componentId: string; requestId: number; handled: boolean }
 	| { type: "engine_custom_invalidate"; componentId: string }
 	| { type: "engine_custom_done"; componentId: string; result?: JsonValue }
@@ -105,8 +120,11 @@ export type InteractiveEngineMessage =
 	  }
 	| { type: "engine_input_form_close"; componentId: string };
 export type InteractiveEngineCommand =
+	| { type: "engine_project_trust_start"; componentId: string; kind: "select" | "confirm" | "input"; title: string }
+	| { type: "engine_project_trust_end"; componentId: string }
 	| { type: "engine_custom_render"; componentId: string; requestId: number; width: number; rows: number }
 	| { type: "engine_custom_input"; componentId: string; requestId: number; data: string }
+	| { type: "engine_custom_scroll"; componentId: string; state: WidgetScrollState }
 	| { type: "engine_custom_dispose"; componentId: string }
 	| {
 			type: "engine_tool_render";
@@ -305,12 +323,15 @@ function parseKeybindingState(value: JsonValue | undefined): EngineKeybindingSta
 		if (
 			!isJsonObject(shortcut) ||
 			typeof shortcut.key !== "string" ||
-			(shortcut.description !== undefined && typeof shortcut.description !== "string")
+			(shortcut.description !== undefined && typeof shortcut.description !== "string") ||
+			(shortcut.editorKeys !== undefined &&
+				(!Array.isArray(shortcut.editorKeys) || shortcut.editorKeys.some((key) => typeof key !== "string")))
 		)
 			return undefined;
 		shortcuts.push({
 			key: shortcut.key,
 			...(typeof shortcut.description === "string" ? { description: shortcut.description } : {}),
+			...(Array.isArray(shortcut.editorKeys) ? { editorKeys: shortcut.editorKeys as KeyId[] } : {}),
 		});
 	}
 	return { userBindings, effectiveBindings, shortcuts };
@@ -360,6 +381,7 @@ export function parseInteractiveEngineMessage(line: string): InteractiveEngineMe
 						type: value.type,
 						componentId: value.componentId,
 						overlay: value.overlay,
+						...(value.purpose === "navigation" || value.purpose === "prompt" ? { purpose: value.purpose } : {}),
 						deferInlineCustomUiFocus: value.deferInlineCustomUiFocus === true,
 						handlesCtrlC: value.handlesCtrlC === true,
 						handlesInternalUiAction: value.handlesInternalUiAction === true,
@@ -368,6 +390,16 @@ export function parseInteractiveEngineMessage(line: string): InteractiveEngineMe
 							? (value.overlayOptions as SerializableOverlayOptions)
 							: undefined,
 						widgetKey: typeof value.widgetKey === "string" ? value.widgetKey : undefined,
+						...(isJsonObject(value.widgetScroll) && typeof value.widgetScroll.maxHeight === "number"
+							? {
+									widgetScroll: {
+										maxHeight: value.widgetScroll.maxHeight,
+										...(typeof value.widgetScroll.maxHeightFraction === "number"
+											? { maxHeightFraction: value.widgetScroll.maxHeightFraction }
+											: {}),
+									},
+								}
+							: {}),
 						widgetPlacement:
 							value.widgetPlacement === "belowEditor"
 								? "belowEditor"
@@ -385,7 +417,22 @@ export function parseInteractiveEngineMessage(line: string): InteractiveEngineMe
 				typeof value.requestId === "number" &&
 				Array.isArray(value.lines) &&
 				value.lines.every((entry) => typeof entry === "string")
-				? { type: value.type, componentId: value.componentId, requestId: value.requestId, lines: value.lines }
+				? {
+						type: value.type,
+						componentId: value.componentId,
+						requestId: value.requestId,
+						lines: value.lines,
+						...(isJsonObject(value.scrollRequest) &&
+						typeof value.scrollRequest.version === "number" &&
+						typeof value.scrollRequest.scrollTop === "number"
+							? {
+									scrollRequest: {
+										version: value.scrollRequest.version,
+										scrollTop: value.scrollRequest.scrollTop,
+									},
+								}
+							: {}),
+					}
 				: undefined;
 		case "engine_custom_input_result":
 			return typeof value.componentId === "string" &&
@@ -465,6 +512,31 @@ export function parseInteractiveEngineMessage(line: string): InteractiveEngineMe
 export function parseInteractiveEngineCommand(line: string): InteractiveEngineCommand | undefined {
 	const value = parseJsonObject(line);
 	if (!value || typeof value.type !== "string" || typeof value.componentId !== "string") return undefined;
+	if (value.type === "engine_project_trust_end") return { type: value.type, componentId: value.componentId };
+	if (
+		value.type === "engine_project_trust_start" &&
+		(value.kind === "select" || value.kind === "confirm" || value.kind === "input") &&
+		typeof value.title === "string"
+	) {
+		return { type: value.type, componentId: value.componentId, kind: value.kind, title: value.title };
+	}
+	if (
+		value.type === "engine_custom_scroll" &&
+		isJsonObject(value.state) &&
+		typeof value.state.scrollTop === "number" &&
+		typeof value.state.viewportHeight === "number" &&
+		typeof value.state.contentHeight === "number"
+	) {
+		return {
+			type: value.type,
+			componentId: value.componentId,
+			state: {
+				scrollTop: value.state.scrollTop,
+				viewportHeight: value.state.viewportHeight,
+				contentHeight: value.state.contentHeight,
+			},
+		};
+	}
 	if (
 		value.type === "engine_custom_render" &&
 		typeof value.requestId === "number" &&

@@ -1,8 +1,148 @@
 # Changelog
 
-This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at the audited Pi `main` sync point (`b8b873b9872db04a938fb4357b5e8e824ddc051c`) lives in [earendil-works/pi](https://github.com/earendil-works/pi/blob/b8b873b9872db04a938fb4357b5e8e824ddc051c/packages/ai/CHANGELOG.md).
+This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at the audited Pi `main` sync point (`92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c`) lives in [earendil-works/pi](https://github.com/earendil-works/pi/blob/92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c/packages/ai/CHANGELOG.md).
 
 ## [Unreleased]
+
+## [0.9.19] - 2026-09-13
+
+Cumulative release of the `0.9.19-alpha.2` through `0.9.19-alpha.4` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Added
+
+- Enabled native deferred tool loading for Fireworks Messages models through `ToolSearch` or `tool_search` ([#9323](https://github.com/earendil-works/pi/issues/9323)).
+
+### Fixed
+
+- Fixed Anthropic object-union tool schemas, including own property names such as `__proto__` and explicitly nonobject branches, without changing authored schemas or local validation ([#2190](https://github.com/bastani-inc/atomic/pull/2190) by [@elefthei](https://github.com/elefthei), [#2189](https://github.com/bastani-inc/atomic/issues/2189)).
+- Capped shared assistant and summary retry backoff with `RetryPolicy.maxAgentDelayMs`, defaulting to 60 seconds ([#8826](https://github.com/earendil-works/pi/issues/8826)).
+- Updated Anthropic, Bedrock, Google and HTTP proxy SDKs; Google's consecutive tool-call limit now returns an error stop reason. GitHub Copilot GPT models use the Responses API ([#9209](https://github.com/earendil-works/pi/issues/9209)).
+- Fixed quadratic CPU usage when draining buffered `EventStream` events ([#9055](https://github.com/earendil-works/pi/issues/9055)).
+- Fixed OpenAI Codex Off reasoning requests and removed unavailable GPT-5.4 and GPT-5.4 mini catalog entries ([#9191](https://github.com/earendil-works/pi/issues/9191), [#9394](https://github.com/earendil-works/pi/issues/9394)).
+- Fixed Fireworks unsigned thinking replay and catalog-based reasoning selection, including DeepSeek V4 and Qwen3.8 fallbacks. Refreshed DeepSeek V4.1 Flash identity and pricing ([#9323](https://github.com/earendil-works/pi/issues/9323), [#9423](https://github.com/earendil-works/pi/issues/9423)).
+- Fixed OpenRouter prompt-cached requests sending `x-session-id` for Chat Completions and Anthropic Messages ([#9102](https://github.com/earendil-works/pi/issues/9102)).
+- Fixed Mistral Medium aliases and Mistral-hosted GLM-5.2 using `reasoning_effort` instead of unsupported or ignored `prompt_mode` ([#8700](https://github.com/earendil-works/pi/issues/8700), [#9375](https://github.com/earendil-works/pi/issues/9375)).
+
+## [0.9.19-alpha.4] - 2026-09-10
+
+### Added
+
+- Enabled native deferred tool loading for Fireworks Messages models. Use `ToolSearch` or `tool_search` as the loader name for prompt-prefix deferral ([#9323](https://github.com/earendil-works/pi/issues/9323)).
+
+### Fixed
+
+- Fixed OpenAI Codex requests to send the model's Off reasoning effort instead of omitting it, while respecting unsupported Off mappings ([#9191](https://github.com/earendil-works/pi/issues/9191)).
+- Fixed Fireworks unsigned thinking replay and reasoning effort selection using catalog metadata, with verified DeepSeek V4 and Qwen3.8 fallbacks and removal of redundant GLM 5.2 and Kimi K3 effort aliases ([#9323](https://github.com/earendil-works/pi/issues/9323)).
+- Fixed OpenRouter requests to send `x-session-id` from `sessionId` for Chat Completions and Anthropic Messages models when prompt caching is enabled ([#9102](https://github.com/earendil-works/pi/issues/9102)).
+- Fixed the DeepSeek catalog to advertise `deepseek-flash` for DeepSeek V4.1 Flash instead of retired Flash aliases, and refreshed DeepSeek pricing metadata ([#9423](https://github.com/earendil-works/pi/issues/9423)).
+- Removed GPT-5.4 and GPT-5.4 mini from the OpenAI Codex catalog after they became unavailable to ChatGPT accounts ([#9394](https://github.com/earendil-works/pi/issues/9394)).
+- Fixed Mistral-hosted GLM-5.2 reasoning requests to use `reasoning_effort` instead of the ignored `prompt_mode` ([#9375](https://github.com/earendil-works/pi/issues/9375)).
+
+## [0.9.19-alpha.3] - 2026-09-09
+
+### Fixed
+
+- Capped shared assistant retry backoff with `RetryPolicy.maxAgentDelayMs` (60 seconds by default), including summary calls ([#8826](https://github.com/earendil-works/pi/issues/8826)).
+
+## [0.9.19-alpha.2] - 2026-09-08
+
+### Fixed
+
+- Fixed Anthropic Messages tool requests advertising root object-union parameter schemas without fields by projecting their branch fields into Anthropic-compatible object schemas ([#2190](https://github.com/bastani-inc/atomic/pull/2190) by [@elefthei](https://github.com/elefthei)).
+- Fixed Anthropic object-union tool projection dropping own property names such as `__proto__` and incorrectly projecting explicitly nonobject branches with `properties` metadata; authored schemas and runtime validation remain unchanged ([#2190](https://github.com/bastani-inc/atomic/pull/2190), [#2189](https://github.com/bastani-inc/atomic/issues/2189)).
+- Updated Anthropic, Bedrock, Google and HTTP proxy SDKs to upstream Pi's current versions, and mapped Google's consecutive tool-call limit to an error stop reason.
+- Routed all GitHub Copilot GPT model IDs through the Responses API ([#9209](https://github.com/earendil-works/pi/issues/9209)).
+- Fixed quadratic CPU usage when draining buffered `EventStream` events ([#9055](https://github.com/earendil-works/pi/issues/9055)).
+- Fixed reasoning-capable Mistral Medium aliases using unsupported `prompt_mode` instead of `reasoning_effort` ([#8700](https://github.com/earendil-works/pi/issues/8700)).
+
+## [0.9.18] - 2026-09-05
+
+Cumulative release of the `0.9.18-alpha.5` through `0.9.18-alpha.7` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- `createGatewayBindingFetch` requires `binding.fetch()` and forwards requests verbatim. The `gateway(id).run(...)` fallback is removed, `baseUrl` and `gateway` options are ignored, and bindings without `fetch()` fail at construction. Set model base URLs to `https://workers-binding.ai/ai-gateway/gateways/{gateway}/{provider}` ([#8287](https://github.com/earendil-works/pi/pull/8287)).
+- Fast inference is explicit `Model.fastRoute` metadata, not a name suffix. Responses adapters accept the canonical model, send its route's upstream ID, enforce its declared tier even against caller options, and price priority using its base model. A route without a tier sends none. Payload hooks that replace the body with a non-object or change the route's model or tier now fail. Models without routes retain caller-controlled tiers and hooks.
+- GitHub Copilot exposes route-bearing fast models only when OAuth `fastModelIds` advertises the exact ID. Provider-owned names ending in `-fast` remain ordinary models governed by `availableModelIds`.
+
+### Added
+
+- Added Claude Fable 5.1 with provider-specific pricing, a 1M-token context window, 128K output, always-on adaptive thinking, and exactly `low`, `medium`, `high`, `xhigh`, and `max` efforts. Added its server-side fallback targets, Claude Opus 4.8 and Opus 5, and compatibility controls for thinking binding, forced tool choice, and temperature.
+- Added Gemini 3.8 Flash across supported provider catalogs, including GitHub Copilot. Google and Vertex use a 1,048,576-token context window and 65,536 output tokens with low, medium, and high thinking; other providers retain their own metadata. Added Copilot Claude Fable 5/5.1 and Baseten `zai-org/GLM-5.3-Fast`.
+- Added GPT-6-Astra on OpenAI, OpenAI Codex, Bedrock, OpenRouter, and Vercel AI Gateway, retaining provider-owned IDs, reasoning levels, pricing, and request-wide long-context tiers. Added a provisional Copilot entry with zero costs for unverified pricing; account availability still depends on Copilot's authenticated catalog.
+- Added OpenRouter `microsoft/mai-image-2.6` and `microsoft/mai-image-2.6-flash` image models.
+- Added public `DocumentContent` PDF input for Anthropic Messages and Bedrock Converse. Unsupported models receive a visible placeholder; non-PDF MIME types are rejected, and token estimates measure the encoded document payload.
+- Added public `FallbackContent`, per-turn Anthropic effort persistence, historical effort markers, signed-thinking recovery, and diagnostics for thinking blocks dropped at request start or after server-side fallback.
+- Added `ModelFastRoute`, `resolveRequestedServiceTier`, and `assertPayloadPreservesFastRoute`, plus `AssistantMessageFrameEncoder` and `reduceAssistantMessageFrames` for compact, replayable stream progress.
+- Added `compat.vllmPriority` for servers using priority scheduling, `supportsMaxOutputTokens` for Responses gateways that reject the output cap, and compatibility flags for unsupported temperature and forced-tool-choice fields.
+
+### Changed
+
+- Exported `./utils/*` subpaths for Pi 0.85 runtime packages.
+- Qwen3.8 Max and Flash thinking choices follow models.dev on Qwen Token Plan providers, offering low, medium, and xhigh without off.
+- Responses models supporting `prompt_cache_options`, including Astra, use `ttl: "30m"` for long retention. Earlier models keep the 24-hour legacy field; short and explicit no-cache modes retain capability checks.
+- Assistant-frame reduction reconstructs owned block values rather than deleting fields on externally supplied content, preserving output and field order.
+
+### Fixed
+
+- Fixed Claude Fable temperature rejection across Anthropic, Bedrock, OpenRouter, and Copilot, including sampling defaults that reintroduced `temperature`, `top_p`, or `top_k`. Forced tool choices on Fable 5.1 now fail explicitly across supported APIs, including all OpenAI forcing shapes and Bedrock requests without tools; auto and none remain unchanged.
+- Fixed first-party Anthropic model switches and Fable 5.1 prefix changes by preserving eligible signed reasoning and letting the API drop incompatible blocks. Disabled thinking no longer sends the interleaved-thinking beta, and recovery diagnostics survive empty later reports or failed streams.
+- Fixed mid-stream Anthropic fallback attribution, replay, and billing. Handoff markers survive, serving-model prices apply, earlier output-producing attempts are charged once, and pre-handoff reasoning and unexecuted calls/results are dropped together. Faux-provider replay keeps content indices aligned around fallback markers.
+- Fixed Fable 5.1 OAuth requests rejected as `claude_code_version_too_old` by advertising the verified minimum Claude Code version, `2.1.251`.
+- Fixed Copilot Claude Fable routing through Anthropic Messages and all Fireworks GLM models through OpenAI-compatible completions. Removed retired xAI `grok-build-0.1` and restored Qwen3.8 Flash on Qwen Token Plan Individual.
+- Fixed Codex SSE terminal events without a trailing blank line and assistant-frame start snapshots losing `providerThinkingLevel`.
+- Fixed `NO_PROXY` matching for root domains, subdomains, IPv6, port-scoped entries, and wildcard entries.
+
+## [0.9.18-alpha.7] - 2026-09-05
+
+### Added
+
+- Added OpenRouter's `microsoft/mai-image-2.6` and `microsoft/mai-image-2.6-flash` image models from the Pi 0.85.1 catalog.
+
+## [0.9.18-alpha.6] - 2026-09-04
+
+### Breaking Changes
+
+- **Breaking:** `createGatewayBindingFetch` now requires `binding.fetch()` and always forwards requests verbatim. The `gateway(id).run(...)` universal-endpoint fallback is removed. `baseUrl` and `gateway` options are ignored. Bindings without `fetch()` throw at construction. Point each model's `baseUrl` at `https://workers-binding.ai/ai-gateway/gateways/{gateway}/{provider}`.
+
+### Added
+
+- Added Anthropic per-turn effort persistence, deterministic historical effort markers, and signed-thinking mismatch recovery for supported Claude models across Anthropic Messages transports, including OpenRouter.
+- Added `compat.vllmPriority` to the OpenAI Completions compatibility options. When set, it is sent as the top-level `priority` request field; lower values are handled earlier and the vLLM server default is `0`, so it only takes effect when vLLM runs with `--scheduling-policy priority`. Setting it on a background or batch model defers that model's long prefills behind interactive sessions. Off by default and never set on the generated catalog ([#9004](https://github.com/earendil-works/pi/pull/9004)).
+- `Model.fastRoute` and the `ModelFastRoute` type. This optional field marks a model as the fast-inference variant of another model and carries the upstream routing it needs: the base model it pairs with, the model ID to send upstream, and an optional OpenAI-style `serviceTier`. Presence of this field — never a `-fast` name suffix — is what gives a model fast semantics.
+- Added `AssistantMessageFrameEncoder` and `reduceAssistantMessageFrames` so callers can persist compact, replayable stream progress without the full event stream ([upstream `8b5899dc`](https://github.com/earendil-works/pi/commit/8b5899dce26f9f6b8d313ee6a4b4a8dccbb9bfc2)).
+- Added Gemini 3.8 Flash to the generated provider catalogs. `google` and `google-vertex` publish `gemini-3.8-flash` with a 1,048,576-token context window, 65,536 maximum output tokens, text and image input, and $0.75 input / $3.75 output / $0.075 cache read per million tokens. Thinking is always on, so `off` is denied as on Gemini 3.6 and 3.7 Flash, and `minimal` is denied too because Google publishes only `LOW`, `MEDIUM`, and `HIGH` for this model and states that `MINIMAL` is unsupported. That denial is scoped to 3.8: Gemini 3.5 and 3.6 Flash do publish `MINIMAL` and keep offering it. The model also lands on `opencode`, `openrouter` (`google/gemini-3.8-flash` and `:batch`), and `vercel-ai-gateway` (`google/gemini-3.8-flash`) from those providers' own catalogs ([#9076](https://github.com/earendil-works/pi/issues/9076)).
+- Added `github-copilot/gemini-3.8-flash` from the models.dev Copilot catalog. Atomic consumes that row without supplementing or overriding it; the current metadata provides a 1,000,000-token context window, 64,000 maximum output tokens, text and image input, and `reasoning_effort` values of `low`, `medium`, and `high`. The model routes through Copilot's OpenAI-compatible completions endpoint with Copilot's static headers.
+- Added `github-copilot/claude-fable-5` and `github-copilot/claude-fable-5-1`. The generator uses each model's models.dev metadata, falling back to the models.dev Anthropic row when the Copilot catalog has not published the same model yet; the authenticated Copilot picker still controls which models an account may select.
+- Added `zai-org/GLM-5.3-Fast` to the Baseten catalog from models.dev.
+- Added GPT-6-Astra to the generated OpenAI and OpenAI Codex catalogs with text and image input, 272,000 default input context, 128,000 maximum output, exact `low` through `max` reasoning efforts, tool search, additional tools, and the published $10 input / $1 cache read / $12.50 cache write / $50 output rates per million tokens. Requests above 272,000 aggregate input carry the published $20 / $2 / $25 / $75 request-wide tier. Amazon Bedrock also gains the exact Codex-advertised `openai.gpt-6-astra`, `global.openai.gpt-6-astra`, and `us.openai.gpt-6-astra` IDs, sends the selected reasoning effort through Converse, and uses zero catalog costs until AWS publishes Astra prices. The current OpenRouter catalog contributes `openai/gpt-6-astra` and `openai/gpt-6-astra-pro`; the Vercel AI Gateway contributes `openai/gpt-6-astra` and its provider-owned `openai/gpt-6-astra-fast`. Both dynamic catalogs retain their request-wide long-context prices. Azure OpenAI remains omitted because its authoritative catalog did not advertise Astra.
+- Added a provisional `github-copilot/gpt-6-astra` catalog entry using the Responses API, known Astra capabilities, and zero costs to mark unverified Copilot pricing. Copilot's own models.dev metadata takes precedence when present; account availability and fast sibling entitlement remain controlled by Copilot.
+
+### Changed
+
+- Exported `./utils/*` subpaths required by Pi 0.85 runtime packages.
+- **Breaking:** the **presence** of `Model.fastRoute` — not just its declared tier value — decides the service tier. A route that declares no tier now means *no tier*, so a GitHub Copilot fast variant emits no `service_tier` field and takes no tier cost multiplier whatever the caller passes. Previously a caller's option leaked through on such a route, which contradicted the documented Copilot contract. A model with no route still honors an explicit `serviceTier`.
+- **Breaking:** the OpenAI Responses and ChatGPT Codex Responses adapters now reject a payload hook that changes the `model` or `service_tier` of a model carrying a `fastRoute`, or replaces its request body with a non-object that cannot carry those fields. The error names the model, the violation, and the normal sibling to select instead. A hook could previously send a different model, an ordinary-tier request, or a malformed replacement under the `-fast` identity the caller recorded and is billed for. Hooks keep unrestricted freedom over every other field and over models with no route. New export: `assertPayloadPreservesFastRoute` from `api/openai-responses-shared`.
+- **Breaking:** a fast model variant's declared `service_tier` now wins over a per-request `serviceTier` option. Fast versus normal is model identity, so a caller who wants another tier selects the normal sibling; letting the option win allowed a model that is still selected, recorded, persisted, and billed as `-fast` to route as an ordinary request. A model with no route honors an explicit `serviceTier` exactly as before. Payload hooks may rewrite other fields, but cannot override a fast route's model or tier.
+- **Breaking:** the OpenAI Responses and ChatGPT Codex Responses adapters now default `service_tier` from `model.fastRoute?.serviceTier` when a request supplies no explicit `serviceTier` option, and use that resolved tier for serialization, response-tier resolution, and cost multiplication alike. A fast model variant therefore routes correctly through `Models.stream`/`complete`, `streamSimple`/`completeSimple`, and a provider's stream functions taken directly — previously only a caller that injected the option got the tier, so every other caller was billed and served at normal tier with no warning. New export: `resolveRequestedServiceTier` from `api/openai-responses-shared`.
+- **Breaking:** the OpenAI Responses and ChatGPT Codex Responses adapters now serialize `model` as `model.fastRoute?.upstreamModelId ?? model.id`. A fast variant therefore routes to its base upstream model while the model object — and so the assistant message the adapter emits, its `model` field, and everything downstream that reads it — keeps the canonical `-fast` identity. Callers that previously handed these adapters a pre-substituted model should hand them the canonical model instead.
+- **Breaking:** the `service_tier` cost multiplier in both adapters now keys on `model.fastRoute?.baseModelId ?? model.id`. Without this, `gpt-5.5-fast` would have been priced at the generic 2x priority rate instead of gpt-5.5's 2.5x once the adapters started receiving the canonical model.
+- **Breaking:** `githubCopilotProvider().filterModels` no longer strips every model ID ending in `-fast` from the selectable list. It now exposes a model carrying `fastRoute` only when the OAuth credential's `fastModelIds` advertises that exact ID, and treats a Copilot-owned model that merely ends in `-fast` as an ordinary picker model gated by `availableModelIds`.
+- Qwen3.8 Max and Qwen3.8 Flash no longer offer the `off` thinking level on the `qwen-token-plan`, `qwen-token-plan-cn`, and `qwen-token-plan-individual` providers. Their selectable effort levels now follow models.dev metadata: `low`, `medium`, and `xhigh`.
+- `reduceAssistantMessageFrames` now rebuilds an ended text, thinking, or tool-call block as a value the reducer owns, assembled from the end frame and the rest of the replayed block's own data, instead of deleting optional fields on a value read out of externally supplied frame content. Reduced output is unchanged for every input, including field order and any property the frame carried that the declared block types do not name.
+- OpenAI Responses models that accept `prompt_cache_options`, including GPT-6 Astra, now send `ttl: "30m"` for long prompt-cache retention instead of combining that API with the legacy `prompt_cache_retention: "24h"` field. Earlier Responses models keep the 24-hour field, explicit no-cache mode remains limited to capable models, and short retention omits both controls.
+
+### Fixed
+
+- Removed the retired `grok-build-0.1` preview from the generated xAI catalog.
+- Fixed native Anthropic Messages requests sending the interleaved-thinking beta when thinking was disabled, and preserved request-start thinking-drop diagnostics when a later provider report is empty or the stream fails.
+- Fixed GitHub Copilot Claude Fable requests to use the Anthropic Messages adapter so selected reasoning levels are sent. The generated Copilot catalog now routes `claude-fable-*` alongside the other Claude 4.x/5.x entries ([#8961](https://github.com/earendil-works/pi/issues/8961)).
+- Fixed the generated Fireworks catalog to serve every GLM model through the OpenAI-compatible completions API. Previously only the `glm-5p2` family took that route and newer GLM entries such as `glm-5p3` were generated against the Anthropic-compatible endpoint ([#8978](https://github.com/earendil-works/pi/issues/8978)).
+- Fast-route payload enforcement now rejects `null`, array, and primitive hook replacements before they can reach the OpenAI Responses or ChatGPT Codex transport.
+- Fixed the Workers AI binding transport to use the binding's plain `fetch` passthrough for models migrated to the `workers-binding.ai` base URL, preserving request methods, headers, query strings, and streaming bodies instead of translating requests through the universal-endpoint shim. See **Breaking Changes** for the required base-URL and binding-type migration ([#8287](https://github.com/earendil-works/pi/pull/8287)).
+- Fixed OpenAI Codex SSE parsing to process terminal events that are not followed by a blank line ([#9047](https://github.com/earendil-works/pi/issues/9047)).
+- Fixed the Qwen Token Plan Individual catalog to include Qwen3.8 Flash ([#9021](https://github.com/earendil-works/pi/issues/9021)).
+- Fixed assistant-message frames dropping `providerThinkingLevel` from the start snapshot ([upstream `0fdec07b`](https://github.com/earendil-works/pi/commit/0fdec07ba397)).
 
 ## [0.9.18-alpha.5] - 2026-09-01
 

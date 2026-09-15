@@ -1,9 +1,10 @@
 import { getDurableBackend } from "../durable/factory.js";
 import { isWorkflowRunResumable } from "../durable/resume-eligibility.js";
 import type { ResumableWorkflowEntry } from "../durable/types.js";
+import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { quitAllRuns, quitRun } from "../runs/background/quit.js";
 import { abortToolNode } from "../runs/background/quit-tool-node.js";
-import { interruptAllRuns, interruptRun, pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
+import { pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
 import { workflowHasPausedStages, workflowHasPausedState } from "../runs/background/workflow-lifecycle-aggregate.js";
 import { store } from "../shared/store.js";
 import type { RunSnapshot } from "../shared/store-types.js";
@@ -23,7 +24,6 @@ import {
 	resolveToolRunTarget,
 	resolveToolStageTarget,
 	stageFailureMessage,
-	toolNodePauseRejectionMessage,
 } from "./workflow-targets.js";
 
 export interface WorkflowControlActionDeps {
@@ -31,13 +31,11 @@ export interface WorkflowControlActionDeps {
 	getRuntime: () => ExtensionRuntime;
 	policy: WorkflowExecutionPolicy;
 	ensureWorkflowResourcesLoaded: () => Promise<void> | void;
+	signal?: AbortSignal;
+	onRunAccepted?: (runId: string) => void;
 }
 
-function controlFailure(
-	action: "pause" | "interrupt" | "quit" | "resume",
-	runId: string,
-	error: unknown,
-): WorkflowToolResult {
+function controlFailure(action: "pause" | "quit" | "resume", runId: string, error: unknown): WorkflowToolResult {
 	return {
 		action,
 		runId,
@@ -60,63 +58,6 @@ function resumeControlFailure(runId: string, error: unknown): WorkflowToolResult
 		status: visiblyRunning ? "partial" : "noop",
 		message: `Failed to resume run ${runId}: ${detail}`,
 	};
-}
-
-export async function workflowPauseAction(args: WorkflowToolArgs): Promise<WorkflowToolResult> {
-	const target = resolveToolRunTarget(args, "No in-flight runs to pause.");
-	const action = "pause";
-	if (target.kind === "all") {
-		if (args.stageId !== undefined && args.stageId.length > 0) {
-			return { action, runId: "--all", status: "noop", message: allStageConflictMessage("pause") };
-		}
-		try {
-			const results = await pauseAllRuns({ actor: "agent" });
-			const paused = results.filter((result) => result.ok).length;
-			return {
-				action,
-				runId: "--all",
-				status: paused > 0 ? "paused" : "noop",
-				message: paused > 0 ? `Paused ${paused} run(s).` : "No in-flight runs to pause.",
-			};
-		} catch (error) {
-			return controlFailure(action, "--all", error);
-		}
-	}
-	if (target.kind === "malformed" || target.kind === "not_found")
-		return { action, runId: target.target, status: "noop", message: target.message };
-	const controlNode = resolveControlNodeTarget(target.runId, args.stageId);
-	// Tool nodes have no turn boundary to stop at, so pause rejects them loudly
-	// instead of silently resolving to nothing.
-	if (!controlNode.ok) return { action, runId: target.runId, status: "noop", message: controlNode.message };
-	if (controlNode.kind === "tool") {
-		return {
-			action,
-			runId: target.runId,
-			status: "noop",
-			message: toolNodePauseRejectionMessage(controlNode.name, controlNode.nodeId),
-		};
-	}
-	const stage = resolveToolStageTarget(target.runId, args.stageId);
-	if (!stage.ok) return { action, runId: target.runId, status: "noop", message: stage.message };
-	const stageRunId = stage.runId ?? target.runId;
-	try {
-		const result = await pauseRun(stageRunId, { stageId: stage.stageId, actor: "agent" });
-		return result.ok
-			? {
-					action,
-					runId: result.runId,
-					status: "paused",
-					message: `Paused ${result.paused.length} stage(s) on run ${result.runId}.`,
-				}
-			: {
-					action,
-					runId: stageRunId,
-					status: "noop",
-					message: stageFailureMessage(stageRunId, result.reason, "pause"),
-				};
-	} catch (error) {
-		return controlFailure(action, stageRunId, error);
-	}
 }
 
 export async function workflowReloadAction(
@@ -152,7 +93,7 @@ function bulkQuitFailureMessage(results: Awaited<ReturnType<typeof quitAllRuns>>
 	const outcomes = results
 		.map((result) =>
 			result.ok
-				? `${result.runId}: quit${abandonedToolSuffix(result.abandonedTools)}`
+				? (result.message ?? `${result.runId}: quit${abandonedToolSuffix(result.abandonedTools)}`)
 				: `${result.runId}: ${result.reason}${"message" in result ? ` (${result.message})` : ""}`,
 		)
 		.join(", ");
@@ -201,7 +142,7 @@ function cancelledToolSummary(result: {
 async function quitToolNodeAction(
 	runId: string,
 	nodeId: string,
-	action: "quit" | "interrupt",
+	action: "quit" | "pause",
 ): Promise<WorkflowToolResult> {
 	const aborted = await abortToolNode(runId, nodeId);
 	if (!aborted.ok) {
@@ -253,7 +194,9 @@ export async function workflowQuitAction(args: WorkflowToolArgs): Promise<Workfl
 				failures.length > 0
 					? bulkQuitFailureMessage(results)
 					: quitCount > 0
-						? `Quit ${quitCount} run(s); resume with /workflow resume.`
+						? successes.some((result) => result.message !== undefined)
+							? successes.map((result) => result.message ?? `Run ${result.runId} quit.`).join("\n")
+							: `Quit ${quitCount} run(s); resume with /workflow resume.`
 						: "No in-flight runs to quit.",
 		};
 	}
@@ -270,7 +213,9 @@ export async function workflowQuitAction(args: WorkflowToolArgs): Promise<Workfl
 				action,
 				runId: result.runId,
 				status: "paused",
-				message: `Run ${result.runId} quit and can be resumed with /workflow resume.${cancelledToolSummary(result)}`,
+				message:
+					result.message ??
+					`Run ${result.runId} quit and can be resumed with /workflow resume.${cancelledToolSummary(result)}`,
 			};
 		}
 		return {
@@ -289,21 +234,24 @@ export async function workflowQuitAction(args: WorkflowToolArgs): Promise<Workfl
 	}
 }
 
-export async function workflowInterruptAction(args: WorkflowToolArgs): Promise<WorkflowToolResult> {
-	const target = resolveToolRunTarget(args, "No in-flight runs to interrupt.");
-	const action = "interrupt";
+export async function workflowPauseAction(args: WorkflowToolArgs): Promise<WorkflowToolResult> {
+	const target = resolveToolRunTarget(args, "No in-flight runs to pause.");
+	const action = "pause";
 	if (target.kind === "all") {
 		if (args.stageId !== undefined && args.stageId.length > 0) {
-			return { action, runId: "--all", status: "noop", message: allStageConflictMessage("interrupt") };
+			return { action, runId: "--all", status: "noop", message: allStageConflictMessage("pause") };
 		}
 		try {
-			const results = await interruptAllRuns();
-			const interrupted = results.filter((result) => result.ok).length;
+			const results = await pauseAllRuns();
+			const paused = results.filter((result) => result.ok).length;
 			return {
 				action,
 				runId: "--all",
-				status: interrupted > 0 ? "paused" : "noop",
-				message: interrupted > 0 ? `Interrupted ${interrupted} run(s).` : "No in-flight runs to interrupt.",
+				status: paused > 0 ? "paused" : "noop",
+				message: [
+					paused > 0 ? `Paused ${paused} run(s).` : "No in-flight runs to pause.",
+					...results.flatMap((result) => (result.ok && result.message !== undefined ? [result.message] : [])),
+				].join("\n"),
 			};
 		} catch (error) {
 			return controlFailure(action, "--all", error);
@@ -318,22 +266,24 @@ export async function workflowInterruptAction(args: WorkflowToolArgs): Promise<W
 	if (!stage.ok) return { action, runId: target.runId, status: "noop", message: stage.message };
 	const stageRunId = stage.runId ?? target.runId;
 	try {
-		const result = await interruptRun(stageRunId, { stageId: stage.stageId });
+		const result = await pauseRun(stageRunId, { stageId: stage.stageId });
 		if (result.ok) {
 			return {
 				action,
 				runId: result.runId,
 				status: "paused",
-				message: stage.stageId
-					? `Stage ${stage.stageId} interrupted on run ${result.runId} and can be resumed.`
-					: `Run ${result.runId} interrupted and can be resumed.`,
+				message:
+					result.message ??
+					(stage.stageId
+						? `Stage ${stage.stageId} paused on run ${result.runId} and can be resumed.`
+						: `Run ${result.runId} paused and can be resumed.`),
 			};
 		}
 		return {
 			action,
 			runId: stageRunId,
 			status: "noop",
-			message: stageFailureMessage(stageRunId, result.reason, "interrupt"),
+			message: stageFailureMessage(stageRunId, result.reason, "pause"),
 		};
 	} catch (error) {
 		return controlFailure(action, stageRunId, error);
@@ -342,22 +292,29 @@ export async function workflowInterruptAction(args: WorkflowToolArgs): Promise<W
 
 async function resumeDurableShadow(
 	runId: string,
-	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy" | "ensureWorkflowResourcesLoaded">,
+	deps: Pick<
+		WorkflowControlActionDeps,
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted"
+	>,
 	budget?: WorkflowToolArgs["budget"],
 ): Promise<WorkflowToolResult> {
 	const runtime = deps.getRuntime();
 	let warning: string | undefined;
 	try {
 		await deps.ensureWorkflowResourcesLoaded();
+		deps.signal?.throwIfAborted();
 		// Targeted read: the shadow run id is exact, so avoid a full catalog scan.
 		if (runtime.prepareDurableResumableForIds !== undefined) await runtime.prepareDurableResumableForIds([runId]);
 		else await runtime.prepareDurableResumable(runId);
 	} catch (error) {
 		warning = formatWorkflowResourceLoadWarning(error);
 	}
+	deps.signal?.throwIfAborted();
 	const resumed = await runtime.resumeDurableWorkflow(runId, {
 		policy: deps.policy,
 		actor: "agent",
+		signal: deps.signal,
+		onRunAccepted: deps.onRunAccepted,
 		...(budget === undefined ? {} : { budget }),
 	});
 	const message = warning === undefined ? resumed.message : `${warning}\n\n${resumed.message}`;
@@ -371,13 +328,16 @@ async function resumeDurableShadow(
 
 async function resumePreparedDurableTarget(
 	runId: string,
-	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy">,
+	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy" | "signal" | "onRunAccepted">,
 	budget?: WorkflowToolArgs["budget"],
 ): Promise<WorkflowToolResult> {
 	try {
+		deps.signal?.throwIfAborted();
 		const resumed = await deps.getRuntime().resumeDurableWorkflow(runId, {
 			policy: deps.policy,
 			actor: "agent",
+			signal: deps.signal,
+			onRunAccepted: deps.onRunAccepted,
 			...(budget === undefined ? {} : { budget }),
 		});
 		return {
@@ -393,17 +353,22 @@ async function resumePreparedDurableTarget(
 async function resolveExplicitDurableTarget(
 	target: string,
 	args: WorkflowToolArgs,
-	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy" | "ensureWorkflowResourcesLoaded">,
+	deps: Pick<
+		WorkflowControlActionDeps,
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted"
+	>,
 	liveRuns: readonly RunSnapshot[] = [],
 ): Promise<WorkflowToolResult> {
 	const runtime = deps.getRuntime();
 	let durable: readonly ResumableWorkflowEntry[];
 	try {
 		await deps.ensureWorkflowResourcesLoaded();
+		deps.signal?.throwIfAborted();
 		durable = await runtime.prepareDurableResumable(target);
 	} catch (error) {
 		return controlFailure("resume", target, error);
 	}
+	deps.signal?.throwIfAborted();
 	const resolved = resolveWorkflowResumeTarget(target, liveRuns, durable, []);
 	if (resolved.kind === "malformed") {
 		return { action: "resume", runId: target, status: "noop", message: resolved.message };
@@ -440,8 +405,12 @@ async function resolveExplicitDurableTarget(
 
 export async function workflowResumeAction(
 	args: WorkflowToolArgs,
-	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy" | "ensureWorkflowResourcesLoaded">,
+	deps: Pick<
+		WorkflowControlActionDeps,
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted"
+	>,
 ): Promise<WorkflowToolResult> {
+	deps.signal?.throwIfAborted();
 	const target = resolveToolRunTarget(args, "No active run to resume.");
 	if (target.kind === "all")
 		return { action: "resume", runId: "--all", status: "noop", message: "Resume does not support --all." };
@@ -469,9 +438,10 @@ export async function workflowResumeAction(
 			message: `Workflow ${target.runId} has no durable checkpoint or pending prompt progress and is not resumable.`,
 		};
 	}
-	if (!backend.isWorkflowLoadable(target.runId)) {
+	if (toolControlRegistry.runControl(target.runId) === undefined && !backend.isWorkflowLoadable(target.runId)) {
 		try {
 			await deps.ensureWorkflowResourcesLoaded();
+			deps.signal?.throwIfAborted();
 			const runtime = deps.getRuntime();
 			if (runtime.prepareDurableResumableForIds !== undefined)
 				await runtime.prepareDurableResumableForIds([target.runId]);
@@ -479,6 +449,7 @@ export async function workflowResumeAction(
 		} catch {
 			// Compatibility preparation remains best-effort before the authoritative check.
 		}
+		deps.signal?.throwIfAborted();
 		if (!backend.isWorkflowLoadable(target.runId)) {
 			store.removeRun(target.runId);
 			return { action: "resume", runId: target.runId, status: "noop", message: `Run not found: ${target.runId}` };
@@ -505,9 +476,12 @@ export async function workflowResumeAction(
 		} catch (error) {
 			warning = formatWorkflowResourceLoadWarning(error);
 		}
+		deps.signal?.throwIfAborted();
 		const continuation = await deps.getRuntime().resumeFailedRun(stageRunId, stage.stageId, {
 			policy: deps.policy,
 			actor: "agent",
+			signal: deps.signal,
+			onRunAccepted: deps.onRunAccepted,
 			...(args.budget === undefined ? {} : { budget: args.budget }),
 		});
 		const message = warning === undefined ? continuation.message : `${warning}\n\n${continuation.message}`;
@@ -537,7 +511,9 @@ export async function workflowResumeAction(
 							: `No paused stages on run ${result.runId}.`
 						: `Resumed ${result.resumed.length} stage(s) on run ${result.runId}${args.message ? ` with message: "${args.message}"` : ""}.`
 					: `Snapshot available: run ${result.runId} (${result.snapshot.name}) — status: ${result.snapshot.status}, stages: ${result.snapshot.stages.length}`);
-			const status = result.mode === "partial" ? "partial" : noPausedProgress ? "noop" : "ok";
+			const noContinuation =
+				result.mode === "not_resumable" || (result.mode === "snapshot" && result.snapshot.status === "blocked");
+			const status = result.mode === "partial" ? "partial" : noContinuation || noPausedProgress ? "noop" : "ok";
 			return { action: "resume", runId: result.runId, status, message };
 		}
 		return { action: "resume", runId: stageRunId, status: "noop", message: `Run not found: ${stageRunId}` };

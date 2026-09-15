@@ -1,8 +1,9 @@
 import type { ExtensionAPI } from "@bastani/atomic";
 import type { InboundMessageEntry } from "./intercom-utils.js";
 import type { IntercomContext } from "./reply-tracker.js";
+import type { Message } from "./types.js";
 
-export type IncomingMessageDelivery = "trigger" | "followUp" | "prelude";
+export type IncomingMessageDelivery = "trigger" | "interrupt" | "followUp" | "prelude";
 export type IncomingMessageSender = (
   entry: InboundMessageEntry,
   delivery: IncomingMessageDelivery,
@@ -23,7 +24,7 @@ export function createIncomingMessageSender(input: {
     if (!input.canDeliver(generation)) {
       return Promise.reject(new Error("Intercom session retired before inbound delivery"));
     }
-    if (delivery === "trigger" && trackReplyContext) {
+    if ((delivery === "trigger" || delivery === "interrupt") && trackReplyContext) {
       input.queueTurnContext(turnContext ?? { from: entry.from, message: entry.message, receivedAt: Date.now() });
     }
     const baseOptions = {
@@ -31,7 +32,9 @@ export function createIncomingMessageSender(input: {
       persistWhenStreaming: true,
       ...(stageAdmissionBarrier ? { stageAdmissionBarrier } : {}),
     } as const;
-    const options = delivery === "trigger"
+    const options = delivery === "interrupt"
+      ? { ...baseOptions, triggerTurn: true, deliverAs: "interrupt" } as const
+      : delivery === "trigger"
       ? { ...baseOptions, triggerTurn: true } as const
       : delivery === "followUp" ? { ...baseOptions, deliverAs: "followUp" } as const : baseOptions;
     return Promise.resolve(input.pi.sendMessage(buildIncomingCustomMessage(entry), options));
@@ -48,6 +51,28 @@ export function framePreStartPendingStageMessage(entry: InboundMessageEntry): In
 	return {
 		...entry,
 		bodyText: `**Messages received before you started**\n\nSent: ${framePendingStageTimestamp(entry.message.timestamp)}\n\n${entry.bodyText}`,
+	};
+}
+
+export function isDeliveryFeedback(message: Message): boolean {
+  return Boolean(message.replyTo) && message.replyError !== undefined;
+}
+
+/** Delivery feedback describes a past send, not the recipient's current activity. */
+export function frameDeliveryFeedback(entry: InboundMessageEntry): InboundMessageEntry {
+  return {
+    ...entry,
+    replyCommand: undefined,
+    bodyText: `**Intercom delivery failed**\n\nSent: ${framePendingStageTimestamp(entry.message.timestamp)}\n\n${entry.bodyText}`,
+  };
+}
+
+/** Supervisor notifications are send-time snapshots, even when delivery precedes completion. */
+export function frameHistoricalSupervisorUpdate(entry: InboundMessageEntry): InboundMessageEntry {
+	if (entry.channel !== "supervisor" || entry.message.expectsReply === true || entry.message.replyTo) return entry;
+	return {
+		...entry,
+		bodyText: `**Historical supervisor update — snapshot at send time**\n\nSent: ${framePendingStageTimestamp(entry.message.timestamp)}\n\nThis is not current task status; a later correction or final result supersedes this update.\n\n${entry.bodyText}`,
 	};
 }
 

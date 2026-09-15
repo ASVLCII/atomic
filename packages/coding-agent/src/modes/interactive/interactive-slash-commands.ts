@@ -1,7 +1,7 @@
 import { computeCacheWaste } from "../../core/cache-stats.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { createChildProcessEnvironment } from "../../utils/child-process.ts";
-import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.ts";
+import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.js";
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import {
 	BorderedLoader,
@@ -176,11 +176,7 @@ InteractiveModeBase.prototype.handleImportCommand = async function (
 	};
 
 	try {
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-		}
-		this.statusContainer.clear();
+		InteractiveModeBase.prototype.clearWorkingLoader.call(this);
 		const result = await this.runtimeHost.importFromJsonl(inputPath);
 		if (result.cancelled) {
 			this.showStatus("Import cancelled");
@@ -228,10 +224,12 @@ InteractiveModeBase.prototype.handleShareCommand = async function (this: Interac
 
 	// Share an export-only JSONL copy carrying context for the viewer. The
 	// persisted session is not mutated.
-	const tmpFile = path.join(os.tmpdir(), "session.jsonl");
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "atomic-share-"));
+	const tmpFile = path.join(tempDir, "session.jsonl");
 	try {
 		this.session.exportToJsonl(tmpFile, { includeShareContext: true });
 	} catch (error: unknown) {
+		fs.rmSync(tempDir, { recursive: true, force: true });
 		this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
 		return;
 	}
@@ -249,7 +247,7 @@ InteractiveModeBase.prototype.handleShareCommand = async function (this: Interac
 		this.editorContainer.addChild(this.editor);
 		this.ui.setFocus(this.editor);
 		try {
-			fs.unlinkSync(tmpFile);
+			fs.rmSync(tempDir, { recursive: true, force: true });
 		} catch {
 			// Ignore cleanup errors
 		}
@@ -312,15 +310,7 @@ InteractiveModeBase.prototype.handleShareCommand = async function (this: Interac
 	}
 };
 
-InteractiveModeBase.prototype.handleCopyCommand = async function (
-	this: InteractiveModeBase,
-	options: { preferSelection?: boolean } = {},
-): Promise<void> {
-	if (options.preferSelection && this.getFullscreenCopyOnSelect() === false) {
-		const selectionCopied = await this.copyActiveFullscreenSelection();
-		if (selectionCopied !== undefined) return;
-	}
-
+InteractiveModeBase.prototype.handleCopyCommand = async function (this: InteractiveModeBase): Promise<void> {
 	const text = this.session.getLastAssistantText();
 	if (!text) {
 		this.showError("No agent messages to copy yet.");

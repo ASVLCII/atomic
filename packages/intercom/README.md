@@ -55,9 +55,9 @@ A session becomes intercom-connected when all of these are true:
 - the model or user has invoked an Intercom tool, `/intercom`, or the `ALT+M` overlay in that session
 - the local broker is running or can be auto-started
 
-The session list only shows intercom-connected sessions, not every open Pi process on the machine.
+The session list, ALT+M picker, and group counts include connected agent sessions only. Internal workflow routing/control connections, model-less `ctx.ui` prompts, and `ctx.tool` nodes are hidden and cannot receive ordinary messages, even by a known ID or through a supervisor route. This includes run-level prompts and retained completed synthetic prompt stages. An agent executing a tool, including `tool:workflow`, or awaiting human input remains visible and messageable.
 
-If a session is unnamed, intercom exposes a runtime-only fallback alias like `subagent-chat-1a2b3c4d-1111-4222-8333-123456789abc` so other sessions can still target it. That alias is not persisted as the session title, so resume pickers can keep showing the transcript snippet instead of a generic `session-...` name.
+Unnamed sessions retain a runtime-only alias such as `subagent-chat-1a2b3c4d-1111-4222-8333-123456789abc` for name lookup. Agent lists omit this redundant alias and lead with the copyable full session ID. Meaningful names remain secondary metadata; resume titles are unchanged.
 
 ## Quick Start
 
@@ -76,10 +76,10 @@ The agent can list sessions and send messages using the `intercom` tool. Tool ca
 ```typescript
 // List active sessions
 intercom({ action: "list" })
-// → **Current session:**
-// → • executor (20d43841-1111-4222-8333-123456789abc) — ~/projects/api (claude-sonnet-4) [self, idle]
-// → **Other sessions:**
-// → • research (6332faab-1111-4222-8333-123456789abc) — ~/projects/api (claude-sonnet-4) [same cwd, thinking]
+// → **Current session** (groups: default):
+// → - `20d43841-1111-4222-8333-123456789abc` [self, idle] ~/projects/api (claude-sonnet-4) name: executor
+// → **Other visible sessions and workflow stages:**
+// → - `6332faab-1111-4222-8333-123456789abc` [same cwd, thinking] ~/projects/api (claude-sonnet-4) name: research
 
 // Add a named membership (it is created if no session is there yet)
 intercom({ action: "join", group: "api-review" })
@@ -133,6 +133,8 @@ The reply hint (enabled by default) points to `intercom({ action: "reply", ... }
 
 When a blocking `intercom.ask` targets a workflow stage that has already completed, Atomic uses the stage's retained conversation as a post-mortem chat. It automatically schedules a new turn in that exact conversation, preserving the original ask text and sender/thread correlation, so the target can answer with ordinary `intercom.reply` and the waiting sibling continues without a manual workflow follow-up. The completed stage and workflow DAG remain terminal. The workflow router has single-owner completion semantics: once it claims the ask, later late-message listeners preserve its completion promise regardless of bundled extension registration order. Parent and unrelated sessions cannot satisfy the child-to-child waiter. Deleted, unavailable, non-resumable, or failed-to-reopen targets return a bounded actionable ask error.
 
+Noninteractive subagent children are different: after completion, failure, interruption, or cancellation they cannot reopen to answer an ask. New asks fail immediately with an explicit terminal-child error, even if a retained registration still shows `idle`; asks already admitted fail on termination unless their reply has settled. Launch a fresh child with explicit context for follow-up work. Live interactive idle sessions remain askable, and all `send` transport semantics remain unchanged.
+
 When a blocking ask reaches a sibling workflow stage during an active model/tool turn, the target reserves it synchronously in the open stage generation before any asynchronous foreground-owner detach handshake. Queue insertion waits inside that reservation, and stage finalization drains it before publishing the terminal snapshot. This prevents a structured-output or other terminal tool call from overtaking a mid-turn ask. If destination-side admission genuinely cannot complete, the asker receives an exact-thread actionable error instead of consuming the full 10-minute timeout.
 
 For delegated children, queued messages and terminal lifecycle notices are ordered per child. Intercom claims the terminal child's pre-terminal ordinary entries in FIFO order and atomically admits that prelude together with the interrupted, completed, or failed notice. A process-local companion bridge covers lazily loaded extensions whose event buses are distinct, while exact terminal-identity deduplication prevents double admission even when the successful terminal dispatch has no queued prelude. Failed dispatches remain retryable, and each terminal child identity is admitted only once. Other children's entries remain independently queued, messages are not discarded, terminal admission does not wait for a separate model turn, and correlated ask replies still bypass unrelated queued sends.
@@ -154,7 +156,7 @@ Verify they see each other from either session:
 
 ```typescript
 intercom({ action: "list" })
-// → • worker — ~/projects/api (claude-sonnet-4) [idle]
+// → - `6332faab-1111-4222-8333-123456789abc` [same cwd, idle] ~/projects/api (claude-sonnet-4) name: worker
 ```
 
 ### The Conversation
@@ -183,6 +185,11 @@ intercom({
 ```
 
 To coordinate two plain chat sessions without changing startup config, have each call `intercom({ action: "join", group: "NAME" })`. Joining adds a membership without changing the session ID or removing existing memberships. Calls to `list`, `send`, and `ask` can then reach any session sharing at least one membership. Use `intercom({ action: "groups" })` to discover every available name, connected-session count, and membership marker. Call `intercom({ action: "leave", group: "NAME" })` to remove one membership while keeping the others, or bare `leave` to reset to the original home group. `contact_supervisor` keeps its dedicated capability-based cross-group behavior.
+
+Joined memberships survive broker reconnects without replacing the session's
+startup identity. An ordinary host can therefore control several joined workflow
+invocations, while a workflow worker cannot gain another invocation's parent-control
+authority by joining its group and reconnecting.
 
 **Worker finds something unexpected — escalates and waits:**
 ```typescript
@@ -245,21 +252,21 @@ This workflow uses Atomic's in-process subagent admission. When the runtime admi
 
 `contact_supervisor` is registered from the typed admission record. The record binds the supervisor target, canonical child identity, child index, session name, and broker-issued capability to the child session; these values are not inherited from environment variables. If the parent does not grant supervisor coordination, the session falls back to the regular `intercom` tool.
 
-Parent-targeted decisions, interviews, and `intercom.ask` make the current child terminal for continuation. The parent receives the original question, ordered attachments, agent identity, and a dynamic `[TASK_CONTEXT]` handoff for a fresh child with a new run identity. Ordinary Intercom detach for sends, progress updates, and non-parent asks remains separate.
+Parallel blocking requests wait only in their requesting child and continue that same execution after the supervisor's correlated Intercom reply. Active and queued siblings retain their identities and execution capacity. A single-child claimed parent request instead retains the terminal `[TASK_CONTEXT]` handoff for a fresh child.
 
 ### Three Reasons
 
 | Reason | Behavior | Use When |
 |--------|----------|----------|
-| `need_decision` | In a claimed foreground run, ends the child and returns a fresh-child handoff; otherwise uses the normal ask fallback | The subagent is blocked, uncertain, needs approval, or faces a product/API/scope decision |
-| `interview_request` | In a claimed foreground run, ends the child and returns structured questions in a fresh-child handoff | The subagent needs multiple machine-readable answers from the supervisor in one exchange |
+| `need_decision` | In parallel, waits for a correlated reply in the same child; a single-child claimed request retains its fresh-child handoff | The subagent is blocked, uncertain, needs approval, or faces a product/API/scope decision |
+| `interview_request` | In parallel, waits for structured answers in the same child; a single-child claimed request retains its fresh-child handoff | The subagent needs multiple machine-readable answers from the supervisor in one exchange |
 | `progress_update` | Fire-and-forget update to the supervisor | Meaningful progress or unexpected discoveries that change the plan |
 
 Do not use `contact_supervisor` for routine completion handoffs. Return the final subagent result normally.
 
 Cross-group delivery uses a dedicated broker protocol. Ordinary raw `send` frames always remain group-isolated and are rejected if they include a forged `channel: "supervisor"` marker. A child can cross groups only after its broker-issued capability has bound its registered socket to the exact supervisor. The broker adds the `supervisor` channel marker to validated inbound traffic so parent relays can distinguish it. Replies cross back only when `replyTo` matches a recorded supervisor message in the exact reverse direction; fabricated thread IDs do not bypass isolation.
 
-During a foreground subagent run, parent-targeted decisions, interviews, and asks are claimed before broker delivery or reply-waiter admission. The current child ends and its parent tool call receives the fresh-start handoff. Parallel claims interrupt active siblings, prevent queued tasks from launching, and retain no sibling set for later bare-run-ID continuation. Sends, progress updates, and asks to other peers retain the exact-child probe/commit detach path and ordinary Intercom delivery behavior.
+Parallel asks, decisions, interviews, sends, and progress updates use ordinary Intercom delivery. The exact-child probe/commit handshake may release foreground observations so the parent can reply; it never cancels the batch or discards queued siblings. Only blocking requests wait for a reply. Targeted cancellation and owner/batch cleanup remain separate. Single-child claimed parent asks retain their source-side terminal fresh-start handoff.
 
 ### Example: Blocked Subagent Asks for Guidance
 
@@ -268,7 +275,8 @@ contact_supervisor({
   reason: "need_decision",
   message: "The auth service returns 403 instead of 401 for expired tokens. Should I treat 403 as a re-auth trigger or a hard failure?"
 })
-// → Parent receives a [TASK_CONTEXT] handoff and launches a fresh child with the answer.
+// → In parallel, the supervisor replies through Intercom and this child continues.
+// → A single-child claimed request instead returns a [TASK_CONTEXT] handoff.
 ```
 
 ### Example: Structured Supervisor Interview
@@ -285,7 +293,7 @@ contact_supervisor({
     ]
   }
 })
-// → Parent includes the structured supervisor answer in a fresh child's task.
+// → In parallel, the structured Intercom reply returns to this child's tool call.
 ```
 
 ### Example: Progress Update
@@ -335,7 +343,7 @@ The supervisor can reply with plain JSON or a fenced `json` block. If the reply 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `action` | string | `"list"`, `"groups"`, `"join"`, `"leave"`, `"send"`, `"ask"`, `"reply"`, `"pending"`, or `"status"` |
-| `to` | string | Exact session name/full session ID, or `<runId>:<stageKey>` for `send` to a not-yet-started workflow stage (for send/ask, or targeted reply) |
+| `to` | string | Exact session name/full session ID, or `workflow:<rootRunId>/<segment>[/<segment>...]`; `*` matches one segment and `**` any depth. Sends support pending/future patterns and broadcast; `ask` requires a live target. |
 | `message` | string | Message text (for send/ask/reply) |
 | `attachments` | array | Optional `file`, `snippet`, or `context` attachments |
 | `replyTo` | string | Optional message ID for threading or replying to an `ask` |
@@ -367,13 +375,15 @@ Only registered in sessions where `pi-subagents` supplied the required child bri
 
 **`list`** — Keeps session-listing semantics: returns the current session and every active session sharing at least one membership. Pass `group` for a read-only view of one group.
 
-Live target lookup accepts only an exact full Intercom session ID or an exact case-insensitive session name. `intercom list` also returns materialized workflow-stage rows labeled `PENDING` or `RUNNING`, with canonical `<runId>:<stageId>` targets and actual groups. From the main chat, join `workflow:<rootRunId>` before controlling those targets. An eligible invocation member has directional list/send/live-ask control over stages in owned `workflow:<rootRunId>/...` subgroups. A subgroup stage or another workflow root cannot turn a mutable join into parent control; sibling subgroups stay isolated, and explicit `group: "default"` remains non-owned.
+Live target lookup accepts only an exact full Intercom session ID or an exact case-insensitive session name. Join `workflow:<rootRunId>` and use `intercom list` to see materialized `PENDING`/`RUNNING` workflow stages with canonical `workflow:<rootRunId>/<segment>[/<segment>...]` paths, plus possible future literals, globs, nested paths, and their queued counts. `*` matches one segment and `**` any depth. `workflow:<rootRunId>/**` reaches live stages now and remains sticky for every future stage until root termination; narrower patterns behave the same for their matches. A valid path outside the known set queues with `notInKnownSet` and settles undeliverable at terminal only if never delivered. Use `ask` only on live targets. An eligible invocation member has directional list/send/live-ask control over stages in owned `workflow:<rootRunId>/...` subgroups. A subgroup stage or another workflow root cannot turn a mutable join into parent control; sibling subgroups stay isolated, and explicit `group: "default"` remains non-owned.
+
+When multiple live agent stages share a name, `ask` refuses the ambiguous target and recommends an exact stage-ID path. Name-based `send` keeps sticky delivery to matching agents, even when a prompt or tool shares the same name. Custom hosts may set `recipientPurpose` to exactly `"agent"` or `"control"` on registration and workflow roster entries; omission means legacy agent behavior. Malformed values (including `null`) are rejected, and presence updates cannot change a session's registered purpose. Host roster-update completion includes a same-connection broker round trip before subsequent discovery.
 
 **`send`** — Sends through ordinary Intercom. Live workflow-stage sessions receive messages immediately and return `delivered`. Known pending invocation-owned stages queue durably and return the distinct `queued` result with its FIFO position; a main-chat session that explicitly joined the owning invocation group may use that route. Pending `group: "default"` stages remain ineligible, and an ineligible attempt is refused with `Target workflow run is in a different intercom group`. Each exact run/stage key retains at most 50 queued messages; the next send is refused rather than evicting an older one. Delivery occurs before the first model turn under **Messages received before you started**, with sender identity and `Sent:` timestamp separate from the task prompt. Resume/replay, broker restart, and stage-attempt restart preserve exactly-once delivery by logical message ID. Skipped, cancelled, and terminal-before-initialization destinations make pending messages undeliverable and notify the sender. If the sender reconnects with a new broker UUID, notification fallback requires one unique same-group match for the immutable registration-time name; mutable presence names/groups, cross-group matches, and ambiguous duplicates are rejected. The broker trusts that initial name/group as host-orchestration metadata, while the original display/provenance remains unchanged in the durable record. Live sends remain immediate by default; `confirmSend: true` still enables confirmation for non-reply sends.
 
 **`ask`** — Sends a message and waits for a live recipient to reply (10-minute timeout). Invocation control supports a live ask into an owned isolated subgroup, and the exact broker-recorded reply resolves the waiting tool call at the asker without opening reverse or lateral group access. Ask to an uninitialized stage remains refused with `pending_stage_ask_unsupported`; use queued `send` instead, because holding a reply waiter until a stage eventually starts would be unbounded. A recipient disconnect after live delivery fails only that peer's exact wait promptly; the timeout remains the backstop while the recipient stays connected. Up to `maxPendingAsks` blocking asks (default: 6) may run concurrently, including same-target and mixed-target fan-out. Replies resolve by exact sender and message ID, so out-of-order replies cannot cross-settle another call. When capacity is full, new asks receive a structured refusal.
 
-**`reply`** — Replies to the current intercom-triggered message if there is one. Otherwise it falls back to the single unresolved inbound ask. If multiple asks are pending, pass an exact name/full session ID in `to`, or the listed message ID in `replyTo`; use `pending` to inspect them first. `replyTo` also disambiguates multiple asks from the same sender. Under the hood this is still a normal `send` with the exact `replyTo` value.
+**`reply`** without selectors replies to the current intercom-triggered message, or otherwise the single unresolved inbound ask. Explicit `to` selects a pending ask from that exact name/full session ID, even during another sender's turn. If that sender has multiple asks, use `pending` and pass the exact message ID as `replyTo`. Explicit `replyTo` selects only that pending ask or the exact active ordinary message; stale, unknown, or empty IDs fail instead of falling back. When both selectors are supplied, the sender must match the selected thread. A successful reply keeps that sender/thread pair across internal retries.
 
 **`pending`** — Lists unresolved inbound asks with sender, message ID, elapsed time, and a short preview. Useful when replying after the original triggered turn.
 
@@ -453,7 +463,25 @@ graph TB
 
 The broker is a standalone TypeScript process that manages session registration and message routing. It auto-spawns when the first session that invokes Intercom needs it and exits after 5 seconds when it last has no registered sessions, including brokers that never received a connection and sockets that close before register. Clients reconnect automatically if the broker disappears and later comes back. A failed reconnect schedules the next attempt on a bounded backoff (1s, 2s, 5s, 10s, then 30s) once it releases reconnect ownership, so a transient failure never leaves a live session with nothing owning recovery; a failed explicit tool or overlay connection still returns its error to the caller and leaves the retry behind. A reconnect that fails after the broker already accepted it closes that connection first, so a session never appears twice in `intercom list`.
 
+Each `send`, `ask`, or `reply` invocation retries typed recoverable disconnects internally up to three times, after delays of 1, 2, and 5 seconds. Retries keep the same message ID, exact arguments, attachment order and presence, and reply route. The model does not supply or receive a retry token; existing integrations must remove `retryToken`, which is now refused without sending. Every new invocation remains a fresh operation, even with identical text. Confirmation happens once, and neither retries nor renewed reply waits extend the original 11-minute operation deadline.
+
+Lazy initialization before delivery has a separate limit of three reconnect retries on the same schedule. If that phase stops, the tool reports `outcome: "not_sent"`. The initialization wrapper never re-executes a delivery that has already started.
+
+Once recovery starts, intermediate nondelivery or authority uncertainty/capacity refusal preserves that identity for the remaining attempts. Delivered/queued success ends recovery; unrelated errors and cancellation stop it. A receipt received during cancellation remains success. Unresolved recovery, or an accepted ask ending without a reply, returns a terminal error with `outcome: "unknown"` and a warning not to repeat automatically because delivery may already have occurred. Check with the recipient before intentionally sending again. Initial nondelivery and unrelated pre-delivery failures do not start recovery.
+
+The broker keeps accepted-operation authority for 12 minutes in `delivered-messages.sqlite`. It stores canonical signatures only as fixed keyed SHA-256 HMAC digests, with the random key in `delivered-messages.key`; message text and attachment contents never reach SQLite, and the key prevents offline guesses for low-entropy messages by other local users. On POSIX the Intercom directory is corrected to `0700` and database/WAL/SHM/key artifacts to `0600`; missing or malformed key/database pairs and corrupt digest records fail closed. The broker retains at most 10,000 live authority records and 64 MiB of digest/routing authority.
+
+The broker reserves an identity durably before forwarding, then marks it accepted after confirmed write and before acknowledging the sender. This survives broker replacement without redelivery. A deduplicated ask remains answerable after reconnect: implicit public `reply` uses the exact recorded sender ID while it is live, even alongside a same-name peer; only a departed ID falls back to authorized reconnect/name resolution, where ambiguity and changed identity/groups fail without sending. An implicit reply retry also retains its original sender/question snapshot, so later inbound asks cannot redirect or invalidate it. Explicit `to` and `replyTo` remain verbatim and `requirePendingReply` still binds the exact pending thread. Legacy sends without logical-target metadata retain transport-target behavior.
+
+Retry state is independently bounded and fails closed at pressure. A fresh client operation reserves one of 1,000 identity slots before consuming an ID, showing confirmation UI, resolving its target/reply route, or sending; existing internal retries remain available when full. The invocation releases its client retry state on exit without deleting broker authority. The broker refuses new delivery rather than evicting live authority, then accepts again after TTL cleanup. The local subagent result relay reserves before its chat side effect and accepts before positive acknowledgement. It refuses the 10,001st live ID or an uncertain replay without performing the side effect. SQLite transactions serialize replacement-broker access.
+
+A workflow stage warming up before its heavy module exists is the one case the reconnect backoff cannot own, so the lightweight wrapper retries that warm-up on the same bounded schedule. When those attempts run out it writes nothing to the console: it hands the stage's pending delivery a typed terminal reason through the delivery contract's required `fail(reason)`, and the workflow side fails that stage with a stage-scoped, non-retryable error instead of leaving it waiting on `pendingStageDelivery.ready()`. No model retry or fallback candidate is spent on it, since every candidate would be refused the same instructions. Queued messages are left queued rather than delivered to a stage that will not read them.
+
 Messages use length-prefixed JSON over a local socket/pipe transport (4-byte length + JSON payload) to handle fragmentation properly. The protocol includes request correlation for session listing, explicit delivery failures, and validation for malformed or out-of-order messages.
+
+Host registrations may declare the immutable `recipientPurpose` as `"agent"` or `"control"`; omission retains legacy agent behavior. Dedicated pending-stage route clients register as controls. Presence, name, status, and membership updates cannot change that purpose. The broker keeps control connections for route ownership while excluding them from recipient discovery and ordinary delivery. Known `ctx.ui` prompt and `ctx.tool` paths are rejected before speculative future-stage queueing; wildcard queues remain available for future agents.
+
+Workflow roster announcements keep node `recipientPurpose` separate from `routeEligible`: a hidden pending row does not make a genuine live agent ineligible. Internal run-parent metadata carries the uniquely resolved boundary names and IDs, so nested tool paths are refused by the broker before invoking their route owner. Materialized run-ID segments retain their existing precedence and may occur at any depth.
 
 Async extension work (startup, inbound flushes, reconnects, overlays, and relays) no-ops if the session shuts down or reloads before it settles.
 
@@ -462,6 +490,8 @@ Runtime files live under the active agent directory. Atomic defaults to `~/.atom
 - `broker.sock` — Unix domain socket for communication (macOS/Linux only; Windows uses a named pipe instead)
 - `broker-launch.vbs` — Windows helper script used to launch the broker without a console window
 - `broker.pid` — Broker process ID
+- `delivered-messages.sqlite` — bounded durable authority containing keyed digests, never plaintext payloads
+- `delivered-messages.key` — random owner-only HMAC key paired with the authority database
 - `broker.spawn.lock` — Short-lived lock used to avoid duplicate auto-spawns
 - `broker.log` — Broker stderr, truncated on every spawn and capped at 8 KiB by the broker itself
 - `config.json` — User configuration

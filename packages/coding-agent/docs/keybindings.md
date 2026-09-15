@@ -8,6 +8,23 @@ Older configs using pre-namespaced ids such as `cursorUp` or `expandTools` are m
 
 After editing `keybindings.json`, run `/reload` in Atomic to apply the changes without restarting the session.
 
+## Workflow widget scrolling
+
+`app.workflows.scrollUp` defaults to `["alt+k", "alt+pageUp"]`; `app.workflows.scrollDown` defaults to `["alt+j", "alt+pageDown"]`. These scroll the main-chat workflow list without leaving the editor. Any other configured editor binding takes precedence, including the Vim Alt+J/K cursor bindings. Alt+Up remains available for queued messages.
+
+For example, replace both defaults and their aliases:
+
+```json
+{
+  "app.workflows.scrollUp": ["ctrl+alt+k"],
+  "app.workflows.scrollDown": ["ctrl+alt+j"]
+}
+```
+
+Use `[]` to disable an action, then `/reload`. On macOS, the widget labels Alt as Option; enable Option-as-Alt/Meta in your terminal. If a shortcut produces a character or is intercepted by your terminal or multiplexer, use the Page aliases or choose another binding. Wheel scrolling over the widget is independent of these shortcuts and requires fullscreen mouse reporting.
+
+Some differently named keys share terminal input: for example, Ctrl+H and Backspace, Ctrl+I and Tab, or Ctrl+M and Enter. Shared input stays with the editor, and ambiguous legacy shortcuts are omitted from the widget hint. A terminal sending distinct enhanced-protocol input may still use the workflow binding. For consistent behavior across terminals, choose an unambiguous binding or use the Page aliases rather than relying on that distinction.
+
 ## Key Format
 
 `modifier+key` where modifiers are `ctrl`, `shift`, `alt`, or `super` (combinable) and keys are:
@@ -84,10 +101,12 @@ The dedicated history actions always change history entries, regardless of the c
 
 ### TUI Fullscreen Viewport
 
-Interactive sessions always use this fullscreen viewport for the primary transcript scroll region. Mouse-wheel input scrolls the region under the pointer, falling back to the transcript over the fixed editor/status/footer dock. Clicking an OSC 8 hyperlink opens it in the default handler; the jump-to-bottom indicator's internal OSC 8 link returns the focused transcript surface to its live end, including an attached workflow stage chat. Dragging with the primary mouse button selects text and, by default, copies it to the clipboard. Set `fullscreenCopyOnSelect` to `false` to retain selections for explicit Ctrl+X copying. See [Terminal setup](/terminal-setup) for terminal-specific mouse and trackpad behavior.
+Interactive sessions always use this fullscreen viewport for the primary transcript scroll region. Mouse-wheel input scrolls the region under the pointer, falling back to the transcript over the fixed editor/status/footer dock. While the main transcript is scrolled up, a clickable "Jump to latest message" label on its bottom row shows the `tui.altScreen.bottom` shortcut; clicking it returns that transcript to its live end. An attached workflow stage chat keeps its own "Jump to latest message" OSC 8 link with the same shortcut, which returns the stage chat to its live end. Clicking other OSC 8 hyperlinks opens them in the default handler. Dragging with the primary mouse button selects text and, by default, copies it to the clipboard. Set `fullscreenCopyOnSelect` to `false` to highlight text without copying. See [Terminal setup](/terminal-setup) for terminal-specific mouse and trackpad behavior.
+
+Hold Alt while using the mouse wheel to scroll five times as far in fullscreen mode. This requires the terminal to forward the Alt modifier in mouse events; focused components may still consume the wheel input themselves.
 
 
-Fullscreen text selection comes from the installed pi-tui 0.84.4 renderer. Drag with the primary button to select characters; double-click selects a word, including complete slash-delimited paths and kebab-case names, and triple-click selects a line. Focus changes and non-drag clicks clear transient selection state, preventing a stale highlight from appearing. A drag release reported with the generic SGR button code also ends the selection. The renderer also reduces mouse tracking in tmux, Zellij, and GNU Screen.
+Fullscreen text selection comes from the installed pi-tui 0.85.1 renderer. Drag with the primary button to select characters; double-click selects a word, including complete slash-delimited paths and kebab-case names, and triple-click selects a line. Focus changes and non-drag clicks clear transient selection state, preventing a stale highlight from appearing. A drag release reported with the generic SGR button code also ends the selection. The renderer also reduces mouse tracking in tmux, Zellij, and GNU Screen.
 Fullscreen transcript bindings take precedence over editor bindings while the main editor has focus. The default unmodified navigation keys therefore control the transcript, while their `ctrl` variants continue to control the editor. When a fullscreen overlay or inline custom component has focus, Atomic sends matching viewport bindings to that component first. Returning `true` keeps the key local. For an in-process component, returning `false`, `undefined`, or `void` lets transcript scrolling handle it. A remote component's correlated reply falls through on `false`, failure, or timeout; `undefined` after disposal is dropped because that component no longer owns focus.
 
 | Key | Editor action | Fullscreen action |
@@ -125,10 +144,9 @@ On Windows, pressing the secondary mouse button in fullscreen pastes text from t
 | `app.interrupt` | `escape` | Abort active or queued work and restore still-queued steering/follow-up messages to the editor; the session remains paused until an ordinary submission. A message the agent already picked up is answered instead of restored |
 | `app.clear` | `ctrl+c` | Interrupt active or queued work, or terminate an unresponsive interactive engine; once idle, clear the editor (press twice while idle to exit) |
 | `app.exit` | `ctrl+d` | Exit (when editor empty) |
-| `app.suspend` | `ctrl+z` (none on Windows) | Suspend to background |
+| `app.suspend` | `ctrl+z` (`alt+z` on Windows) | Suspend to background; on Windows, open a PowerShell subshell |
 | `app.editor.external` | `ctrl+g` | Open in external editor (`$VISUAL` or `$EDITOR`) |
 | `app.clipboard.pasteImage` | `ctrl+v` (`alt+v` on Windows) | Paste image or text from clipboard |
-| `app.message.copy` | `ctrl+x` | When `fullscreenCopyOnSelect` is `false`, copy the active fullscreen selection; otherwise copy the last assistant message |
 
 When `app.clipboard.pasteImage` finds text rather than an image, Atomic inserts that clipboard text into the editor instead of reporting an image-paste failure.
 
@@ -138,7 +156,7 @@ Inside tmux on macOS, `Ctrl+V` is the reliable image-paste shortcut; native `Cmd
 
 When the clipboard has both text and an image, behavior depends on the terminal: empty-paste terminals may insert the text on `Cmd+V`, while Kitty-protocol terminals that deliver `super+v` go through the image path (same preference as `Ctrl+V`). `Ctrl+V` always prefers the image. Apple Terminal may send nothing for image-only paste; use Ghostty/iTerm/Kitty or `Ctrl+V` in that case.
 
-Ctrl+X keeps Atomic's hierarchy precedence. A workflow tool-detail view closes to its graph; the scoped-model selector clears its local selection; an attached workflow stage chat returns to its graph; and a workflow graph returns to main chat. Only the main editor then runs `app.message.copy`. Workflow surfaces recognize the physical Ctrl+X chord directly, including CSI variants, rather than the configurable application action. `/copy` is separate and always copies the last assistant message.
+Ctrl+X does not copy messages or selections. A workflow tool-detail view closes to its graph; the scoped-model selector clears its local selection; an attached workflow stage chat returns to its graph; and a workflow graph returns to main chat. Workflow surfaces recognize the physical Ctrl+X chord directly, including CSI variants. `/copy` always copies the last assistant message.
 
 A held paused queue by itself is idle for Ctrl+C handling. After an interruption settles, the next Ctrl+C clears the editor without releasing or dequeuing the hold, and a second quick idle press exits normally.
 
@@ -179,6 +197,8 @@ Ctrl+C is the host's escape hatch whenever an engine-owned `ctx.ui.custom()` com
 | `app.thinking.cycle` | `shift+tab` | Cycle thinking level |
 | `app.thinking.toggle` | `ctrl+t` | Collapse or expand thinking blocks |
 
+Interactive model and thinking choices automatically become startup defaults. There is no save-default shortcut.
+
 ### Display and Message Queue
 
 | Keybinding id | Default | Description |
@@ -186,6 +206,23 @@ Ctrl+C is the host's escape hatch whenever an engine-owned `ctx.ui.custom()` com
 | `app.tools.expand` | `ctrl+o` | Collapse or expand tool and workflow-node detail in main chat or an attached workflow stage chat |
 | `app.message.followUp` | `alt+enter` | Queue follow-up message |
 | `app.message.dequeue` | `alt+up` | Restore queued messages to editor |
+
+### Task inspector actions
+
+These action names are reserved for focused task inspection. They do not replace
+global Ctrl+O expansion, F2 graph navigation, or editor input. Host mounting is a
+separate integration gate; defining a key does not make an unavailable inspector open.
+
+| Keybinding id | Default | Description |
+|--------|---------|-------------|
+| `app.tasks.open` | Unbound | Command-only `/tasks` route |
+| `app.tasks.inspect` | `enter` | Inspect the selected task while task focus owns input |
+| `app.tasks.foreground` | Unbound | Observe the selected live task without restarting it |
+| `app.tasks.cancel` | Unbound | Request cancellation after confirming the target |
+| `app.tasks.input` | Unbound | Focus stdin only when the selected task has writable input |
+
+Mounted human-input prompts and the composer retain priority. Escape leaves stdin
+or task detail before leaving task focus. Unbound actions have no key hint.
 
 ### Tree Navigation
 
@@ -205,11 +242,10 @@ Ctrl+C is the host's escape hatch whenever an engine-owned `ctx.ui.custom()` com
 
 ### Scoped Models Selector
 
-Used inside the scoped models selector (opened via `/scoped-models`).
+Used inside the scoped models selector (opened via `/scoped-models`). Changes are saved automatically.
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
-| `app.models.save` | `ctrl+s` | Save current model selection to settings |
 | `app.models.enableAll` | `ctrl+a` | Enable all models (or all matching the current search) |
 | `app.models.clearAll` | `ctrl+x` | Clear all models (or all matching the current search) |
 | `app.models.toggleProvider` | `ctrl+p` | Toggle all models for the current provider |
@@ -230,7 +266,7 @@ Create `~/.atomic/agent/keybindings.json`:
 
 Each action can have a single key or an array of keys. User config overrides defaults.
 
-On native Windows, `app.suspend` has no default binding because Windows terminals do not support Unix job control. If you bind it manually, Atomic shows a status message instead of suspending. In WSL, the normal Linux `ctrl+z`/`fg` behavior still applies.
+On native Windows, `app.suspend` opens an interactive PowerShell subshell with `alt+z`, leaving `ctrl+z` available for editor undo. Type `exit` to return to the same Atomic session. Atomic and its owned background tasks continue running; this is not process suspension. Ctrl+C in the subshell does not clear or exit Atomic. PowerShell 7 (`pwsh.exe`) is preferred, with Windows PowerShell (`powershell.exe`) as fallback on `PATH`. In WSL, the normal Linux `ctrl+z`/`fg` behavior still applies.
 
 ### Emacs Example
 

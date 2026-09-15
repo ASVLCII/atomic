@@ -24,6 +24,11 @@ const modelVisibleRouting = `${combinedGuidance}\n${WORKFLOW_TOOL_DESCRIPTION}\n
 
 const workflowDocumentationPaths = [
 	"packages/coding-agent/docs/workflows.md",
+	"packages/coding-agent/docs/workflows/builtins.md",
+	"packages/coding-agent/docs/workflows/authoring.md",
+	"packages/coding-agent/docs/workflows/reliable-design.md",
+	"packages/coding-agent/docs/workflows/operations.md",
+	"packages/coding-agent/docs/workflows/api-reference.md",
 	"packages/coding-agent/docs/quickstart.md",
 	"packages/workflows/README.md",
 	"docs/workflow-playbook.md",
@@ -33,11 +38,11 @@ const workflowDocumentationPaths = [
 describe("workflow-first execution routing", () => {
 	test("restores workflows as the default for non-trivial verifiable work", () => {
 		for (const phrase of [
-			"default execution path for any non-trivial task",
-			"inherent structure plus an objective you can make verifiable",
+			"Unless the user explicitly chooses inline execution for this task",
+			"default execution path for non-trivial tasks and requests with structure and a verifiable objective",
 			"implementation, build, debug/diagnosis, bug-fix, migration, new-feature",
 			"multiple steps, dependencies, handoffs, uncertainty",
-			"Only skip workflows for tiny, deterministic, low-risk",
+			"Without an explicit execution-mode preference, skip workflows for tiny",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
 		}
@@ -47,7 +52,7 @@ describe("workflow-first execution routing", () => {
 		for (const phrase of [
 			"Budget reconnaissance",
 			"roughly ten exploratory tool calls",
-			"Sunk inline research transfers through files",
+			"when inline was requested, continue directly with the same validation bar",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
 		}
@@ -78,7 +83,7 @@ describe("workflow-first execution routing", () => {
 	test("supports named and rich inline TypeScript workflows", () => {
 		for (const phrase of [
 			"builtin, project, user, or package",
-			"custom TypeScript `workflow({...})` inline",
+			"custom TypeScript `workflow({...})` with normal coding tools",
 			"reload workflow resources",
 			"Do not force-fit",
 			"deterministic branching",
@@ -130,6 +135,7 @@ describe("workflow-first execution routing", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		for (const phrase of [
 			"packages/coding-agent/docs/models/model-selection.md",
+			"packages/coding-agent/docs/models/evals.md",
 			'workflow({ action: "models" })',
 			"returned `fullId` values as model strings",
 			"availableThinkingLevels",
@@ -163,8 +169,10 @@ describe("workflow-first execution routing", () => {
 		for (const phrase of [
 			"measurement configuration used for that benchmark result",
 			"not a universal workflow default",
-			"| Security, identity, adversarial challenge, final approval | `max`",
-			"| Codebase mapping, lifecycle analysis, compatibility, planning, synthesis, triage, repair | `high`",
+			"`max` is usually overkill and is not preferred in practice.",
+			"| Coding, implementation, routine fixes | `low` or `medium` |",
+			"| Code review, test design, failure analysis, security, identity, adversarial challenge, final approval | `high` or `xhigh` |",
+			"| Codebase mapping, lifecycle analysis, compatibility, planning, synthesis, triage | `high` |",
 			"| User-impact review and final reporting | `medium`",
 			"| Deterministic checks | No model call",
 		]) {
@@ -193,9 +201,11 @@ describe("workflow-first execution routing", () => {
 		}
 
 		for (const phrase of [
-			"Reserve `max` for a high-cost-of-error role or an explicit user request",
-			"For each primary and fallback, choose a level for the same stage role independently",
-			"A fallback is not a reason to inherit `max` mechanically",
+			"`max` is an exception, not a role default.",
+			"Consider it only when task-specific evidence justifies the extra effort or the user explicitly requests it.",
+			"An explicit request wins over these defaults, but the requested level still must appear in the configured catalog; do not invent an unsupported suffix.",
+			"For each primary and fallback, choose a supported level for the same stage role independently.",
+			"If `xhigh` is unavailable, use `high` rather than automatically promoting to `max`; choose another catalog model or leave the stage unpinned if neither is supported.",
 		]) {
 			expect(modelSelection).toContain(phrase);
 		}
@@ -217,7 +227,7 @@ describe("workflow-first execution routing", () => {
 	});
 
 	test("mirrors the stage assignment policy in workflow authoring docs", async () => {
-		for (const path of ["packages/coding-agent/docs/workflows.md", "packages/workflows/README.md"]) {
+		for (const path of ["packages/coding-agent/docs/workflows/reliable-design.md", "packages/workflows/README.md"]) {
 			const documentation = await readRepositoryFile(path);
 			for (const phrase of [
 				"failure cost",
@@ -225,13 +235,25 @@ describe("workflow-first execution routing", () => {
 				"thinking level",
 				"fallback policy",
 				"Stage | Model | Thinking | Role",
-				"high-cost-of-error roles",
+				path.endsWith("reliable-design.md")
+					? "`max` is an exception justified by task-specific evidence or an explicit user request, not a role default"
+					: "high-cost-of-error roles",
 				"deterministic checks as tool nodes with no model call",
 				"fallback",
 				"availableThinkingLevels",
 				"leave the stage unpinned rather than inventing",
 			]) {
 				expect(documentation, path).toContain(phrase);
+			}
+			if (path.endsWith("reliable-design.md")) {
+				// #2847 reconciliation: current upstream model selection supersedes the older role default.
+				for (const phrase of [
+					"Use `low` or `medium` for implementation and routine fixes",
+					"`high` or `xhigh` for code review, test design, failure analysis, and approval decisions when supported",
+					"approve | <catalog fullId> | high | final approval",
+				])
+					expect(documentation, path).toContain(phrase);
+				expect(documentation, path).not.toContain("approve | <catalog fullId> | max | final approval");
 			}
 		}
 	});
@@ -335,7 +357,7 @@ describe("workflow-first execution routing", () => {
 	});
 
 	test("documents the complete stacked-slices starter section", async () => {
-		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows.md");
+		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows/reliable-design.md");
 		const heading = "##### Stacked implementation slices starter pattern";
 		const sectionStart = documentation.indexOf(heading);
 		expect(sectionStart).toBeGreaterThanOrEqual(0);
@@ -362,7 +384,14 @@ describe("workflow-first execution routing", () => {
 
 	test("requires dynamic workflow topologies to remain acyclic", async () => {
 		const authoringGuidance = workflowGuidance.join("\n");
-		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows.md");
+		const documentation = (
+			await Promise.all(
+				[
+					"packages/coding-agent/docs/workflows/authoring.md",
+					"packages/coding-agent/docs/workflows/reliable-design.md",
+				].map(readRepositoryFile),
+			)
+		).join("\n");
 		const rootReadme = await readRepositoryFile("README.md");
 
 		for (const phrase of [
@@ -426,7 +455,7 @@ describe("workflow-first execution routing", () => {
 		]) {
 			expect(workflowGuidance.join("\n")).toContain(phrase);
 		}
-		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows.md");
+		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows/reliable-design.md");
 		for (const phrase of [
 			"Interpret ordering words locally unless a cross-item dependency is explicit",
 			"already merged into the base each run will use",
@@ -538,7 +567,7 @@ describe("workflow-first execution routing", () => {
 	});
 
 	test("mirrors risk/evidence routing and verifier-loop guidance in workflow docs", async () => {
-		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows.md");
+		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows/reliable-design.md");
 
 		for (const phrase of [
 			"pre-launch workflow architecture",
@@ -610,12 +639,10 @@ describe("workflow-first execution routing", () => {
 	test("continues through blocked status unless human input must settle ambiguity", () => {
 		for (const phrase of [
 			"Treat a blocked run as continuable by default",
-			"A blocked run is a changed condition, not a stop order",
-			"keep the work moving by default",
-			"resume a resumable block",
-			"carries the remaining tracked work past a terminal block",
-			"continue inline only if the remaining work is minimal",
-			"so ambiguous that competing interpretations lead to materially different outcomes",
+			"unless the user requests inline/no-workflow execution",
+			"safely holding/stopping the affected run",
+			"reconciling completed work and in-flight effects",
+			"continuing inline without duplication",
 			"When human input is unavailable",
 			"do not stall on a question",
 			"mine git history, commits, PRs, issues",
@@ -632,7 +659,7 @@ describe("workflow-first execution routing", () => {
 			"do not raise it silently",
 			"Summarize progress and the estimated next steps",
 			"ask the user whether to proceed",
-			"prefer the `ask_user_question` tool when it is available",
+			"ask the user whether to proceed using the `ask_user_question` tool",
 			"resume with a raised `budget` only after approval",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
@@ -640,18 +667,16 @@ describe("workflow-first execution routing", () => {
 	});
 
 	test("mirrors blocked-continuation guidance in workflow docs", async () => {
-		for (const path of ["packages/coding-agent/docs/workflows.md", "packages/workflows/README.md"]) {
+		for (const path of ["packages/coding-agent/docs/workflows/operations.md", "packages/workflows/README.md"]) {
 			const documentation = await readRepositoryFile(path);
 			for (const phrase of [
-				"Treat a blocked run as continuable by default",
-				"resume a resumable block",
-				"continue inline only if the remaining work is minimal",
-				"mine git history, commits, PRs, issues",
-				"continue fully autonomously",
-				"record the assumption",
-				"estimated next steps",
-				"ask the user whether to proceed",
-				"resume with a raised `budget` only after approval",
+				"continuable by default",
+				"inline/no-workflow",
+				"completed work",
+				"in-flight",
+				"authorization",
+				"budget_exceeded",
+				"approval",
 			]) {
 				expect(documentation, path).toContain(phrase);
 			}
@@ -665,11 +690,11 @@ describe("workflow-first execution routing", () => {
 			"see agents working",
 			"chat with and steer each stage",
 			"Inspection and control calls",
-			"`status`, `stages`, `stage`, `transcript`, `answer`, `pause`, `resume`, `interrupt`, `quit`",
+			"`status`, `stages`, `stage`, `transcript`, `answer`, `pause`, `resume`, `quit`",
 			"A heartbeat is a periodic alignment check",
 			"continue a progressing run when no intervention is needed",
 			"Send free-form updates through Intercom",
-			"`<runId>:<stageKey>`",
+			"`workflow:<rootRunId>/<segment>[/<segment>...]`",
 			"delivers immediately to live stages",
 			"before their first model turn",
 			"Use `ask` once the target has a live session that can reply",
@@ -707,6 +732,7 @@ describe("workflow-first execution routing", () => {
 			"documented task requirement",
 			"Do not choose an ad hoc model merely for diversity",
 			"packages/coding-agent/docs/models/model-selection.md",
+			"packages/coding-agent/docs/models/evals.md",
 			'workflow({ action: "models" })',
 			"Pin only a returned fullId",
 			"thinking level listed for that entry",
@@ -754,7 +780,7 @@ describe("workflow-first execution routing", () => {
 	});
 
 	test("synchronizes side-effect guidance across workflow authoring references", async () => {
-		for (const path of ["packages/coding-agent/docs/workflows.md", "packages/workflows/README.md"]) {
+		for (const path of ["packages/coding-agent/docs/workflows/authoring.md", "packages/workflows/README.md"]) {
 			const documentation = await readRepositoryFile(path);
 			for (const phrase of [
 				"ctx.tool(name, args, fn)",
@@ -841,11 +867,26 @@ describe("workflow-first execution routing", () => {
 			registered?.description.includes("Workflow invocation groups are named `workflow:<rootRunId>`"),
 			"workflow tool description should document invocation-group names",
 		);
+		expect(registered?.description).toContain("`workflow:<rootRunId>/<segment>[/<segment>...]`");
+		expect(registered?.description).toContain("`*` matches one segment and `**` any depth");
+		expect(registered?.description).toContain("`intercom list` inside the invocation group");
+		expect(registered?.description).toContain("Name and pattern sends remain sticky for every future matching stage");
+		expect(registered?.description).toContain("broadcast one authoritative update to `workflow:<rootRunId>/**`");
+		expect(registered?.description).toContain("`notInKnownSet` warning");
+		expect(registered?.description).toContain("settles undeliverable at terminal only if never delivered");
 		expect(registered?.description).toContain("answer pending prompts");
-		expect(registered?.description).toContain("pause/resume/interrupt/quit runs");
+		expect(registered?.description).toContain("pause/resume/quit runs");
 		expect(registered?.description).not.toMatch(/workflow send|action ['"]send['"]/i);
+
 		const readme = await readRepositoryFile("packages/workflows/README.md");
-		expect(readme).toContain(`"description": ${JSON.stringify(WORKFLOW_TOOL_DESCRIPTION)},`);
+		for (const sharedGuidance of [
+			"`workflow:<rootRunId>/<segment>[/<segment>...]`",
+			"broadcast one authoritative update to `workflow:<rootRunId>/**`",
+			"`notInKnownSet` warning",
+			"use `ask` only on live targets",
+		]) {
+			expect(readme).toContain(sharedGuidance);
+		}
 	});
 
 	test("documents directional invocation control before workflow-stage steering", async () => {
@@ -867,7 +908,7 @@ describe("workflow-first execution routing", () => {
 		const exactGuidance: Record<string, string> = {
 			"packages/intercom/skills/intercom/SKILL.md":
 				"The invocation context can control owned isolated subgroups by exact target, while sibling subgroups and other runs remain isolated.",
-			"packages/coding-agent/docs/intercom.md":
+			"packages/coding-agent/docs/intercom/reference.md":
 				"The invocation group has asymmetric exact-target control over its owned subgroups; ownership does not grant reverse or lateral access.",
 		};
 		for (const [path, sentence] of Object.entries(exactGuidance)) {
@@ -887,7 +928,7 @@ describe("workflow-first execution routing", () => {
 			"packages/workflows/src/extension/workflow-prompts.ts",
 			"packages/workflows/src/extension/workflow-schema.ts",
 			"packages/workflows/README.md",
-			"packages/coding-agent/docs/workflows.md",
+			"packages/coding-agent/docs/workflows/operations.md",
 			"scripts/readme-feature-wall/tapes/6.2.tape",
 		];
 		const staleWorkflowSendGuidance = [
@@ -909,11 +950,11 @@ describe("workflow-first execution routing", () => {
 				expect(currentGuidance, `${path}: ${stale}`).not.toContain(stale);
 		}
 
-		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows.md");
+		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows/operations.md");
 		for (const current of [
 			"`answer` responds only to a pending primitive or structured human-input prompt",
 			"Use `workflow resume` only for paused workflow control",
-			"ordinary Intercom to `<runId>:<stageKey>`",
+			"ordinary Intercom to",
 			"delivers immediately to live stages",
 			"delivering them before their first model turn",
 			"Use `ask` once the target has a reply-capable live session",
@@ -951,7 +992,7 @@ describe("workflow-first execution routing", () => {
 			"hide the graph across files",
 			"line counts alone as a module boundary",
 		];
-		for (const path of ["packages/coding-agent/docs/workflows.md", "packages/workflows/README.md"]) {
+		for (const path of ["packages/coding-agent/docs/workflows/authoring.md", "packages/workflows/README.md"]) {
 			const documentation = await readRepositoryFile(path);
 			for (const phrase of sharedPolicyPhrases) {
 				expect(documentation, path).toContain(phrase);
@@ -978,9 +1019,8 @@ describe("workflow-first execution routing", () => {
 		for (const phrase of [
 			"Do not pass a `budget` unless the user asked for a limit",
 			"omitting `budget` inherits the workflow declaration and config",
-			"assuming no budget is always the correct default",
 			"pass only the fields they named",
-			"Pass budget only when the user asked for a limit",
+			"Pass budget only for a user-specified limit",
 			"Heartbeat cadence is 15 minutes by default",
 			"Keep that interval unless the user explicitly asks for a different cadence",
 			"A heartbeat is a periodic alignment check",

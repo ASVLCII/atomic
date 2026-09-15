@@ -1,9 +1,9 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { constants, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { basename, join, parse, resolve } from "node:path";
 import { type Api, type Model, modelsAreEqual } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolvePath } from "../utils/paths.ts";
-import type { AgentSession } from "./agent-session.ts";
+import type { AgentSession } from "./agent-session.js";
 import type { AgentSessionInternalSurface } from "./agent-session-methods.ts";
 import { prepareProtectedStreamingCustomMessagesForDisposal } from "./agent-session-persistent-custom-messages.ts";
 import { type AtomicOAuthLoginCallbacks, loginRuntimeOAuthProvider } from "./agent-session-runtime-auth.ts";
@@ -13,7 +13,7 @@ import type {
 	ReplacedSessionContext,
 	SessionShutdownEvent,
 	SessionStartEvent,
-} from "./extensions/index.ts";
+} from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { ModelFallbackReason } from "./model-resolver-types.ts";
 import type { AuthStatus } from "./provider-composer.ts";
@@ -46,13 +46,22 @@ export interface LogoutProviderResult {
  * services for the effective cwd, resolves session options against those
  * services, and finally creates the AgentSession.
  */
-export type CreateAgentSessionRuntimeFactory = (options: {
+export interface CreateAgentSessionRuntimeOptions {
 	cwd: string;
 	agentDir: string;
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
-}) => Promise<CreateAgentSessionRuntimeResult>;
+}
+
+export type CreateAgentSessionRuntimeFactory = {
+	(options: CreateAgentSessionRuntimeOptions): Promise<CreateAgentSessionRuntimeResult>;
+	prepareResume?: (
+		options: CreateAgentSessionRuntimeOptions,
+	) => Promise<() => Promise<CreateAgentSessionRuntimeResult>>;
+};
+
+const SESSION_REPLACEMENT_UI_PROMPT_SETTLEMENT_TIMEOUT_MS = 1_000;
 
 /**
  * Thrown when /import references a JSONL file path that does not exist.
@@ -88,6 +97,21 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 export class AgentSessionRuntime {
 	private rebindSession?: (session: AgentSession) => Promise<void>;
 	private beforeSessionInvalidate?: () => void;
+	private projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
+
+	/** Bind a process-local trust UI; closures never cross the engine RPC boundary. */
+	setProjectTrustContextFactory(factory: (cwd: string) => ProjectTrustContext): void {
+		this.projectTrustContextFactory = factory;
+	}
+
+	/** Return false for ordinary startup; otherwise finish the safe session in place. */
+	async completeStartup(): Promise<boolean> {
+		const complete = this.services.completeStartup;
+		if (!complete) return false;
+		if (!this.projectTrustContextFactory) throw new Error("Startup trust requires a bound session UI");
+		await complete(this.projectTrustContextFactory(this.services.cwd));
+		return true;
+	}
 
 	private declare _session: AgentSession;
 	private declare _services: AgentSessionServices;
@@ -250,6 +274,12 @@ export class AgentSessionRuntime {
 
 	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
 		await this.settleActiveResponseBeforeTeardown();
+		const { timedOut } = await this.session.extensionRunner.flushUIPromptNotifications(
+			SESSION_REPLACEMENT_UI_PROMPT_SETTLEMENT_TIMEOUT_MS,
+		);
+		if (timedOut) {
+			console.error("Warning: UI prompt observers did not settle within 1,000 ms; continuing session replacement.");
+		}
 		await emitSessionShutdownEvent(this.session.extensionRunner, {
 			type: "session_shutdown",
 			reason,
@@ -291,16 +321,19 @@ export class AgentSessionRuntime {
 		const previousSessionFile = this.session.sessionFile;
 		const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
 		assertSessionCwdExists(sessionManager, this.cwd);
+		const runtimeOptions: CreateAgentSessionRuntimeOptions = {
+			cwd: sessionManager.getCwd(),
+			agentDir: this.services.agentDir,
+			sessionManager,
+			sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+			projectTrustContext: (options?.projectTrustContextFactory ?? this.projectTrustContextFactory)?.(
+				sessionManager.getCwd(),
+			),
+		};
+		await this.settleActiveResponseBeforeTeardown();
+		const complete = await this.createRuntime.prepareResume?.(runtimeOptions);
 		await this.teardownCurrent("resume", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: sessionManager.getCwd(),
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
-				projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
-			}),
-		);
+		this.apply(await (complete ? complete() : this.createRuntime(runtimeOptions)));
 		await this.finishSessionReplacement(options?.withSession);
 		return { cancelled: false };
 	}
@@ -449,15 +482,23 @@ export class AgentSessionRuntime {
 			mkdirSync(sessionDir, { recursive: true });
 		}
 
-		const destinationPath = join(sessionDir, basename(resolvedPath));
+		let destinationPath = join(sessionDir, basename(resolvedPath));
+		const sourceAlreadyStored = resolve(destinationPath) === resolvedPath;
+		if (!sourceAlreadyStored) {
+			const { name, ext } = parse(destinationPath);
+			let suffix = 1;
+			while (existsSync(destinationPath)) {
+				destinationPath = join(sessionDir, `${name}-${suffix++}${ext}`);
+			}
+		}
 		const beforeResult = await this.emitBeforeSwitch("resume", destinationPath);
 		if (beforeResult.cancelled) {
 			return beforeResult;
 		}
 
 		const previousSessionFile = this.session.sessionFile;
-		if (resolve(destinationPath) !== resolvedPath) {
-			copyFileSync(resolvedPath, destinationPath);
+		if (!sourceAlreadyStored) {
+			copyFileSync(resolvedPath, destinationPath, constants.COPYFILE_EXCL);
 		}
 
 		const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
@@ -476,6 +517,7 @@ export class AgentSessionRuntime {
 	}
 
 	async dispose(): Promise<void> {
+		await this.session.closeSessionTasks();
 		await emitSessionShutdownEvent(this.session.extensionRunner, {
 			type: "session_shutdown",
 			reason: "quit",

@@ -1,6 +1,6 @@
 import type { Provider } from "@bastani/pi-ai";
 import type { KeyId } from "@earendil-works/pi-tui";
-import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "../event-bus.ts";
+import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "../event-bus.js";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import {
@@ -71,6 +71,12 @@ export function createExtensionAPI(
 	};
 	registerCanonicalEventBus(events, canonicalEventBusFor(eventBus));
 	const api = {
+		registerWorkflowActivityPublisher() {
+			assertActive();
+			const publisher = runtime.workflowActivityHub.registerWorkflowActivityPublisher();
+			if (state === "loading") loadingUnsubscribers.push(() => publisher.dispose());
+			return publisher;
+		},
 		on(event: string, handler: HandlerFn): void {
 			assertActive();
 			const list = extension.handlers.get(event) ?? [];
@@ -81,6 +87,11 @@ export function createExtensionAPI(
 		registerTool(tool: ToolDefinition): void {
 			assertActive();
 			if (runtime.canRegisterResource?.(extension, "tool", tool.name) === false) return;
+			if (typeof tool.parameters !== "object" || tool.parameters === null || Array.isArray(tool.parameters)) {
+				throw new Error(
+					`Tool "${tool.name}" registered by extension "${extension.path}" must define an object parameter schema.`,
+				);
+			}
 			const registration = { definition: tool, sourceInfo: extension.sourceInfo };
 			if (runtime.stageToolRegistration?.(extension, tool.name, registration)) return;
 			extension.tools.set(tool.name, registration);
@@ -100,6 +111,8 @@ export function createExtensionAPI(
 			shortcut: KeyId,
 			options: {
 				description?: string;
+				keybinding?: import("../keybindings.ts").Keybinding;
+				preferEditor?: boolean;
 				handler: (ctx: ExtensionContext) => Promise<void> | void;
 			},
 		): void {

@@ -1,12 +1,13 @@
 import { buildIntercomCallbacks } from "../intercom/intercom-routing.js";
 import { subscribeIntercomControl } from "../intercom/result-intercom.js";
 import { store } from "../shared/store.js";
+import { currentWorkflowStore } from "../shared/store-factory.js";
 import { registerChatSurfaceRenderer } from "../tui/chat-surface-message.js";
 import { deriveGraphTheme } from "../tui/graph-theme.js";
 import { registerInlineFormRenderer } from "../tui/inline-form-overlay.js";
 import type { GraphOverlayPort } from "../tui/overlay-adapter.js";
 import { buildGraphOverlayAdapter } from "../tui/overlay-adapter.js";
-import { installStoreWidget, installToolExecutionHooks } from "../tui/store-widget-installer.js";
+import { installStoreWidget, installToolExecutionHooks, scrollStoreWidget } from "../tui/store-widget-installer.js";
 import type { PostMortemHandleResolution } from "../tui/workflow-attach-pane-types.js";
 import { adoptWorkflowSessionRunState } from "./adopt-session-run-state.js";
 import { registerCompletedStageIntercomAskRouter } from "./completed-stage-intercom-ask.js";
@@ -20,6 +21,7 @@ import { type RunEndPayload, type RunStartPayload, renderRunBanner, renderRunSum
 import { buildRuntimeAdapters } from "./wiring.js";
 import { registerWorkflowSlashCommand } from "./workflow-command-registration.js";
 import { installInputInterceptor, type WorkflowCommandHandler } from "./workflow-command-utils.js";
+import { createWorkflowObservation } from "./workflow-observation.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import { overlaySurfaceFromContext } from "./workflow-targets.js";
 import { makeExecuteWorkflowTool } from "./workflow-tool.js";
@@ -55,6 +57,18 @@ function registerWorkflowShortcut(pi: ExtensionAPI, overlay: GraphOverlayPort): 
 		description: "Open workflow orchestrator pane",
 		handler: openPane,
 	});
+	pi.registerShortcut("alt+pageUp", {
+		description: "Scroll background workflows up",
+		keybinding: "app.workflows.scrollUp",
+		preferEditor: true,
+		handler: () => scrollStoreWidget(store, -1),
+	});
+	pi.registerShortcut("alt+pageDown", {
+		description: "Scroll background workflows down",
+		keybinding: "app.workflows.scrollDown",
+		preferEditor: true,
+		handler: () => scrollStoreWidget(store, 1),
+	});
 }
 
 function registerIntercomControl(pi: ExtensionAPI, intercomControlRef: { current: (() => void) | null }): void {
@@ -74,6 +88,22 @@ function factory(pi: ExtensionAPI): void {
 	// would rebind process-shared run state away from the parent host session.
 	if (pi.subagentPolicy !== undefined) return;
 	adoptWorkflowSessionRunState(pi.events);
+	let disposeObservation: (() => void) | undefined;
+	if (pi.registerWorkflowActivityPublisher) {
+		const publisher = pi.registerWorkflowActivityPublisher();
+		let observation: ReturnType<typeof createWorkflowObservation> | undefined;
+		pi.on?.("session_start", (_event, ctx) => {
+			observation = createWorkflowObservation(
+				currentWorkflowStore(),
+				publisher,
+				(ctx?.sessionManager ?? pi.sessionManager)?.getSessionId?.() ?? "",
+			);
+		});
+		disposeObservation = () => {
+			observation?.dispose();
+			publisher.dispose();
+		};
+	}
 
 	const adapters = buildRuntimeAdapters(pi);
 	const runtimeState = createWorkflowExtensionRuntimeState(pi, adapters);
@@ -125,7 +155,7 @@ function factory(pi: ExtensionAPI): void {
 		},
 	});
 	registerWorkflowMessageRenderers(pi);
-	registerWorkflowLifecycleHandlers(pi, { runtimeState, storeWidgetRef, intercomControlRef });
+	registerWorkflowLifecycleHandlers(pi, { runtimeState, storeWidgetRef, intercomControlRef, disposeObservation });
 
 	storeWidgetRef.current = installStoreWidget(pi, store);
 	installToolExecutionHooks(pi, store);

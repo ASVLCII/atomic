@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getCapabilities, type SettingItem } from "@earendil-works/pi-tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
-import { keyDisplayText } from "./keybinding-hints.ts";
+import { keyDisplayText } from "./keybinding-hints.js";
 import { DEFAULT_PROJECT_TRUST_LABELS } from "./settings-selector-options.ts";
 import { SelectSubmenu, ThemeSubmenu, WarningSettingsSubmenu } from "./settings-selector-submenus.ts";
 import type { SettingsCallbacks, SettingsConfig } from "./settings-selector-types.ts";
@@ -127,7 +127,7 @@ function insertUiToggles(items: SettingItem[], config: SettingsConfig): void {
 	insertAfter(items, "terminal-progress", {
 		id: "cache-miss-notices",
 		label: "Cache miss notices",
-		description: "Show prompt-cache misses and compaction or branch-summary billing",
+		description: "Show cache costs and provider recovery diagnostics",
 		currentValue: config.showCacheMissNotices ? "true" : "false",
 		values: ["true", "false"],
 	});

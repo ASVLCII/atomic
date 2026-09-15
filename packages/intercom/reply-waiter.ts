@@ -1,3 +1,4 @@
+import { ASK_REPLY_TIMEOUT_MS } from "./retry-policy.js";
 import type { Message } from "./types.js";
 
 export interface ReplyWaiterRecord {
@@ -17,6 +18,8 @@ export interface ReplyWait {
    * unhandled rejection.
    */
   promise: Promise<Message>;
+  /** Bind only this question to the broker-authorized recipient before dispatch. */
+  bindSender(from: string): void;
   /** Rejects only this waiter. No-op once it settled or was replaced. */
   cancel(error: Error): void;
 }
@@ -26,7 +29,7 @@ export type ReplyWaitAdmission =
   | { ok: false; reason: "busy"; limit: number }
   | { ok: false; reason: "cancelled" };
 
-export const DEFAULT_REPLY_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_REPLY_TIMEOUT_MS = ASK_REPLY_TIMEOUT_MS;
 export const DEFAULT_MAX_PENDING_REPLY_WAITS = 6;
 
 /**
@@ -107,6 +110,7 @@ export class ReplyWaiterRegistry {
       ok: true,
       wait: {
         promise,
+        bindSender: (sender) => { if (this.waiters.get(replyTo) === record) record.from = sender; },
         cancel: (error) => record.reject(error),
       },
     };

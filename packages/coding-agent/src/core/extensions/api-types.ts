@@ -3,12 +3,12 @@ import type { Api, ImageContent, Model, TextContent } from "@bastani/pi-ai/compa
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { KeyId } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
-import type { EventBus } from "../event-bus.ts";
+import type { EventBus } from "../event-bus.js";
 import type { ExecOptions, ExecResult } from "../exec.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ResolvedResource } from "../package-manager.ts";
 import type { DefaultResourceLoaderInheritanceSnapshot } from "../resource-loader.ts";
-import type { SlashCommandInfo } from "../slash-commands.ts";
+import type { SlashCommandInfo } from "../slash-commands.js";
 import type {
 	AfterProviderResponseEvent,
 	AgentEndEvent,
@@ -74,6 +74,13 @@ import type {
 } from "./session-events.ts";
 import type { ToolCallEvent, ToolResultEvent } from "./tool-events.ts";
 import type { ToolDefinition, ToolInfo } from "./tool-types.ts";
+import type {
+	WorkflowActivityChangedEvent,
+	WorkflowActivityPublisher,
+	WorkflowHeartbeatEvent,
+	WorkflowLifecycleEvent,
+	WorkflowStageCompletedEvent,
+} from "./workflow-events.js";
 
 /** Handler function type for events */
 // biome-ignore lint/suspicious/noConfusingVoidType: void allows bare return statements
@@ -83,6 +90,11 @@ export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContex
  * ExtensionAPI passed to extension factory functions.
  */
 export interface ExtensionAPI {
+	registerWorkflowActivityPublisher(): WorkflowActivityPublisher;
+	on(event: "workflow_lifecycle", handler: ExtensionHandler<WorkflowLifecycleEvent>): void;
+	on(event: "workflow_activity_changed", handler: ExtensionHandler<WorkflowActivityChangedEvent>): void;
+	on(event: "workflow_stage_completed", handler: ExtensionHandler<WorkflowStageCompletedEvent>): void;
+	on(event: "workflow_heartbeat", handler: ExtensionHandler<WorkflowHeartbeatEvent>): void;
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
@@ -154,6 +166,8 @@ export interface ExtensionAPI {
 		shortcut: KeyId,
 		options: {
 			description?: string;
+			keybinding?: import("../keybindings.ts").Keybinding;
+			preferEditor?: boolean;
 			handler: (ctx: ExtensionContext) => Promise<void> | void;
 		},
 	): void;
@@ -260,13 +274,19 @@ export interface ExtensionAPI {
 	// Model and Thinking Level
 	// =========================================================================
 
-	/** Set the current model. Returns false if no API key available. */
+	/**
+	 * Set the model for the current session without changing the configured default for new sessions.
+	 * Returns false if authentication is not configured for the model's provider.
+	 */
 	setModel(model: Model<Api>): Promise<boolean>;
 
 	/** Get current thinking level. */
 	getThinkingLevel(): ThinkingLevel;
 
-	/** Set thinking level (clamped to model capabilities). */
+	/**
+	 * Set the thinking level (clamped to model capabilities) for the current session without changing the configured default
+	 * for new sessions.
+	 */
 	setThinkingLevel(level: ThinkingLevel): void;
 
 	// =========================================================================

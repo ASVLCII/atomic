@@ -12,7 +12,6 @@ import {
 import {
 	type AgentProgress,
 	type ArtifactPaths,
-	type ForegroundParentAskHandoff,
 	isWorkflowStageOrchestrationContext,
 	resolveTopLevelParallelConcurrency,
 	resolveTopLevelParallelMaxTasks,
@@ -29,13 +28,12 @@ import { recordRun } from "../shared/run-history.js";
 import { resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.js";
 import { cleanupWorktrees, type WorktreeSetup } from "../shared/worktree.js";
 import { createDetachedCleanupBarrier } from "./detached-cleanup-barrier.js";
-import { formatParentAskHandoffOutput } from "./parent-ask-output.js";
 import { runForegroundParallelTasks } from "./subagent-executor-parallel-task.js";
-import { markParentAskHandoff } from "./subagent-executor-parent-ask-projection.js";
 import {
 	createForegroundControlNotifier,
 	maybeBuildForegroundIntercomReceipt,
 	notifyDetachedForegroundChildExit,
+	workflowStageAcceptsDetachedNotification,
 } from "./subagent-executor-status.js";
 import type { ExecutionContextData, ResolvedExecutorDeps, TaskParam } from "./subagent-executor-types.js";
 import {
@@ -46,6 +44,7 @@ import {
 	findDuplicateParallelOutputPath,
 	resolveParallelTaskCwd,
 } from "./subagent-executor-worktree.js";
+import { subagentTaskResponseText, taskResponseRecords } from "./task-execution.js";
 
 export async function runParallelPath(
 	data: ExecutionContextData,
@@ -147,7 +146,6 @@ export async function runParallelPath(
 		cleanupWorktrees(worktreeSetup);
 	});
 	if (errorResult) return errorResult;
-	let parentAsk: ForegroundParentAskHandoff | undefined;
 
 	try {
 		const duplicateOutputError = findDuplicateParallelOutputPath({
@@ -179,22 +177,23 @@ export async function runParallelPath(
 		}
 
 		const results = await runForegroundParallelTasks({
+			wait: params.wait,
+			onTaskTerminal: (index) => detachedCleanup.recover(index),
 			onDetachedExit: (index, result) => {
 				try {
-					notifyDetachedForegroundChildExit({
-						pi: deps.pi,
-						runId,
-						mode: "parallel",
-						index,
-						totalTasks: tasks.length,
-						result,
-					});
+					if (workflowStageAcceptsDetachedNotification(ctx)) {
+						notifyDetachedForegroundChildExit({
+							pi: deps.pi,
+							runId,
+							mode: "parallel",
+							index,
+							totalTasks: tasks.length,
+							result,
+						});
+					}
 				} finally {
 					detachedCleanup.recover(index);
 				}
-			},
-			onParentAskHandoff: (handoff) => {
-				if (!parentAsk) parentAsk = handoff;
 			},
 			tasks,
 			taskTexts,
@@ -235,6 +234,32 @@ export async function runParallelPath(
 			worktreeSetup: worktreeSetup as WorktreeSetup | undefined,
 			runtime: deps.runtime,
 		});
+		if (ctx.getAgentTaskHost) {
+			const response: import("../../../../coding-agent/src/core/tasks/contracts.js").ModelParallelResponse = {
+				kind: "parallel",
+				slots: results.map((result, ordinal) => ({
+					ordinal,
+					outcome: result.taskResponse ?? {
+						kind: "unstarted",
+						reason: { kind: "skipped", cause: "parallel-group-detach" },
+					},
+				})),
+			};
+			worktreeCleanupDeferred = detachedCleanup.defer(
+				response.slots.flatMap(({ ordinal, outcome }) =>
+					outcome.kind === "admitted" && outcome.observation.kind === "yielded" ? [ordinal] : [],
+				),
+			);
+			return {
+				content: [{ type: "text", text: subagentTaskResponseText(response) }],
+				details: {
+					mode: "parallel",
+					results: [],
+					taskResponse: response,
+					taskRecords: taskResponseRecords(response, ctx.getAgentTaskHost()),
+				},
+			};
+		}
 		for (let i = 0; i < results.length; i++) {
 			const run = results[i]!;
 			recordRun(run.agent, taskTexts[i]!, run.status, run.progressSummary?.durationMs ?? 0);
@@ -245,25 +270,17 @@ export async function runParallelPath(
 			if (result.artifactPaths) allArtifactPaths.push(result.artifactPaths);
 		}
 
-		const interrupted = results.find((result) => result.interrupted && !isParentCancellation(result.cause));
+		const interrupted = results.find(
+			(result) => result.status === "killed" || (result.interrupted && !isParentCancellation(result.cause)),
+		);
 		const details = compactForegroundDetails({
 			mode: "parallel",
 			runId,
 			results,
-			parentAskYielded: parentAsk !== undefined,
+			parentAskYielded: false,
 			progress: params.includeProgress ? allProgress : undefined,
 			artifacts: allArtifactPaths.length ? { dir: artifactsDir, files: allArtifactPaths } : undefined,
 		});
-		if (parentAsk) {
-			const worktreeSuffix = buildParallelWorktreeSuffix(worktreeSetup, artifactsDir, tasks as TaskParam[]);
-			const handoffText = formatParentAskHandoffOutput(parentAsk);
-			const yieldedResult: SubagentToolResult = {
-				content: [{ type: "text", text: worktreeSuffix ? `${handoffText}\n\n${worktreeSuffix}` : handoffText }],
-				details,
-			};
-			markParentAskHandoff(yieldedResult, parentAsk);
-			return yieldedResult;
-		}
 		if (
 			interrupted &&
 			!results.some(
@@ -274,7 +291,10 @@ export async function runParallelPath(
 				content: [
 					{
 						type: "text",
-						text: `Parallel run ended after interrupt (${interrupted.agent}). Launch fresh subagents for any follow-up.`,
+						text:
+							interrupted.status === "killed"
+								? `Parallel child killed (${interrupted.agent}). This child cannot be resumed. Launch fresh subagents for any follow-up.`
+								: `Parallel run ended before completion (${interrupted.agent}). Launch fresh subagents for any follow-up.`,
 					},
 				],
 				details,
@@ -290,7 +310,7 @@ export async function runParallelPath(
 				content: [
 					{
 						type: "text",
-						text: `Parallel run detached for intercom coordination (${detached.agent}). Reply to the supervisor request first. After the child exits, launch fresh follow-up work if needed.`,
+						text: `Parallel observation yielded for intercom coordination (${detached.agent}). The original children continue; reply to any pending ask without relaunching them.`,
 					},
 				],
 				details,

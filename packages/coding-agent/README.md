@@ -79,7 +79,7 @@ atomic
 
 Then just talk to Atomic. By default, Atomic gives the model six coding tools: `read`, `write`, `edit`, `bash`, `find`, and `search`. On native Windows, Atomic also enables `powershell` when `pwsh.exe` or `powershell.exe` is available. The model uses these to fulfill your requests. `read`, `search`, `write`, and successful `edit` calls emit session-scoped hashline anchors (`[path#TAG]` plus `LINE:text`) so the model can make stale-safe line edits; see [docs/tools.md](docs/tools.md). Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Atomic packages](#atomic-packages).
 
-**Platform notes:** [Windows](docs/windows.md) | [Alpine/musl Linux](docs/index.md#alpine-and-musl-linux-archives) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
+**Platform notes:** [Windows](docs/windows.md) | [Alpine/musl Linux](docs/getting-started/installation.md#alpine-and-musl-linux-archives) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
 ---
 
@@ -138,7 +138,7 @@ For each built-in provider, Atomic maintains a list of tool-capable models, upda
 
 See [docs/providers.md](docs/providers.md) for detailed setup instructions.
 
-Atomic's Pi 0.84.1 model/runtime surface includes Claude Opus 5 on Anthropic and Bedrock, model-capability-aware strict JSON-schema and OpenAI Lark/regex tool sampling, ETag-revalidated cached catalogs, persisted llama.cpp models, arbitrary OpenAI-compatible `samplingParams`, opt-in vLLM thinking-token budgets through `compat.supportsThinkingTokenBudget`, and finishless-stream stop inference through `compat.supportsFinishReason`. A populated `ANTHROPIC_AUTH_TOKEN` makes Anthropic models available/selectable while sending header-only bearer auth—with no synthesized API key or `x-api-key`—across chat and summary/compaction requests. Typed RPC model listings expose constrained-sampling flags through optional `ModelInfo.compat`; capability flags are enforcement claims, so unsupported `require` constraints fail instead of being silently weakened. Custom `models.json` is read from the active Atomic agent directory only; it is not merged across `.pi` and `.atomic` paths. See [models](docs/models.md), [providers](docs/providers.md), [RPC](docs/rpc.md#get_available_models), and [extensions](docs/extensions.md#constrained-sampling).
+Atomic's Pi 0.84.1 model/runtime surface includes Claude Opus 5 on Anthropic and Bedrock, model-capability-aware strict JSON-schema and OpenAI Lark/regex tool sampling, ETag-revalidated cached catalogs, persisted llama.cpp models, arbitrary OpenAI-compatible `samplingParams`, opt-in vLLM thinking-token budgets through `compat.supportsThinkingTokenBudget`, and finishless-stream stop inference through `compat.supportsFinishReason`. A populated `ANTHROPIC_AUTH_TOKEN` makes Anthropic models available/selectable while sending header-only bearer auth—with no synthesized API key or `x-api-key`—across chat and summary/compaction requests. Typed RPC model listings expose constrained-sampling flags through optional `ModelInfo.compat`; capability flags are enforcement claims, so unsupported `require` constraints fail instead of being silently weakened. Custom `models.json` is read from the active Atomic agent directory only; it is not merged across `.pi` and `.atomic` paths. See [models](docs/models.md), [providers](docs/providers.md), [RPC](docs/rpc/protocol.md#get_available_models), and [extensions](docs/extensions/authoring.md#constrained-sampling).
 
 **Custom providers & models:** Add providers via the active agent directory's `models.json` (normally `~/.atomic/agent/models.json`; `ATOMIC_CODING_AGENT_DIR`/`PI_CODING_AGENT_DIR` can select another directory) if they speak a supported API (OpenAI, Anthropic, Google). For custom APIs or OAuth, use extensions. See [docs/models.md](docs/models.md) and [docs/custom-provider.md](docs/custom-provider.md).
 
@@ -152,7 +152,7 @@ The interface from top to bottom:
 
 - **Startup header** - Shows shortcuts (`/hotkeys` for all), loaded AGENTS.md files, prompt templates, skills, and extensions
 - **Messages** - Your messages, assistant responses, tool calls and results, notifications, errors, and extension UI
-- **Editor** - Where you type; border color indicates thinking level
+- **Editor** - Where you type; border color indicates thinking level, with streaming activity shown in a separate status row
 - **Footer** - Working directory, session name, total token/cache usage, cost, context usage, current model
 
 The editor can be temporarily replaced by other UI, like built-in `/settings` or custom UI from extensions (e.g., a Q&A tool that lets the user answer model questions in a structured format). [Extensions](#extensions) can also replace the editor, add widgets above/below it, a status line, custom footer, or overlays.
@@ -176,8 +176,8 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | OAuth authentication |
-| `/model` | Switch models; Ctrl+S in the picker saves the startup default |
-| `/thinking` | Switch thinking level; Ctrl+S in the picker saves the startup default |
+| `/model` | Switch models and automatically save the startup default |
+| `/thinking` | Switch thinking level and automatically save the startup default |
 | `/scoped-models` | Enable/disable models for CTRL+P cycling |
 | `/settings` | Theme, message delivery, transport, and other preferences |
 | `/resume` | Pick from previous sessions |

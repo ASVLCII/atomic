@@ -13,7 +13,7 @@ import type {
 	ShutdownHandler,
 	SubagentChildPolicy,
 	ToolDefinition,
-} from "./extensions/index.ts";
+} from "./extensions/index.js";
 import type { CustomMessage } from "./messages.ts";
 import type { ModelRuntime } from "./model-runtime.js";
 import type { ResourceLoader } from "./resource-loader.ts";
@@ -94,6 +94,10 @@ export interface InterruptQueueHold {
 	readonly steering: AgentMessage[];
 	readonly followUp: AgentMessage[];
 }
+
+/** Insertion boundary after already admitted priority input in a queue hold. */
+export const priorityHoldCounts = new WeakMap<InterruptQueueHold, number>();
+
 export interface ClearQueueOptions {
 	preserveUnprotectedCustomMessages?: boolean;
 }
@@ -156,7 +160,7 @@ export interface AgentSessionConfig {
 	allowedToolNames?: string[];
 	excludedToolNames?: string[];
 	baseToolsOverride?: Record<string, AgentTool>;
-	extensionRunnerRef?: { current?: import("./extensions/index.ts").ExtensionRunner };
+	extensionRunnerRef?: { current?: import("./extensions/index.js").ExtensionRunner };
 	sessionStartEvent?: SessionStartEvent;
 	subagentPolicy?: SubagentChildPolicy;
 	systemPromptTransform?: (prompt: string) => string;

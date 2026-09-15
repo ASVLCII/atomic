@@ -6,9 +6,9 @@ import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
 import { type Static, Type } from "typebox";
 import { APP_NAME } from "../../config.js";
-import { parenthesizedKeyHint } from "../../modes/interactive/components/keybinding-hints.ts";
+import { parenthesizedKeyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.ts";
-import { theme } from "../../modes/interactive/theme/theme.ts";
+import { theme } from "../../modes/interactive/theme/theme.js";
 import { createChildProcessEnvironment, waitForChildProcess } from "../../utils/child-process.ts";
 import {
 	getShellConfig,
@@ -18,15 +18,22 @@ import {
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
 import type { BashResult } from "../bash-executor.ts";
-import { experimentalToolSamplingProperty } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import type { WaitPolicy } from "../tasks/contracts.js";
 import {
 	type BashInterceptorRule,
 	checkBashInterceptionCandidates,
 	DEFAULT_BASH_INTERCEPTOR_RULES,
 } from "./bash-interceptor.ts";
 import { stripLeadingCdCommand } from "./bash-leading-cd.ts";
-import { executeNativePty } from "./bash-pty-native.ts";
+import {
+	executeNativePty,
+	executeSupervisedCommand,
+	type SupervisedCommandOwner,
+	type SupervisedCommandResult,
+	validateBashWait,
+	waitForSupervisedCommand,
+} from "./bash-pty-native.js";
 import { applyBashSessionEnvironment, snapshotBashSessionEnvironment } from "./bash-session-environment.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
@@ -46,16 +53,70 @@ const bashBaseSchema = Type.Object(
 		command: Type.String({ description: "Shell command to execute." }),
 		env: Type.Optional(envSchema),
 		timeout: Type.Optional(Type.Number({ description: "Timeout in seconds." })),
+		wait: Type.Optional(
+			Type.Unsafe<WaitPolicy>({
+				type: "object",
+				properties: {
+					kind: { type: "string", enum: ["background", "foreground"] },
+					budgetMs: {
+						type: "number",
+						minimum: 0,
+						description: "Foreground observation budget in milliseconds; only valid with foreground.",
+					},
+				},
+				required: ["kind"],
+				additionalProperties: false,
+				description:
+					"Observation policy, independent of execution timeout. Omit for owner-configured automatic yield (default 10s).",
+			}),
+		),
 		cwd: Type.Optional(Type.String({ description: "Working directory for the command." })),
 		pty: Type.Optional(Type.Boolean({ description: "Run with PTY handling." })),
 	},
 	{ additionalProperties: false },
 );
-const bashSchema = bashBaseSchema;
+type ShellCommandInput = Static<typeof bashBaseSchema> & { action?: never; id?: never; budgetMs?: never };
+type ShellWaitInput = { action: "wait"; id: string; budgetMs?: number } & Partial<
+	Record<keyof Static<typeof bashBaseSchema>, never>
+>;
+const bashSchema = Type.Unsafe<ShellCommandInput | ShellWaitInput>({
+	...bashBaseSchema,
+	properties: {
+		...bashBaseSchema.properties,
+		action: {
+			type: "string",
+			enum: ["wait"],
+			description: "Observe an existing asynchronous task without executing a command.",
+		},
+		id: { type: "string", description: "Existing task ID owned by this session." },
+		budgetMs: {
+			type: "number",
+			minimum: 0,
+			description: "Observation budget in milliseconds; omitted uses owner policy.",
+		},
+	},
+	required: [],
+	// xAI requires explicit object types on root union branches (see #3031).
+	anyOf: [
+		{
+			type: "object",
+			required: ["command"],
+			not: { anyOf: ["action", "id", "budgetMs"].map((key) => ({ required: [key] })) },
+		},
+		{
+			type: "object",
+			required: ["action", "id"],
+			not: { anyOf: Object.keys(bashBaseSchema.properties).map((key) => ({ required: [key] })) },
+		},
+	],
+});
 export const bashToolSystemPromptContribution = Object.freeze({
 	snippet: "Execute a shell command.",
 	guidelines: Object.freeze([
 		"You can inspect ATOMIC_* or PI_* environment variables for current model and session details.",
+		'Use { action: "wait", id: taskId } to observe an existing shell task with the owner policy. Avoid repeated short polls; await completion notifications when no dependent work is blocked. Never relaunch a yielded command. Waiting does not extend execution timeout or owner lifetime.',
+		"For ordinary commands, omit wait to use the owner's observation policy (normally 10s). Do not routinely request one-second waits: premature yields add tool calls without making the command faster. Use a short budget only for a concrete responsiveness need, or explicit background observation when you have independent work to do. Explicit budgets, including zero for polling, remain available.",
+		"Choose foreground or background shell observation as needed without asking the user each time. Background yields after admission; foreground waits for its optional budget then the same command continues in background. Omitted wait uses owner-configured automatic background yield (default 10s). Observation never changes the execution timeout, which stops the command. Background requires a supported task owner; unbound foreground waits until completion regardless of budget.",
 	] as const),
 } as const);
 export type BashToolInput = Static<typeof bashSchema>;
@@ -63,13 +124,14 @@ export interface BashToolDetails {
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
 	exitCode?: number | null;
+	observation?: import("../tasks/contracts.js").WaitOutcome;
 	timeoutSeconds?: number;
 	requestedTimeoutSeconds?: number;
 	wallTimeMs?: number;
 }
 const DEFAULT_TIMEOUT_SECONDS = 300,
 	MAX_TIMEOUT_SECONDS = 3600;
-function validateExplicitTimeoutSeconds(timeout: number): void {
+export function validateExplicitTimeoutSeconds(timeout: number): void {
 	if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMEOUT_SECONDS)
 		throw new Error(
 			`Invalid timeout ${String(timeout)}: timeout must be a finite number greater than 0 and no more than ${MAX_TIMEOUT_SECONDS} seconds`,
@@ -89,14 +151,19 @@ export interface BashOperations {
 			onData: (data: Buffer, channel?: BashOutputChannel) => void;
 			signal?: AbortSignal;
 			timeout?: number;
+			wait?: WaitPolicy;
 			env?: NodeJS.ProcessEnv;
 			pty?: boolean;
 		},
-	) => Promise<{ exitCode: number | null }>;
+	) => Promise<SupervisedCommandResult>;
 }
-export function createLocalBashOperations(options?: { shellPath?: string }): BashOperations {
+export function createLocalBashOperations(options?: {
+	shellPath?: string;
+	taskOwner?: SupervisedCommandOwner;
+}): BashOperations {
 	return {
-		exec: async (command, cwd, { onData, signal, timeout, env, pty }) => {
+		exec: async (command, cwd, { onData, signal, timeout, wait, env, pty }) => {
+			validateBashWait(wait, !!options?.taskOwner);
 			if (timeout !== undefined) validateExplicitTimeoutSeconds(timeout);
 			if (pty && process.env.PI_NO_PTY !== "1" && process.env.ATOMIC_NO_PTY !== "1") {
 				try {
@@ -104,10 +171,13 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 						onData: (data) => onData(data, "stdout"),
 						signal,
 						timeout,
+						wait,
 						env,
 						shellPath: options?.shellPath,
+						taskOwner: options?.taskOwner,
 					});
 				} catch (error) {
+					if (options?.taskOwner) throw error;
 					const message = String(error instanceof Error ? error.message : error);
 					if (!message.includes("Native PTY") && !message.includes("PtySession")) throw error;
 				}
@@ -122,6 +192,13 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
 			}
 			if (signal?.aborted) throw new Error("aborted");
+			if (options?.taskOwner)
+				return executeSupervisedCommand(
+					command,
+					cwd,
+					{ onData, signal, timeout, wait, env, shellPath: options.shellPath, taskOwner: options.taskOwner },
+					false,
+				);
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
 			const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
 				cwd,
@@ -192,12 +269,16 @@ export type BashInterceptor = (
 ) => Promise<BashInterceptorResult | undefined> | BashInterceptorResult | undefined;
 export interface BashToolOptions {
 	operations?: BashOperations;
+	/** Trusted host ownership; never supplied by model arguments. */
+	taskOwner?: SupervisedCommandOwner;
 	/** Expose the execution-time Atomic session snapshot and PI compatibility aliases. Default: true. */
 	exposeSessionEnvironment?: boolean;
 	/** Prefix prepended to every shell command before execution. */
 	commandPrefix?: string;
 	/** Override shell executable resolution for local bash operations. */
 	shellPath?: string;
+	/** Dialect for generated internal-URL path literals. Defaults to POSIX; does not select the executable. */
+	shellDialect?: "posix" | "powershell";
 	/** Last-mile hook for rewriting the command/cwd/env spawn context. */
 	spawnHook?: BashSpawnHook;
 	/** Optional command interceptor used by extensions and parity tests. */
@@ -269,7 +350,11 @@ function formatDuration(ms: number): string {
 	if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 	return `${seconds}s`;
 }
-function formatBashCall(args: { command?: string; timeout?: number } | undefined, prompt: string): string {
+function formatBashCall(
+	args: { command?: string; timeout?: number; action?: string; id?: string } | undefined,
+	prompt: string,
+): string {
+	if (args?.action === "wait") return theme.fg("toolTitle", theme.bold(`${prompt} wait ${str(args.id) ?? "..."}`));
 	const command = str(args?.command);
 	const timeout = args?.timeout as number | undefined;
 	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
@@ -290,6 +375,19 @@ function rebuildBashResultRenderComponent(
 	const state = component.state;
 	component.clear();
 	let output = getTextOutput(result, showImages).trim();
+	const observation = result.details?.observation;
+	if (observation?.kind === "yielded") {
+		const receipt = `Command is still running (task ${observation.taskId}).`;
+		if (output.endsWith(receipt)) output = output.slice(0, -receipt.length).trimEnd();
+		component.addChild(new Text(theme.fg("accent", "∀ Continued in background"), 0, 0));
+		component.addChild(
+			new Text(
+				theme.fg("dim", `/tasks to inspect output or stop${options.expanded ? ` · ${observation.taskId}` : ""}`),
+				0,
+				0,
+			),
+		);
+	}
 	const truncation = result.details?.truncation;
 	const fullOutputPath = result.details?.fullOutputPath;
 	if (!options.isPartial && truncation?.truncated && fullOutputPath && output.endsWith("]")) {
@@ -347,7 +445,7 @@ function rebuildBashResultRenderComponent(
 		component.addChild(new Text(`\n${theme.fg("warning", `[${warnings.join(". ")}]`)}`, 0, 0));
 	}
 	if (startedAt !== undefined) {
-		const label = options.isPartial ? "Elapsed" : "Took";
+		const label = options.isPartial ? "Elapsed" : observation?.kind === "yielded" ? "Observed for" : "Took";
 		const endTime = endedAt ?? Date.now();
 		component.addChild(new Text(`\n${theme.fg("muted", `${label} ${formatDuration(endTime - startedAt)}`)}`, 0, 0));
 	}
@@ -357,7 +455,9 @@ export function createBashToolDefinition(
 	options?: BashToolOptions,
 	presentation: ShellToolPresentation = BASH_SHELL_PRESENTATION,
 ): ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> {
-	const defaultOps = options?.operations ?? createLocalBashOperations({ shellPath: options?.shellPath });
+	const defaultOps =
+		options?.operations ??
+		createLocalBashOperations({ shellPath: options?.shellPath, taskOwner: options?.taskOwner });
 	const commandPrefix = options?.commandPrefix,
 		exposeSessionEnvironment = options?.exposeSessionEnvironment ?? true;
 	const spawnHook = options?.spawnHook;
@@ -374,15 +474,41 @@ export function createBashToolDefinition(
 	return {
 		name: "bash",
 		label: "bash",
-		description: "Execute a shell command in the session workspace, with optional PTY handling.",
+		description:
+			'Execute a shell command with optional PTY handling and foreground/background observation, or observe an existing task with action: "wait", id, and optional budgetMs. Omitted command wait uses owner policy (default 10s). Observation never changes execution timeout. Background and existing-task waits require a supported task owner; unbound foreground execution waits until completion.',
 		promptSnippet: bashToolSystemPromptContribution.snippet,
-		...experimentalToolSamplingProperty(),
+		constrainedSampling: { type: "json_schema", strict: "prefer" },
 		promptGuidelines: exposeSessionEnvironment ? [...bashToolSystemPromptContribution.guidelines] : undefined,
 		parameters: bashSchema,
 		maxResultSizeChars: Infinity,
 		async execute(_toolCallId, bashCommand: BashToolInput, signal?: AbortSignal, onUpdate?, ctx?: ExtensionContext) {
+			if (bashCommand.action !== undefined) {
+				if (
+					bashCommand.action !== "wait" ||
+					typeof bashCommand.id !== "string" ||
+					Object.keys(bashCommand).some((key) => !["action", "id", "budgetMs"].includes(key)) ||
+					(bashCommand.budgetMs !== undefined &&
+						(typeof bashCommand.budgetMs !== "number" ||
+							!Number.isFinite(bashCommand.budgetMs) ||
+							bashCommand.budgetMs < 0))
+				)
+					throw new Error(
+						"Invalid shell wait: expected action wait, id, and optional finite non-negative budgetMs",
+					);
+				return waitForSupervisedCommand(options?.taskOwner, bashCommand.id, bashCommand.budgetMs, signal, {
+					tempFilePrefix: presentation.tempFilePrefix,
+					tempDir: resolveSessionTempDir(),
+				});
+			}
+			if (
+				bashCommand.id !== undefined ||
+				bashCommand.budgetMs !== undefined ||
+				typeof bashCommand.command !== "string"
+			)
+				throw new Error("Invalid shell command: command is required; id and budgetMs require action wait");
 			const { command } = bashCommand;
 			const timeout = normalizeTimeoutSeconds(bashCommand.timeout);
+			validateBashWait(bashCommand.wait, !!options?.operations || !!options?.taskOwner);
 			const sessionEnvironment = snapshotBashSessionEnvironment(ctx, exposeSessionEnvironment);
 			const resourceCtx = ctx as InternalResourceContext | undefined;
 			const executionCwd = ctx?.cwd || cwd;
@@ -395,7 +521,13 @@ export function createBashToolDefinition(
 					? await expandShellInternalUrls(bashCommand.cwd!, executionCwd, resourceCtx)
 					: executionCwd,
 				requestedCwd = resolvePath(executionCwd, cwdInput);
-			const expandedCommand = await expandShellInternalUrls(command, executionCwd, resourceCtx, true);
+			const expandedCommand = await expandShellInternalUrls(
+				command,
+				executionCwd,
+				resourceCtx,
+				true,
+				options?.shellDialect,
+			);
 			const strippedExpandedContext = hasExplicitCwd
 				? undefined
 				: stripLeadingCdCommand(expandedCommand, requestedCwd);
@@ -544,15 +676,18 @@ export function createBashToolDefinition(
 			const appendStatus = (text: string, status: string) => `${text ? `${text}\n\n` : ""}${status}`;
 			try {
 				let exitCode: number | null;
+				let observation: SupervisedCommandResult["observation"];
 				try {
 					const result = await ops.exec(executionContext.command, executionContext.cwd, {
 						onData: handleData,
 						signal,
 						timeout,
+						wait: bashCommand.wait,
 						env: executionContext.env,
 						pty: bashCommand.pty,
 					});
 					exitCode = result.exitCode;
+					observation = result.observation;
 				} catch (err) {
 					const snapshot = await finishOutput();
 					const { text } = formatOutput(snapshot, "");
@@ -567,6 +702,16 @@ export function createBashToolDefinition(
 				}
 				const snapshot = await finishOutput();
 				const { text: outputText, details } = formatOutput(snapshot);
+				if (observation?.kind === "yielded")
+					return {
+						content: [
+							{
+								type: "text",
+								text: appendStatus(outputText, `Command is still running (task ${observation.taskId}).`),
+							},
+						],
+						details: { ...withTiming(details), observation },
+					};
 				if (exitCode !== 0 && exitCode !== null) {
 					return {
 						content: [{ type: "text", text: appendStatus(outputText, `Command exited with code ${exitCode}`) }],

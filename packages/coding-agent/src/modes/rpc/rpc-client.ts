@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { ImageContent } from "@bastani/pi-ai/compat";
 import type { BashResult } from "../../core/bash-executor.ts";
 import { CredentialSynchronizationError } from "../../core/model-runtime.js";
-import type { BashOutputChannel } from "../../core/tools/bash.ts";
+import type { BashOutputChannel } from "../../core/tools/bash.js";
 import { sleep } from "../../utils/sleep.ts";
 import type { ActivityWatchdogDiagnostic } from "../interactive-engine/activity-watchdog.ts";
 import type {
@@ -23,10 +23,11 @@ import { RpcClientApi, type RpcCommandBody } from "./rpc-client-api.ts";
 import {
 	appendBoundedStderr,
 	createInteractiveJsonlOptions,
+	createStderrReporter,
 	restartCliArgs,
 	spawnRpcClientProcess,
 	terminateRpcClientProcess,
-} from "./rpc-client-process.ts";
+} from "./rpc-client-process.js";
 import { collectRpcEvents, runUserBashWithUpdates, waitForRpcIdle } from "./rpc-client-waits.ts";
 import { DEFAULT_REQUEST_TIMEOUT_MS, LONG_LIVED_COMMANDS, RESTART_CANCELLED_MESSAGE } from "./rpc-command-timeouts.ts";
 import { RpcEventBuffer } from "./rpc-event-buffer.ts";
@@ -81,6 +82,8 @@ export class RpcClient extends RpcClientApi {
 	private engineMessageListeners: Array<(message: InteractiveEngineMessage) => void> = [];
 	private latestEngineKeybindingState: EngineKeybindingState | undefined;
 	private readonly pendingEngineMessages = new GenerationBuffer<InteractiveEngineMessage>();
+	private readonly pendingProjectTrustFrames = new GenerationBuffer<string>();
+	private boundGeneration = 0;
 	private readonly pendingRequests = new RpcPendingRequests();
 	/** Bumped by every explicit stop; a restart holds a permit across its own stop. */
 	private restartRevision = 0;
@@ -161,10 +164,24 @@ export class RpcClient extends RpcClientApi {
 		);
 		childProcess.once("error", (rawError) => this.failGeneration(rawError, generation, "process-error"));
 		childProcess.stdin?.on("error", (rawError) => this.failGeneration(rawError, generation, "stdin-error"));
-		childProcess.stderr?.on("data", (data) => {
+		const reportStderr = createStderrReporter((message) => {
 			if (generation !== this.generation) return;
-			this.stderr = appendBoundedStderr(this.stderr, data.toString());
-			process.stderr.write(data);
+			if (this.options.interactiveEngine) {
+				this.options.interactiveEngine.onDiagnostic({
+					activity: undefined,
+					elapsedMs: 0,
+					level: "blocking",
+					source: "stderr",
+					message,
+				});
+			} else console.log(message);
+		});
+		// Decode continuously per child, including split code points and the final incomplete sequence at EOF.
+		childProcess.stderr?.setEncoding("utf8");
+		childProcess.stderr?.on("data", (data: string) => {
+			if (generation !== this.generation) return;
+			this.stderr = appendBoundedStderr(this.stderr, data);
+			reportStderr(data);
 		});
 		const readerOptions = createInteractiveJsonlOptions(this.engineMonitor !== undefined);
 		let markStdoutDrained!: () => void;
@@ -306,6 +323,15 @@ export class RpcClient extends RpcClientApi {
 
 	sendInteractiveEngineCommand(command: InteractiveEngineCommand): void {
 		const writer = this.stdinWriter;
+		if (command.type === "engine_project_trust_start" || command.type === "engine_project_trust_end") {
+			if (this.generation <= this.lastEndedGeneration) return;
+			// The terminal can open and close /trust while the engine is still binding.
+			// Retain both frames, without delaying the host-owned decision.
+			if (this.engineMonitor && this.boundGeneration !== this.generation) {
+				this.pendingProjectTrustFrames.push(this.generation, serializeInteractiveEngineFrame(command));
+				return;
+			}
+		}
 		if (!writer) return;
 		const frame = serializeInteractiveEngineFrame(command);
 		if (
@@ -426,6 +452,12 @@ export class RpcClient extends RpcClientApi {
 		if (generation !== this.generation || generation <= this.lastEndedGeneration) return;
 		if (message.type === "engine_heartbeat") this.options.interactiveEngine?.onHeartbeat?.();
 		if (message.type === "engine_ready") this.enginePid = message.pid;
+		if (message.type === "engine_bound") {
+			this.boundGeneration = generation;
+			for (const frame of this.pendingProjectTrustFrames.drain(generation)) {
+				if (this.stdinWriter) this.bestEffort(this.stdinWriter.write(frame), "project trust notification");
+			}
+		}
 		if (message.type === "engine_keybindings_reloaded") this.latestEngineKeybindingState = message.state;
 		if (message.type === "engine_activity_started") this.activeActivityIds.add(message.activity.id);
 		else if (message.type === "engine_activity_finished") this.activeActivityIds.delete(message.activityId);
@@ -470,6 +502,7 @@ export class RpcClient extends RpcClientApi {
 		// while it is closing that very generation's components.
 		this.pendingEngineMessages.dropGeneration(generation);
 		this.pendingExtensionUIRequests.dropGeneration(generation);
+		this.pendingProjectTrustFrames.dropGeneration(generation);
 		for (const listener of [...this.generationEndedListeners]) listener(event);
 	}
 	private failTransport(rawError: Error): void {

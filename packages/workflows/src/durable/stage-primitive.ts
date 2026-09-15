@@ -3,7 +3,7 @@
 import type { ParallelFailFastScope } from "../runs/foreground/executor-types.js";
 import { RESUME_CONTINUATION_PROMPT } from "../shared/resume-continuation.js";
 import type { StageSnapshot } from "../shared/store-types.js";
-import { elapsedStageMs } from "../shared/timing.js";
+import { elapsedStageMs, stageTimingFields } from "../shared/timing.js";
 import type {
 	StageContext,
 	StageOptions,
@@ -150,9 +150,9 @@ export function createDurableStagePrimitive(input: {
 	readonly stage: (name: string, options: StageOptions | undefined, replayKey: string) => StageContext;
 	readonly durableIntercomGroup?: (replayKey: string, stageId: string | undefined) => string | undefined;
 	readonly recordCachedStage?: (name: string, replayKey: string, checkpoint: DurableCompletedStageCheckpoint) => void;
-}): (name: string, options?: StageOptions) => StageContext {
-	return (name: string, options?: StageOptions): StageContext => {
-		const replayKey = input.nextReplayKey(name);
+}): (name: string, options?: StageOptions, reservedReplayKey?: string) => StageContext {
+	return (name: string, options?: StageOptions, reservedReplayKey?: string): StageContext => {
+		const replayKey = reservedReplayKey ?? input.nextReplayKey(name);
 		const cached = stageCheckpointWithOutput(input.backend, input.workflowId, replayKey);
 		if (cached !== undefined) {
 			input.recordCachedStage?.(name, replayKey, cached);
@@ -387,8 +387,8 @@ function completeTaskResult(
 			? { artifacts: [...(base.artifacts ?? checkpoint.artifacts ?? [])] }
 			: {}),
 		...(base.model !== undefined || checkpoint.model !== undefined ? { model: base.model ?? checkpoint.model } : {}),
-		...(base.fastMode !== undefined || checkpoint.fastMode !== undefined
-			? { fastMode: base.fastMode ?? checkpoint.fastMode }
+		...(base.thinkingLevel !== undefined || checkpoint.thinkingLevel !== undefined
+			? { thinkingLevel: base.thinkingLevel ?? checkpoint.thinkingLevel }
 			: {}),
 		...(base.attemptedModels !== undefined || checkpoint.attemptedModels !== undefined
 			? { attemptedModels: [...(base.attemptedModels ?? checkpoint.attemptedModels ?? [])] }
@@ -513,7 +513,7 @@ function taskCheckpointMetadata(result: WorkflowTaskResult): Partial<DurableStag
 		...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
 		...(result.sessionFile !== undefined ? { sessionFile: result.sessionFile } : {}),
 		...(result.model !== undefined ? { model: result.model } : {}),
-		...(result.fastMode !== undefined ? { fastMode: result.fastMode } : {}),
+		...(result.thinkingLevel !== undefined ? { thinkingLevel: result.thinkingLevel } : {}),
 		...(result.attemptedModels !== undefined ? { attemptedModels: [...result.attemptedModels] } : {}),
 		...(result.modelAttempts !== undefined ? { modelAttempts: [...result.modelAttempts] } : {}),
 		...(result.structured !== undefined ? { structured: result.structured } : {}),
@@ -562,7 +562,7 @@ function mergeCheckpointHydrationMetadata(
 		...(replayValueCheckpoint.sessionId === undefined ? metadataValue(checkpoints, "sessionId") : {}),
 		...(replayValueCheckpoint.sessionFile === undefined ? metadataValue(checkpoints, "sessionFile") : {}),
 		...(replayValueCheckpoint.model === undefined ? metadataValue(checkpoints, "model") : {}),
-		...(replayValueCheckpoint.fastMode === undefined ? metadataValue(checkpoints, "fastMode") : {}),
+		...(replayValueCheckpoint.thinkingLevel === undefined ? metadataValue(checkpoints, "thinkingLevel") : {}),
 		...(replayValueCheckpoint.attemptedModels === undefined ? metadataValue(checkpoints, "attemptedModels") : {}),
 		...(replayValueCheckpoint.modelAttempts === undefined ? metadataValue(checkpoints, "modelAttempts") : {}),
 		...(replayValueCheckpoint.structured === undefined ? metadataValue(checkpoints, "structured") : {}),
@@ -625,6 +625,9 @@ export function cachedStageId(runId: string, replayKey: string): string {
 function stageMetadataCheckpointId(replayKey: string, stage: StageSnapshot): string {
 	return `${stableCheckpointId("stage-meta", replayKey)}:${durableHash({
 		stageId: stage.id,
+		// Replay metadata may upgrade legacy topology while retaining identical timing.
+		// Keep it separate from the original execution record, stable across replays.
+		...(stage.replayed === true ? { replayed: true } : {}),
 		status: stage.status,
 		endedAt: stage.endedAt ?? 0,
 		durationMs: stage.durationMs ?? 0,
@@ -642,11 +645,9 @@ export function recordCachedStageIntoStore(
 	parentIds?: readonly string[],
 	checkpoint?: DurableCompletedStageCheckpoint,
 ): void {
-	const now = Date.now();
 	const sourceStageId = checkpoint?.topology?.run?.runId === runId ? checkpoint.topology.stageId : undefined;
 	const stageId = sourceStageId ?? cachedStageId(runId, replayKey);
 	const result = checkpoint?.result ?? (typeof output === "string" ? output : JSON.stringify(output));
-	const endedAt = checkpoint?.endedAt ?? checkpoint?.completedAt ?? now;
 	const hasCurrentIdentity =
 		checkpoint?.topology?.sourceOrder !== undefined ||
 		checkpoint?.topology?.status !== undefined ||
@@ -661,9 +662,7 @@ export function recordCachedStageIntoStore(
 		name,
 		status: "completed",
 		parentIds: parentIds !== undefined ? Object.freeze([...parentIds]) : [],
-		startedAt: checkpoint?.startedAt ?? endedAt,
-		endedAt,
-		durationMs: checkpoint?.durationMs ?? 0,
+		...stageTimingFields(checkpoint),
 		result,
 		replayKey,
 		replayed: true,
@@ -676,7 +675,7 @@ export function recordCachedStageIntoStore(
 		...(checkpoint?.sessionId !== undefined ? { sessionId: checkpoint.sessionId } : {}),
 		...(checkpoint?.sessionFile !== undefined ? { sessionFile: checkpoint.sessionFile } : {}),
 		...(checkpoint?.model !== undefined ? { model: checkpoint.model } : {}),
-		...(checkpoint?.fastMode !== undefined ? { fastMode: checkpoint.fastMode } : {}),
+		...(checkpoint?.thinkingLevel !== undefined ? { thinkingLevel: checkpoint.thinkingLevel } : {}),
 		...(checkpoint?.attemptedModels !== undefined ? { attemptedModels: checkpoint.attemptedModels } : {}),
 		...(checkpoint?.modelAttempts !== undefined ? { modelAttempts: checkpoint.modelAttempts } : {}),
 		...(checkpoint?.structured !== undefined ? { structured: checkpoint.structured } : {}),

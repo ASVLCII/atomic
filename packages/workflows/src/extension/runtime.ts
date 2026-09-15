@@ -10,7 +10,8 @@
  *            src/workflows/registry.ts
  */
 
-import { getDurableBackend, initializeDurableBackend } from "../durable/factory.js";
+import { type DurabilityWarningSink, getDurableBackend, initializeDurableBackend } from "../durable/factory.js";
+import { resolveToolResumeFrontier } from "../durable/tool-resume-frontier.js";
 import type { CancellationRegistry } from "../runs/background/cancellation-registry.js";
 import type { JobTracker } from "../runs/background/job-tracker.js";
 import type { DetachedRunOpts } from "../runs/background/runner.js";
@@ -81,8 +82,16 @@ export interface ExtensionRuntimeOpts {
 	jobs?: JobTracker;
 	/** Invocation cwd used for workflow execution. Defaults to process.cwd(). */
 	cwd?: string;
+	/** Display-only degradation warning reporter supplied by the host composition root. */
+	durabilityWarningSink?: DurabilityWarningSink;
 	/** Resolve the host's non-default session directory for workflow stage transcripts. */
 	resolveDefaultStageSessionDir?: () => string | undefined;
+	/**
+	 * Resolves a workflow definition's source path for the D1 possible-stage
+	 * scan at launch (discovery filePath, else the builtin source probe).
+	 * When absent, launch skips the scan and the run simply has no set.
+	 */
+	resolvePossibleStageEntry?: (normalizedName: string) => string | undefined;
 	/** Seed lifecycle state before historical completed snapshots are restored. */
 	beforeRestoreCompleted?: (snapshots: readonly RunSnapshot[]) => void;
 }
@@ -90,7 +99,14 @@ export interface ExtensionRuntimeOpts {
 // Public interface
 // ---------------------------------------------------------------------------
 export type ResumeFailedRunResult =
-	| { ok: true; runId: string; sourceRunId: string; resumeFromStageId?: string; message: string }
+	| {
+			ok: true;
+			runId: string;
+			sourceRunId: string;
+			resumeFromStageId?: string;
+			resumeFromToolNodeId?: string;
+			message: string;
+	  }
 	| {
 			ok: false;
 			reason: "run_not_found" | "not_resumable" | "workflow_not_found" | "insufficient_state";
@@ -125,7 +141,7 @@ export interface RuntimeDispatchOptions {
 	readonly actor?: WorkflowActor;
 	/** Run-level budget override used when a continuation is launched. */
 	readonly budget?: WorkflowBudget;
-	/** Cancels only the public request/admission wait, never detached execution after acknowledgement. */
+	/** Cancels initialization before acknowledgement; acknowledged execution stays detached. */
 	readonly signal?: AbortSignal;
 	/** Reports the exact detached identity before startup admission is awaited. */
 	readonly onRunAccepted?: (runId: string) => void;
@@ -157,15 +173,17 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 	const config = opts.config;
 	const models = opts.models;
 	const jobs = opts.jobs;
+	const durabilityWarningSink = opts.durabilityWarningSink;
 	const runtimeCwd = opts.cwd ?? process.cwd();
 	const resolveDefaultStageSessionDir = opts.resolveDefaultStageSessionDir;
+	const resolvePossibleStageEntry = opts.resolvePossibleStageEntry;
 	const beforeRestoreCompleted = opts.beforeRestoreCompleted;
-	const ensureDbosReady = async (): Promise<void> => {
+	const ensureDbosReady = async () => {
 		// Deliberately not memoized: the factory revalidates its memoized backend
 		// against the current DBOS lifecycle generation, so caching a permanently
 		// resolved promise here could mask a backend stopped after a
 		// host-session replacement (issue #1957).
-		await initializeDurableBackend();
+		return await initializeDurableBackend(durabilityWarningSink);
 	};
 
 	function runOptions(policy?: WorkflowExecutionPolicy): RunOpts {
@@ -224,7 +242,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 	function resolveResumeStage(
 		source: RunSnapshot,
 		stageId?: string,
-	): { ok: true; stageId?: string } | { ok: false; message: string } {
+	): { ok: true; stageId?: string; toolNodeId?: string } | { ok: false; message: string } {
 		const budgetExceededSource =
 			source.result?.status === "budget_exceeded" && source.budgetState?.systemOwnedStop === true;
 		if (stageId !== undefined) {
@@ -235,9 +253,13 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				return { ok: false, message: `insufficient_state: stage ${stage.name} is ${stage.status}, not failed` };
 			return { ok: true, stageId: stage.id };
 		}
+		if (source.failedToolNodeId !== undefined && source.failedStageId === undefined) {
+			return resolveToolResumeFrontier(source, getDurableBackend());
+		}
 		const failedStageId = source.failedStageId ?? source.stages.find((stage) => stage.status === "failed")?.id;
 		if (failedStageId !== undefined) return { ok: true, stageId: failedStageId };
 		if (budgetExceededSource && source.stages.length === 0) return { ok: true };
+		if ((source.toolNodes?.length ?? 0) > 0) return resolveToolResumeFrontier(source, getDurableBackend());
 		return { ok: false, message: `insufficient_state: failed run ${source.id} does not identify a failed stage` };
 	}
 
@@ -246,6 +268,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 		stageId?: string,
 		options?: RuntimeDispatchOptions,
 	): Promise<ResumeFailedRunResult> {
+		options?.signal?.throwIfAborted();
 		const source = activeStore.runs().find((run) => run.id === sourceRunId);
 		if (source === undefined) {
 			return { ok: false, reason: "run_not_found", message: `run not found: ${sourceRunId}` };
@@ -255,10 +278,14 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 		const isBudgetResumable =
 			source.result?.status === "budget_exceeded" && source.budgetState?.systemOwnedStop === true;
 		const isActiveBlockedResumable =
-			(source.endedAt === undefined || isBudgetResumable) &&
+			(source.endedAt === undefined || source.status === "blocked" || isBudgetResumable) &&
 			source.resumable === true &&
 			source.failureRecoverability === "recoverable";
-		if (!isTerminalFailedResumable && !isActiveBlockedResumable) {
+		if (
+			source.exitReason === "quit" ||
+			source.status === "killed" ||
+			(!isTerminalFailedResumable && !isActiveBlockedResumable)
+		) {
 			return { ok: false, reason: "not_resumable", message: `run ${sourceRunId} is not a resumable workflow run` };
 		}
 		const def = registry.get(source.name);
@@ -280,13 +307,15 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 			};
 		}
 		const stageMessage = (verb: string, runId: string): string =>
-			`${verb} workflow "${def.name}" from run ${source.id}${resolvedStage.stageId === undefined ? " at workflow start" : ` at stage ${resolvedStage.stageId}`} (run ${runId}).`;
+			`${verb} workflow "${def.name}" from run ${source.id}${resolvedStage.toolNodeId !== undefined ? ` at tool ${resolvedStage.toolNodeId}` : resolvedStage.stageId === undefined ? " at workflow start" : ` at stage ${resolvedStage.stageId}`} (run ${runId}).`;
 		const launchContinuation = (hooks?: Pick<DetachedRunOpts, "onWorkflowStartReady" | "onRawSettled">) =>
 			launchDetachedUntilStartup(def, sourceInputs, {
 				...runOptions(options?.policy),
+				startupSignal: options?.signal,
 				continuation: {
 					source,
 					...(resolvedStage.stageId !== undefined ? { resumeFromStageId: resolvedStage.stageId } : {}),
+					...(resolvedStage.toolNodeId !== undefined ? { resumeFromToolNodeId: resolvedStage.toolNodeId } : {}),
 				},
 				...(options?.actor === undefined ? {} : { resumeActor: options.actor }),
 				...(jobs !== undefined ? { jobs } : {}),
@@ -339,6 +368,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				};
 			}
 			const { accepted } = launch;
+			options?.onRunAccepted?.(accepted.runId);
 			const admission = await launch.wait;
 			if (!admission.started) {
 				const startupError = workflowStartupFailureMessage(
@@ -378,6 +408,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				runId: accepted.runId,
 				sourceRunId: source.id,
 				resumeFromStageId: resolvedStage.stageId,
+				...(resolvedStage.toolNodeId !== undefined ? { resumeFromToolNodeId: resolvedStage.toolNodeId } : {}),
 				message: stageMessage("Resuming blocked", accepted.runId),
 			};
 		}
@@ -392,6 +423,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 			};
 		}
 		const { accepted } = launch;
+		options?.onRunAccepted?.(accepted.runId);
 		const admission = await launch.wait;
 		if (!admission.started) {
 			const startupError = workflowStartupFailureMessage(
@@ -419,6 +451,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 			runId: accepted.runId,
 			sourceRunId: source.id,
 			resumeFromStageId: resolvedStage.stageId,
+			...(resolvedStage.toolNodeId !== undefined ? { resumeFromToolNodeId: resolvedStage.toolNodeId } : {}),
 			message: stageMessage("Resuming failed", accepted.runId),
 		};
 	}
@@ -429,7 +462,9 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 		},
 
 		async dispatch(args: WorkflowToolArgs, options?: RuntimeDispatchOptions): Promise<WorkflowToolResult> {
+			options?.signal?.throwIfAborted();
 			await raceWorkflowRequestAbort(ensureDbosReady(), options?.signal);
+			options?.signal?.throwIfAborted();
 			const defaultSessionDir = resolveDefaultStageSessionDir?.();
 			return dispatch(args, {
 				registry,
@@ -441,6 +476,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				mcp,
 				config,
 				models,
+				resolvePossibleStageEntry,
 				policy: options?.policy,
 				...(options?.origin === undefined ? {} : { origin: options.origin }),
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
@@ -450,7 +486,8 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 			});
 		},
 
-		resumeFailedRun,
+		resumeFailedRun: (sourceRunId, stageId, options) =>
+			raceWorkflowRequestAbort(resumeFailedRun(sourceRunId, stageId, options), options?.signal),
 		...createDurableResumeRuntime({
 			registry,
 			store: activeStore,

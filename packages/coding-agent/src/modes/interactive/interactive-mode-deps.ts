@@ -59,17 +59,11 @@ export {
 	getDocsPath,
 	getEnvValue,
 	getShareViewerUrl,
-	setCodexFastModeEnvironmentSettings,
 	VERSION,
 } from "../../config.js";
-export { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+export { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
 export { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 export { formatNoModelsAvailableMessage } from "../../core/auth-guidance.ts";
-export {
-	formatCodexFastModeModelLabel,
-	hasSupportedCodexFastModeModel,
-	shouldApplyCodexFastMode,
-} from "../../core/codex-fast-mode.ts";
 export type { VerbatimCompactionResult } from "../../core/compaction/index.ts";
 export type {
 	AutocompleteProviderFactory,
@@ -83,7 +77,7 @@ export type {
 	HostCustomUiState,
 	HostCustomUiStateListener,
 	ProjectTrustContext,
-} from "../../core/extensions/index.ts";
+} from "../../core/extensions/index.js";
 export { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 export { configureHttpDispatcher } from "../../core/http-dispatcher.ts";
 export { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
@@ -101,7 +95,7 @@ export { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-nam
 export type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 export { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 export { type SessionContext, SessionManager } from "../../core/session-manager.ts";
-export { BUILTIN_SLASH_COMMANDS, BUNDLED_EXTENSION_SLASH_COMMANDS } from "../../core/slash-commands.ts";
+export { BUILTIN_SLASH_COMMANDS, BUNDLED_EXTENSION_SLASH_COMMANDS } from "../../core/slash-commands.js";
 export type { SourceInfo } from "../../core/source-info.ts";
 export { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 export { recordTimeSinceReset } from "../../core/timings.ts";
@@ -143,7 +137,7 @@ export {
 	chatEntriesFromAgentMessages,
 	renderChatMessageEntry,
 } from "./components/chat-message-renderer.ts";
-export { addChatTranscriptEntry } from "./components/chat-transcript.ts";
+export { addChatTranscriptEntry } from "./components/chat-transcript.js";
 export { CompactionBoundaryMessageComponent } from "./components/compaction-boundary-message.ts";
 export { CountdownTimer } from "./components/countdown-timer.ts";
 export { CustomEditor } from "./components/custom-editor.ts";
@@ -154,9 +148,8 @@ export { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 export { ExtensionEditorComponent } from "./components/extension-editor.ts";
 export { ExtensionInputComponent } from "./components/extension-input.ts";
 export { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-export { FastModeSelectorComponent } from "./components/fast-mode-selector.ts";
 export { FooterComponent, UsageMeterComponent } from "./components/footer.ts";
-export { formatKeyText, keyDisplayText, keyHintIfBound, keyText } from "./components/keybinding-hints.ts";
+export { formatKeyText, keyDisplayText, keyHintIfBound, keyText } from "./components/keybinding-hints.js";
 export { LoginDialogComponent } from "./components/login-dialog.ts";
 export { ModelSelectorComponent } from "./components/model-selector.ts";
 export { type AuthSelectorProvider, OAuthSelectorComponent } from "./components/oauth-selector.ts";
@@ -182,6 +175,6 @@ export {
 	stopThemeWatcher,
 	Theme,
 	theme,
-} from "./theme/theme.ts";
+} from "./theme/theme.js";
 export { InteractiveThemeController } from "./theme/theme-controller.ts";
 export { pickWhimsicalWorkingMessage } from "./whimsical-messages.ts";

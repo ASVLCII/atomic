@@ -7,7 +7,7 @@ import type {
 	OverlayOptions,
 	TUI,
 } from "@earendil-works/pi-tui";
-import type { Theme } from "../../modes/interactive/theme/theme.ts";
+import type { Theme } from "../../modes/interactive/theme/theme.js";
 import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { MarkdownTransformer, MessageRenderer } from "./message-types.ts";
@@ -24,10 +24,30 @@ export interface ExtensionUIDialogOptions {
 /** Placement for extension widgets. */
 export type WidgetPlacement = "aboveEditor" | "belowEditor";
 
+export interface WidgetScrollState {
+	scrollTop: number;
+	viewportHeight: number;
+	contentHeight: number;
+}
+
+export interface WidgetScrollRequest {
+	/** Increase when intentionally requesting a new position. */
+	version: number;
+	scrollTop: number;
+}
+
+export interface ScrollableWidgetComponent extends Component {
+	getScrollRequest?(): WidgetScrollRequest | undefined;
+	onScroll?(state: WidgetScrollState): void;
+	dispose?(): void;
+}
+
 /** Options for extension widgets. */
 export interface ExtensionWidgetOptions {
 	/** Where the widget is rendered. Defaults to "aboveEditor". */
 	placement?: WidgetPlacement;
+	/** Opt in to a host-owned viewport. Height is a cap, not a guaranteed allocation. */
+	scroll?: { maxHeight: number; maxHeightFraction?: number };
 }
 
 /** Raw terminal input listener for extensions. */
@@ -103,6 +123,8 @@ export interface HostCustomUiState {
 	blockingInlineCustomUiActive: boolean;
 	/** True when the active inline custom UI is waiting behind an overlay that kept focus. */
 	blockingInlineCustomUiFocusDeferred?: boolean;
+	/** Distinguishes required prompts from navigation. Omitted when all mounts are prompts. */
+	blockingInlineCustomUiNeedsInput?: boolean;
 }
 
 export type HostCustomUiStateListener = (state: HostCustomUiState) => void;
@@ -282,6 +304,8 @@ export interface ExtensionUIContext {
 			done: (result: T) => void,
 		) => ExtensionCustomComponent | Promise<ExtensionCustomComponent>,
 		options?: {
+			/** Navigation does not emit approval-prompt events. Defaults to "prompt". */
+			purpose?: "prompt" | "navigation";
 			overlay?: boolean;
 			/** Keep host inline custom UI pending in the background while this overlay is visible. */
 			deferInlineCustomUiFocus?: boolean;

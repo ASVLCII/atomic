@@ -280,9 +280,14 @@ function completedToolNodes(
 				parentIds: Object.freeze(
 					[...(topology?.parentIds ?? [])].map((parentId) => sourceIds.get(parentId) ?? parentId),
 				),
-				replayed: true,
+				...(checkpoint.throwingFailureError === undefined ? { replayed: true } : {}),
 				...(topology === undefined ? { topologyState: "unavailable" as const } : {}),
-				status: failed ? ("failed" as const) : ("cached" as const),
+				status:
+					checkpoint.cancelled === true
+						? ("cancelled" as const)
+						: failed
+							? ("failed" as const)
+							: ("cached" as const),
 				executionOrder: topology?.order ?? firstSequenceByHash.get(checkpoint.argsHash)!,
 				...(topology?.startedAt !== undefined ? { startedAt: topology.startedAt } : {}),
 				endedAt: topology?.endedAt ?? checkpoint.completedAt,
@@ -628,7 +633,7 @@ function stageSnapshotFromDraft(draft: StageDraft, id: string, parentIds: readon
 		...(draft.sessionId !== undefined ? { sessionId: draft.sessionId } : {}),
 		...(draft.sessionFile !== undefined ? { sessionFile: draft.sessionFile } : {}),
 		...(draft.model !== undefined ? { model: draft.model } : {}),
-		...(draft.fastMode !== undefined ? { fastMode: draft.fastMode } : {}),
+		...(draft.thinkingLevel !== undefined ? { thinkingLevel: draft.thinkingLevel } : {}),
 		...(draft.attemptedModels !== undefined ? { attemptedModels: draft.attemptedModels } : {}),
 		...(draft.modelAttempts !== undefined ? { modelAttempts: draft.modelAttempts } : {}),
 	};

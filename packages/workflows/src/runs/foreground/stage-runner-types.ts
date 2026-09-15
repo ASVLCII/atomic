@@ -1,4 +1,5 @@
 import type { AgentSession, CreateAgentSessionOptions, PromptOptions, SettingsManager } from "@bastani/atomic";
+import type { WorkflowPendingStageRouteReadiness } from "../../shared/pending-stage-route-readiness.js";
 import type {
 	CompleteStageOpts,
 	StageContext,
@@ -18,14 +19,12 @@ type WorkflowPendingStageDelivery = NonNullable<
 type AgentStageSessionEvent = Parameters<AgentSession["subscribe"]>[0] extends (event: infer T) => void ? T : never;
 export type StageSessionEvent = AgentStageSessionEvent & { readonly turnId?: string | number };
 
-export type WorkflowFastModeSettings = {
-	readonly chat: boolean;
-	readonly workflow: boolean;
+// External Pi hosts may predate the optional agent retry cap.
+export type WorkflowRetrySettings = Omit<ReturnType<SettingsManager["getRetrySettings"]>, "maxAgentDelayMs"> & {
+	readonly maxAgentDelayMs?: number;
 };
-export type WorkflowRetrySettings = ReturnType<SettingsManager["getRetrySettings"]>;
 
-export type WorkflowFastModeSettingsManager = {
-	getCodexFastModeSettings(): WorkflowFastModeSettings;
+export type WorkflowSettingsManager = {
 	getRetrySettings?(): WorkflowRetrySettings;
 };
 
@@ -59,6 +58,10 @@ export interface StageSessionRuntime {
 	pauseQueuedMessages?(): void;
 	/** Optional native release; calls `beforeRelease` at the final synchronous boundary. */
 	resumeQueuedMessages?(beforeRelease?: () => void): boolean | Promise<boolean>;
+	/** Optional owned-execution hold: block launches synchronously, cancel and drain before resolving. */
+	pauseTasks?(): Promise<void>;
+	/** Reopen launches only; cancelled executions must never restart. */
+	resumeTasks?(): void;
 	steer(text: string): Promise<void>;
 	followUp(text: string): Promise<void>;
 	subscribe(listener: (event: StageSessionEvent) => void): () => void;
@@ -85,7 +88,7 @@ export interface StageSessionRuntime {
 	getSteeringMessages?(): readonly string[];
 	getFollowUpMessages?(): readonly string[];
 	/** Settings manager supplied by the Atomic SDK when the adapter did not pre-create one. */
-	readonly settingsManager?: WorkflowFastModeSettingsManager;
+	readonly settingsManager?: WorkflowSettingsManager;
 	navigateTree: AgentSession["navigateTree"];
 	compact: AgentSession["compact"];
 	abortCompaction(): void;
@@ -99,7 +102,7 @@ export type StageSessionCreateOptions = CreateAgentSessionOptions &
 
 export interface StageSessionCreateResult {
 	readonly session: StageSessionRuntime;
-	readonly settingsManager?: WorkflowFastModeSettingsManager;
+	readonly settingsManager?: WorkflowSettingsManager;
 }
 
 export interface AgentSessionAdapter {
@@ -111,7 +114,7 @@ export interface AgentSessionAdapter {
 
 export interface StageModelFallbackMeta {
 	readonly model?: string;
-	readonly fastMode?: boolean;
+	readonly thinkingLevel?: string;
 	readonly attemptedModels?: readonly string[];
 	readonly modelAttempts?: readonly WorkflowModelAttempt[];
 	readonly warnings?: readonly string[];
@@ -149,15 +152,21 @@ export interface StageRunnerOpts {
 	executionMode?: WorkflowExecutionMode;
 	/** Host-resolved non-default session directory inherited by stages without explicit sessionDir. */
 	defaultSessionDir?: string;
-	/** Internal: notifies the executor when an in-flight fallback changes model/fast metadata. */
+	/** Internal: notifies the executor when an in-flight fallback changes model metadata. */
 	onModelFallbackMetaChange?: (meta: StageModelFallbackMeta) => void;
 	/** Internal: persist stage-session identity once the SDK has created its path. */
 	onSessionReady?: () => void | Promise<void>;
+	/** Internal phase/age observation, including cancellation with retained ownership. */
+	onStartupChange?: (snapshot: import("../../shared/stage-startup.js").StageStartupSnapshot) => void;
+	/** Internal: acknowledged owner authority required before session_start can register a live route. */
+	routeAuthorityReady?: () => WorkflowPendingStageRouteReadiness | undefined;
 	/** Internal durable pre-start message bridge consumed by the intercom extension. */
 	pendingStageDelivery?: WorkflowPendingStageDelivery;
 }
 
 export interface InternalStageContext extends StageContext {
+	/** Internal executor continuation of the current output generation. */
+	__continuePrompt(text: string): Promise<string>;
 	/** Internal cleanup hook; intentionally omitted from the public StageContext type. */
 	__dispose(): Promise<void>;
 	/** Internal result snapshot hook for the workflow store/TUI. */
@@ -191,7 +200,7 @@ export interface InternalStageContext extends StageContext {
 	/** Internal: synchronously reject new detached traffic without waiting for active work. */
 	__sealGeneration(): void;
 	/** Internal: atomically stop detached traffic admission and drain admitted work. */
-	__closeGeneration(): Promise<void>;
+	__closeGeneration(): Promise<string | undefined>;
 	/** Internal: snapshot of currently-known SDK session metadata. */
 	__sessionMeta(): { sessionId: string | undefined; sessionFile: string | undefined };
 	/** Internal: live coding-agent session when the adapter returned one. */

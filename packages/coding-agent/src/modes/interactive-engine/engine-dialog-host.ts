@@ -1,6 +1,6 @@
-import type { ExtensionUIContext } from "../../core/extensions/index.ts";
+import type { ExtensionUIContext } from "../../core/extensions/index.js";
 import type { RpcExtensionUIRequest, RpcExtensionUIResponse } from "../rpc/rpc-types.ts";
-import type { IsolatedInteractiveRuntime } from "./isolated-runtime.ts";
+import type { IsolatedInteractiveRuntime } from "./isolated-runtime.js";
 
 /** Requests that mount a host dialog and therefore need generation ownership. */
 const MOUNTING_METHODS: ReadonlySet<string> = new Set(["select", "confirm", "input", "editor"]);
@@ -40,7 +40,10 @@ async function handleRequest(
 			ui.setStatus(request.statusKey, request.statusText);
 			return undefined;
 		case "setWidget":
-			ui.setWidget(request.widgetKey, request.widgetLines, { placement: request.widgetPlacement });
+			ui.setWidget(request.widgetKey, request.widgetLines, {
+				placement: request.widgetPlacement,
+				...(request.widgetScroll ? { scroll: request.widgetScroll } : {}),
+			});
 			return undefined;
 		case "setTitle":
 			ui.setTitle(request.title);

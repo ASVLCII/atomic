@@ -1,10 +1,14 @@
 import { APP_NAME, getEnvValue, type ExtensionAPI, type ExtensionContext, type SessionStartEvent, type ToolDefinition } from "@bastani/atomic";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { getExtensionContextOwner } from "./context-owner.js";
 import { renderIntercomToolResult } from "./result-renderers.js";
 import { executeHeavyTool, runHeavyCommand, type HeavyHandle } from "./lazy-tool-execution.js";
 import { assertCurrentLifecycleLease, createLifecycleLease, retainSettledLifecycleCleanup, retireLifecycleLease, SerializedLifecycleForwarder, type LifecycleLease } from "./lifecycle-lease.js";
 import { rejectLazyResultRelay } from "./lazy-subagent-ack.js";
+import { isRecoverableIntercomDisconnect } from "./recoverable-disconnect.js";
+import { IntercomWarmUpExhaustedError } from "./warm-up-exhaustion.js";
+import { reconnectDelayMs } from "./reconnect-backoff.js";
 import {
 	createForwardedHandlerMap,
 	createHeavyProxy,
@@ -19,12 +23,16 @@ type LifecycleSnapshot<K extends keyof ForwardedEventMap> = {
 	event: ForwardedEventMap[K];
 	ctx: ExtensionContext;
 };
-type ShutdownSnapshot = LifecycleSnapshot<"session_shutdown"> & { generation: number };
+type ShutdownSnapshot = LifecycleSnapshot<"session_shutdown"> & { generation: number; diagnosticRoute: DiagnosticRoute };
 type IntercomLease = LifecycleLease<ShutdownSnapshot>;
 type SessionSnapshot = LifecycleSnapshot<"session_start"> & { generation: number; lease: IntercomLease };
 type IntercomHeavyHandle = HeavyHandle<CapturedHeavy>;
 type HeavyAttempt = { lease: IntercomLease; promise: Promise<IntercomHeavyHandle> };
 type ReplayAttempt = { lease: IntercomLease; heavy: CapturedHeavy; promise: Promise<void> };
+/** The stage's durable pre-start delivery, as the host hands it to a workflow-stage session. */
+type WorkflowStagePendingDelivery = NonNullable<
+	NonNullable<ExtensionContext["orchestrationContext"]>["pendingStageDelivery"]
+>;
 type ActiveLifecycleState = {
 	turnStart: LifecycleSnapshot<"turn_start"> | null;
 	agentStart: LifecycleSnapshot<"agent_start"> | null;
@@ -33,6 +41,12 @@ type ActiveLifecycleState = {
 };
 interface LightweightIntercomOptions {
 	importHeavy?: () => Promise<{ default: (pi: ExtensionAPI) => void | Promise<void> }>;
+	/**
+	 * Internal test seam: the warm-up retry schedule in milliseconds. Production
+	 * uses the shared reconnect backoff; a test supplies short delays so the
+	 * bounded retry can be driven without waiting out the real schedule.
+	 */
+	warmUpRetryDelaysMs?: readonly number[];
 }
 
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
@@ -120,15 +134,86 @@ function renderHeavyToolResult(loadedHeavy: CapturedHeavy | null, name: string, 
 	if (renderer) return renderer(...args);
 	return renderIntercomToolResult(name, args);
 }
-function isRecoverableHeavyInitializationDisconnect(error: unknown): boolean {
-	return error instanceof Error && error.message === "Client disconnected";
+
+/** Formatting a diagnostic must never replace the failure or its acknowledgement. */
+function diagnosticDetail(error: unknown): string {
+	try {
+		return String(error instanceof Error ? error.message : error);
+	} catch {
+		return "Unprintable error";
+	}
 }
+
+type DiagnosticRoute = ExtensionContext | "console" | "silent";
+
+/** Snapshot routing before awaits can invalidate the owner's guarded getters. */
+function captureDiagnosticRoute(ctx: ExtensionContext | undefined): DiagnosticRoute {
+	try {
+		// RPC has UI too, but only a terminal owns pane diagnostics. Keep the
+		// context, not its raw UI: late TUI notifications must still be guarded.
+		return ctx?.hasUI && ctx.mode === "tui" ? ctx : "console";
+	} catch {
+		return "silent";
+	}
+}
+
+/** Report against the captured owner, not whichever session is current after an await. */
+function reportDiagnostic(
+	route: DiagnosticRoute,
+	message: string,
+	error: unknown,
+	level: "warning" | "error",
+	consoleMessage = message,
+): void {
+	if (route === "console") {
+		console.error(consoleMessage, error);
+		return;
+	}
+	if (route === "silent") return;
+	try {
+		route.ui.notify(message, level);
+	} catch {
+		// A retired TUI context or unavailable UI never authorizes console fallback.
+	}
+}
+
+/**
+ * Diagnostics for a background Intercom event relay.
+ *
+ * A recoverable broker disconnect is not a relay failure the user can act on:
+ * the lazy heavy attempt has already been discarded, so the next relay or tool
+ * call reconnects on its own. Rendering it would dump an alarming
+ * "Intercom event relay failed ... Client disconnected" into the stage UI for
+ * work nobody requested. Every other failure — protocol, authentication,
+ * configuration, a non-recoverable import, or a terminal relay error — is still
+ * reported. The caller-facing acknowledgement is emitted either way, so a
+ * waiting relay never hangs on this decision.
+ */
+function reportRelayFailure(route: DiagnosticRoute, eventName: string, error: unknown): void {
+	if (isRecoverableIntercomDisconnect(error)) return;
+	const prefix = `Intercom event relay failed (${eventName}):`;
+	const detail = diagnosticDetail(error);
+	reportDiagnostic(route, `${prefix} ${detail}`, error, "error", prefix);
+}
+
+/**
+ * Bounded attempts for the workflow-stage warm-up retry.
+ *
+ * A stage that carries queued pending messages parks on
+ * `pendingStageDelivery.ready()`, which only a successful heavy-module replay
+ * resolves. Silently discarding a recoverable warm-up disconnect would leave
+ * that stage waiting with no owner and no signal, so the wrapper retries on the
+ * shared reconnect backoff and reports once when the attempts run out.
+ */
+const WARM_UP_RETRY_ATTEMPTS = 5;
 
 export default function intercom(pi: ExtensionAPI, options: LightweightIntercomOptions = {}) {
   const inheritedDelegatedSessionName = readSubagentEnv("INTERCOM_SESSION_NAME");
   let heavyAttempt: HeavyAttempt | null = null;
   let loadedHeavy: IntercomHeavyHandle | null = null;
   let sessionSnapshot: SessionSnapshot | null = null;
+	// Event subscriptions outlive shutdown replay state; never use this owner to load heavy state.
+	let shutdownDiagnosticRoute: DiagnosticRoute | undefined;
 	let lifecycleGeneration = 0;
 	let nextLeaseId = 1;
 	let activeLease = createLifecycleLease<ShutdownSnapshot>(nextLeaseId++);
@@ -199,6 +284,8 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 		await promise;
 	}
 	async function loadHeavy(ctx?: ExtensionContext): Promise<IntercomHeavyHandle> {
+		let diagnosticRoute = captureDiagnosticRoute(ctx);
+		let diagnosticOwner = ctx && getExtensionContextOwner(ctx);
 		const lease = activeLease;
 		if (lease.retired) throw new Error("Intercom initialization unavailable: no active session");
 		await waitForPriorCleanup(lease);
@@ -214,12 +301,12 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 			return handle;
 		}
 		let promise: Promise<IntercomHeavyHandle>;
+		let replayCtx: ExtensionContext | null = null;
 		promise = (async (): Promise<IntercomHeavyHandle> => {
 			const captured: CapturedHeavy = {
 				tools: new Map(), commands: new Map(), handlers: createForwardedHandlerMap(),
 				shortcuts: new Map(), eventHandlers: new Map(),
 			};
-			let replayCtx: ExtensionContext | null = null;
 			let cleaned = false;
 			const cleanupCandidate = async (): Promise<void> => {
 				const shutdown = lease.shutdown;
@@ -230,7 +317,9 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 				try {
 					await dispatchHandlers(captured, "session_shutdown", event, cleanupCtx);
 				} catch (cleanupError) {
-					console.error("Intercom failed to clean rejected lazy candidate:", cleanupError);
+					const prefix = "Intercom failed to clean rejected lazy candidate:";
+					const detail = diagnosticDetail(cleanupError);
+					reportDiagnostic(shutdown?.diagnosticRoute ?? diagnosticRoute, `${prefix} ${detail}`, cleanupError, "error", prefix);
 				}
 			};
 			try {
@@ -241,7 +330,15 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 				if (!sessionSnapshot && ctx) {
 					sessionSnapshot = { event: createSyntheticSessionStartEvent(), ctx, generation: ++lifecycleGeneration, lease };
 				}
-				await ensureSessionStartReplayed(captured, lease, (replayContext) => { replayCtx = replayContext; });
+				await ensureSessionStartReplayed(captured, lease, (replayContext) => {
+					// Dispatch wrappers differ even for the same (possibly already stale) owner.
+					const owner = getExtensionContextOwner(replayContext);
+					if (owner !== diagnosticOwner) {
+						diagnosticRoute = captureDiagnosticRoute(replayContext);
+						diagnosticOwner = owner;
+					}
+					replayCtx = replayContext;
+				});
 				assertLease(lease);
 				const handle = createHandle(captured, lease);
 				loadedHeavy = handle;
@@ -256,13 +353,107 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 			() => undefined,
 			(error: unknown) => {
 				if (heavyAttempt?.promise === promise) heavyAttempt = null;
-				if (!isRecoverableHeavyInitializationDisconnect(error)) {
-					const message = error instanceof Error ? error.message : String(error);
-					console.error(`Intercom heavy initialization failed; a later call will retry: ${message}`, error);
+				if (!isRecoverableIntercomDisconnect(error)) {
+					const message = diagnosticDetail(error);
+					reportDiagnostic(
+						diagnosticRoute,
+						`Intercom heavy initialization failed; a later call will retry: ${message}`,
+						error,
+						"warning",
+					);
 				}
 			},
 		);
 		return promise;
+	}
+	type WarmUpRetry = { lease: IntercomLease; generation: number; timer: ReturnType<typeof setTimeout> | null; cancelled: boolean };
+	let warmUpRetry: WarmUpRetry | null = null;
+	function cancelWarmUpRetry(): void {
+		if (!warmUpRetry) return;
+		warmUpRetry.cancelled = true;
+		if (warmUpRetry.timer) clearTimeout(warmUpRetry.timer);
+		warmUpRetry = null;
+	}
+	function warmUpRetryDelay(attempt: number): number | undefined {
+		const schedule = options.warmUpRetryDelaysMs;
+		if (schedule) return schedule[attempt];
+		return attempt < WARM_UP_RETRY_ATTEMPTS ? reconnectDelayMs(attempt) : undefined;
+	}
+	/**
+	 * Own the recovery for a workflow-stage warm-up that lost the broker.
+	 *
+	 * `session_start` returns immediately so the host is not blocked on backoff,
+	 * and exactly one retry chain runs per lease: each attempt re-checks that the
+	 * lease and lifecycle generation are still current, so shutdown, reload, and
+	 * session replacement abort it silently instead of racing a stale context or
+	 * building a second client. A success drains the stage's pending deliveries
+	 * through the normal `session_start` replay.
+	 *
+	 * Running out of attempts is terminal, and it belongs to the stage rather
+	 * than to the console: the extension hands the delivery owner a typed reason
+	 * so the stage fails at its own lifecycle boundary. Writing the diagnostic
+	 * here instead put raw extension text into the root session's transcript and
+	 * still left the stage waiting on `pendingStageDelivery.ready()` forever.
+	 */
+	function scheduleWarmUpRetry(
+		ctx: ExtensionContext,
+		lease: IntercomLease,
+		generation: number,
+		pendingStageDelivery: WorkflowStagePendingDelivery,
+		initialError: unknown,
+	): void {
+		if (warmUpRetry) return;
+		const state: WarmUpRetry = { lease, generation, timer: null, cancelled: false };
+		warmUpRetry = state;
+		let lastError: unknown = initialError;
+		const clearOwner = (): void => {
+			if (warmUpRetry === state) warmUpRetry = null;
+		};
+		const stale = (): boolean =>
+			state.cancelled || activeLease !== lease || lease.retired || sessionSnapshot?.generation !== generation;
+		const attemptAt = (attempt: number): void => {
+			const delay = warmUpRetryDelay(attempt);
+			if (delay === undefined) {
+				clearOwner();
+				const exhausted = new IntercomWarmUpExhaustedError(
+					attempt,
+					lastError instanceof Error ? { cause: lastError } : undefined,
+				);
+				try {
+					pendingStageDelivery.fail(exhausted);
+				} catch {
+					// `fail` is part of the delivery contract, so this is a host that
+					// violates it. Nothing here may write to the transcript, and this runs
+					// inside a timer callback where a throw would become an
+					// uncaughtException; the offending host keeps its own parked stage.
+				}
+				return;
+			}
+			const timer = setTimeout(() => {
+				state.timer = null;
+				if (stale()) {
+					clearOwner();
+					return;
+				}
+				void loadHeavy(ctx).then(clearOwner, (error: unknown) => {
+					lastError = error;
+					if (stale()) {
+						clearOwner();
+						return;
+					}
+					// A non-recoverable failure is already reported by loadHeavy's own
+					// rejection handler; retrying it would only repeat that diagnostic.
+					if (!isRecoverableIntercomDisconnect(error)) {
+						clearOwner();
+						return;
+					}
+					attemptAt(attempt + 1);
+				});
+			}, delay);
+			timer.unref?.();
+			state.timer = timer;
+		};
+		attemptAt(0);
 	}
   let typedContactSupervisorRegistered = hasSubagentIntercomEnv();
   const activateTypedContactSupervisor = (): void => {
@@ -307,8 +498,25 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
     }
     const generation = ++lifecycleGeneration;
     sessionSnapshot = { event, ctx, generation, lease };
+		shutdownDiagnosticRoute = undefined;
+    cancelWarmUpRetry();
     if (ctx.orchestrationContext?.kind === "workflow-stage" && ctx.orchestrationContext.pendingStageDelivery !== undefined) {
-      await loadHeavy(ctx);
+      const pendingStageDelivery = ctx.orchestrationContext.pendingStageDelivery;
+      try {
+        await loadHeavy(ctx);
+      } catch (error) {
+        // Eager stage warm-up is Intercom's own initiative, not the user's.
+        // Letting a recoverable disconnect escape would make the host runner
+        // report a `session_start` extension error and paint "Client
+        // disconnected" over a stage that is still running. Recovery is not
+        // left to chance either: this branch hands the failure to a bounded
+        // retry owner, because a stage carrying queued messages parks on
+        // `pendingStageDelivery.ready()` until a replay delivers them, and
+        // that owner signals the same delivery when its attempts run out.
+        // Everything else still escapes.
+        if (!isRecoverableIntercomDisconnect(error)) throw error;
+        scheduleWarmUpRetry(ctx, lease, generation, pendingStageDelivery, error);
+      }
     } else if (loadedHeavy) {
       await ensureSessionStartReplayed(loadedHeavy.heavy, lease);
     }
@@ -316,7 +524,10 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 	pi.on("session_shutdown", async (event, ctx) => {
 		const lease = activeLease;
 		const generation = ++lifecycleGeneration;
-		retireLifecycleLease(lease, { event, ctx, generation });
+		const diagnosticRoute = captureDiagnosticRoute(ctx);
+		retireLifecycleLease(lease, { event, ctx, generation, diagnosticRoute });
+		shutdownDiagnosticRoute = diagnosticRoute;
+		cancelWarmUpRetry();
 		const retiredHeavy = loadedHeavy?.heavy ?? null;
 		const retiredAttempt = heavyAttempt?.lease === lease ? heavyAttempt.promise : null;
 		const retiredReplay = replayAttempt?.lease === lease ? replayAttempt.promise : null;
@@ -412,19 +623,35 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
 		const request = payload as SupervisorAuthorizationRequest;
 		if (typeof request.childName !== "string" || !request.childName.trim() || request.completion) return;
-		request.completion = loadHeavy(latestLifecycleContext()).then(async (handle) => {
-			handle.assertCurrent();
-			const forwarded: SupervisorAuthorizationRequest = { childName: request.childName };
-			await dispatchEventHandlers(handle.heavy, SUBAGENT_SUPERVISOR_AUTHORIZATION_EVENT, forwarded);
-			if (!forwarded.completion) throw new Error("Intercom supervisor authorization provider is unavailable");
-			return await forwarded.completion;
-		});
+		request.completion = loadHeavy(latestLifecycleContext())
+			.then(async (handle) => {
+				handle.assertCurrent();
+				const forwarded: SupervisorAuthorizationRequest = { childName: request.childName };
+				await dispatchEventHandlers(handle.heavy, SUBAGENT_SUPERVISOR_AUTHORIZATION_EVENT, forwarded);
+				if (!forwarded.completion) throw new Error("Intercom supervisor authorization provider is unavailable");
+				return await forwarded.completion;
+			})
+			.catch((error: unknown) => {
+				// Supervisor authorization is advisory. `requestSupervisorAuthorization`
+				// already resolves `undefined` when the parent runtime is gone, and a
+				// runtime with no provider simply omits supervisor metadata rather than
+				// exposing a broken channel. A recoverable broker disconnect is the same
+				// situation: rejecting instead aborts the launch and makes
+				// "Client disconnected" the subagent's entire run result, which is the
+				// leak this fix exists to close. The child connects lazily anyway, so it
+				// requests its own capability once the broker is back. Every other
+				// failure — including a claimed provider that failed — still aborts.
+				if (isRecoverableIntercomDisconnect(error)) return undefined;
+				throw error;
+			});
 	});
 	pi.events.on(PENDING_STAGE_UNDELIVERABLE_EVENT, (payload) => {
 		if (!isPendingStageUndeliverableRelay(payload) || payload.handled === true) return;
 		payload.handled = true;
 		const forwarded = { ...payload, handled: false, completion: undefined };
-		payload.completion = loadHeavy(latestLifecycleContext())
+		const ctx = latestLifecycleContext();
+		const diagnosticRoute = ctx ? captureDiagnosticRoute(ctx) : shutdownDiagnosticRoute ?? "console";
+		payload.completion = loadHeavy(ctx)
 			.then(async (handle) => {
 				handle.assertCurrent();
 				await dispatchEventHandlers(handle.heavy, PENDING_STAGE_UNDELIVERABLE_EVENT, forwarded);
@@ -434,7 +661,7 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 					: false;
 			})
 			.catch((error) => {
-				console.error(`Intercom event relay failed (${PENDING_STAGE_UNDELIVERABLE_EVENT}):`, error);
+				reportRelayFailure(diagnosticRoute, PENDING_STAGE_UNDELIVERABLE_EVENT, error);
 				return false;
 			});
 	});
@@ -444,7 +671,9 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 		PENDING_STAGE_ROUTE_EVENT,
 	] as const) {
 		pi.events.on(eventName, (payload) => {
-			const completion = loadHeavy(latestLifecycleContext()).then(async (handle) => {
+			const ctx = latestLifecycleContext();
+			const diagnosticRoute = ctx ? captureDiagnosticRoute(ctx) : shutdownDiagnosticRoute ?? "console";
+			const completion = loadHeavy(ctx).then(async (handle) => {
 				handle.assertCurrent();
 				await dispatchEventHandlers(handle.heavy, eventName, payload);
 				handle.assertCurrent();
@@ -458,7 +687,7 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 			}
 			void completion.catch((error) => {
 				rejectLazyResultRelay(pi, eventName, payload, error);
-				console.error(`Intercom event relay failed (${eventName}):`, error);
+				reportRelayFailure(diagnosticRoute, eventName, error);
 			});
 		});
 	}
@@ -484,7 +713,8 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
 		description: `Send a message to another local agent session running on this machine.
 Use this to communicate findings, request help, or coordinate work with other sessions.
 Sessions belong to an intercom group and can ONLY message sessions in the same group; cross-group sends are rejected by the broker. Ungrouped sessions share the "default" group.
-For send, live session names and exact full session IDs remain supported. For a known workflow stage, use the exact \`<runId>:<stageKey>\` target; send messages to pending stages queue automatically.
+For send, live session names and exact full session IDs remain supported. Workflow-stage targets use \`workflow:<rootRunId>/<segment>[/<segment>...]\`; \`*\` matches one segment and \`**\` any depth. Use \`intercom list\` inside the invocation group to see live, pending, and possible future targets with queued counts. \`workflow:<rootRunId>/**\` reaches live stages now and remains sticky for every future stage until root termination; valid targets outside the known set queue with a \`notInKnownSet\` warning and settle undeliverable at terminal only if never delivered. Use \`ask\` only on live targets.
+For send/ask/reply, Intercom retries recoverable disconnects internally up to three times with the same operation identity. Each new tool call is a new operation. If recovery ends with an unknown delivery outcome, do not repeat it automatically.
 Usage:
   intercom({ action: "list" })                    → List sessions in your group
   intercom({ action: "list", group: "name" })     → Read-only peek at another group's sessions
@@ -497,10 +727,10 @@ Usage:
   intercom({ action: "status" })                  → Show connection status and your group
 
 "default" is the shared group; "true" and "auto" are reserved for subagent auto-groups. Joining does not grant cross-group access; contact_supervisor remains the only cross-group path.`,
-		promptSnippet: "Use to coordinate with other local agent sessions in your intercom group: list peers, send updates, ask for help, or check intercom connectivity. Groups are isolated; you can only message sessions in your own group.",
+		promptSnippet: "Use to coordinate with other local agent sessions in your intercom group. Send/ask/reply retry reconnects internally; do not automatically repeat an unknown delivery outcome.",
 		parameters: Type.Object({
 			action: Type.String({ description: "Action: 'list', 'join', 'leave', 'send', 'ask', 'reply', 'pending', or 'status'" }),
-			to: Type.Optional(Type.String({ description: "Live session name, exact full session ID, or exact `<runId>:<stageKey>` for a known workflow stage; send messages to pending stages queue automatically (for 'send', 'ask', or targeted 'reply')" })),
+			to: Type.Optional(Type.String({ description: "Live session name, exact full session ID, or `workflow:<rootRunId>/<segment>[/<segment>...]` path; `*` matches one segment and `**` any depth. Send queues sticky pending/future delivery and `workflow:<rootRunId>/**` broadcasts to live and future stages; use `ask` only on live targets (for 'send', 'ask', or targeted 'reply')" })),
 			message: Type.Optional(Type.String({ description: "Message to send (for 'send', 'ask', or 'reply' action)" })),
 			attachments: Type.Optional(Type.Array(Type.Object({
 				type: Type.Union([Type.Literal("file"), Type.Literal("snippet"), Type.Literal("context")]),
@@ -511,7 +741,14 @@ Usage:
 			replyTo: Type.Optional(Type.String({ description: "Exact pending-ask message ID; disambiguates concurrent asks, including asks from one sender" })),
 			group: Type.Optional(Type.String({ description: "Group name for 'join'; read-only group filter for 'list'/'status'. 'send'/'ask' are locked to your own group." })),
 		}),
-		execute: (...args) => executeHeavyTool(loadHeavy, "intercom", args),
+		execute: (...args) => {
+			const invocationLease = activeLease;
+			return executeHeavyTool((ctx) => {
+				// Reconnect backoff must not move an old call into a new session.
+				assertLease(invocationLease);
+				return loadHeavy(ctx);
+			}, "intercom", args);
+		},
 		renderResult: (...args) => renderHeavyToolResult(loadedHeavy?.heavy ?? null, "intercom", args),
 		renderCall(args, theme) {
 			const input = args as { action?: string; to?: string; message?: string };

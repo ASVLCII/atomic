@@ -4,8 +4,9 @@ import {
 	convertToLlm,
 	type PromptOptions,
 	type StructuredOutputCapture,
-	shouldApplyCodexFastModeForScope,
 } from "@bastani/atomic";
+import { raceAbort } from "../../shared/abort.js";
+import type { StageStartupPhase, StageStartupSnapshot } from "../../shared/stage-startup.js";
 import type {
 	StageContext,
 	StageExecutionMeta,
@@ -25,13 +26,16 @@ import {
 	workflowModelId,
 } from "../shared/model-fallback.js";
 import { nextRetryDecision, sleepOrAbort } from "../shared/retry.js";
+import { isWorkflowPendingStageDeliveryFailure } from "./pending-stage-delivery.js";
 import { StageDeliveryActivity, type StageDeliveryActivityListener } from "./stage-delivery-activity.js";
 import { stageSessionQueueUpdateEvent } from "./stage-queued-user-messages.js";
+import { StageArtifactCapture } from "./stage-runner-artifact-capture.js";
 import { candidateLabel, effectiveCandidateReasoning, modelAttemptReasoning } from "./stage-runner-candidate.js";
 import { StageMessageAdmission } from "./stage-runner-message-admission.js";
 import {
 	lastAssistantTextFromSession,
 	latestTerminalAssistantFailureSince,
+	structuredOutputTurnDetail,
 	WorkflowPromptModelFailure,
 } from "./stage-runner-messages.js";
 import { missingAdapter, stripWorkflowOnlyOptions, unavailableSync } from "./stage-runner-options.js";
@@ -41,11 +45,17 @@ import { sendStageUserMessage } from "./stage-runner-send-user-message.js";
 import {
 	asAgentSession,
 	attachCreatedStageSession,
+	cleanupFailedStageSessionBinding,
 	disposeStageSession,
 	normalizeSessionCreateResult,
+	StageSessionBindingCleanupFailure,
+	shutdownStageSession,
 } from "./stage-runner-session.js";
 import { buildStageSessionOptions } from "./stage-runner-session-options.js";
-import { structuredOutputToolErrorFromEvent } from "./stage-runner-structured-output.js";
+import {
+	STRUCTURED_OUTPUT_MISSING_ERROR,
+	structuredOutputToolErrorFromEvent,
+} from "./stage-runner-structured-output.js";
 import type {
 	AgentSessionConsumer,
 	StageModelFallbackMeta,
@@ -55,8 +65,8 @@ import type {
 	StageSessionEvent,
 	StageSessionRuntime,
 	StageUserMessagePreparation,
-	WorkflowFastModeSettingsManager,
 	WorkflowRetrySettings,
+	WorkflowSettingsManager,
 } from "./stage-runner-types.js";
 import {
 	isUnresolvedContextOverflowFailure,
@@ -65,6 +75,7 @@ import {
 	unresolvedContextOverflowFailure,
 	unresolvedContextOverflowMessage,
 } from "./stage-runner-unresolved-overflow.js";
+import { waitForStageStartup } from "./stage-startup-wait.js";
 
 type RetryPauseResume = NonNullable<ReturnType<StageSessionPause["currentResume"]>>;
 
@@ -156,14 +167,12 @@ function stageUserMessageText(message: StageSessionRuntime["messages"][number]):
 		.map((part) => part.text)
 		.join("");
 }
-function retrySettingsManagerFromError(error: unknown): WorkflowFastModeSettingsManager | undefined {
+function retrySettingsManagerFromError(error: unknown): WorkflowSettingsManager | undefined {
 	if (error === null || typeof error !== "object") return undefined;
 	const manager = (error as { readonly settingsManager?: unknown }).settingsManager;
 	if (manager === null || typeof manager !== "object") return undefined;
-	const candidate = manager as Partial<WorkflowFastModeSettingsManager>;
-	return typeof candidate.getCodexFastModeSettings === "function"
-		? (candidate as WorkflowFastModeSettingsManager)
-		: undefined;
+	const candidate = manager as Partial<WorkflowSettingsManager>;
+	return typeof candidate.getRetrySettings === "function" ? (candidate as WorkflowSettingsManager) : undefined;
 }
 
 type RetryableAgentSession = AgentSession & {
@@ -207,9 +216,16 @@ export class StageSessionController {
 	/** The creation promise a candidate walk still owns, if one is advancing. */
 	private ownedCreationPromise: Promise<StageSessionRuntime> | undefined;
 	private abortGeneration = 0;
+	private routeAuthorityWait: AbortController | undefined;
+	/** Consumer cancellation never releases the underlying creation owner. */
+	private startupWait = new AbortController();
+	private startup: StageStartupSnapshot | undefined;
 	private abortReason: Error | DOMException | string | undefined;
 	private abortReasonGeneration = 0;
 	private sessionPromise: Promise<StageSessionRuntime> | undefined;
+	private sessionShutdownPromise: Promise<void> | undefined;
+	/** #3020: an unowned failed binding cannot be replaced until cleanup proves release. Never reset this fence. */
+	private bindingCleanupFailure: StageSessionBindingCleanupFailure | undefined;
 	private reattachSessionFile: string | undefined;
 	private lastPromptStartIndex: number | undefined;
 	/** Message index latched once per high-level candidate prompt; never re-read later. */
@@ -225,6 +241,7 @@ export class StageSessionController {
 	};
 	private readonly terminatingToolCallIds = new Set<string>();
 	private latestStructuredOutputToolErrorValue: string | undefined;
+	private structuredOutputCycleAttemptMark: number | undefined;
 	private unsubscribeTerminateWatcher: (() => void) | undefined;
 	private unresolvedContextOverflowMessage: string | undefined;
 	private generationSealed = false;
@@ -234,7 +251,7 @@ export class StageSessionController {
 	private pendingThinkingLevel: Parameters<StageContext["setThinkingLevel"]>[0] | undefined;
 	private readonly pendingListeners = new Set<(event: StageSessionEvent) => void>();
 	private readonly listenerUnsubscribes = new Map<(event: StageSessionEvent) => void, () => void>();
-	private readonly pauseControl = new StageSessionPause(() => this.session);
+	private readonly pauseControl = new StageSessionPause(() => this.session ?? this.replacement.retiringSession);
 	private readonly hasExplicitModelFallbackConfig: boolean;
 	private candidatesPromise: Promise<WorkflowResolvedModelCandidate[]> | undefined;
 	private activeCandidateIndex: number | undefined;
@@ -246,13 +263,35 @@ export class StageSessionController {
 	private readonly modelWarnings: string[] = [];
 	private readonly pendingFallbackWarnings: string[] = [];
 	private readonly modelCatalog: WorkflowModelCatalogPort | undefined;
-	private sessionSettingsManager: WorkflowFastModeSettingsManager | undefined;
+	private sessionSettingsManager: WorkflowSettingsManager | undefined;
 	private readonly thrownErrorRetryStates = new Set<ThrownErrorRetryState>();
 	private readonly creationPauseObservers = new Set<CreationPauseObserver>();
 	private readonly replacement = new StageSessionReplacement();
 	private pendingCreationResumeMessage: string | undefined;
 	private readonly messageAdmission = new StageMessageAdmission();
 	private readonly deliveryActivity = new StageDeliveryActivity();
+	private readonly artifactCapture = new StageArtifactCapture();
+
+	beginOutputGeneration(): void {
+		this.artifactCapture.reset();
+	}
+
+	outputGenerationMessages(): StageSessionRuntime["messages"] {
+		return this.artifactCapture.messages();
+	}
+
+	async navigateTree(
+		...args: Parameters<StageSessionRuntime["navigateTree"]>
+	): ReturnType<StageSessionRuntime["navigateTree"]> {
+		const session = await this.ensureSession();
+		// Preserve answers from snapshot-only adapters before replacing their context.
+		this.artifactCapture.messages();
+		try {
+			return await session.navigateTree(...args);
+		} finally {
+			this.artifactCapture.rememberContext(session);
+		}
+	}
 
 	constructor(
 		private readonly opts: StageRunnerOpts,
@@ -283,12 +322,73 @@ export class StageSessionController {
 		return this.lastPromptStartIndex;
 	}
 
-	get latestStructuredOutputToolError(): string | undefined {
-		return this.latestStructuredOutputToolErrorValue;
-	}
-
 	resetStructuredOutputToolError(): void {
 		this.latestStructuredOutputToolErrorValue = undefined;
+	}
+
+	/**
+	 * Mark where the current candidate's structured-output correction cycle
+	 * begins, so exhausting that cycle can reclassify every attempt it recorded
+	 * (issue #2812).
+	 */
+	beginStructuredOutputCandidateCycle(): void {
+		this.structuredOutputCycleAttemptMark = this.modelAttempts.length;
+	}
+
+	/**
+	 * Why the latest schema-backed turn finished without a `structured_output`
+	 * call. A failed tool call already explains itself; anything else is a clean
+	 * turn whose shape has to be named, or the external cause stays invisible
+	 * (issue #2812).
+	 */
+	structuredOutputFailureReason(): string {
+		const toolError = this.latestStructuredOutputToolErrorValue;
+		if (toolError !== undefined) return toolError;
+		const messages = this.session?.messages;
+		if (messages === undefined) return STRUCTURED_OUTPUT_MISSING_ERROR;
+		return `${STRUCTURED_OUTPUT_MISSING_ERROR} ${structuredOutputTurnDetail(messages, this.lastPromptStartIndex ?? 0)}`;
+	}
+
+	/**
+	 * A candidate that burned its whole structured-output correction budget has
+	 * failed, however clean its turns looked. Route it through the chain rate
+	 * limits already use (issue #2812): reclassify the attempts it recorded,
+	 * warn, dispose the session, and point the walk at the next candidate, which
+	 * the caller then re-prompts with the original stage prompt and a fresh
+	 * correction budget. Returns whether such a candidate exists.
+	 */
+	async failCandidateForStructuredOutputExhaustion(error: string): Promise<boolean> {
+		const mark = this.structuredOutputCycleAttemptMark ?? 0;
+		this.structuredOutputCycleAttemptMark = undefined;
+		// Every clean-looking turn in this cycle was recorded as a success. None
+		// of them produced the structured result the stage requires.
+		for (let attemptIndex = mark; attemptIndex < this.modelAttempts.length; attemptIndex += 1) {
+			const attempt = this.modelAttempts[attemptIndex];
+			if (attempt === undefined || !attempt.success) continue;
+			this.modelAttempts[attemptIndex] = { ...attempt, success: false, error };
+		}
+		const candidates = this.hasExplicitModelFallbackConfig ? await this.modelCandidates() : [];
+		const index = this.activeCandidateIndex ?? 0;
+		const candidate = candidates[index];
+		const nextCandidate = candidates[index + 1];
+		if (this.opts.signal?.aborted || candidate === undefined || nextCandidate === undefined) {
+			this.modelWarnings.push(...this.pendingFallbackWarnings);
+			this.pendingFallbackWarnings.length = 0;
+			this.notifyModelFallbackMetaChange();
+			return false;
+		}
+		this.pendingFallbackWarnings.push(
+			`[fallback] ${candidateLabel(candidate)} failed: ${error}. Retrying with ${candidateLabel(nextCandidate)}.`,
+		);
+		// Unlike a rate-limit advance, nothing else in the run reveals that this
+		// candidate failed: its turns returned cleanly and its attempts are the
+		// only trace. Flush the warning now so it survives a fallback that then
+		// succeeds, instead of being cleared with the pending batch (issue #2812).
+		this.modelWarnings.push(...this.pendingFallbackWarnings);
+		this.pendingFallbackWarnings.length = 0;
+		await this.disposeCurrentSession(index + 1);
+		this.notifyModelFallbackMetaChange();
+		return true;
 	}
 	requireSession(property: string): StageSessionRuntime {
 		if (!this.session) unavailableSync(property);
@@ -316,33 +416,48 @@ export class StageSessionController {
 	}
 
 	async ensureSession(consumer: AgentSessionConsumer = "prompt"): Promise<StageSessionRuntime> {
+		if (this.bindingCleanupFailure !== undefined) throw this.bindingCleanupFailure;
+		if (this.sessionShutdownPromise !== undefined) {
+			const generation = this.abortGeneration;
+			await this.sessionShutdownPromise;
+			if (this.disposed || this.opts.signal?.aborted || this.abortGeneration !== generation)
+				throw this.staleCreationReason(generation);
+		}
 		if (this.disposed) throw new Error(`atomic-workflows: stage "${this.opts.stageName}" session has been disposed`);
-		if (this.session !== undefined) return this.session;
+		this.opts.signal?.throwIfAborted();
+		if (this.session !== undefined && this.activeCreation === undefined) return this.session;
 		if (!this.sessionPromise) {
+			this.beginStartup();
 			const pending = this.createInitialSession(consumer);
 			this.sessionPromise = pending;
 			// One creation gate: the walk owns this promise while it advances
 			// candidates, so a concurrent caller joins it instead of racing it.
 			this.ownedCreationPromise = pending;
-			const release = (): void => {
+			const release = (failed = false): void => {
 				if (this.ownedCreationPromise === pending) this.ownedCreationPromise = undefined;
+				this.settleStartup(failed);
 			};
-			// A terminal creation failure must not be replayed to every later
-			// caller. Clear by identity so a walk that replaced the promise, or a
-			// cancellation that already cleared it, is left alone.
-			pending.then(release, () => {
-				release();
-				if (this.sessionPromise === pending) this.sessionPromise = undefined;
-			});
+			// Ordinary creation failures may be retried by a later caller; failed
+			// binding cleanup is separately sticky. Clear by identity so a walk that
+			pending.then(
+				() => release(),
+				() => {
+					release(true);
+					if (this.sessionPromise === pending) {
+						this.sessionPromise = undefined;
+						this.activeCandidateIndex = undefined;
+					}
+				},
+			);
 		}
-		return this.sessionPromise;
+		return waitForStageStartup(this.sessionPromise, this.startupWait.signal);
 	}
 
 	async ensureSessionFromFile(
 		sessionFile: string,
 		consumer: AgentSessionConsumer = "prompt",
 	): Promise<StageSessionRuntime> {
-		if (!this.sessionPromise && !this.session) this.reattachSessionFile = sessionFile;
+		if (!this.sessionShutdownPromise && !this.sessionPromise && !this.session) this.reattachSessionFile = sessionFile;
 		const session = await this.ensureSession(consumer);
 		await session.closeWorkflowStageGeneration?.();
 		return session;
@@ -414,6 +529,7 @@ export class StageSessionController {
 		const pending = this.activeCreation ?? this.sessionPromise;
 		const session = pending ? await pending : this.session;
 		await session?.closeWorkflowStageGeneration?.();
+		this.artifactCapture.close();
 	}
 
 	async promptWithFallback(
@@ -421,6 +537,15 @@ export class StageSessionController {
 		sdkOptions: PromptOptions | undefined,
 		consumer: AgentSessionConsumer = "prompt",
 	): Promise<void> {
+		if (
+			this.session !== undefined &&
+			this.activeCreation === undefined &&
+			this.ownedCreationPromise === undefined &&
+			this.startupWait.signal.aborted
+		) {
+			this.opts.signal?.throwIfAborted();
+			this.startupWait = new AbortController();
+		}
 		if (!this.hasExplicitModelFallbackConfig) {
 			try {
 				const activeSession = await this.ensureSession(consumer);
@@ -443,14 +568,23 @@ export class StageSessionController {
 			return;
 		}
 
-		const candidates = await this.modelCandidates();
+		// An attached session is not usable until its creation/readiness owner
+		// settles. Join before every explicit-model reuse path, including resume.
+		const readinessOwner = this.ownedCreationPromise ?? this.activeCreation;
+		if (readinessOwner !== undefined) await waitForStageStartup(readinessOwner, this.startupWait.signal);
+
+		if (this.session === undefined) this.beginStartup();
+		const startupSignal = this.startupWait.signal;
+		const candidates = await waitForStageStartup(this.modelCandidates(), startupSignal);
 		if (candidates.length === 0) {
 			try {
 				const activeSession = await this.ensureSession(consumer);
 				const resumedText = this.pendingCreationResumeMessage;
 				this.pendingCreationResumeMessage = undefined;
 				await this.promptWithThrownErrorRetry(activeSession, resumedText ?? text, sdkOptions);
+				this.artifactCapture.settleAttempt(true);
 			} catch (error) {
+				this.artifactCapture.settleAttempt(false);
 				if (error instanceof StageSessionCreationCancelled) return;
 				throw error;
 			}
@@ -460,15 +594,8 @@ export class StageSessionController {
 		// A creation already in flight — an eager walk, or a concurrent caller —
 		// owns the candidate chain. Join it rather than starting a second walk that
 		// would duplicate provider work and leak whichever session lost the race.
-		if (this.session === undefined && this.sessionPromise !== undefined) {
-			try {
-				await this.sessionPromise;
-			} catch (error) {
-				if (error instanceof StageSessionCreationCancelled) return;
-				// The exhausted walk cleared its own promise by identity; fall through
-				// and let the walk below report the failure for this prompt.
-			}
-		}
+		const creationOwner = this.ownedCreationPromise ?? this.activeCreation;
+		if (creationOwner !== undefined) await waitForStageStartup(creationOwner, startupSignal);
 
 		// A paused creation resumed with a replacement objective: that text is
 		// authoritative for this prompt and must not be dropped here.
@@ -478,12 +605,29 @@ export class StageSessionController {
 		if (await this.tryResumeCurrentSession(promptText, sdkOptions, candidates)) return;
 		let index = this.activeCandidateIndex ?? 0;
 		while (index < candidates.length) {
+			// Attachment may have acquired the creation walk while shutdown drained.
+			// Join that entire walk, including its failures, rather than accounting
+			// for the same successor attempt twice or restarting a rejected candidate.
+			if (this.ownedCreationPromise !== undefined || this.activeCreation !== undefined) {
+				try {
+					await waitForStageStartup(this.ownedCreationPromise ?? this.activeCreation!, startupSignal);
+				} catch (error) {
+					if (error instanceof StageSessionCreationCancelled) return;
+					throw error;
+				}
+				index = this.activeCandidateIndex ?? index;
+				promptText = this.pendingCreationResumeMessage ?? promptText;
+				this.pendingCreationResumeMessage = undefined;
+			}
 			const candidate = candidates[index]!;
 			try {
 				const created =
 					this.session && this.activeCandidateIndex === index
 						? this.session
-						: await this.createSessionWithThrownErrorRetry(candidate, consumer);
+						: await waitForStageStartup(
+								this.createSessionWithThrownErrorRetry(candidate, consumer),
+								startupSignal,
+							);
 				if (isSessionCreationPauseResult(created)) {
 					if (created.resumeMessage === undefined) return;
 					promptText = created.resumeMessage;
@@ -512,7 +656,10 @@ export class StageSessionController {
 			} catch (err) {
 				const failure = await this.handleCandidateFailure(err, candidate, candidates, index);
 				if (failure === "handled") return;
-				if (failure === "throw") throw err;
+				if (failure === "throw") {
+					this.settleStartup(true);
+					throw err;
+				}
 				index += 1;
 			}
 		}
@@ -521,10 +668,10 @@ export class StageSessionController {
 	currentModelFallbackMeta(): StageModelFallbackMeta {
 		const attemptedModels = this.modelAttempts.map((attempt) => attempt.model);
 		const model = this.selectedModel ?? workflowModelId(this.session?.model);
-		const fastMode = this.isWorkflowFastModeEnabled();
+		const thinkingLevel = this.session?.thinkingLevel ?? this.pendingThinkingLevel;
 		return {
 			...(model !== undefined ? { model } : {}),
-			...(fastMode !== undefined ? { fastMode } : {}),
+			...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
 			...(attemptedModels.length > 0 ? { attemptedModels } : {}),
 			...(this.modelAttempts.length > 0 ? { modelAttempts: [...this.modelAttempts] } : {}),
 			...(this.modelWarnings.length > 0 ? { warnings: [...this.modelWarnings] } : {}),
@@ -556,7 +703,9 @@ export class StageSessionController {
 		this.messageAdmission.dispose();
 		this.deliveryActivity.dispose();
 		await this.replacement.dispose();
-		await disposeStageSession(this.session);
+		// The creation owner also owns any attached-but-not-ready session. It
+		// disposes that session only after its final readiness callback settles.
+		if (this.activeCreation === undefined) await disposeStageSession(this.session);
 	}
 
 	/**
@@ -642,6 +791,12 @@ export class StageSessionController {
 		this.abortGeneration += 1;
 		this.abortReason = reason;
 		this.abortReasonGeneration = this.abortGeneration;
+		this.routeAuthorityWait?.abort(reason);
+		this.startupWait.abort(reason);
+		if (this.startup?.state === "active") {
+			this.startup = { ...this.startup, state: "cancelled" };
+			this.opts.onStartupChange?.(this.startup);
+		}
 		this.abortThrownErrorRetries(reason);
 	}
 
@@ -820,6 +975,8 @@ export class StageSessionController {
 		let retainedPrompt: StageSessionRuntime["messages"][number] | undefined;
 		let terminalScanStartIndex: number | undefined;
 		while (true) {
+			// Same-model retries must not accept answers from an earlier failed iteration.
+			this.artifactCapture.beginAttempt(activeSession);
 			const messagesBeforeAttempt = [...activeSession.messages];
 			try {
 				if (retryAdmittedPrompt) {
@@ -881,6 +1038,7 @@ export class StageSessionController {
 				// admitted prompt to stay; the re-prompt path re-sends it.
 				const willContinue = continuationSession !== undefined && admittedMessages;
 				if (retryableFailure && willRetry) {
+					this.artifactCapture.settleAttempt(false);
 					retainedPrompt =
 						this.restoreSessionMessages(activeSession, messagesBeforeAttempt, nextText, willContinue) ??
 						retainedPrompt;
@@ -957,13 +1115,17 @@ export class StageSessionController {
 	}
 
 	private async createInitialSession(consumer: AgentSessionConsumer): Promise<StageSessionRuntime> {
+		const generation = this.abortGeneration;
 		if (!this.hasExplicitModelFallbackConfig) {
 			return this.createSessionObservingPause(undefined, consumer).catch((error) =>
 				this.createInitialSessionWithRetry(undefined, consumer, { error }),
 			);
 		}
 		const candidates = await this.modelCandidates();
-		const first = candidates[0];
+		if (this.abortGeneration !== generation || this.opts.signal?.aborted || this.disposed)
+			throw this.staleCreationReason(generation);
+		const initialIndex = this.activeCandidateIndex ?? 0;
+		const first = candidates[initialIndex];
 		if (first === undefined) {
 			return this.createSessionObservingPause(undefined, consumer).catch((error) =>
 				this.createInitialSessionWithRetry(undefined, consumer, { error }),
@@ -978,10 +1140,10 @@ export class StageSessionController {
 			this.resumeCurrentSession = true;
 			return resumed;
 		}
-		this.activeCandidateIndex = 0;
+		this.activeCandidateIndex = initialIndex;
 		this.selectedModel = first.id;
 		return this.createSessionObservingPause(first, consumer).catch((error) =>
-			this.createInitialSessionCandidateWalk(candidates, consumer, 0, { error }),
+			this.createInitialSessionCandidateWalk(candidates, consumer, initialIndex, { error }),
 		);
 	}
 
@@ -1115,13 +1277,20 @@ export class StageSessionController {
 				}
 				return await this.createSessionObservingPause(candidate, consumer);
 			} catch (error) {
+				if (error instanceof StageSessionBindingCleanupFailure) throw error;
 				const errorSettingsManager = retrySettingsManagerFromError(error);
 				if (errorSettingsManager !== undefined) this.sessionSettingsManager = errorSettingsManager;
-				const decision = nextRetryDecision(this.retrySettings(), retryAttempt, isRetryableSameModelFailure(error));
+				// A stage refused its queued Intercom instructions will be refused them
+				// by every retry, so the terminal delivery failure is never eligible —
+				// independent of what the shared model-failure classifier makes of it.
+				const decision = isWorkflowPendingStageDeliveryFailure(error)
+					? undefined
+					: nextRetryDecision(this.retrySettings(), retryAttempt, isRetryableSameModelFailure(error));
 				if (
 					decision === undefined ||
 					this.disposed ||
 					this.opts.signal?.aborted === true ||
+					this.startupWait.signal.aborted ||
 					this.capturedStructuredOutputForAttempt()
 				) {
 					throw error;
@@ -1155,14 +1324,66 @@ export class StageSessionController {
 		consumer: AgentSessionConsumer,
 		resumeOptions?: { restoreSavedModel?: boolean },
 	): Promise<StageSessionRuntime> {
+		if (this.bindingCleanupFailure !== undefined) return Promise.reject(this.bindingCleanupFailure);
+		if (this.sessionShutdownPromise !== undefined) {
+			const generation = this.abortGeneration;
+			return this.sessionShutdownPromise.then(() => {
+				if (this.disposed || this.opts.signal?.aborted || this.abortGeneration !== generation)
+					throw this.staleCreationReason(generation);
+				return this.createSession(candidate, consumer, resumeOptions);
+			});
+		}
+		if (this.activeCreation !== undefined) return this.activeCreation;
+		if (this.session !== undefined) return Promise.resolve(this.session);
+		this.startupWait.signal.throwIfAborted();
 		const creation = this.createSessionAttempt(candidate, consumer, resumeOptions);
 		this.activeCreation = creation;
 		void creation
 			.finally(() => {
 				if (this.activeCreation === creation) this.activeCreation = undefined;
+				this.settleStartup();
 			})
 			.catch(() => {});
 		return creation;
+	}
+
+	private settleStartup(failed = false): void {
+		if (this.activeCreation !== undefined || this.ownedCreationPromise !== undefined || this.startup === undefined)
+			return;
+		if (this.startup.state === "dispatched" || this.startup.phase === "ready") return;
+		if (this.startup.state === "active" && !failed && this.bindingCleanupFailure === undefined) return;
+		this.startup = {
+			...this.startup,
+			state: this.startup.state === "active" ? "failed" : this.startup.state,
+			ownershipPending: this.bindingCleanupFailure !== undefined,
+			...(this.bindingCleanupFailure === undefined ? { settledAt: Date.now() } : {}),
+		};
+		this.opts.onStartupChange?.(this.startup);
+	}
+
+	private beginStartup(): void {
+		if (
+			this.activeCreation !== undefined ||
+			this.ownedCreationPromise !== undefined ||
+			this.sessionPromise !== undefined
+		)
+			return;
+		this.opts.signal?.throwIfAborted();
+		if (this.startupWait.signal.aborted) this.startupWait = new AbortController();
+		this.reportStartupPhase("model-resolution", true);
+	}
+
+	private reportStartupPhase(phase: StageStartupPhase, reset = false): void {
+		if (!reset && this.startup !== undefined && this.startup.state !== "active") return;
+		const now = Date.now();
+		this.startup = {
+			phase,
+			startedAt: reset ? now : (this.startup?.startedAt ?? now),
+			phaseStartedAt: now,
+			state: phase === "first-dispatch" ? "dispatched" : "active",
+			ownershipPending: phase !== "first-dispatch" && phase !== "ready",
+		};
+		this.opts.onStartupChange?.(this.startup);
 	}
 
 	private async createSessionAttempt(
@@ -1171,6 +1392,22 @@ export class StageSessionController {
 		resumeOptions?: { restoreSavedModel?: boolean },
 	): Promise<StageSessionRuntime> {
 		const startGeneration = this.abortGeneration;
+		if (this.disposed || this.opts.signal?.aborted) throw this.staleCreationReason(startGeneration);
+		this.reportStartupPhase("route-authority");
+		const authority = this.opts.routeAuthorityReady?.();
+		if (authority !== undefined) {
+			const wait = new AbortController();
+			this.routeAuthorityWait = wait;
+			try {
+				await raceAbort(authority.completion, wait.signal);
+				authority.assertCurrent();
+				if (this.disposed || this.opts.signal?.aborted || this.abortGeneration !== startGeneration)
+					throw this.staleCreationReason(startGeneration);
+			} finally {
+				if (this.routeAuthorityWait === wait) this.routeAuthorityWait = undefined;
+			}
+		}
+		this.reportStartupPhase("resource-preparation");
 		this.applyCandidateThinking(candidate);
 		const stageOptions = buildStageSessionOptions({
 			effectiveStageOptions: this.effectiveStageOptions,
@@ -1191,6 +1428,10 @@ export class StageSessionController {
 						) as StageSessionCreateOptions,
 						{
 							...this.meta,
+							startupSignal: this.startupWait.signal,
+							onStartupPhase: (phase) => {
+								if (this.abortGeneration === startGeneration) this.reportStartupPhase(phase);
+							},
 							stageOptions,
 							...(this.sharedOrchestrationContext !== undefined
 								? { orchestrationContext: this.sharedOrchestrationContext }
@@ -1199,6 +1440,10 @@ export class StageSessionController {
 					)
 				: missingAdapter(consumer);
 		} catch (error) {
+			if (error instanceof StageSessionBindingCleanupFailure) {
+				this.bindingCleanupFailure = error;
+				throw error;
+			}
 			if (this.disposed || this.opts.signal?.aborted === true || this.abortGeneration !== startGeneration)
 				throw this.disposed
 					? new Error(`atomic-workflows: stage "${this.opts.stageName}" session has been disposed`)
@@ -1211,13 +1456,30 @@ export class StageSessionController {
 				throw new Error(`atomic-workflows: stage "${this.opts.stageName}" session has been disposed`);
 			throw this.staleCreationReason(startGeneration);
 		}
+		this.reportStartupPhase("session-attachment");
 		const session = attachCreatedStageSession(created, this.disposed, this.opts.stageName, (result) =>
 			this.attachSession(result),
 		);
 		const attachedSession = session instanceof Promise ? await session : session;
-		const pendingStageDeliveryReady = this.sharedOrchestrationContext?.pendingStageDelivery?.ready();
-		if (pendingStageDeliveryReady !== undefined) await pendingStageDeliveryReady;
-		await this.opts.onSessionReady?.();
+		this.reportStartupPhase("delivery-readiness");
+		try {
+			await this.sharedOrchestrationContext?.pendingStageDelivery?.ready();
+			await this.opts.onSessionReady?.();
+			if (this.disposed || this.opts.signal?.aborted || this.abortGeneration !== startGeneration)
+				throw this.staleCreationReason(startGeneration);
+		} catch (reason) {
+			// Attachment is not readiness. The retained creation owns cleanup on
+			// both rejection and cancellation; never expose this identity for reuse.
+			if (this.session === attachedSession) this.session = undefined;
+			try {
+				await cleanupFailedStageSessionBinding(attachedSession, reason);
+			} catch (error) {
+				if (error instanceof StageSessionBindingCleanupFailure) this.bindingCleanupFailure = error;
+				throw error;
+			}
+			throw reason;
+		}
+		this.reportStartupPhase("ready");
 		return attachedSession;
 	}
 
@@ -1230,11 +1492,11 @@ export class StageSessionController {
 		if (this.generationSealed) result.session.sealWorkflowStageGeneration?.();
 		this.replacement.adopt(result.session);
 		this.session = result.session;
+		this.sessionSettingsManager = result.settingsManager ?? result.session.settingsManager;
 		if (this.sharedModelRuntime === undefined) {
 			const withRegistry = result.session as Partial<Pick<AgentSession, "modelRuntime">>;
 			if (withRegistry.modelRuntime !== undefined) this.sharedModelRuntime = withRegistry.modelRuntime;
 		}
-		this.sessionSettingsManager = result.settingsManager ?? result.session.settingsManager;
 		if (this.pendingThinkingLevel !== undefined) result.session.setThinkingLevel(this.pendingThinkingLevel);
 		for (const listener of this.pendingListeners) {
 			this.listenerUnsubscribes.set(listener, result.session.subscribe(listener));
@@ -1250,6 +1512,7 @@ export class StageSessionController {
 		}
 		this.unsubscribeTerminateWatcher?.();
 		this.unsubscribeTerminateWatcher = result.session.subscribe((event) => {
+			this.artifactCapture.onEvent(result.session, event);
 			const terminatingId = terminatingToolCallId(event);
 			if (terminatingId !== undefined) this.terminatingToolCallIds.add(terminatingId);
 			this.unresolvedContextOverflowMessage =
@@ -1260,12 +1523,16 @@ export class StageSessionController {
 		return result.session;
 	}
 
-	private async disposeCurrentSession(): Promise<void> {
+	private async disposeCurrentSession(nextCandidateIndex: number | undefined): Promise<void> {
+		// A later prompt must not replace a rejected cleanup barrier with an empty shutdown.
+		if (this.sessionShutdownPromise !== undefined) await this.sessionShutdownPromise;
+		const startGeneration = this.abortGeneration;
 		this.abortThrownErrorRetries(new Error(`atomic-workflows: stage "${this.opts.stageName}" session was replaced`));
 		const current = this.session;
 		this.messageAdmission.reset();
 		this.replacement.retire(current);
 		this.session = undefined;
+		this.activeCandidateIndex = nextCandidateIndex;
 		// A candidate walk still advancing owns the shared creation promise: clearing
 		// it here would let a concurrent caller start a second walk, duplicating
 		// provider work and leaking whichever session lost the race.
@@ -1277,6 +1544,20 @@ export class StageSessionController {
 		this.unsubscribeTerminateWatcher?.();
 		this.unsubscribeTerminateWatcher = undefined;
 		this.terminatingToolCallIds.clear();
+		// #3020: every creator must wait for ownership release, not only the prompt
+		// advancing fallback. Keep a failed barrier: shutdown failure is not proof
+		// of release, so later attachment must fail rather than register a new owner.
+		const shutdown = Promise.resolve().then(() => shutdownStageSession(current));
+		this.sessionShutdownPromise = shutdown;
+		void shutdown.then(
+			() => {
+				if (this.sessionShutdownPromise === shutdown) this.sessionShutdownPromise = undefined;
+			},
+			() => {},
+		);
+		await shutdown;
+		if (this.disposed || this.opts.signal?.aborted === true || this.abortGeneration !== startGeneration)
+			throw this.staleCreationReason(startGeneration);
 	}
 
 	private async promptWithPauseResume(
@@ -1298,6 +1579,7 @@ export class StageSessionController {
 			this.lastPromptStartIndex = promptStartIndex;
 			this.unresolvedContextOverflowMessage = undefined;
 			try {
+				this.reportStartupPhase("first-dispatch");
 				await activeSession.prompt(nextText, sdkOptions);
 				const pendingPauseAfterPrompt = this.pauseControl.currentResume();
 				if (pendingPauseAfterPrompt) {
@@ -1342,6 +1624,7 @@ export class StageSessionController {
 			const { terminalScanStartIndex } = await this.promptWithThrownErrorRetry(resumedSession, text, sdkOptions);
 			const terminalFailure = latestTerminalAssistantFailureSince(resumedSession.messages, terminalScanStartIndex);
 			if (terminalFailure === undefined || this.capturedStructuredOutputForAttempt()) {
+				this.artifactCapture.settleAttempt(true);
 				const usage = this.takeAttemptUsage(resumedSession);
 				this.modelAttempts.push({
 					model: resumedLabel,
@@ -1350,11 +1633,14 @@ export class StageSessionController {
 				});
 				this.pendingFallbackWarnings.length = 0;
 				this.resumeCurrentSession = true;
+				// Issue #2812: the resumed candidate's success is durable metadata too.
+				this.notifySuccessfulModelFallbackMeta();
 				return true;
 			}
 			throw new WorkflowPromptModelFailure(terminalFailure);
 		} catch (err) {
 			if (this.capturedStructuredOutputForAttempt() && isRetryableModelFailure(err)) {
+				this.artifactCapture.settleAttempt(true);
 				const usage = this.takeAttemptUsage(resumedSession);
 				this.modelAttempts.push({
 					model: resumedLabel,
@@ -1363,8 +1649,11 @@ export class StageSessionController {
 				});
 				this.pendingFallbackWarnings.length = 0;
 				this.resumeCurrentSession = true;
+				// Issue #2812: see above — a corrective success must reach the callback.
+				this.notifySuccessfulModelFallbackMeta();
 				return true;
 			}
+			this.artifactCapture.settleAttempt(false);
 			const message = errorMessage(err);
 			const usage = this.takeAttemptUsage(resumedSession);
 			this.modelAttempts.push({
@@ -1395,8 +1684,7 @@ export class StageSessionController {
 					? `[fallback] resume on ${resumedLabel} failed: ${message}. Restarting fallback from ${candidateLabel(candidates[0]!)}.`
 					: `[fallback] resume on ${resumedLabel} failed: ${message}. Retrying with ${candidateLabel(candidates[resumedOverflowNextIndex]!)}.`,
 			);
-			await this.disposeCurrentSession();
-			this.activeCandidateIndex = resumedOverflowNextIndex;
+			await this.disposeCurrentSession(resumedOverflowNextIndex);
 			return false;
 		}
 	}
@@ -1407,11 +1695,18 @@ export class StageSessionController {
 		candidates: readonly WorkflowResolvedModelCandidate[],
 		index: number,
 	): Promise<"handled" | "retry" | "throw"> {
+		if (err instanceof StageSessionBindingCleanupFailure) throw err;
 		const message = errorMessage(err);
-		if (this.capturedStructuredOutputForAttempt() && isRetryableModelFailure(err)) {
+		// A terminal pending-stage delivery failure is not a model failure: every
+		// candidate would be refused the same queued instructions. It records the one
+		// attempt it actually spent and then stops, so no further candidate is walked
+		// and no `[fallback]` warning claims a model was at fault.
+		const terminalStageDelivery = isWorkflowPendingStageDeliveryFailure(err);
+		if (!terminalStageDelivery && this.capturedStructuredOutputForAttempt() && isRetryableModelFailure(err)) {
 			this.recordSuccessfulAttempt(candidate);
 			return "handled";
 		}
+		this.artifactCapture.settleAttempt(false);
 		const usage = this.takeAttemptUsage(this.session);
 		this.modelAttempts.push({
 			model: candidate.id,
@@ -1420,7 +1715,13 @@ export class StageSessionController {
 			...(usage === undefined ? {} : { usage }),
 			error: message,
 		});
-		if (this.opts.signal?.aborted || !isRetryableModelFailure(err) || index === candidates.length - 1) {
+		if (
+			this.opts.signal?.aborted ||
+			this.startupWait.signal.aborted ||
+			terminalStageDelivery ||
+			!isRetryableModelFailure(err) ||
+			index === candidates.length - 1
+		) {
 			this.modelWarnings.push(...this.pendingFallbackWarnings);
 			this.pendingFallbackWarnings.length = 0;
 			this.notifyModelFallbackMetaChange();
@@ -1430,7 +1731,7 @@ export class StageSessionController {
 		this.pendingFallbackWarnings.push(
 			`[fallback] ${candidateLabel(candidate)} failed: ${message}. Retrying with ${candidateLabel(nextCandidate)}.`,
 		);
-		await this.disposeCurrentSession();
+		await this.disposeCurrentSession(index + 1);
 		return "retry";
 	}
 
@@ -1439,6 +1740,7 @@ export class StageSessionController {
 	}
 
 	private recordSuccessfulAttempt(candidate: WorkflowResolvedModelCandidate): void {
+		this.artifactCapture.settleAttempt(true);
 		const usage = this.takeAttemptUsage(this.session);
 		this.modelAttempts.push({
 			model: candidate.id,
@@ -1448,10 +1750,33 @@ export class StageSessionController {
 		});
 		this.pendingFallbackWarnings.length = 0;
 		this.resumeCurrentSession = true;
+		// Issue #2812: `onModelFallbackMetaChange` is the only boundary that
+		// refreshes the running stage snapshot the durable checkpoint reads. Every
+		// notification before this one is emitted on a selection or failure edge,
+		// so without this call the last durable record of a stage that fell back
+		// holds only the failed attempts, and a run interrupted between here and
+		// terminal persistence resumes without the provenance of its own result.
+		// Emitted last, after the pending warnings are cleared, so the payload is
+		// exactly what the terminal snapshot will carry.
+		this.notifySuccessfulModelFallbackMeta();
 	}
 
 	private notifyModelFallbackMetaChange(): void {
 		this.opts.onModelFallbackMetaChange?.(this.currentModelFallbackMeta());
+	}
+
+	/**
+	 * Issue #2812: `disposeAll()` neither awaits nor cancels a prompt already
+	 * parked in the adapter. That prompt still resolves, and its success still
+	 * belongs in `modelAttempts`. Publishing it does not: the stage snapshot is
+	 * terminal by then, and the executor writes whatever a callback hands it, so
+	 * a late success would stamp `success: true` onto an ended stage. Scoped to
+	 * the success edges this repair added — the selection and failure edges keep
+	 * the behavior they already had.
+	 */
+	private notifySuccessfulModelFallbackMeta(): void {
+		if (this.disposed) return;
+		this.notifyModelFallbackMetaChange();
 	}
 
 	private applyCandidateThinking(candidate: WorkflowResolvedModelCandidate | undefined): void {
@@ -1459,13 +1784,6 @@ export class StageSessionController {
 			candidate === undefined
 				? this.effectiveStageOptions?.thinkingLevel
 				: effectiveCandidateReasoning(candidate, this.effectiveStageOptions?.thinkingLevel);
-	}
-	private isWorkflowFastModeEnabled(): boolean | undefined {
-		const model = this.session?.model;
-		const settingsManager = this.sessionSettingsManager ?? this.effectiveStageOptions?.settingsManager;
-		return model === undefined || settingsManager === undefined
-			? undefined
-			: shouldApplyCodexFastModeForScope(model, settingsManager.getCodexFastModeSettings(), "workflow");
 	}
 	private throwUnresolvedContextOverflowIfPresent(): void {
 		const message = this.unresolvedContextOverflowMessage;

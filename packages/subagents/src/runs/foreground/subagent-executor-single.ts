@@ -38,8 +38,10 @@ import {
 	createForegroundControlNotifier,
 	maybeBuildForegroundIntercomReceipt,
 	notifyDetachedForegroundChildExit,
+	workflowStageAcceptsDetachedNotification,
 } from "./subagent-executor-status.js";
 import type { ExecutionContextData, ForegroundControl, ResolvedExecutorDeps } from "./subagent-executor-types.js";
+import { runAgentTask, taskToolResult } from "./task-execution.js";
 
 function formatFailedSingleRunOutput(result: SingleResult, displayOutput: string): string {
 	const error = result.error || "Failed";
@@ -224,7 +226,9 @@ export async function runSinglePath(
 			},
 			onDetachedExit: (result) => {
 				cleanupTransientProgress(progressDir, artifactConfig.enabled);
-				if (result) notifyDetachedForegroundChildExit({ pi: deps.pi, runId, mode: "single", index: 0, result });
+				if (result && workflowStageAcceptsDetachedNotification(ctx)) {
+					notifyDetachedForegroundChildExit({ pi: deps.pi, runId, mode: "single", index: 0, result });
+				}
 			},
 			index: 0,
 			modelOverride,
@@ -236,7 +240,35 @@ export async function runSinglePath(
 			currentThinkingLevel: ctx.thinkingLevel,
 			skills: effectiveSkills,
 		};
-		r = await deps.runtime.runSync(ctx.cwd, agents, params.agent!, task, runOptions);
+		if (ctx.getAgentTaskHost) {
+			let settledChild: SingleResult | undefined;
+			const response = await runAgentTask({
+				host: ctx.getAgentTaskHost(),
+				cwd: ctx.cwd,
+				agents,
+				agent: params.agent!,
+				task,
+				intentTask: handoffTaskContext,
+				options: runOptions,
+				wait: params.wait,
+				runtime: deps.runtime,
+				onTerminal: (child) => {
+					settledChild = child;
+					cleanupTransientProgress(progressDir, artifactConfig.enabled);
+				},
+				outputText: (child) =>
+					parentAsk && child.interrupted
+						? formatParentAskHandoffOutput({
+								askingChildIndex: 0,
+								releasedChildIndices: [0],
+								unlaunchedChildIndices: [],
+								request: parentAsk,
+							})
+						: getSingleResultOutput(child),
+			});
+			if (!parentAsk || !settledChild?.interrupted) return taskToolResult(response, ctx.getAgentTaskHost());
+			r = settledChild;
+		} else r = await deps.runtime.runSync(ctx.cwd, agents, params.agent!, task, runOptions);
 	} catch (error) {
 		cleanupTransientProgress(progressDir, artifactConfig.enabled);
 		throw error;
@@ -334,12 +366,24 @@ export async function runSinglePath(
 		};
 	}
 
+	if (r.status === "killed") {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Killed (${params.agent}). This child cannot be resumed. Launch a fresh subagent for any follow-up.`,
+				},
+			],
+			details,
+		};
+	}
+
 	if (r.interrupted) {
 		return {
 			content: [
 				{
 					type: "text",
-					text: `Run ended after interrupt (${params.agent}). Launch a fresh subagent for any follow-up.`,
+					text: `Run ended before completion (${params.agent}). Launch a fresh subagent for any follow-up.`,
 				},
 			],
 			details,

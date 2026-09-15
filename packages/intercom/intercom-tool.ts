@@ -1,9 +1,8 @@
 import type { ExtensionAPI } from "@bastani/atomic";
-import { randomUUID } from "crypto";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
 import type { IntercomClient } from "./broker/client.js";
-import type { SessionDirectory, SessionInfo, WorkflowStageRosterEntry } from "./types.js";
+import type { SessionInfo, SessionDirectory, WorkflowStageRosterEntry, WorkflowFutureStageRosterEntry } from "./types.js";
 import { requestParentAskHandoff } from "./parent-ask-handoff.js";
 import type { ReplyWait, ReplyWaitAdmission } from "./reply-waiter.ts";
 import { renderIntercomResult } from "./result-renderers.js";
@@ -18,34 +17,149 @@ import {
 import type { ReplyTracker } from "./reply-tracker.js";
 import { resolveSessionTargetId } from "./session-target.js";
 import { normalizeGroup, normalizeGroups, validateRuntimeGroup } from "./group.js";
-import { parsePendingStageTarget } from "./broker/send-handler.js";
+import { parseWorkflowStageTarget, withWorkflowStageTargetFinalSegment } from "./workflow-stage-target.js";
+import { isRecoverableIntercomDisconnect } from "./recoverable-disconnect.js";
+import { RetryIdentityReservations, type RetryIdentityAttempt, RetryTokenError } from "./retry-identity.js";
+import { runIntercomOperation, type IntercomAttemptResult } from "./tool-retry.js";
+
+function retryErrorDetails(retryToken: string | undefined): Record<string, unknown> {
+	return retryToken === undefined ? { error: true } : { error: true, retryToken };
+}
+
+function retainRecoverableRetry(
+	reservations: RetryIdentityReservations,
+	attempt: RetryIdentityAttempt,
+): { readonly retryToken?: string; readonly remainingRetries: number } {
+	const retryToken = reservations.retainAfterRecoverableDisconnect(attempt);
+	return {
+		...(retryToken === undefined ? {} : { retryToken }),
+		remainingRetries: reservations.remainingRetries(attempt),
+	};
+}
+
+function retainInconclusiveRetry(
+	reservations: RetryIdentityReservations,
+	attempt: RetryIdentityAttempt,
+): { readonly retryToken?: string; readonly remainingRetries: number } {
+	const retryToken = reservations.retainAfterInconclusiveRetry(attempt);
+	return {
+		...(retryToken === undefined ? {} : { retryToken }),
+		remainingRetries: reservations.remainingRetries(attempt),
+	};
+}
 
 async function listDirectory(client: IntercomClient, group?: string): Promise<SessionDirectory> {
 	if (typeof client.listDirectory === "function") return client.listDirectory(group);
-	return { sessions: await client.listSessions(group), workflowStages: [] };
+	return { sessions: await client.listSessions(group), workflowStages: [], workflowFutureStages: [] };
 }
 
-async function resolveReplySender(client: IntercomClient, logicalTarget: string, sendTarget: string): Promise<string> {
-	if (logicalTarget !== sendTarget) return sendTarget;
-	// #2784: only a canonical `<runId>:<stageKey>` target needs the roster lookup that maps it to
-	// the stage's live session id. Ordinary name/id asks resolve to themselves here, so gating on
-	// the canonical shape keeps them off the directory round-trip (and its timeout failure mode).
-	if (parsePendingStageTarget(logicalTarget) === undefined) return sendTarget;
-	// The broker registers BOTH `<runId>:<stageId>` and `<runId>:<stageName>` as live aliases, but the
-	// roster only publishes the id form. Match either alias, otherwise a name-addressed ask is
-	// delivered and then blocks to the 10-minute timeout because its waiter is keyed on a string
-	// inbound reply routing never produces.
-	const stage = (await listDirectory(client)).workflowStages.find(
+type ReplySenderResolution =
+	| { readonly kind: "resolved"; readonly sessionId: string }
+	| { readonly kind: "unresolved" }
+	| { readonly kind: "ambiguous"; readonly reason: string };
+
+/**
+ * Map a canonical workflow-stage target to the live session id its reply will arrive
+ * from. `unresolved` keeps today's behavior of keying the waiter on the send target
+ * (ordinary miss handling); `ambiguous` must refuse the ask — keying on the raw path
+ * string is the #2784 hang-to-timeout class because inbound reply routing only ever
+ * produces the stage session's id or name.
+ */
+async function resolveReplySender(
+	client: IntercomClient,
+	logicalTarget: string,
+	sendTarget: string,
+): Promise<ReplySenderResolution> {
+	if (logicalTarget !== sendTarget) return { kind: "unresolved" };
+	// Only a canonical workflow path needs the roster lookup that maps it to the
+	// stage's live session id. Ordinary name/id asks stay off this directory round-trip.
+	const parsedTarget = parseWorkflowStageTarget(logicalTarget);
+	if (parsedTarget?.kind !== "path") return { kind: "unresolved" };
+	// The roster publishes the depth-faithful id form; live routing also registers the name
+	// form (final segment swapped). Sibling stages can share a boundary name, so more than
+	// one alias may match — that is an ambiguous target, not a first-match wins.
+	const stages = (await listDirectory(client)).workflowStages;
+	const aliasMatches = stages.filter(
 		(candidate) =>
 			candidate.sessionId !== undefined &&
-			(candidate.target === logicalTarget || `${candidate.runId}:${candidate.stageName}` === logicalTarget),
+			(candidate.target === logicalTarget ||
+				withWorkflowStageTargetFinalSegment(candidate.target, candidate.stageName) === logicalTarget),
 	);
-	return stage?.sessionId ?? sendTarget;
+	const aliasSessionIds = new Set(aliasMatches.map((candidate) => candidate.sessionId));
+	if (aliasSessionIds.size > 1) {
+		return {
+			kind: "ambiguous",
+			reason: `multiple live workflow stages share the target "${logicalTarget}"`,
+		};
+	}
+	if (aliasSessionIds.size === 1) {
+		const [onlySessionId] = aliasSessionIds;
+		if (onlySessionId !== undefined) return { kind: "resolved", sessionId: onlySessionId };
+	}
+	// Boundary forms (`workflow:<root>/<boundary...>/<stage>`) match neither alias. Start from
+	// every live nested candidate under the same invocation root whose final segment matches,
+	// then narrow to candidates whose boundary segments agree with the target's (the candidate
+	// target's segment at that depth, or the owning run id at the candidate's own depth).
+	const finalSegment = parsedTarget.segments.at(-1);
+	const middleSegments = parsedTarget.segments.slice(0, -1);
+	const boundaryAgrees = (candidate: WorkflowStageRosterEntry): boolean => {
+		const parsedCandidate = parseWorkflowStageTarget(candidate.target);
+		if (
+			parsedCandidate === undefined ||
+			parsedCandidate.rootRunId !== parsedTarget.rootRunId ||
+			parsedCandidate.segments.length < 2
+		) {
+			return false;
+		}
+		if (middleSegments.length === 0) return true;
+		const candidateMiddles = parsedCandidate.segments.slice(0, -1);
+		return middleSegments.every((segment, index) => {
+			const owningRunIdentity = index === candidateMiddles.length - 1 ? candidate.runId : undefined;
+			return segment === candidateMiddles[index] || segment === owningRunIdentity;
+		});
+	};
+	const looseCandidates = stages.filter((candidate) => {
+		if (candidate.sessionId === undefined) return false;
+		if (candidate.stageId !== finalSegment && candidate.stageName !== finalSegment) return false;
+		const parsedCandidate = parseWorkflowStageTarget(candidate.target);
+		return (
+			parsedCandidate !== undefined &&
+			parsedCandidate.rootRunId === parsedTarget.rootRunId &&
+			parsedCandidate.segments.length >= 2
+		);
+	});
+	const strictMatches = looseCandidates.filter(boundaryAgrees);
+	const strictSessionIds = new Set(strictMatches.map((candidate) => candidate.sessionId));
+	if (strictSessionIds.size === 1) {
+		const [onlySessionId] = strictSessionIds;
+		if (onlySessionId !== undefined) return { kind: "resolved", sessionId: onlySessionId };
+	}
+	// Never key a waiter on the raw path when the final segment names several live stages:
+	// inbound reply routing could never correlate it, so the ask would block to its timeout.
+	const looseSessionIds = new Set(looseCandidates.map((candidate) => candidate.sessionId));
+	if (looseSessionIds.size > 1 || strictSessionIds.size > 1) {
+		return {
+			kind: "ambiguous",
+			reason: `multiple live workflow stages share the final segment "${finalSegment}" under different boundaries`,
+		};
+	}
+	if (looseSessionIds.size === 1) {
+		const [onlySessionId] = looseSessionIds;
+		if (onlySessionId !== undefined) return { kind: "resolved", sessionId: onlySessionId };
+	}
+	return { kind: "unresolved" };
 }
 
 function formatWorkflowStageRow(stage: WorkflowStageRosterEntry): string {
-	return `- **${stage.stageName}** — workflow stage [${stage.lifecycle.toUpperCase()}] — target: \`${stage.target}\`${
-		stage.sessionId === undefined ? "" : ` — intercom session: ${stage.sessionId}`
+	return `- \`${stage.target}\` [${stage.lifecycle.toUpperCase()}] workflow stage: ${stage.stageName}${
+		stage.sessionId === undefined ? "" : ` session: \`${stage.sessionId}\``
+	}`;
+}
+
+/** D7 (slice 4): one possible-future row from the run's persisted scan (or the `**` broadcast row). */
+function formatWorkflowFutureStageRow(stage: WorkflowFutureStageRosterEntry): string {
+	return `- \`${stage.target}\` [future] ${stage.queuedCount} queued message${
+		stage.queuedCount === 1 ? "" : "s"
 	}`;
 }
 
@@ -61,9 +175,12 @@ interface IntercomToolDeps {
   /** Atomically reserves one correlation-keyed reply waiter. */
   beginReplyWait(from: string, replyTo: string, signal?: AbortSignal): ReplyWaitAdmission;
   replyTracker: ReplyTracker | (() => ReplyTracker);
+  /** Internal test seam for exercising retry pressure before public tool side effects. */
+  retryIdentityMaxEntries?: number;
 }
 
 export function registerIntercomTool(pi: ExtensionAPI, deps: IntercomToolDeps): void {
+  const retryIdentities = new RetryIdentityReservations({ maxEntries: deps.retryIdentityMaxEntries });
   const { childOrchestratorMetadata, ensureConnected, syncPresenceIdentity, beginReplyWait } = deps;
   const resolveTarget = deps.resolveSessionTarget ?? resolveSessionTargetId;
   const getMetadata = typeof childOrchestratorMetadata === "function"
@@ -80,9 +197,17 @@ Use this to communicate findings, request help, or coordinate work with other se
 Sessions belong to an intercom group and can ONLY message sessions in the same group;
 cross-group sends are rejected by the broker. Ungrouped sessions share the "default" group.
 
-For send, live session names and exact full session IDs remain supported. For a known
-workflow stage, use the exact \`<runId>:<stageKey>\` target; send messages to pending stages
-queue automatically.
+For send, live session names and exact full session IDs remain supported. Workflow-stage targets use
+\`workflow:<rootRunId>/<segment>[/<segment>...]\`; a segment may be a stage name, run id, or glob
+(\`*\` matches one segment and may be embedded, while \`**\` matches any depth). Use \`intercom list\`
+inside the invocation group to see live, pending, and possible future targets with queued counts.
+\`workflow:<rootRunId>/**\` reaches every live stage immediately and remains sticky for every future
+stage until the root run terminates; narrower name or pattern sends likewise reach every future match.
+A valid target outside the known set queues speculatively with a \`notInKnownSet\` warning and settles
+undeliverable at terminal only if never delivered. Use \`ask\` only for a live, reply-capable target.
+Stage paths win over same-named owned subgroups for send/ask; \`list\` with \`group\` continues to
+select the group.
+For send/ask/reply, Intercom retries recoverable disconnects internally up to three times with the same operation identity. Each new tool call is a new operation. If recovery ends with an unknown delivery outcome, do not repeat it automatically.
 
 Usage:
   intercom({ action: "list" })                    → List sessions visible through your groups
@@ -101,14 +226,13 @@ The "join" action is additive. "default" is the shared default group; "true" and
 "auto" are reserved for subagent auto-groups. Ordinary delivery requires at least
 one shared membership; contact_supervisor remains the only cross-group path.`,
     promptSnippet:
-      "Use to coordinate with other local agent sessions that share an intercom group: discover groups or peers, send updates, ask for help, or check connectivity. Ordinary messages require a shared membership.",
-
+      "Use to coordinate with other local agent sessions that share an intercom group. Send/ask/reply retry reconnects internally; do not automatically repeat an unknown delivery outcome.",
     parameters: Type.Object({
       action: Type.String({
         description: "Action: 'list', 'groups', 'join', 'leave', 'send', 'ask', 'reply', 'pending', or 'status'",
       }),
       to: Type.Optional(Type.String({
-        description: "Live session name, exact full session ID, or exact `<runId>:<stageKey>` for a known workflow stage; send messages to pending stages queue automatically (for 'send', 'ask', or targeted 'reply')",
+        description: "Live session name, exact full session ID, or `workflow:<rootRunId>/<segment>[/<segment>...]` path; `*` matches one segment and `**` any depth. Send queues sticky delivery for pending/future matches; `workflow:<rootRunId>/**` broadcasts to live and future stages. Use `ask` only on live targets (for 'send', 'ask', or targeted 'reply')",
       })),
       message: Type.Optional(Type.String({
         description: "Message to send (for 'send', 'ask', or 'reply' action)",
@@ -127,20 +251,54 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
       })),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      let connectedClient: IntercomClient;
-      try {
-        connectedClient = await ensureConnected("tool");
-      } catch (error) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      if ("retryToken" in params) {
         return {
-          content: [{ type: "text", text: `Intercom not connected: ${getErrorMessage(error)}` }],
+          content: [{ type: "text", text: "Intercom manages retries internally. Caller-supplied retry tokens are not supported; this call was not sent." }],
           isError: true,
           details: { error: true },
         };
       }
+      const toolSessionId = ctx.sessionManager.getSessionId();
+      const { action, to, message, replyTo, group } = params;
+      const attachments = params.attachments?.map((attachment) => ({ ...attachment }));
+      const executeAttempt = async (retryToken: string | undefined, _signal?: AbortSignal): Promise<IntercomAttemptResult> => {
+      if (retryToken !== undefined) {
+        if (action !== "send" && action !== "ask" && action !== "reply") {
+          const error = new RetryTokenError("mismatch");
+          return {
+            content: [{ type: "text", text: getErrorMessage(error) }],
+            isError: true,
+            details: { error: true },
+          };
+        }
+        try {
+          retryIdentities.validateRetryToken(retryToken, toolSessionId, action);
+        } catch (error) {
+          return {
+            content: [{ type: "text", text: getErrorMessage(error) }],
+            isError: true,
+            details: { error: true },
+          };
+        }
+      }
 
-      syncPresenceIdentity(ctx.sessionManager.getSessionId());
-      const { action, to, message, attachments, replyTo, group } = params;
+      let connectedClient: IntercomClient;
+      try {
+        connectedClient = await ensureConnected("tool");
+      } catch (error) {
+        const retainedToken = retryToken !== undefined && isRecoverableIntercomDisconnect(error) ? retryToken : undefined;
+        return {
+          content: [{
+            type: "text",
+            text: `Intercom not connected: ${getErrorMessage(error)}`,
+          }],
+          isError: true,
+          details: { ...retryErrorDetails(retainedToken), retryable: isRecoverableIntercomDisconnect(error) },
+        };
+      }
+
+      syncPresenceIdentity(toolSessionId);
       const resolveOwnGroups = (sessions?: readonly SessionInfo[]): string[] => {
         if (Array.isArray(connectedClient.groups)) {
           return connectedClient.groups.map((membership) => normalizeGroup(membership));
@@ -273,6 +431,7 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 			  const rows = [
 				...peeked.sessions.map((session) => formatSessionListRow(session, currentSession.cwd, session.id === mySessionId)),
 				...peeked.workflowStages.map(formatWorkflowStageRow),
+				...(peeked.workflowFutureStages ?? []).map(formatWorkflowFutureStageRow),
 			  ];
 			  const section = rows.length === 0
 				? `**Group [${requestedGroup}] (read-only peek):**\nNo sessions or workflow stages in this group.`
@@ -285,6 +444,9 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 					groups: ownGroups,
 					peekGroup: requestedGroup,
 					workflowStages: peeked.workflowStages,
+					...((peeked.workflowFutureStages?.length ?? 0) === 0
+						? {}
+						: { workflowFutureStages: peeked.workflowFutureStages }),
 				},
 			  };
             }
@@ -294,6 +456,7 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 			const visibleRows = [
 				...otherSessions.map((session) => formatSessionListRow(session, currentSession.cwd, false)),
 				...ownDirectory.workflowStages.map(formatWorkflowStageRow),
+				...(ownDirectory.workflowFutureStages ?? []).map(formatWorkflowFutureStageRow),
 			];
 			const otherSection = visibleRows.length === 0
 				? "**Other sessions and workflow stages:**\nNo other sessions or workflow stages share any of your groups."
@@ -308,6 +471,9 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 				...(ownDirectory.workflowStages.length === 0
 					? {}
 					: { workflowStages: ownDirectory.workflowStages }),
+				...((ownDirectory.workflowFutureStages?.length ?? 0) === 0
+					? {}
+					: { workflowFutureStages: ownDirectory.workflowFutureStages }),
 			  },
             };
           } catch (error) {
@@ -321,28 +487,47 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 
         case "send": {
           if (!to || !message) {
+            const errorText = retryToken === undefined
+              ? "Missing 'to' or 'message' parameter"
+              : getErrorMessage(new RetryTokenError("mismatch"));
             return {
-              content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
+              content: [{ type: "text", text: errorText }],
               isError: true,
               details: { error: true },
             };
           }
+          if (_signal?.aborted) {
+            return {
+              content: [{
+                type: "text",
+                text: "Cancelled",
+              }],
+              isError: true,
+              details: retryErrorDetails(retryToken),
+            };
+          }
+          let retryIdentity: RetryIdentityAttempt | undefined;
           try {
-            const sendTo = await resolveTarget(connectedClient, to) ?? to;
-            if (sendTo === connectedClient.sessionId) {
-              return {
-                content: [{ type: "text", text: "Cannot message the current session" }],
-                isError: true,
-                details: { error: true },
-              };
+            if (retryToken === undefined) {
+              retryIdentity = retryIdentities.begin({
+                sessionId: toolSessionId,
+                action: "send",
+                target: to,
+                text: message,
+                attachments,
+                replyTo,
+                expectsReply: false,
+              });
             }
-            if (!replyTo && deps.confirmSend && ctx.hasUI) {
+            if (retryToken === undefined && !replyTo && deps.confirmSend && ctx.hasUI) {
               const attachmentText = attachments?.length ? formatAttachments(attachments) : "";
               const confirmed = await ctx.ui.confirm(
                 "Send Message",
                 `Send to "${to}":\n\n${message}${attachmentText}`,
               );
               if (!confirmed) {
+                if (retryIdentity !== undefined) retryIdentities.release(retryIdentity);
+                retryIdentity = undefined;
                 return {
                   content: [{ type: "text", text: "Message cancelled by user" }],
                   isError: false,
@@ -350,66 +535,140 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
                 };
               }
             }
+            retryIdentity ??= retryIdentities.begin({
+              sessionId: toolSessionId,
+              action: "send",
+              target: to,
+              text: message,
+              attachments,
+              replyTo,
+              expectsReply: false,
+            }, retryToken);
+            const sendTo = await resolveTarget(connectedClient, to) ?? to;
+            if (_signal?.aborted) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
+              return {
+                content: [{ type: "text", text: "Cancelled" }],
+                isError: true,
+                details: retryErrorDetails(retained.retryToken),
+              };
+            }
+            if (sendTo === connectedClient.sessionId) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
+              return {
+                content: [{
+                  type: "text",
+                  text: "Cannot message the current session",
+                }],
+                isError: true,
+                details: retryErrorDetails(retained.retryToken),
+              };
+            }
+            // Stage closure cannot undo a submitted send. Preserve its receipt or
+            // disconnect retry identity; the owning receiver suppresses late ingress.
             const result = await connectedClient.send(sendTo, {
+              messageId: retryIdentity.messageId,
+              logicalTarget: to,
               text: message,
               attachments,
               replyTo,
             });
+
             if (result.queued === true) {
+              retryIdentities.release(retryIdentity);
+              retryIdentity = undefined;
               pi.appendEntry("intercom_sent", {
                 to,
                 message: { text: message, attachments, replyTo },
                 messageId: result.id,
                 timestamp: Date.now(),
               });
+              const notInKnownSet = result.notInKnownSet === true;
               return {
-                content: [{ type: "text", text: `Message queued for ${to}` }],
+                content: [{
+                  type: "text",
+                  text: notInKnownSet
+                    ? `Message queued for ${to} (not in the workflow's known stage set; it will be delivered to every matching stage that starts before the run terminates)`
+                    : `Message queued for ${to}`,
+                }],
                 isError: false,
                 details: {
                   messageId: result.id,
                   delivered: false,
                   queued: true,
-                  runId: result.runId,
-                  stageKey: result.stageKey,
+                  target: result.target,
                   position: result.position,
+                  ...(notInKnownSet ? { notInKnownSet: true } : {}),
                 },
               };
             }
             if (!result.delivered) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
               return {
-                content: [{ type: "text", text: `Message to "${to}" was not delivered: ${errorText}` }],
+                content: [{
+                  type: "text",
+                  text: `Message to "${to}" was not delivered: ${errorText}`,
+                }],
                 isError: true,
-                details: { messageId: result.id, delivered: false, reason: result.reason },
+                details: retryToken === undefined
+                  ? { messageId: result.id, delivered: false, reason: result.reason }
+                  : {
+                      delivered: false,
+                      reason: result.reason,
+                      ...(retained.retryToken === undefined ? {} : { retryToken: retained.retryToken }),
+                    },
               };
             }
+            retryIdentities.release(retryIdentity);
+            retryIdentity = undefined;
             pi.appendEntry("intercom_sent", {
               to,
               message: { text: message, attachments, replyTo },
               messageId: result.id,
               timestamp: Date.now(),
             });
-            if (replyTo) {
-              activeReplyTracker().markReplied(replyTo);
-            }
+            if (replyTo) activeReplyTracker().markReplied(replyTo);
             return {
               content: [{ type: "text", text: `Message sent to ${to}` }],
               isError: false,
               details: { messageId: result.id, delivered: true },
             };
           } catch (error) {
+            let failure = error;
+            let retained: { readonly retryToken?: string; readonly remainingRetries: number } | undefined;
+            if (retryIdentity !== undefined) {
+              if (isRecoverableIntercomDisconnect(error)) {
+                try {
+                  retained = retainRecoverableRetry(retryIdentities, retryIdentity);
+                } catch (retentionError) {
+                  failure = retentionError;
+                }
+              } else {
+                retryIdentities.release(retryIdentity);
+              }
+            }
             return {
-              content: [{ type: "text", text: `Failed to send: ${getErrorMessage(error)}` }],
+              content: [{
+                type: "text",
+                text: `Failed to send: ${getErrorMessage(failure)}`,
+              }],
               isError: true,
-              details: { error: true },
+              details: { ...retryErrorDetails(retained?.retryToken), retryable: isRecoverableIntercomDisconnect(error) },
             };
           }
         }
 
         case "ask": {
           if (!to) {
+            const errorText = retryToken === undefined
+              ? "Missing 'to' or 'message' parameter"
+              : getErrorMessage(new RetryTokenError("mismatch"));
             return {
-              content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
+              content: [{ type: "text", text: errorText }],
               isError: true,
               details: { error: true },
             };
@@ -417,14 +676,28 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 
           if (_signal?.aborted) {
             return {
-              content: [{ type: "text", text: "Cancelled" }],
+              content: [{
+                type: "text",
+                text: "Cancelled",
+              }],
               isError: true,
-              details: { error: true },
+              details: retryErrorDetails(retryToken),
             };
           }
           let wait: ReplyWait | null = null;
+          let retryIdentity: RetryIdentityAttempt | undefined;
+          let askDelivered = false;
 
           try {
+            retryIdentity = retryIdentities.begin({
+              sessionId: toolSessionId,
+              action: "ask",
+              target: to,
+              text: message ?? "",
+              attachments,
+              replyTo,
+              expectsReply: true,
+            }, retryToken);
             const metadata = getMetadata();
             const currentSupervisorId = connectedClient.supervisorSessionId ?? undefined;
             const metadataSupervisorId = metadata?.supervisor?.supervisorSessionId;
@@ -434,20 +707,24 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
                 to === currentSupervisorId ||
                 to === metadataSupervisorId),
             );
+            let parentTarget = directParentTarget;
             const claimParentAsk = (resolvedTargetId: string): boolean =>
               Boolean(
                 metadata &&
                 requestParentAskHandoff(pi.events, metadata, {
                   kind: "intercom",
                   question: typeof message === "string" ? message : "",
-                  attachments,
+                  attachments: params.attachments,
                   resolvedTargetId,
                 }),
               );
             if (
+              retryToken === undefined &&
               directParentTarget &&
               claimParentAsk(currentSupervisorId ?? metadataSupervisorId ?? to)
             ) {
+              retryIdentities.release(retryIdentity);
+              retryIdentity = undefined;
               return {
                 content: [{ type: "text", text: "Parent ask claimed; this child is ending for a fresh subagent start." }],
                 isError: false,
@@ -457,17 +734,31 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
 
             const sendTo = await resolveTarget(connectedClient, to) ?? to;
             if (_signal?.aborted) {
+              const retained = retryIdentity === undefined
+                ? undefined
+                : retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               return {
-                content: [{ type: "text", text: "Cancelled" }],
+                content: [{
+                  type: "text",
+                  text: "Cancelled",
+                }],
                 isError: true,
-                details: { error: true },
+                details: retryErrorDetails(retained?.retryToken),
               };
             }
             if (sendTo === connectedClient.sessionId) {
+              const retained = retryIdentity === undefined
+                ? undefined
+                : retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               return {
-                content: [{ type: "text", text: "Cannot message the current session" }],
+                content: [{
+                  type: "text",
+                  text: "Cannot message the current session",
+                }],
                 isError: true,
-                details: { error: true },
+                details: retryErrorDetails(retained?.retryToken),
               };
             }
             if (metadata && !directParentTarget) {
@@ -476,7 +767,10 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
               );
               const resolvedParent =
                 authoritativeParent ?? await resolveTarget(connectedClient, metadata.orchestratorTarget);
-              if (resolvedParent !== null && resolvedParent === sendTo && claimParentAsk(sendTo)) {
+              parentTarget = resolvedParent !== null && resolvedParent === sendTo;
+              if (retryToken === undefined && parentTarget && claimParentAsk(sendTo)) {
+                retryIdentities.release(retryIdentity);
+                retryIdentity = undefined;
                 return {
                   content: [{ type: "text", text: "Parent ask claimed; this child is ending for a fresh subagent start." }],
                   isError: false,
@@ -484,57 +778,113 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
                 };
               }
             }
-            if (!message) {
+
+            if (!message && !parentTarget) {
+              retryIdentities.release(retryIdentity);
+              retryIdentity = undefined;
               return {
                 content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
                 isError: true,
                 details: { error: true },
               };
             }
-			const questionId = randomUUID();
+
 			// Canonical workflow targets must remain canonical on the send path so the
 			// broker can authorize invocation-to-subgroup control. The waiter, however,
 			// correlates the actual inbound stage session identity.
-			const replyFrom = await resolveReplySender(connectedClient, to, sendTo);
+			const replySender = await resolveReplySender(connectedClient, to, sendTo);
+			if (replySender.kind === "ambiguous") {
+				const retained = retryIdentity === undefined
+					? undefined
+					: retainInconclusiveRetry(retryIdentities, retryIdentity);
+				retryIdentity = undefined;
+				return {
+					content: [{
+						type: "text",
+						text: `Message to "${to}" is ambiguous: ${replySender.reason}. Use the exact target shown by intercom list.`,
+					}],
+					isError: true,
+					details: retryErrorDetails(retained?.retryToken),
+				};
+			}
+			const questionId = retryIdentity.messageId;
+			const replyFrom = replySender.kind === "resolved" ? replySender.sessionId : sendTo;
 			const admission = beginReplyWait(replyFrom, questionId, _signal);
             if (!admission.ok) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               const text = admission.reason === "busy"
                 ? `Too many pending asks (${admission.limit}); reply-wait slots are full`
                 : "Cancelled";
               return {
-                content: [{ type: "text", text }],
+                content: [{
+                  type: "text",
+                  text,
+                }],
                 isError: true,
-                details: { error: true },
+                details: retryErrorDetails(retained.retryToken),
               };
             }
             wait = admission.wait;
             const sendResult = await connectedClient.send(sendTo, {
               messageId: questionId,
-              text: message,
+              logicalTarget: to,
+              text: message ?? "",
               attachments,
               replyTo,
               expectsReply: true,
+              ...(parseWorkflowStageTarget(to)?.kind === "path" ? { onReplyTarget: wait.bindSender } : {}),
             });
 
+            if (sendResult.queued === true) {
+              retryIdentities.release(retryIdentity);
+              retryIdentity = undefined;
+              wait.cancel(new Error(`Message queued for ${to}`));
+              pi.appendEntry("intercom_sent", {
+                to,
+                message: { text: message, attachments, replyTo },
+                messageId: sendResult.id,
+                timestamp: Date.now(),
+              });
+              return {
+                content: [{ type: "text", text: `Message queued for ${to}` }],
+                isError: false,
+                details: {
+                  messageId: sendResult.id,
+                  delivered: false,
+                  queued: true,
+                  target: sendResult.target,
+                  position: sendResult.position,
+                },
+              };
+            }
             if (!sendResult.delivered) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
               wait.cancel(new Error(`Message to "${to}" was not delivered: ${errorText}`));
 							const pendingStageAskRefusal = errorText.startsWith(
 								"Cannot ask a workflow stage whose session has not initialized.",
 							);
               return {
-                content: [{ type: "text", text: `Message to "${to}" was not delivered: ${errorText}` }],
+                content: [{
+                  type: "text",
+                  text: `Message to "${to}" was not delivered: ${errorText}`,
+                }],
                 isError: true,
-                details: pendingStageAskRefusal
-                  ? {
-                      error: true,
-                      refusal: "pending_stage_ask_unsupported",
-                      recommendedAction: "send",
-                      reason: errorText,
-                    }
-                  : { error: true },
+                details: {
+                  ...(pendingStageAskRefusal
+                    ? {
+                        refusal: "pending_stage_ask_unsupported",
+                        recommendedAction: "send",
+                        reason: errorText,
+                      }
+                    : {}),
+                  ...retryErrorDetails(retained.retryToken),
+                },
               };
             }
+            askDelivered = true;
             pi.appendEntry("intercom_sent", {
               to,
               message: { text: message, attachments, replyTo },
@@ -542,6 +892,8 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
               timestamp: Date.now(),
             });
             const replyMessage = await wait.promise;
+            retryIdentities.release(retryIdentity);
+            retryIdentity = undefined;
             const replyText = replyMessage.content.text;
             const replyAttachments = replyMessage.content.attachments?.length
               ? formatAttachments(replyMessage.content.attachments)
@@ -565,64 +917,180 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
               details: {},
             };
           } catch (error) {
-            // Settle only this call's own waiter; a concurrent call's
-            // reservation must never be torn down from this failure path.
             wait?.cancel(toError(error));
+            let failure = error;
+            let retained: { readonly retryToken?: string; readonly remainingRetries: number } | undefined;
+            if (retryIdentity !== undefined) {
+              if (isRecoverableIntercomDisconnect(error)) {
+                try {
+                  retained = retainRecoverableRetry(retryIdentities, retryIdentity);
+                } catch (retentionError) {
+                  failure = retentionError;
+                }
+              } else {
+                retryIdentities.release(retryIdentity);
+              }
+            }
             return {
-              content: [{ type: "text", text: `Failed: ${getErrorMessage(error)}` }],
+              content: [{
+                type: "text",
+                text: `Failed: ${getErrorMessage(failure)}`,
+              }],
               isError: true,
-              details: { error: true },
+              details: { ...retryErrorDetails(retained?.retryToken), retryable: isRecoverableIntercomDisconnect(error), deliveryUncertain: askDelivered },
             };
           }
         }
 
         case "reply": {
           if (!message) {
+            const errorText = retryToken === undefined
+              ? "Missing 'message' parameter"
+              : getErrorMessage(new RetryTokenError("mismatch"));
             return {
-              content: [{ type: "text", text: "Missing 'message' parameter" }],
+              content: [{ type: "text", text: errorText }],
               isError: true,
               details: { error: true },
             };
           }
 
+          if (_signal?.aborted) {
+            return { content: [{ type: "text", text: "Cancelled" }], isError: true, details: retryErrorDetails(retryToken) };
+          }
+          let retryIdentity: RetryIdentityAttempt | undefined;
           try {
-			const target = activeReplyTracker().resolveReplyTarget({ to, replyTo });
-            if (target.from.id === connectedClient.sessionId) {
+            retryIdentity = retryIdentities.begin({
+              sessionId: toolSessionId,
+              action: "reply",
+              target: to,
+              text: message,
+              attachments,
+              replyTo,
+              expectsReply: false,
+            }, retryToken);
+            if (retryToken === undefined) {
+              const target = activeReplyTracker().resolveReplyTarget({ to, replyTo });
+              retryIdentities.bindReplyRoute(retryIdentity, {
+                senderId: target.from.id,
+                ...(target.from.name === undefined ? {} : { senderName: target.from.name }),
+                messageId: target.message.id,
+                expectsReply: target.message.expectsReply === true,
+              });
+            }
+            const route = retryIdentities.replyRoute(retryIdentity);
+            if (route === undefined) throw new RetryTokenError("invalid");
+            const replySendTo = to ?? route.senderId;
+            const replyLogicalTarget = to ?? route.senderId;
+            const displayTarget = route.senderName || route.senderId;
+            if (route.senderId === connectedClient.sessionId) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               return {
-                content: [{ type: "text", text: "Cannot message the current session" }],
+                content: [{
+                  type: "text",
+                  text: "Cannot message the current session",
+                }],
                 isError: true,
-                details: { error: true },
+                details: retryErrorDetails(retained.retryToken),
               };
             }
-            const result = await connectedClient.send(target.from.id, {
+            const replyMessageId = retryIdentity.messageId;
+            const sendReply = (targetId: string) => connectedClient.send(targetId, {
+              messageId: replyMessageId,
+              logicalTarget: replyLogicalTarget,
+              ...(route.expectsReply ? { requirePendingReply: true as const } : {}),
+              ...(to === undefined && replyTo === undefined ? {} : { expectedRecipientId: route.senderId }),
               text: message,
-              replyTo: target.message.id,
+              attachments,
+              replyTo: route.messageId,
             });
+            let result = await sendReply(replySendTo);
+            if (
+              to === undefined &&
+              replyTo === undefined &&
+              result.delivered === false &&
+              result.reasonCode === "session_not_found" &&
+              route.senderName !== undefined
+            ) {
+              result = await sendReply(route.senderName);
+            }
+            if (result.queued === true) {
+              retryIdentities.release(retryIdentity);
+              retryIdentity = undefined;
+              activeReplyTracker().markReplied(route.messageId);
+              pi.appendEntry("intercom_sent", {
+                to: displayTarget,
+                message: { text: message, attachments, replyTo: route.messageId },
+                messageId: result.id,
+                timestamp: Date.now(),
+              });
+              return {
+                content: [{ type: "text", text: `Reply queued for ${displayTarget}` }],
+                isError: false,
+                details: {
+                  messageId: result.id,
+                  delivered: false,
+                  queued: true,
+                  replyTo: route.messageId,
+                  target: result.target,
+                  position: result.position,
+                },
+              };
+            }
             if (!result.delivered) {
+              const retained = retainInconclusiveRetry(retryIdentities, retryIdentity);
+              retryIdentity = undefined;
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
               return {
-                content: [{ type: "text", text: `Reply to "${target.from.name || target.from.id}" was not delivered: ${errorText}` }],
+                content: [{
+                  type: "text",
+                  text: `Reply to "${displayTarget}" was not delivered: ${errorText}`,
+                }],
                 isError: true,
-                details: { messageId: result.id, delivered: false, reason: result.reason },
+                details: retryToken === undefined
+                  ? { messageId: result.id, delivered: false, reason: result.reason }
+                  : {
+                      delivered: false,
+                      reason: result.reason,
+                      ...(retained.retryToken === undefined ? {} : { retryToken: retained.retryToken }),
+                    },
               };
             }
-            activeReplyTracker().markReplied(target.message.id);
+            retryIdentities.release(retryIdentity);
+            retryIdentity = undefined;
+            activeReplyTracker().markReplied(route.messageId);
             pi.appendEntry("intercom_sent", {
-              to: target.from.name || target.from.id,
-              message: { text: message, replyTo: target.message.id },
+              to: displayTarget,
+              message: { text: message, attachments, replyTo: route.messageId },
               messageId: result.id,
               timestamp: Date.now(),
             });
             return {
-              content: [{ type: "text", text: `Reply sent to ${target.from.name || target.from.id}` }],
+              content: [{ type: "text", text: `Reply sent to ${displayTarget}` }],
               isError: false,
-              details: { messageId: result.id, delivered: true, replyTo: target.message.id },
+              details: { messageId: result.id, delivered: true, replyTo: route.messageId },
             };
           } catch (error) {
+            let failure = error;
+            let retained: { readonly retryToken?: string; readonly remainingRetries: number } | undefined;
+            if (retryIdentity !== undefined) {
+              if (isRecoverableIntercomDisconnect(error)) {
+                try {
+                  retained = retainRecoverableRetry(retryIdentities, retryIdentity);
+                } catch (retentionError) {
+                  failure = retentionError;
+                }
+              } else {
+                retryIdentities.release(retryIdentity);
+              }
+            }
             return {
-              content: [{ type: "text", text: `Failed to reply: ${getErrorMessage(error)}` }],
+              content: [{
+                type: "text",
+                text: `Failed to reply: ${getErrorMessage(failure)}`,
+              }],
               isError: true,
-              details: { error: true },
+              details: { ...retryErrorDetails(retained?.retryToken), retryable: isRecoverableIntercomDisconnect(error) },
             };
           }
         }
@@ -691,6 +1159,9 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
             details: { error: true },
           };
       }
+      };
+      if (action !== "send" && action !== "ask" && action !== "reply") return executeAttempt(undefined, signal);
+      return runIntercomOperation(executeAttempt, (token) => retryIdentities.discard(token), signal);
     },
     renderCall(args, theme) {
       const action = typeof args.action === "string" ? args.action : "intercom";

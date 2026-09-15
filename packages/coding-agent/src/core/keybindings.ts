@@ -12,6 +12,8 @@ import { getAgentDir } from "../config.js";
 import { stripBom } from "../utils/text.ts";
 
 export interface AppKeybindings {
+	"app.workflows.scrollUp": true;
+	"app.workflows.scrollDown": true;
 	"app.interrupt": true;
 	"app.clear": true;
 	"app.exit": true;
@@ -21,12 +23,16 @@ export interface AppKeybindings {
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
 	"app.tools.expand": true;
+	"app.tasks.open": true;
+	"app.tasks.inspect": true;
+	"app.tasks.foreground": true;
+	"app.tasks.cancel": true;
+	"app.tasks.input": true;
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
 	"app.editor.external": true;
 	"app.message.followUp": true;
 	"app.message.dequeue": true;
-	"app.message.copy": true;
 	"app.clipboard.pasteImage": true;
 	"app.session.new": true;
 	"app.session.tree": true;
@@ -41,7 +47,6 @@ export interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
-	"app.models.save": true;
 	"app.models.enableAll": true;
 	"app.models.clearAll": true;
 	"app.models.toggleProvider": true;
@@ -73,6 +78,8 @@ const windowsKeybindings = useWindowsKeybindings();
 
 export const KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
+	"app.workflows.scrollUp": { defaultKeys: ["alt+k", "alt+pageUp"], description: "Scroll workflows up" },
+	"app.workflows.scrollDown": { defaultKeys: ["alt+j", "alt+pageDown"], description: "Scroll workflows down" },
 	"tui.editor.undo": {
 		...TUI_KEYBINDINGS["tui.editor.undo"],
 		defaultKeys: process.platform === "win32" ? "ctrl+z" : windowsKeybindings ? "alt+z" : "ctrl+-",
@@ -95,8 +102,8 @@ export const KEYBINDINGS = {
 	"app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
 	"app.suspend": {
-		defaultKeys: process.platform === "win32" ? [] : "ctrl+z",
-		description: "Suspend to background",
+		defaultKeys: process.platform === "win32" ? "alt+z" : "ctrl+z",
+		description: process.platform === "win32" ? "Open PowerShell subshell" : "Suspend to background",
 	},
 	"app.thinking.cycle": {
 		defaultKeys: "shift+tab",
@@ -112,6 +119,11 @@ export const KEYBINDINGS = {
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
+	"app.tasks.open": { defaultKeys: [], description: "Open task list" },
+	"app.tasks.inspect": { defaultKeys: "enter", description: "Inspect selected task" },
+	"app.tasks.foreground": { defaultKeys: [], description: "Wait for selected task" },
+	"app.tasks.cancel": { defaultKeys: [], description: "Cancel selected task with confirmation" },
+	"app.tasks.input": { defaultKeys: [], description: "Input to selected task" },
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",
 		description: "Toggle thinking blocks",
@@ -131,10 +143,6 @@ export const KEYBINDINGS = {
 	"app.message.dequeue": {
 		defaultKeys: windowsKeybindings ? "alt+q" : "alt+up",
 		description: "Restore queued messages",
-	},
-	"app.message.copy": {
-		defaultKeys: "ctrl+x",
-		description: "Copy fullscreen selection or last agent message",
 	},
 	"app.clipboard.pasteImage": {
 		defaultKeys: windowsKeybindings ? "alt+v" : "ctrl+v",
@@ -179,10 +187,6 @@ export const KEYBINDINGS = {
 	"app.session.deleteNoninvasive": {
 		defaultKeys: "ctrl+backspace",
 		description: "Delete session when query is empty",
-	},
-	"app.models.save": {
-		defaultKeys: "ctrl+s",
-		description: "Save model selection",
 	},
 	"app.models.enableAll": {
 		defaultKeys: "ctrl+a",

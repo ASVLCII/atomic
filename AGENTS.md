@@ -30,12 +30,12 @@ everywhere. Where the split differs from pi, the reason is written down.
 | `packages/coding-agent` suite | `vitest --run` | already parity; it now runs under Node rather than `bun --bun`, SQLite selectors included |
 | Script tests | `node --test scripts/*.test.mjs` | pi parity. Scripts Node can run are tested with Node's own runner |
 | Repository scripts | `bun run scripts/*.ts` | Bun executes `.ts` directly and resolves `.js` specifiers to `.ts` source with no loader hook. Bare `node` cannot; scripts meant for `node --test` are `.mjs` |
-| Binary compilation | `bun build --compile` | Cross-compiles the single-file executables; upstream pi uses Bun for exactly this step too. Bun pinned to 1.4.0 |
+| Binary compilation | `bun build --compile` | Cross-compiles the single-file executables; upstream pi uses Bun for exactly this step too. Bun pinned to 1.4.2 |
 | npm-package smoke tests | Node (`node-version: 22` in CI, matching pi) | `test/integration/installed-package-node-extensions.test.ts` verifies the shipped `atomic` bin under `#!/usr/bin/env node`, which is how npm installs run it |
 | Registry publish | `npm publish --provenance` | npm's OIDC-signed provenance lives in the npm CLI, and npm trusted publishing requires a GitHub-hosted runner |
 
 **Where this repository deliberately declines pi's shape:** pi's CI is one `ubuntu-latest`
-job with no matrix and no `timeout-minutes`. Do not copy it. This workflow produces nine
+job with no matrix and no `timeout-minutes`. Do not copy it. This workflow produces eleven
 check contexts including full Windows coverage, runs on Blacksmith runners, and carries
 per-job timeout budgets that `test/ci/test-workflow-topology.test.ts` asserts. Adopting pi's
 topology would delete Windows coverage and orphan the two required check contexts. Parity is
@@ -50,7 +50,7 @@ a *toolchain* goal, not a CI-topology goal.
 ### Commands
 
 - `npm ci --ignore-scripts` — install dependencies from `package-lock.json`
-- `npm run build` — one-time per checkout (and after pulling changes to `packages/ai`, `crates/`, or `packages/natives/`): builds `@bastani/pi-ai` (fetches models.dev and writes `src/providers/data/`, then compiles), aliases `@earendil-works/pi-ai` onto it, and builds the native N-API module. `npm ci --ignore-scripts` skips the `prepare` hook, so nothing else runs these
+- `npm run build` — one-time per checkout (and after pulling changes to `packages/ai`, `packages/coding-agent`, `crates/`, or `packages/natives/`): builds `@bastani/pi-ai` (fetches models.dev and writes `src/providers/data/`, then compiles), aliases `@earendil-works/pi-ai` onto it, builds the native N-API module, and builds `@bastani/atomic` with its bundled package assets. `npm ci --ignore-scripts` skips the `prepare` hook, so nothing else runs these
 - `npm install <pkg>` — add a dependency; `.npmrc` applies `save-exact`. There is no release-age gate: `min-release-age=0`
 - `npm run check` — `tsc --noEmit`, then the coding-agent package typecheck (`tsgo -p tsconfig.build.json --noEmit`), plus the published-shrinkwrap check. `npm run typecheck` runs both typecheck passes alone
 - `npm run test:unit`, `npm run test:integration`, `npm run test:ci-contracts`, `npm run test:all`
@@ -69,7 +69,7 @@ name it.
 ## Best Practices
 
 - Avoid ambiguous types like `any` and `unknown`. Use specific types instead.
-- `@types/bun` is held at 1.3.14 while the Bun runtime/CI pin is 1.4.0: bun-types 1.4.0 declares `on`/`off`/`once` for its `memoryPressure` event directly on `NodeJS.Process`, which hides the inherited `EventEmitter` overloads and breaks every `process.off("SIGINT"|"unhandledRejection", ...)` call under `tsc`. Bump the types only once a bun-types release stops shadowing them (verify with `npm run typecheck`).
+- `@types/bun` is pinned to 1.4.1 while the Bun runtime/CI pin is 1.4.2: `@types/bun@1.4.2` is not yet published. bun-types 1.4.1 restores generic `off`/`removeListener` overloads on `NodeJS.Process` (oven-sh/bun#40003), resolving the `memoryPressure` shadowing that required the previous 1.3.14 compatibility pin. Both repository typecheck passes succeed with 1.4.1; verify with `npm run typecheck` when bumping types.
 - Source files use `.js` import extensions (TypeScript ESM convention). The repo ships as `.ts` files; Bun resolves `.js` specifiers to the underlying `.ts` source directly — no loader hook required. atomic's loader follows the same convention as pi.
 - Do not add a build step (`dist/`, `tsconfig.build.json`, etc.) to `packages/workflows`; it distributes raw TypeScript and the host loads it directly. `packages/coding-agent` is copied from upstream pi and keeps its existing build setup.
 - When using skills, if you see a frontmatter of `metadata: internal` set to `true` (if missing assume `false`), that means the skill is for internal developers of this package. If this flag is omitted, the skill is meant for consumers/everyday users.
@@ -128,9 +128,9 @@ the helper.
 ### SQLite selectors use node:sqlite on either runtime
 
 `src/core/tools/resource-selectors.ts` loads `node:sqlite`, which Node ≥ 22.13 and
-Bun ≥ 1.4.0 (this repository's Bun floor, oven-sh/bun#32498) both ship. The
-`bun:sqlite` fallback that covered older Bun binaries was removed with that floor;
-do not reintroduce it.
+Bun ≥ 1.4.2 (this repository's Bun floor) both ship. Bun introduced it in 1.4.0
+(oven-sh/bun#32498), when the `bun:sqlite` fallback for older Bun binaries was
+removed; do not reintroduce it.
 
 `better-sqlite3` was evaluated and rejected: it segfaults Bun 1.3.14 on construction, which is
 worse than a catchable missing-module error.
@@ -234,6 +234,8 @@ If a user asks to publish a release or prerelease, route the request through the
 ## Docs
 
 - ALWAYS keep the user-facing docs in `packages/coding-agent/docs` up-to-date with the latest changes after you make changes. Prefer to keep other docs up-to-date as well, but the coding-agent docs are the most important since they are user-facing and often consulted by users and other agents.
+- `packages/coding-agent/docs` is user-facing documentation. Explain how to use, configure, and troubleshoot Atomic. Do not include internal implementation details, test infrastructure, debugging histories, verification evidence, or maintainer-only design notes. Keep those in repository-level docs, code/test comments, or PR descriptions. Keep user guides concise and focused on what users need to know.
+- Update user guides only when a change affects how users use, configure, or troubleshoot Atomic. An internal optimization does not require a guide edit merely to say that something is faster, uses less CPU, or needs no configuration. If there is no actionable user guidance, leave the guide unchanged. Put user-visible performance improvements in the package changelog and measurements or implementation rationale in repository-level notes or the PR description.
 - To update docs, prefer using your `release-docs` workflow to thoroughly update all relevant docs with the latest changes. If you need to make a quick fix or update, you can also edit the markdown files directly, but make sure to keep them comprehensive and up-to-date.
 
 ## Changelog
@@ -252,23 +254,29 @@ Use these sections under `## [Unreleased]`:
 
 ### Rules
 
-- Package changelogs are user-facing release notes. Add entries only for changes to shipped package behavior, APIs, features, or user-visible fixes.
-- CI configuration, release/publish pipelines, repository automation, maintainer scripts, and agent-instruction changes are infrastructure-level changes. Do **not** add them to `packages/*/CHANGELOG.md` unless they also change the behavior of a shipped package for users.
-- In particular, changing how a release is tagged, dispatched, built, verified, or published does not itself warrant a package changelog entry.
-- Before adding entries, read the full `[Unreleased]` section to see which subsections already exist
-- New entries ALWAYS go under `## [Unreleased]` section
-- Append to existing subsections (e.g., `### Fixed`), do not create duplicates
-- NEVER modify already-released version sections (e.g., `## [0.12.2]`)
-- Each version section is immutable once released
-- When updating the changelog entry you should:
-    1. Carefully note key features that were added for a particular `prerelease` revision and for each `release` version changelog you should note every key feature that was introduced in the cumulative `prerelease`(s) that led up to the `release`.
-    2. Do NOT be lazy and avoid saying something like: "Bumped package version for the Atomic prerelease." That is not helpful to users and does not provide any information on what was actually changed.
-    3. The changelog should be a comprehensive and detailed summary of all the key features, bug fixes, breaking changes, and other relevant information about the `release`/`prerelease` that would be helpful for users.
+- Changelogs are user-facing release notes. Record only changes to shipped package
+  behavior: APIs, features, user-visible fixes. CI, release/publish pipelines,
+  repository automation, maintainer scripts, and agent instructions are infrastructure
+  and get no entry unless they also change what users get.
+- New entries go under `## [Unreleased]`, appended to the existing subsection for their
+  kind. Read the whole section first; do not create a second `### Fixed`.
+- A released section (`## [0.12.2]`) is immutable. Do not edit, append to, or delete
+  one. `test/unit/changelog.test.ts` compares each against its tag.
+- A release section (`## [0.9.19]`) lists every entry from the prereleases that led to
+  it (`0.9.19-alpha.1` through `0.9.19-alpha.12`), grouped under the standard
+  subsections. It must stand alone: the GitHub release page shows only that section.
+- Do not open a section with a preamble that names the prereleases it covers and
+  redirects the reader, e.g. "Cumulative release of the `0.9.19-alpha.1` through
+  `0.9.19-alpha.12` prereleases. Per-change details remain in the prerelease sections
+  below." `scripts/build-release-notes.ts` merges one preamble per package, so this
+  stacks eight redirections above the first real entry.
+- Each entry says what changed for the user. "Bumped package version for the Atomic
+  prerelease" is not an entry.
 
 ### Attribution
 
-- **Internal changes (from issues)**: `Fixed foo bar ([#123](https://github.com/earendil-works/pi-mono/issues/123))`
-- **External contributions**: `Added feature X ([#456](https://github.com/earendil-works/pi-mono/pull/456) by [@username](https://github.com/username))`
+- **From an issue**: `Fixed foo bar ([#123](https://github.com/bastani-inc/atomic/issues/123))`
+- **External contribution**: `Added feature X ([#456](https://github.com/bastani-inc/atomic/pull/456) by [@username](https://github.com/username))`
 
 ## Versionless release bases & bumping
 

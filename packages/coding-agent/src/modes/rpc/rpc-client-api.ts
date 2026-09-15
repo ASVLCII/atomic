@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Credential } from "@bastani/pi-ai";
 import type { Api, ImageContent, Model } from "@bastani/pi-ai/compat";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { SessionStats } from "../../core/agent-session.ts";
+import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { VerbatimCompactionResult } from "../../core/compaction/index.ts";
 import type { AtomicProviderCompat } from "../../core/model-capabilities.ts";
@@ -179,8 +179,8 @@ export abstract class RpcClientApi {
 	async exportHtml(outputPath?: string): Promise<{ path: string }> {
 		return this.data(await this.request({ type: "export_html", outputPath }));
 	}
-	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-		return this.data(await this.request({ type: "switch_session", sessionPath }));
+	async switchSession(sessionPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
+		return this.data(await this.request({ type: "switch_session", sessionPath, cwdOverride }));
 	}
 	async fork(entryId: string): Promise<{ text: string; cancelled: boolean }> {
 		return this.data(await this.request({ type: "fork", entryId }));

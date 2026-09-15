@@ -1,13 +1,13 @@
 import { type KeyId, matchesKey } from "@earendil-works/pi-tui";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type { ResourceOverlap } from "../../core/diagnostics.ts";
-import type { ExtensionUIContext } from "../../core/extensions/index.ts";
+import type { ExtensionUIContext } from "../../core/extensions/index.js";
 import type { KeybindingsManager } from "../../core/keybindings.ts";
 import type { RpcAutocompleteItem, RpcResourceExtension, RpcSlashCommand } from "../rpc/rpc-types.ts";
 import type { ActivityWatchdogDiagnostic } from "./activity-watchdog.ts";
 import { EngineDialogHostController } from "./engine-dialog-host.ts";
 import { InputFormHostController } from "./input-form-host.ts";
-import { IsolatedInteractiveRuntime } from "./isolated-runtime.ts";
+import { IsolatedInteractiveRuntime } from "./isolated-runtime.js";
 import type { EngineExtensionShortcut, EngineKeybindingState, InteractiveEngineMessage } from "./protocol.ts";
 import { RemoteComponentController, type TuiRendererLifecycle } from "./remote-component.ts";
 import { registerRemoteProxyOwnership } from "./remote-input-ownership.ts";
@@ -48,7 +48,10 @@ export function attachInteractiveEngineHost(
 	const dialogs = new EngineDialogHostController(runtime, ui);
 	let shortcuts: EngineExtensionShortcut[] = [];
 	const dispatchShortcut = (data: string): boolean => {
-		const shortcut = shortcuts.find(({ key }) => matchesKey(data, key as KeyId));
+		const shortcut = shortcuts.find(
+			({ key, editorKeys }) =>
+				matchesKey(data, key as KeyId) && !editorKeys?.some((editorKey) => matchesKey(data, editorKey)),
+		);
 		if (!shortcut) return false;
 		void runtime
 			.invokeRemoteShortcut(shortcut.key)
@@ -92,6 +95,18 @@ export function attachInteractiveEngineHost(
 		dialogs.dispose();
 		disposeDiagnostic();
 	};
+}
+
+/** Route host-owned trust waits to the runner that actually owns the subscribers. */
+export function withHostProjectTrustPrompt<T>(
+	runtime: AgentSessionRuntime,
+	kind: "select" | "confirm" | "input",
+	title: string,
+	run: () => Promise<T>,
+): Promise<T> {
+	return runtime instanceof IsolatedInteractiveRuntime
+		? runtime.withProjectTrustPrompt(kind, title, run)
+		: runtime.session.extensionRunner.withProjectTrustPrompt(kind, title, run);
 }
 
 export async function waitForInteractiveEngineBound(runtime: AgentSessionRuntime): Promise<void> {

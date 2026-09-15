@@ -2,6 +2,137 @@
 
 ## [Unreleased]
 
+## [0.9.20-alpha.2] - 2026-09-15
+
+### Added
+
+- Added `/feedback` to draft privacy-scrubbed bug reports and enhancements, investigate bugs with one debugger run, and post reviewed drafts through your `gh` login ([#2799](https://github.com/bastani-inc/atomic/issues/2799)).
+
+## [0.9.19] - 2026-09-13
+
+Cumulative release of the `0.9.19-alpha.2` through `0.9.19-alpha.6` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- Renamed terminal control action `interrupt` to `kill`, including calls using `runId`. Replace `subagent({ action: "interrupt", id })` with `subagent({ action: "kill", id })`. The old action is rejected; killed children cannot resume and follow-up work requires a fresh launch.
+
+### Added
+
+- Added a searchable `/agents` catalog grouped by source with model, tool, description and prompt details.
+- Added the builtin Herdr skill from upstream v0.9.0 with managed-pane safety checks and CLI guidance.
+
+### Changed
+
+- Session-bound launches return owner-bound task observations immediately by default. Explicit foreground observation and `action: "wait"` observe the same execution; yielding does not cancel children or consume additional execution slots ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Reduced default top-level parallel concurrency from 4 to 3. Explicit overrides remain honored; the per-parent native turn cap remains 4.
+- Launch receipts, compact themed status cards and task details show readable outcomes, activity, elapsed time, tool/token counts and resolved model/reasoning settings, retaining identity through fallback and completion. Live transcripts subscribe to session events.
+- Locator and pattern-finding agents use GPT-5.6 Luna at xhigh with Grok fallbacks at medium. Other agents explicitly select xhigh for OpenRouter Grok fallbacks. Debugger uses Astra and Fable at medium and Sol at high, preserving its fallback order.
+- Delegation guidance keeps immediately blocking work local unless specialist expertise, isolation or an explicit request warrants a child. Parents overlap independent work and wait on dependencies rather than poll. Requests to work "quickly" select inline execution without hidden workflows or skipped validation.
+
+### Fixed
+
+- Intercom sends and asks interrupt working children and handle input in the same execution, including startup, preflight and settlement races, without relaunching or losing messages. Explicit abort and owner cancellation remain terminal.
+- Parallel requests wait for correlated replies in the original requester without ending siblings or discarding queued work. Parent observation yielding does not change execution concurrency; exact group commits release foreground observations without replacing executions ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Published terminal state before child disposal so completed children reject asks they cannot answer. Bound transcripts retain exact Intercom targets, and same-child messages precede completion delivery.
+- Fixed queued-child worktree and branch cleanup on cancellation or owner closure without removing live siblings' worktrees early.
+- Preserved explicit kill during capacity waiting and parent-cancellation races, including grouped Intercom status. Status and kill accept returned owner-bound task IDs.
+- Background cards display known model/reasoning settings at admission without guessing unresolved values. Browsing `/agents` is navigation and no longer reports a false approval or Herdr block.
+
+## [0.9.19-alpha.6] - 2026-09-11
+
+### Changed
+
+- Delegation guidance now favors keeping immediately blocking work local unless specialist expertise, context isolation, or an explicit request warrants a child. Parents are guided to continue independent work and wait on dependencies rather than repeatedly polling. Background launch defaults and explicit foreground waits are unchanged.
+
+## [0.9.19-alpha.5] - 2026-09-11
+
+### Changed
+
+- The bundled debugger now uses GPT-6 Astra at `medium`, with Astra/Fable 5.1/Fable 5 fallbacks at `medium` and Sol at `high`. Its complete fallback order, other model efforts, and all other bundled agent configurations remain unchanged.
+
+## [0.9.19-alpha.4] - 2026-09-10
+
+### Breaking Changes
+
+- Renamed the terminal subagent control action from `interrupt` to `kill`. Replace `subagent({ action: "interrupt", id })` with `subagent({ action: "kill", id })`, including calls using `runId`. The old action is rejected, not aliased. Killed children cannot be resumed; launch a fresh child with explicit context for follow-up work. Command results and status report killed, while parent cancellation and lower-level host/native interruption retain their existing semantics.
+
+### Fixed
+
+- Preserved an explicit kill when parent cancellation arrives during execution-capacity waiting, without allowing a late kill to replace an earlier parent cancellation.
+- Kept grouped Intercom cancellation status consistent when a killed child has parent-cancelled siblings, while retaining each child's outcome.
+- Intercom `send` and `ask` interrupt a working foreground or background child immediately: its current model call or cancellable tool is cancelled and the message is handled in the same child execution without relaunch. Messages admitted during startup, consumed input preflight, overlapping SDK interrupt turns, or final settlement still join the original task rather than creating competing work or disappearing ahead of the result; explicit user abort and owner cancellation remain terminal.
+
+## [0.9.19-alpha.3] - 2026-09-09
+
+### Changed
+
+- Reduced default top-level parallel subagent concurrency from 4 to 3. Explicit configuration and per-call overrides remain honored; the separate per-parent native turn cap remains 4.
+
+## [0.9.19-alpha.2] - 2026-09-08
+
+### Added
+
+- Added `/agents` to browse and filter effective agent definitions by source, with model, tool, description, and prompt details.
+- Added the builtin herdr skill from upstream v0.9.0 beside tmux, preserving its managed-pane safety checks and CLI guidance.
+
+### Fixed
+
+- Publish noninteractive execution termination before session disposal so completed, failed, interrupted, and cancelled children no longer accept Intercom asks they cannot answer. Follow-up work requires a fresh child; live asks and send behavior are preserved.
+- Already-admitted in-process task callers now yield each active foreground sibling's observation on an exact Intercom group commit without ending or replacing the original executions ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Status and interrupt now accept owner-bound task IDs returned by launches, and wait results use readable observation summaries. Corrected foreground-only claims in orchestrator guidance, the bundled delegation and terminal skills, and the README. Agents can choose foreground-first or background observation; automatic yielding preserves the original execution.
+- Bound task transcript sources now retain the trusted run and actual Intercom target so queued child messages are delivered before owner-bound completion notices, without guessing from task or SDK session IDs.
+- Parallel Intercom asks and supervisor decisions/interviews now wait in the original requester without ending siblings. Foreground coordination releases observations, not execution slots; queued siblings survive and start once capacity is free. Targeted interruption and owner/batch cancellation remain separate.
+- Fixed parallel worktree cleanup after a queued child is cancelled or its session/workflow-stage owner closes. Cleanup now includes never-started children without removing live siblings' worktrees early, for both foreground and background observations.
+- Background launch cards now show the concrete model and known reasoning level already selected at admission, including inherited defaults, before child session startup. Unresolved settings are not guessed, and later session and fallback updates remain authoritative.
+- Marked the read-only `/agents` catalog as navigation so browsing no longer creates a false approval wait or Herdr blocked status.
+
+### Changed
+
+- Locator and pattern-finding agents now use GPT-5.6 Luna at xhigh with Grok fallbacks at medium. Other bundled agents explicitly select xhigh for OpenRouter Grok fallbacks.
+- Owner-bound task reports and foreground/background result receipts now retain resolved model and reasoning settings across fallback and completion. Live transcript viewers subscribe to session events without publishing high-frequency task-status updates.
+- Session-bound launches now return task observations immediately by default. Independent parallel launches admit queued slots under their concurrency limit; explicit foreground groups retain Intercom yielding. Owner-scoped `action:"wait"` observes the same child; terminal completion uses a nonvisual persisted envelope ([#2884](https://github.com/bastani-inc/atomic/pull/2884)).
+- Subagent tool results now summarize launch observations and agent discovery instead of displaying raw task receipts or full catalog dumps by default. Parallel receipts show numbered sibling rows and errors; expanded results retain task identities. Owner-task progress includes recorded elapsed time, tool/token counts, and concise current-tool arguments.
+- In-process status cards now show compact, theme-aware agent rows with state symbols instead of repeated run IDs and raw residency text. Expanding reveals all children and diagnostic metadata; narrow terminals preserve readable status labels.
+- Orchestration guidance honors requests to work "quickly" as inline execution, without spawning a hidden or nested workflow or dropping validation requirements.
+
+## [0.9.18] - 2026-09-05
+
+Cumulative release of the `0.9.18-alpha.6` prerelease. Per-change details remain in the unchanged prerelease section below.
+
+### Breaking Changes
+
+- Removed `fastMode` from result, progress, runtime, artifact, and run-history metadata. Select fast inference with a canonical `-fast` model ID in model or fallback fields, such as `openai-codex/gpt-5.6-sol-fast:medium`.
+
+### Changed
+
+- Labels show the complete selected model ID without a separate fast badge.
+- Bundled agents use GPT-6 Astra at low, with debugger at xhigh. Added Astra and Claude Fable 5.1 fallbacks ahead of older models, and aligned locator fallback chains with ordinary agents, including Sol, GPT-5.5, and Opus 4.8 at medium.
+- The qlty skill follows repository/user priorities, preserves authoritative checks and read-only boundaries, supports offline/manual setup, and distinguishes prepared configuration from executed checks.
+- Default guidance honors task-scoped inline/no-workflow requests while retaining testing, review, safety, and reconciliation of active workflow effects. Model selection for unpinned agents consults task-specific measured evals alongside role guidance.
+
+### Fixed
+
+- Completing workflow stages cancel their still-running single, parallel, and detached subagents. Children retain interrupted/abort outcomes and cleanup, late findings no longer reach parent chat, and exact ownership preserves other stages' traffic. Already-submitted Intercom sends keep receipts/retry identities; detached children still notify while their owning stage is live ([#2840](https://github.com/bastani-inc/atomic/issues/2840)).
+
+## [0.9.18-alpha.6] - 2026-09-04
+
+### Breaking Changes
+
+- Removed the redundant `fastMode` fields from subagent result, progress, runtime metadata, persisted artifact metadata, and run-history records. Agents now select fast inference by pinning a canonical `-fast` model ID in `model` or fallback model fields, for example `openai-codex/gpt-5.6-sol-fast:medium`.
+
+### Changed
+
+- Subagent labels now render the complete selected model ID, including `-fast`, without appending a separate `fast` badge.
+- Updated bundled agents to GPT-6 Astra at `low`, with debugger at `xhigh`. Added Astra and Claude Fable 5.1 provider fallbacks ahead of older models. Locator roles now use the same ordered fallback chain as the other ordinary agents, including Sol, GPT-5.5, and Opus 4.8 at `medium`.
+
+- The qlty skill now selects checks from repository/user priorities, preserves existing tools and read-only boundaries, and supports manual offline configuration when initialization or installation is unavailable. It separates prepared configuration from executed checks without weakening authoritative project validation.
+- Subagent default guidance now honors task-scoped inline/no-workflow requests, including complex work, while preserving testing, review, safety and reconciliation of active workflow effects.
+- Orchestrator guidance for agents without a declared model now cites the measured per-evaluation scores in `packages/coding-agent/docs/models/evals.md` by task type, in addition to the role guidance in `model-selection.md`.
+
+### Fixed
+
+- Workflow stages now cancel their still-running subagents at completion, including single and parallel children detached for Intercom coordination. Cancelled children keep the `interrupted` status, `cause: "abort"`, and normal cleanup. Late findings and completion notifications from those children no longer reach the parent/main chat. Exact run ownership preserves other stages' child traffic, and already-submitted Intercom sends retain their transport receipts and retry identities. Detached children still notify normally while their owning stage is live ([#2840](https://github.com/bastani-inc/atomic/issues/2840)).
+
 ## [0.9.16] - 2026-08-29
 
 Cumulative release of the `0.9.16-alpha.1` – `0.9.16-alpha.11` prereleases. The summary below covers the user-visible outcome of that work; the per-change detail remains in the prerelease sections below.

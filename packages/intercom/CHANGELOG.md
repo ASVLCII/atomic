@@ -4,6 +4,151 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 
 ## [Unreleased]
 
+## [0.9.20-alpha.1] - 2026-09-14
+
+### Fixed
+
+- Supervisor progress updates show their original send timestamp and are labelled historical snapshots, so delayed hypotheses cannot be mistaken for current activity after a correction or final result ([#3039](https://github.com/bastani-inc/atomic/issues/3039)).
+
+## [0.9.19] - 2026-09-13
+
+Cumulative release of the `0.9.19-alpha.2` through `0.9.19-alpha.9` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- Removed the model-facing `retryToken` parameter and result field. Intercom owns bounded reconnect retries; each new tool call remains a distinct operation, including identical messages.
+- Explicit `replyTo` selectors reject stale, unknown, empty or sender-mismatched threads instead of falling back. Use `pending` to select the exact unresolved question.
+
+### Changed
+
+- Agent lists lead with copyable full session IDs and canonical workflow paths, followed by meaningful names, status, working directory and future queued counts. Live/terminal reply capability is separate from idle activity; closed workflow generations report post-mortem-only or unavailable routing.
+
+### Fixed
+
+- `send` and `ask` interrupt a working subagent or live workflow stage's current model call or cancellable tool and process messages in the same execution. Arrival order, persistence retries, duplicate suppression and exact reply correlation survive cancellation without replaying completed side effects.
+- Targeted replies complete the requested ask even when an unrelated message is active. Cancelled turns without a reply retain the pending ask's context.
+- Recoverable disconnects retry up to three times within one invocation with the same delivery identity. Cancellation stops retries; unresolved outcomes warn against automatic resending, and client retry state is released on exit.
+- Broker refusals reject outstanding registered-client requests with the actual reason instead of timing out or reporting a generic disconnect. Lazy initialization, relay and cleanup diagnostics use the owning interactive session's notifications rather than raw console output.
+- Recipient discovery excludes workflow routing/control connections and model-less prompt/tool nodes. Malformed purposes are rejected, legacy omitted purposes remain supported, and roster updates wait for broker processing. Same-name non-agent nodes do not hide genuine duplicate agents or invalidate connected aliases ([#2895](https://github.com/bastani-inc/atomic/pull/2895)).
+- Terminal noninteractive children reject asks promptly, including socket-write races. Retained connected workflow stages preserve reply correlation after leaving the active roster; closed stages without post-mortem routing return lifecycle guidance.
+- Busy noninteractive refusals return correlated delivery errors without starting another parent turn. Owner-bound completion waits for same-child messages in order, retries failed delivery, and never repeats task execution.
+- Parallel child-to-parent requests use correlated replies without ending siblings, preserving empty questions, omitted decision notes and ordered attachments. Sends and progress remain nonblocking; single-child claimed handoffs are unchanged.
+
+## [0.9.19-alpha.9] - 2026-09-12
+
+### Breaking Changes
+
+- Explicit `reply` selectors now fail closed: stale, unknown, empty, or sender-mismatched `replyTo` values no longer fall back to another active or pending thread. Use `pending` to select the exact unresolved question.
+
+### Changed
+
+- Agent-visible Intercom lists lead with copyable full session IDs and canonical workflow paths, keeping status, working directory, meaningful names, and future queued counts without redundant generated aliases.
+
+### Fixed
+
+- Targeted replies select the requested sender's pending ask even when an unrelated message triggered the current turn, so a delivered reply no longer leaves that ask waiting on the wrong thread.
+
+## [0.9.19-alpha.6] - 2026-09-11
+
+### Fixed
+
+- A broker refusal received by an already-registered client now rejects that client's outstanding requests with the broker's own reason instead of being discarded. Previously the refusal was delivered to a listener that `connect()` removes after registration, so pipelined work — notably the session-directory barrier behind workflow route updates — waited out its five-second timer and surfaced `List sessions timeout` or a generic disconnect. Reasons such as `Pending-stage route is not authorized` now reach callers as non-recoverable errors, and the `disconnected` event carries the same cause. Pre-registration rejection, transport-disconnect classification, and explicit shutdown are unchanged.
+
+## [0.9.19-alpha.4] - 2026-09-10
+
+### Fixed
+
+- Route lazy initialization, event-relay, and rejected-candidate cleanup diagnostics through the owning interactive session's notifications, including during shutdown, instead of leaking console output and stacks. Retryable initialization uses warning color; non-interactive console diagnostics (including RPC), original failures, acknowledgements, and retry behavior are preserved even when an error cannot be rendered.
+- `send` and `ask` to a working subagent or live workflow stage are delivered as a priority interrupt: the recipient's active model call or cancellable tool is cancelled immediately and the message is processed in the same task instead of waiting for the next natural turn or being refused as busy. Completed side effects are not undone or replayed. Arrival order holds across persistence retries for both receiver kinds; duplicate suppression, exact reply correlation, terminal-child and closed-stage rejection, unrelated headless protection, and group restrictions are unchanged.
+- A cancelled turn that produced no reply no longer consumes the pending ask's reply context, so replies to consecutive asks stay correlated with the right sender and message.
+
+## [0.9.19-alpha.3] - 2026-09-09
+
+### Fixed
+
+- Session listings display host-provided live/terminal reply capability separately from idle activity. Closed workflow generations publish `closed` with post-mortem-only or unavailable reply routing rather than remaining misleadingly idle; group isolation and ask rejection rules are unchanged.
+- Canonical workflow-path asks correlate replies from connected retained stages even after their active roster rows disappear. Closed stages without post-mortem routing reject asks with lifecycle guidance rather than attempting a model turn.
+
+## [0.9.19-alpha.2] - 2026-09-08
+
+### Breaking Changes
+
+- Removed the model-facing `retryToken` parameter and result field. Callers must stop carrying tokens between calls; Intercom now owns bounded reconnect retries. Each new call remains a distinct operation, including identical messages.
+
+### Fixed
+
+- Reject asks to terminal noninteractive subagent children with an explicit error instead of waiting on retained idle registrations. Termination also settles exact pending asks, including socket-write races; live interactive idle asks, workflow post-mortem conversations, and send delivery remain unchanged.
+- Excluded internal workflow route-owner/control connections, model-less `ctx.ui` prompts, and `ctx.tool` nodes from recipient discovery. Broker checks refuse known non-agent targets before delivery or queueing, including retained completed prompts. Genuine agents busy in tools or awaiting human input remain eligible, and connected aliases survive pending-capability changes and completion without same-name controls changing agent ambiguity diagnostics.
+- Reject malformed session/roster recipient purposes while preserving omitted-purpose legacy agents. Workflow roster updates now wait for broker processing before reporting completion, preventing stale discovery across connections ([#2895](https://github.com/bastani-inc/atomic/pull/2895)).
+- `send`, `ask`, and `reply` now retry recoverable disconnects inside one tool invocation, preserving delivery identity and reply correlation for up to three retries. Cancellation stops retries, unresolved outcomes warn against automatic resending, and client retry state is released on exit. Broker deduplication and durable acceptance safeguards remain unchanged.
+- Busy non-interactive recipients now return correlated delivery errors instead of a stale "still working" auto-reply. Unclaimed refusals bypass the parent's idle queue as timestamped delivery feedback without starting another turn; waiting asks retain exact error correlation.
+- Owner-bound subagent task completion now participates in same-child message ordering, preserving unrelated queued messages and retrying failed delivery without repeating task execution.
+- Parallel child-to-parent requests now use correlated replies instead of terminal fresh-child handoffs, preserving accepted empty parent questions, omitted decision notes, and ordered attachments. Sends and progress updates remain nonblocking; single-child claimed handoffs are unchanged.
+
+## [0.9.18] - 2026-09-05
+
+Cumulative release of the `0.9.18-alpha.3` through `0.9.18-alpha.7` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- Workflow-stage targets require root-anchored `workflow:<rootRunId>/<segment>[/<segment>...]` paths. Legacy `<runId>:<stageKey>` targets fail with a migration hint.
+
+### Added
+
+- Added literal, run-ID, and glob stage-path routing, sticky delivery to future matches, and `workflow:<rootRunId>/**` broadcasts to live and future descendants until root termination.
+- `intercom list` shows persisted possible future targets and queued counts. Valid unknown paths queue with `notInKnownSet` warnings and produce terminal undeliverable notices only if never delivered. Tool guidance, skills, and docs teach path discovery and live-only asks.
+
+### Fixed
+
+- Fixed invocation control across isolated workflow subgroups, pending-stage roster discovery and delivery, correlated live replies, registration-based authorization, and sibling/cross-run isolation. Queued sends render as successful, not failed ([#2784](https://github.com/bastani-inc/atomic/issues/2784)).
+- Background reconnects retry with bounded backoff after releasing ownership, restore stage visibility/routing, and close failed accepted connections instead of accumulating stale registrations. Host sessions retain their startup home group across joins and reconnects, preserving multi-workflow control without granting workers cross-invocation authority.
+- Recoverable disconnects during lazy initialization, stage warm-up, advisory subagent authorization, or event relays no longer produce misleading stage/UI failures. Registered transport resets enter typed recovery; unrelated protocol, auth, configuration, and terminal errors remain actionable.
+- Stage warm-up owns bounded retries. Exhaustion settles queued delivery with a stage-scoped terminal failure instead of hanging or printing into the host transcript. No model retry/fallback is spent, queued messages remain available, late drains are safe, and stages without queued messages still start.
+- Brokers retire ended sockets before routing more traffic. Delivery waits for socket-write acknowledgement, so failed writes cannot claim success, open reply authority, poison retry identity, or inflate sticky-broadcast receipts.
+- Recoverable disconnects on send/ask/reply return opaque `retryToken` values for explicit exact-operation retries. Tokenless identical calls remain distinct. Tokens allow three claimed attempts within the original 11-minute deadline, retain identity after inconclusive nondelivery, preserve implicit reply correlation, and reject invalid or mismatched claims before side effects. Capacity is reserved before new operations begin.
+- Retry signatures survive reconnects while preserving caller-visible target and argument distinctions. Local subagent result relays reserve deduplication identity before delivery and fail closed on conflicts, capacity, and uncertain acceptance.
+- Broker acceptance records use keyed SHA-256 HMACs rather than plaintext signatures, keeping message and attachment text out of SQLite/WAL/SHM. POSIX directories/files use owner-only modes; key/database mismatch and corruption fail closed. The 12-minute durability and 10,000-record/64 MiB limits remain enforced.
+- Closed stages suppress late messages from their own cancelled subagents without dropping other stages' traffic; already-submitted sends preserve receipts and retry identities ([#2840](https://github.com/bastani-inc/atomic/issues/2840)).
+
+## [0.9.18-alpha.7] - 2026-09-05
+
+### Fixed
+
+- Host sessions that join multiple workflow groups retain workflow broadcast and pending-stage routing after reconnecting. Registration now preserves the startup home group instead of treating the most recently joined group as the session's origin; workflow workers still cannot gain another invocation's control authority through joins or reconnects.
+
+## [0.9.18-alpha.6] - 2026-09-04
+
+### Breaking Changes
+
+- Workflow-stage targets now accept only root-anchored `workflow:<rootRunId>/<segment>[/<segment>...]` paths. The legacy `<runId>:<stageKey>` form is refused with a canonical-path migration hint.
+
+### Added
+
+- Workflow-stage routing now supports literal, run-id, and glob path segments, sticky delivery to every future match, and `workflow:<rootRunId>/**` broadcast to live and future descendants until root termination.
+- `intercom list` now surfaces persisted possible future literals, patterns, and child paths with queued counts. Valid targets outside the known set queue with a `notInKnownSet` warning and produce a terminal undeliverable notification only when never delivered.
+
+### Changed
+
+- Intercom tool guidance, the bundled skill, and workflow-stage discovery documentation now teach canonical path targets, globs, sticky broadcasts, speculative acceptance, terminal settlement, and live-only asks.
+
+### Fixed
+
+- A recoverable broker disconnect no longer surfaces as a workflow-stage failure. Most visibly, a subagent launch no longer aborts with `Client disconnected` as its entire result: the supervisor-authorization request is advisory, so a transient disconnect now lets the launch proceed with supervisor metadata omitted, exactly as a runtime with no provider already did. Eager stage warm-up during `session_start` no longer reports the disconnect through the host extension-error channel, and the background event relays no longer log `Intercom event relay failed …` into the stage output.
+- A workflow-stage warm-up that loses the broker now has a retry owner. Previously nothing rescheduled it, so a stage holding queued pending messages could wait indefinitely for a delivery that never came. The wrapper now retries the warm-up on the same bounded reconnect backoff, and the next entry covers what happens when those attempts run out.
+- An exhausted workflow-stage warm-up retry no longer writes `Intercom could not reconnect for workflow stage "…" after 5 attempts` into the host session's transcript, and no longer leaves that stage waiting forever. The bounded retry previously ended with a raw `console.error`, which the root session paints into the main chat area, and nothing settled the stage's pending delivery — so the stage stayed running on an untimed `pendingStageDelivery.ready()` with no owner and no signal. The wrapper now hands the delivery a typed `IntercomWarmUpExhaustedError` through the `fail(reason)` member of the `WorkflowPendingStageDelivery` contract, and the workflow side settles `ready()` exactly once with a stage-scoped `WorkflowPendingStageDeliveryFailedError` naming the run, stage id, and stage name, so the stage ends `failed` at its own lifecycle boundary and spends no model retry or fallback candidate on a delivery no candidate could have received. Transient reconnects stay silent and keep retrying, a late success still delivers queued messages in admission order before stage work, and shutdown still cancels the retry silently. Nothing is dropped: after the terminal signal the queue is left untouched rather than marked delivered to a stage that will not read it, a stage with nothing queued still starts normally, and a duplicate `fail()`, a `fail()` before the first `ready()`, and a late drain are all safe. A host whose `fail` implementation throws cannot turn its own contract violation into an uncaught exception or an unhandled rejection in the session, and still gets no transcript output.
+- Recoverable-disconnect classification requires the typed error raised inside the broker client rather than message text or a copyable marker property, so protocol, authentication, configuration, non-recoverable initialization, terminal relay, exhausted-retry, user-initiated, and identically worded unrelated failures all stay visible and actionable.
+- The broker no longer writes to a departing peer's ended socket. A session was retired only when its connection finally closed, so a peer that half-closed — or one the broker itself ended after refusing a registration — stayed in the routing table and every later broadcast wrote into a socket whose writable side was gone. Node destroys the socket synchronously for such a write, so one departure cascaded into further disconnects and filled the 8 KiB `broker.log` with `ERR_STREAM_WRITE_AFTER_END` traces, leaving no room for any other diagnostic. Sessions are now retired as soon as their socket stops accepting frames, and every broker write checks writability as part of the write itself.
+- A session the broker ended is no longer advertised by `intercom list` and no longer acked as `delivered`. Previously a `send` to such a session was answered `delivered` while the peer received nothing, and the fabricated delivery record then refused the honest retry with `message_id_conflict`, leaving the message permanently undeliverable under its stable id. Delivery-producing sends now wait for the socket write callback, so an immediate asynchronous reset cannot be acknowledged before its failure arrives. A send that cannot be handed to its target fails with `Session not found`, keeps the message id retryable, and opens no reply authorization for a message that was never sent. Pending-stage routing and notifications fail the same way instead of stalling for their full acknowledgement timeout, and a sticky broadcast reports only the stages it actually reached.
+- A transport reset on an already-registered broker connection now enters the bounded reconnect path instead of failing the caller. `ECONNRESET`, `EPIPE`, and their relatives were stored raw and rejected pending work with the raw error, which the recoverable-disconnect classifier does not recognize, so an ordinary broker restart bypassed recovery. Such a reset is now the typed recoverable disconnect with the original transport error preserved as `cause`; the raw error still reaches `error` listeners, a protocol error that is followed by a socket error keeps its own diagnosis, and pre-registration failures are unchanged.
+- A recoverable `Client disconnected` result and both model-visible Intercom tool registrations now return/describe an opaque `retryToken` for the exact failed `send`, `ask`, or `reply`. Only an explicit matching claim reuses identity; a tokenless byte-identical call is always a distinct intentional operation. Concurrent failures receive separate process-local tokens, and invalid, expired, foreign-session, mismatched, concurrent, exhausted, or settled claims fail before sending. Omitted attachments and an explicit empty list remain distinct caller arguments, while attachment object member order is canonical. Each token allows at most three claimed attempts without extending the original 11-minute deadline.
+- A claimed retry no longer releases its accepted identity on an intermediate resolved nondelivery. `delivered: false`, `Session not found`, durable-authority uncertainty/capacity refusal, and another typed disconnect preserve and visibly return the same token/ID for the remaining bounded attempts; delivered or queued success settles it. This prevents an accepted operation with a lost acknowledgement from minting a second ID after an inconclusive retry.
+- Stable-message retries remain reconnect-safe: retry signatures use reconnect-stable sender/recipient authority and preserve the model-issued target verbatim while transport resolution changes independently. Canonical attachment object member order is ignored, while attachment omission, array order/duplicates, raw target aliases, whitespace, and reply fields remain significant.
+- A retry token for an implicit `reply` now retains the originally resolved sender and question route. An exact retry validates its caller-visible arguments before consulting mutable reply state, so a later inbound ask cannot make it ambiguous or steal its correlation. Public implicit `reply` still prefers the recorded exact sender ID while it is live; only a departed ID uses the authorized name fallback, ambiguity fails closed with the still-valid token, and explicit `to`/`replyTo` stay verbatim.
+- Retry-token capacity is now reserved before a fresh operation can consume an ID, open a confirmation prompt, resolve a target/reply route, or send. Live token claims still work at full capacity, settled tombstones are discarded, and releasing or expiring an in-flight/retained identity reopens capacity without evicting live authority.
+- Local subagent result relay delivery now reserves its process-local deduplication identity before the chat side effect and accepts it before positive acknowledgement. The 10,001st live ID, conflicts, invalid state, and uncertain in-flight replays fail closed without delivery or success acknowledgement; a proven side-effect failure forgets only its exact reservation, while an acceptance failure remains uncertain so replay cannot duplicate it.
+- Broker acceptance records now persist as fixed keyed SHA-256 HMAC authority rather than canonical plaintext signatures, so SQLite/WAL/SHM never contain message or attachment text and low-entropy payloads cannot be tested without the paired random key. The configurable Intercom directory and database/key artifacts are corrected to owner-only POSIX modes (`0700`/`0600`), while Windows permission semantics remain unchanged. Missing/malformed key-database pairs, corrupt records, capacity, and uncertain reservations fail closed; digest-based byte accounting, 12-minute restart durability, and 10,000-record/64 MiB bounds remain enforced.
+- Closed workflow stages suppress late messages from the subagent runs they own, without dropping messages from other stages' children. Cancelled sends stop before transport when possible; already-submitted sends preserve their delivery receipts and disconnect retry identities ([#2840](https://github.com/bastani-inc/atomic/issues/2840)).
+
 ## [0.9.18-alpha.5] - 2026-09-01
 
 ### Fixed

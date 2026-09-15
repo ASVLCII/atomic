@@ -1,182 +1,30 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+import { describe, it } from "vitest";
 import {
-	type AiGatewayUniversalRequestLike,
+	type AiGatewayBinding,
 	CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
 	createGatewayBindingFetch,
 } from "../src/api/cloudflare-gateway-binding.ts";
 import { streamSimple as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import type { Model } from "../src/types.ts";
 
-const BASE_URL = "https://gateway.ai.cloudflare.com/v1/account-id/my-gateway";
+const BINDING_PREFIX = "https://workers-binding.ai/ai-gateway/gateways/my-gateway";
+const PASSTHROUGH_OPTIONS = { baseUrl: BINDING_PREFIX, gateway: "my-gateway" };
 
-interface CapturedRun {
-	gatewayId: string;
-	data: AiGatewayUniversalRequestLike;
-	options: { signal?: AbortSignal } | undefined;
-}
-
-function fakeBinding(response?: Response) {
-	const runs: CapturedRun[] = [];
-	const binding = {
-		gateway: (gatewayId: string) => ({
-			run: (data: AiGatewayUniversalRequestLike, options?: { signal?: AbortSignal }) => {
-				runs.push({ gatewayId, data, options });
-				return Promise.resolve(response ?? new Response("{}"));
-			},
-		}),
+function fakeFetchBinding(response?: Response) {
+	const calls: Array<{ input: Request | string | URL; init?: RequestInit }> = [];
+	const binding: AiGatewayBinding = {
+		aiGatewayLogId: null,
+		fetch: (input: Request | string | URL, init?: RequestInit) => {
+			calls.push({ input, init });
+			return Promise.resolve(response ?? new Response("{}"));
+		},
 	};
-	return { binding, runs };
+	return { binding, calls };
 }
 
-describe("createGatewayBindingFetch", () => {
-	it("derives provider and endpoint from gateway passthrough URLs", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await fetchFn(`${BASE_URL}/anthropic/v1/messages`, {
-			method: "POST",
-			body: JSON.stringify({ model: "claude" }),
-		});
-		await fetchFn(`${BASE_URL}/openai/responses`, {
-			method: "POST",
-			body: JSON.stringify({ model: "gpt" }),
-		});
-		await fetchFn(`${BASE_URL}/workers-ai/v1/chat/completions`, {
-			method: "POST",
-			body: JSON.stringify({ model: "@cf/meta/llama" }),
-		});
-
-		expect(runs.map((run) => [run.data.provider, run.data.endpoint])).toEqual([
-			["anthropic", "v1/messages"],
-			["openai", "responses"],
-			["workers-ai", "v1/chat/completions"],
-		]);
-		expect(runs.map((run) => run.gatewayId)).toEqual(["my-gateway", "my-gateway", "my-gateway"]);
-		expect(runs[0].data.query).toEqual({ model: "claude" });
-	});
-
-	it("keeps the query string in the endpoint", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await fetchFn(`${BASE_URL}/openai/responses?beta=true`, {
-			method: "POST",
-			body: "{}",
-		});
-
-		expect(runs[0].data.endpoint).toBe("responses?beta=true");
-	});
-
-	it("lowercases header names so case-variant duplicates collapse", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await fetchFn(`${BASE_URL}/anthropic/v1/messages`, {
-			method: "POST",
-			headers: { "Anthropic-Version": "2023-06-01" },
-			body: "{}",
-		});
-
-		expect(runs[0].data.headers).toEqual({ "anthropic-version": "2023-06-01" });
-	});
-
-	it("lets init headers replace a Request input's headers, per the fetch spec", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await fetchFn(
-			new Request(`${BASE_URL}/anthropic/v1/messages`, {
-				method: "POST",
-				headers: { "x-from-request": "yes" },
-				body: "{}",
-			}),
-			{ headers: { "x-from-init": "yes" } },
-		);
-
-		expect(runs[0].data.headers["x-from-init"]).toBe("yes");
-		expect(runs[0].data.headers["x-from-request"]).toBeUndefined();
-	});
-
-	it("strips gateway auth and derived headers, forwards the rest", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await fetchFn(`${BASE_URL}/anthropic/v1/messages`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"Content-Length": "17",
-				"CF-AIG-Authorization": `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}`,
-				"cf-aig-metadata": '{"user":"42"}',
-				"anthropic-version": "2023-06-01",
-				"x-api-key": "provider-key",
-			},
-			body: "{}",
-		});
-
-		const headers = Object.fromEntries(
-			Object.entries(runs[0].data.headers).map(([key, value]) => [key.toLowerCase(), value]),
-		);
-		expect(headers["cf-aig-authorization"]).toBeUndefined();
-		expect(headers["content-length"]).toBeUndefined();
-		expect(headers["cf-aig-metadata"]).toBe('{"user":"42"}');
-		expect(headers["anthropic-version"]).toBe("2023-06-01");
-		// Provider auth headers pass through: that is how request-supplied (BYOK) keys ride.
-		expect(headers["x-api-key"]).toBe("provider-key");
-	});
-
-	it("accepts Request inputs and forwards their headers and body", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await fetchFn(
-			new Request(`${BASE_URL}/openai/chat/completions`, {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ stream: true }),
-			}),
-		);
-
-		expect(runs).toHaveLength(1);
-		expect(runs[0].data.provider).toBe("openai");
-		expect(runs[0].data.endpoint).toBe("chat/completions");
-		expect(runs[0].data.query).toEqual({ stream: true });
-		expect(runs[0].data.headers["content-type"]).toBe("application/json");
-	});
-
-	it("forwards the abort signal", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-		const controller = new AbortController();
-
-		await fetchFn(`${BASE_URL}/anthropic/v1/messages`, {
-			method: "POST",
-			body: "{}",
-			signal: controller.signal,
-		});
-
-		expect(runs[0].options?.signal).toBe(controller.signal);
-	});
-
-	it("lets an explicit `signal: null` in init clear a Request input's signal, per the fetch spec", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-		const controller = new AbortController();
-
-		await fetchFn(
-			new Request(`${BASE_URL}/anthropic/v1/messages`, {
-				method: "POST",
-				body: "{}",
-				signal: controller.signal,
-			}),
-			{ signal: null },
-		);
-
-		expect(runs).toHaveLength(1);
-		expect(runs[0].options?.signal).toBeUndefined();
-	});
-
-	it("returns the binding response untouched, including streaming bodies", async () => {
+describe("createGatewayBindingFetch binding.fetch() passthrough", () => {
+	it("passes input, init, and the streaming response through by identity", async () => {
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				controller.enqueue(new TextEncoder().encode("data: {}\n\n"));
@@ -184,122 +32,63 @@ describe("createGatewayBindingFetch", () => {
 			},
 		});
 		const bindingResponse = new Response(stream, {
-			status: 200,
 			headers: { "content-type": "text/event-stream", "cf-aig-log-id": "log-1" },
 		});
-		const { binding } = fakeBinding(bindingResponse);
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		const response = await fetchFn(`${BASE_URL}/workers-ai/v1/chat/completions`, {
-			method: "POST",
-			body: "{}",
+		const { binding, calls } = fakeFetchBinding(bindingResponse);
+		const fetchFn = createGatewayBindingFetch({ binding, ...PASSTHROUGH_OPTIONS });
+		const request = new Request(`${BINDING_PREFIX}/anthropic/v1/messages?beta=true`, {
+			method: "PATCH",
+			headers: { "cf-aig-authorization": `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}` },
+			body: "unparsed body",
 		});
+		const init: RequestInit = { headers: { "x-init": "yes" } };
 
-		expect(response).toBe(bindingResponse);
-		expect(response.headers.get("cf-aig-log-id")).toBe("log-1");
-		expect(await response.text()).toBe("data: {}\n\n");
+		const response = await fetchFn(request, init);
+
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0].input, request);
+		assert.equal(calls[0].init, init);
+		assert.equal(response, bindingResponse);
+		assert.equal(await response.text(), "data: {}\n\n");
 	});
 
-	it("rejects in-prefix requests the universal endpoint cannot express", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await expect(fetchFn(`${BASE_URL}/anthropic/v1/messages`, { method: "GET" })).rejects.toThrow(
-			"cannot express GET",
-		);
-		await expect(fetchFn(`${BASE_URL}/anthropic/v1/messages`, { method: "POST", body: "not json" })).rejects.toThrow(
-			"non-JSON body",
-		);
-		await expect(fetchFn(`${BASE_URL}/anthropic`, { method: "POST", body: "{}" })).rejects.toThrow(
-			"missing provider/endpoint path",
-		);
-		expect(runs).toHaveLength(0);
-	});
-
-	it("rejects URLs outside the gateway prefix: transport selection is the caller's", async () => {
-		// Silent passthrough would ship the auth sentinel to whatever host the URL names; a
-		// misconfigured baseUrl must fail loudly instead.
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		await expect(
-			fetchFn("https://api.openai.com/v1/chat/completions", { method: "POST", body: "{}" }),
-		).rejects.toThrow("outside the configured gateway prefix");
-		// Same origin, different path (another account's gateway) is just as out-of-prefix.
-		await expect(
-			fetchFn("https://gateway.ai.cloudflare.com/v1/other-account/my-gateway/anthropic/v1/messages", {
-				method: "POST",
-				body: "{}",
-			}),
-		).rejects.toThrow("outside the configured gateway prefix");
-		expect(runs).toHaveLength(0);
-	});
-
-	it("matches and splits on the URL-normalized path, as real fetch would send it", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-
-		// Dot segments normalize away before the provider/endpoint split, so a lexical variant
-		// routes exactly like its normal form (raw string prefixing would split it differently).
-		await fetchFn(`${BASE_URL}/anthropic/../anthropic/v1/./messages`, {
-			method: "POST",
-			body: JSON.stringify({ model: "claude" }),
+	it("ignores legacy baseUrl and gateway translation options", async () => {
+		const { binding, calls } = fakeFetchBinding();
+		const fetchFn = createGatewayBindingFetch({
+			binding,
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/wrong-account/wrong-gateway",
+			gateway: "wrong-gateway",
 		});
-		expect(runs.map((run) => [run.data.provider, run.data.endpoint])).toEqual([["anthropic", "v1/messages"]]);
+		const url = "https://workers-binding.ai/ai-gateway/gateways/real-gateway/openai/responses";
 
-		// A dot-segment URL that resolves outside the prefix is rejected even though it starts
-		// with the prefix as a raw string.
-		await expect(
-			fetchFn(`${BASE_URL}/../other-gateway/anthropic/v1/messages`, { method: "POST", body: "{}" }),
-		).rejects.toThrow("outside the configured gateway prefix");
-		expect(runs).toHaveLength(1);
+		await fetchFn(url, { method: "GET" });
+
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0].input, url);
+		assert.deepEqual(calls[0].init, { method: "GET" });
 	});
 
-	it("consumes a one-shot stream body for the JSON probe", async () => {
-		const { binding, runs } = fakeBinding();
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
-		const streamOf = (text: string) =>
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(new TextEncoder().encode(text));
-					controller.close();
-				},
-			});
-
-		// JSON stream body: consumed once, reaches the binding as the parsed query.
-		await fetchFn(`${BASE_URL}/anthropic/v1/messages`, {
-			method: "POST",
-			body: streamOf('{"model":"claude"}'),
-			duplex: "half",
-		} as RequestInit);
-		expect(runs).toHaveLength(1);
-		expect(runs[0].data.query).toEqual({ model: "claude" });
-
-		// Non-JSON stream body: rejects like any other non-JSON body (never replayed).
-		await expect(
-			fetchFn(`${BASE_URL}/anthropic/v1/messages`, {
-				method: "POST",
-				body: streamOf("not json"),
-				duplex: "half",
-			} as RequestInit),
-		).rejects.toThrow("non-JSON body");
-		expect(runs).toHaveLength(1);
+	it("rejects a binding without fetch() at construction", () => {
+		assert.throws(
+			() =>
+				createGatewayBindingFetch({
+					binding: { aiGatewayLogId: null } as unknown as AiGatewayBinding,
+					...PASSTHROUGH_OPTIONS,
+				}),
+			/does not expose fetch\(\)/,
+		);
 	});
 
-	it("keeps SDK placeholder auth out of entries when paired with null auth headers", async () => {
-		// The full header contract from the module docs: the sentinel satisfies pi's request-auth
-		// check, and the explicit nulls make the OpenAI SDK delete its own `Authorization: Bearer
-		// unused` placeholder before the request reaches the shim.
-		const { binding, runs } = fakeBinding(
+	it("keeps SDK-generated provider auth headers off the passthrough when explicitly nulled", async () => {
+		const { binding, calls } = fakeFetchBinding(
 			Response.json({ error: { type: "bad_request", message: "stubbed" } }, { status: 400 }),
 		);
-		const fetchFn = createGatewayBindingFetch({ binding, baseUrl: BASE_URL, gateway: "my-gateway" });
 		const model: Model<"openai-completions"> = {
 			id: "test-model",
 			name: "Test Model",
 			api: "openai-completions",
 			provider: "openai",
-			baseUrl: `${BASE_URL}/openai`,
+			baseUrl: `${BINDING_PREFIX}/openai`,
 			reasoning: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -316,17 +105,16 @@ describe("createGatewayBindingFetch", () => {
 					Authorization: null,
 					"x-api-key": null,
 				},
-				fetch: fetchFn,
+				fetch: createGatewayBindingFetch({ binding, ...PASSTHROUGH_OPTIONS }),
 				maxRetries: 0,
 			},
 		).result();
 
-		expect(result.stopReason).toBe("error");
-		expect(runs).toHaveLength(1);
-		expect(runs[0].data.provider).toBe("openai");
-		const headerNames = Object.keys(runs[0].data.headers);
-		expect(headerNames).not.toContain("authorization");
-		expect(headerNames).not.toContain("x-api-key");
-		expect(headerNames).not.toContain("cf-aig-authorization");
+		assert.equal(result.stopReason, "error");
+		assert.equal(calls.length, 1);
+		const initHeaders = new Headers(calls[0].init?.headers);
+		assert.equal(initHeaders.has("authorization"), false);
+		assert.equal(initHeaders.has("x-api-key"), false);
+		assert.equal(initHeaders.get("cf-aig-authorization"), `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}`);
 	});
 });

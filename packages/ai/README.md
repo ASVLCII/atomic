@@ -1,6 +1,6 @@
 # @bastani/pi-ai
 
-Bastani-branded fork of [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) from [earendil-works/pi](https://github.com/earendil-works/pi). Originally forked at **v0.84.2** (`914cf1472e715297caa30db4b9535d534a9eb718`); upstream Pi AI fixes and the generated image catalog are synced through [`b8b873b9872db04a938fb4357b5e8e824ddc051c`](https://github.com/earendil-works/pi/commit/b8b873b9872db04a938fb4357b5e8e824ddc051c), the audited Pi `main` sync point. `@bastani/pi-ai` publishes at the same version as Atomic. `npm run build` refreshes the models.dev catalog, same as upstream.
+Bastani-branded fork of [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) from [earendil-works/pi](https://github.com/earendil-works/pi). Originally forked at **v0.84.2** (`914cf1472e715297caa30db4b9535d534a9eb718`); upstream Pi AI fixes and the generated image catalog are synced through [`92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c`](https://github.com/earendil-works/pi/commit/92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c), the audited Pi `main` sync point. `@bastani/pi-ai` publishes at the same version as Atomic. `npm run build` refreshes the models.dev catalog, same as upstream.
 
 The public API is a drop-in replacement: install `@bastani/pi-ai` and import from `@bastani/pi-ai` instead of `@earendil-works/pi-ai`. See [NOTICE.md](NOTICE.md). This package lives in the Atomic monorepo and publishes from `.github/workflows/publish.yml`. The first npm version must be published by hand so trusted publishing can be attached.
 
@@ -575,6 +575,12 @@ context.messages.push({
 });
 ```
 
+### Fireworks deferred tools
+
+Fireworks models using the Anthropic Messages API support native deferred tool loading. Keep your discovery tool in `context.tools`, add discovered tool definitions there, and set `addedToolNames` on the discovery tool's result to the names you added. The adapter sends deferred schemas and `tool_reference` blocks while preserving ordinary result text and unsigned thinking during replay.
+
+Name the discovery tool `ToolSearch` or `tool_search` for Fireworks prompt-prefix deferral. Other discovery names serialize correctly but do not get that prefix optimization. Set `model.compat.supportsToolReferences` to `false` to send ordinary tool schemas instead. This feature does not apply to Fireworks Chat Completions models.
+
 ### Streaming Tool Calls with Partial JSON
 
 During streaming, tool call arguments are progressively parsed as they arrive. This enables real-time UI updates before the complete arguments are available:
@@ -654,6 +660,10 @@ for await (const event of s) {
 ```
 
 ### Complete Event Reference
+
+Successful generation follows `start → updates* → done`. A failure after generation starts follows `start → updates* → error`. Request setup may fail before generation starts, in which case the stream contains only `error`; `done` and update events are invalid before `start`. Direct API `streamSimple()` calls throw synchronously when request auth is missing.
+
+Tool-call arguments at `toolcall_start` are provider-specific; `toolcall_delta` carries subsequent JSON updates.
 
 All streaming events emitted during assistant message generation:
 
@@ -898,7 +908,7 @@ Every `AssistantMessage` includes a `stopReason` field that indicates how the ge
 
 ## Error Handling
 
-Request failures never throw out of the stream functions: when a request ends with an error (including aborts and tool call validation errors), the streaming API emits an error event and the final message carries the details:
+Request failures after a stream is returned never throw: when a request ends with an error (including aborts and tool call validation errors), the streaming API emits an error event and the final message carries the details. Direct API `streamSimple()` calls throw synchronously when their required auth is absent:
 
 ```typescript
 // In streaming
@@ -920,7 +930,7 @@ if (message.stopReason === 'error' || message.stopReason === 'aborted') {
 }
 ```
 
-Auth failures (no key configured, OAuth refresh failed, unknown provider) surface the same way: as a stream error with `stopReason: "error"`.
+When using a provider collection, auth failures (OAuth refresh failed, unknown provider) surface as a stream error with `stopReason: "error"`. Direct API `streamSimple()` calls instead throw synchronously when their required auth is absent.
 
 ### Aborting Requests
 
@@ -1179,7 +1189,7 @@ interface OpenAICompletionsCompat {
   supportsUsageInStreaming?: boolean; // Whether provider supports `stream_options: { include_usage: true }` (default: true)
   supportsStrictMode?: boolean;      // Whether provider supports `strict` in tool definitions (default: true)
   supportsOpenAIGrammarTools?: boolean; // Whether to emit OpenAI custom Lark/regex grammar tools; false falls back to normal function tools (default: false; the generated catalog enables it for capable models)
-  sendSessionAffinityHeaders?: boolean; // Send session-affinity data from `sessionId` (default: false)
+  sendSessionAffinityHeaders?: boolean; // Send session-affinity data from `sessionId` (default: true for OpenRouter, false otherwise)
   sessionAffinityFormat?: 'openai' | 'openai-nosession' | 'openrouter'; // Format for session affinity: 'openai' uses `prompt_cache_key`, `session_id`, `x-client-request-id`, and `x-session-affinity`; 'openai-nosession' uses `prompt_cache_key`, `x-client-request-id`, and `x-session-affinity`; 'openrouter' uses `x-session-id` (default: auto-detected)
   maxTokensField?: 'max_completion_tokens' | 'max_tokens';  // Which field name to use (default: max_completion_tokens)
   requiresToolResultName?: boolean;  // Whether tool results require the `name` field (default: false)
@@ -1194,6 +1204,7 @@ interface OpenAICompletionsCompat {
   cacheControlFormat?: 'anthropic';  // Anthropic-style cache_control on system prompt, last tool, and last user/assistant text content
   openRouterRouting?: OpenRouterRouting; // OpenRouter routing preferences (default: {})
   vercelGatewayRouting?: VercelGatewayRouting; // Vercel AI Gateway routing preferences (default: {})
+  vllmPriority?: number;             // vLLM scheduler priority sent as the top-level `priority` field; lower values are handled earlier and the server default is 0, so it only applies under `--scheduling-policy priority` (default: unset)
 }
 
 interface OpenAIResponsesCompat {
@@ -1205,6 +1216,8 @@ interface OpenAIResponsesCompat {
   supportsMaxOutputTokens?: boolean; // Whether provider accepts `max_output_tokens`; false omits the parameter for Codex-protocol gateways that reject it with a 400 (default: true)
 }
 ```
+
+OpenRouter requests send `x-session-id` from `sessionId` when prompt caching is enabled. Chat Completions and Anthropic Messages both auto-detect OpenRouter endpoints unless `sendSessionAffinityHeaders` is explicitly false. On Anthropic-compatible models, `sessionAffinityFormat: "openrouter"` selects `x-session-id`; when unset on non-OpenRouter endpoints, the existing `x-session-affinity` format is used. Explicit request headers take precedence over generated headers.
 
 If `compat` is not set, the library falls back to URL-based detection. If `compat` is partially set, unspecified fields use the detected defaults. This is useful for:
 

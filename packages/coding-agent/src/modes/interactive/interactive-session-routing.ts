@@ -1,3 +1,4 @@
+import { withHostProjectTrustPrompt } from "../interactive-engine/extension-ui-bridge.ts";
 import { mountIdleStatus } from "./components/idle-status.ts";
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import {
@@ -69,25 +70,38 @@ InteractiveModeBase.prototype.showTrustSelector = function (this: InteractiveMod
 	const cwd = this.sessionManager.getCwd();
 	const trustStore = new ProjectTrustStore(this.runtimeHost.services.agentDir);
 	const savedDecision = trustStore.getEntry(cwd);
-	this.showSelector((done) => {
-		const selector = new TrustSelectorComponent({
-			cwd,
-			savedDecision,
-			projectTrusted: this.settingsManager.isProjectTrusted(),
-			onSelect: (selection) => {
-				trustStore.setMany(selection.updates);
-				done();
-				this.showStatus(
-					`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart ${APP_NAME} for this to take effect.`,
-				);
-			},
-			onCancel: () => {
-				done();
-				this.ui.requestRender();
-			},
-		});
-		return { component: selector, focus: selector };
-	});
+	void withHostProjectTrustPrompt(
+		this.runtimeHost,
+		"select",
+		"Project trust",
+		() =>
+			new Promise<void>((resolve) => {
+				this.showSelector((done) => {
+					const selector = new TrustSelectorComponent({
+						cwd,
+						savedDecision,
+						projectTrusted: this.settingsManager.isProjectTrusted(),
+						onSelect: (selection) => {
+							try {
+								trustStore.setMany(selection.updates);
+							} catch (error) {
+								this.showError(error instanceof Error ? error.message : String(error));
+								return;
+							}
+							done();
+							this.showStatus(
+								`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart ${APP_NAME} for this to take effect.`,
+							);
+						},
+						onCancel: () => {
+							done();
+							this.ui.requestRender();
+						},
+					});
+					return { component: selector, focus: selector, dispose: resolve };
+				});
+			}),
+	).catch((error: Error) => this.showError(error.message));
 };
 
 InteractiveModeBase.prototype.showTreeSelector = async function (
@@ -155,6 +169,17 @@ InteractiveModeBase.prototype.showTreeSelector = async function (
 					}
 				}
 
+				if (this.session.isStreaming) {
+					this.restoreQueuedMessagesToEditor();
+					await this.session.abort();
+				}
+				if (this.session.isCompacting) {
+					this.showError(
+						"Wait for the current compaction or tree navigation to finish before navigating the session tree.",
+					);
+					return;
+				}
+
 				// Set up escape handler and loader if summarizing
 				let summaryLoader: Loader | undefined;
 				const originalOnEscape = this.defaultEditor.onEscape;
@@ -172,14 +197,6 @@ InteractiveModeBase.prototype.showTreeSelector = async function (
 					);
 					this.statusContainer.addChild(summaryLoader);
 					this.ui.requestRender();
-				}
-
-				// The user committed to navigating: stop the active response first, so the
-				// aborted turn is settled on the branch it belongs to. navigateTree()
-				// rejects while streaming.
-				if (this.session.isStreaming) {
-					this.restoreQueuedMessagesToEditor();
-					await this.session.abort();
 				}
 
 				try {
@@ -281,11 +298,7 @@ InteractiveModeBase.prototype.handleResumeSession = async function (
 	options?: Parameters<ExtensionCommandContext["switchSession"]>[1],
 ): Promise<{ cancelled: boolean }> {
 	await this.ensureDeferredStartupComplete();
-	if (this.loadingAnimation) {
-		this.loadingAnimation.stop();
-		this.loadingAnimation = undefined;
-	}
-	this.statusContainer.clear();
+	InteractiveModeBase.prototype.clearWorkingLoader.call(this);
 	mountIdleStatus(this.statusContainer, this.settingsManager.getClearOnShrink());
 	try {
 		const result = await this.runtimeHost.switchSession(sessionPath, {

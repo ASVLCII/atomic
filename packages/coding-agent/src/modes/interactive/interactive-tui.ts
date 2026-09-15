@@ -12,7 +12,9 @@ import { stripOverlayActiveRowMarker } from "../../core/extensions/ui-types.ts";
 import { isLifecycleTimingEnabled, markLifecycleTiming } from "../../core/lifecycle-timings.ts";
 import { copyToClipboard } from "../../utils/clipboard.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
+import { keyDisplayText } from "./components/keybinding-hints.js";
 import { TRANSCRIPT_JUMP_TO_END_URL } from "./components/transcript-follow-indicator.ts";
+import { theme } from "./theme/theme.js";
 
 interface TuiOverlayEntry {
 	component: Component;
@@ -50,6 +52,10 @@ interface TuiAltScreenMouseInternals {
 /** pi-tui 0.84.2 keeps its overlay-deferral predicate private (tui-alt-screen.d.ts:84). */
 interface TuiAltScreenViewportDeferral {
 	shouldDeferViewportInputToOverlay?(): boolean;
+}
+
+interface TuiAltScreenScrollToEndIndicatorInternals {
+	handleScrollToEndIndicatorMouseEvent(event: unknown): boolean;
 }
 
 interface TuiAltScreenSelectionInternals {
@@ -198,14 +204,15 @@ interface ViewportInputSubscription {
 
 const viewportInputSubscriptions = new WeakMap<AtomicTuiAltScreen, ViewportInputSubscription>();
 
-/** A complete SGR or X10 mouse report extracted from an input chunk. */
 interface ParsedMouseSequence {
 	readonly data: string;
 	readonly button: number;
+	readonly x: number;
+	readonly y: number;
 	readonly isRelease: boolean;
 }
 
-const SGR_MOUSE_SEQUENCE = /^\x1b\[<(\d+);\d+;\d+([Mm])/;
+const SGR_MOUSE_SEQUENCE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
 const LEFT_MOUSE_MODIFIER_MASK = 4 | 8 | 16;
 
 function parseMouseSequences(data: string): ParsedMouseSequence[] | undefined {
@@ -217,13 +224,25 @@ function parseMouseSequences(data: string): ParsedMouseSequence[] | undefined {
 		const sgr = SGR_MOUSE_SEQUENCE.exec(remaining);
 		if (sgr) {
 			const sequence = sgr[0]!;
-			sequences.push({ data: sequence, button: Number.parseInt(sgr[1]!, 10), isRelease: sgr[2] === "m" });
+			sequences.push({
+				data: sequence,
+				button: Number.parseInt(sgr[1]!, 10),
+				x: Number.parseInt(sgr[2]!, 10) - 1,
+				y: Number.parseInt(sgr[3]!, 10) - 1,
+				isRelease: sgr[4] === "m",
+			});
 			offset += sequence.length;
 			continue;
 		}
 		if (remaining.startsWith("\x1b[M") && remaining.length >= 6) {
 			const sequence = remaining.slice(0, 6);
-			sequences.push({ data: sequence, button: sequence.charCodeAt(3) - 32, isRelease: false });
+			sequences.push({
+				data: sequence,
+				button: sequence.charCodeAt(3) - 32,
+				x: sequence.charCodeAt(4) - 33,
+				y: sequence.charCodeAt(5) - 33,
+				isRelease: false,
+			});
 			offset += 6;
 			continue;
 		}
@@ -323,6 +342,13 @@ class AtomicTuiAltScreen extends TuiAltScreen {
 		const deferral = this as unknown as TuiAltScreenViewportDeferral;
 		const deferToOverlay = deferral.shouldDeferViewportInputToOverlay?.bind(this);
 		deferral.shouldDeferViewportInputToOverlay = () => !viewportInputReplays.has(this) && deferToOverlay?.() === true;
+
+		// pi-tui 0.85 owns the jump-to-end indicator, but its hit test runs before Atomic's
+		// focused-overlay input gate. Let the gate offer that press to the overlay first.
+		const indicator = this as unknown as TuiAltScreenScrollToEndIndicatorInternals;
+		const handleScrollToEndIndicator = indicator.handleScrollToEndIndicatorMouseEvent.bind(this);
+		indicator.handleScrollToEndIndicatorMouseEvent = (event) =>
+			this.isFocusedOverlay() ? false : handleScrollToEndIndicator(event);
 	}
 
 	/**
@@ -568,6 +594,11 @@ export function createFullscreenTui(options: InteractiveTuiOptions): TuiAltScree
 		options.showHardwareCursor,
 		options.logDirectory,
 		{
+			scrollToEndIndicator: () => {
+				const shortcut = keyDisplayText("tui.altScreen.bottom");
+				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
+				return theme.bg("selectedBg", theme.fg("text", label));
+			},
 			openUrl: (url) =>
 				handleUrlActivation(url, {
 					onOverlayInternalUiAction: options.onOverlayInternalUiAction,

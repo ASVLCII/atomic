@@ -3,6 +3,7 @@
  */
 
 import type { SessionStats } from "@bastani/atomic";
+import type { ChildIdentity } from "@bastani/atomic-natives";
 import type { Message } from "@bastani/pi-ai/compat";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 
@@ -91,7 +92,7 @@ export interface ControlEvent {
 	recentFailureSummary?: string;
 }
 
-export type SubagentResultStatus = "completed" | "failed" | "interrupted" | "detached";
+export type SubagentResultStatus = "completed" | "failed" | "interrupted" | "killed" | "detached";
 export type SubagentRunMode = "single" | "parallel";
 
 export interface SubagentResultIntercomChild {
@@ -127,15 +128,13 @@ export interface SubagentResultIntercomPayload {
 export interface AgentProgress {
 	index: number;
 	agent: string;
-	status: "pending" | "running" | "completed" | "failed" | "detached" | "interrupted";
+	status: "pending" | "running" | "completed" | "failed" | "detached" | "interrupted" | "killed";
 	activityState?: ActivityState;
 	task: string;
 	/** Effective model for this live attempt, including fallback changes. */
 	model?: string;
 	/** Effective thinking level for this live attempt. */
 	thinking?: string;
-	/** Whether Codex fast mode applies to this attempt. */
-	fastMode?: boolean;
 	skills?: string[];
 	lastActivityAt?: number;
 	currentTool?: string;
@@ -177,9 +176,10 @@ export interface ModelAttempt {
 	usage?: Usage;
 }
 
-export type SubagentAttemptStatus = "ok" | "error" | "skipped" | "interrupted" | "continued";
+export type SubagentAttemptStatus = "ok" | "error" | "skipped" | "interrupted" | "killed" | "continued";
 
 export interface SingleResult {
+	taskResponse?: import("../../../coding-agent/src/core/tasks/contracts.js").ModelSingleResponse;
 	agent: string;
 	task: string;
 	/** Typed terminal outcome; this is the only result discriminator. */
@@ -195,7 +195,6 @@ export interface SingleResult {
 	usage: Usage;
 	model?: string;
 	thinking?: string;
-	fastMode?: boolean;
 	attemptedModels?: string[];
 	modelAttempts?: ModelAttempt[];
 	controlEvents?: ControlEvent[];
@@ -215,7 +214,26 @@ export interface SingleResult {
 	outputSaveError?: string;
 }
 
+/** Read-only control-plane snapshot for status cards; text output stays unchanged. */
+export interface SubagentStatusGroup {
+	parentPath: string;
+	children: Array<
+		Omit<ChildIdentity, "status"> & {
+			status: ChildIdentity["status"] | "killed";
+			sessionFile?: string;
+			model?: string;
+			thinking?: string;
+		}
+	>;
+}
+
 export interface Details {
+	taskResponse?:
+		| import("../../../coding-agent/src/core/tasks/contracts.js").ModelSingleResponse
+		| import("../../../coding-agent/src/core/tasks/contracts.js").ModelParallelResponse;
+	taskRecords?: import("../../../coding-agent/src/core/tasks/contracts.js").TaskRecord[];
+	taskError?: string;
+	statusGroups?: SubagentStatusGroup[];
 	mode: SubagentRunMode | "management";
 	runId?: string;
 	context?: "fresh" | "fork";

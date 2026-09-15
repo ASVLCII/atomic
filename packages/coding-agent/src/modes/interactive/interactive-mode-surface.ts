@@ -1,4 +1,4 @@
-import type { Usage } from "@bastani/pi-ai/compat";
+import type { AssistantMessage, Usage } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 /** Method surface installed onto InteractiveModeBase by sibling modules. */
 
@@ -33,7 +33,6 @@ import type {
 	HostCustomUiStateListener,
 	Keybinding,
 	KeybindingsManager,
-	Loader,
 	LoaderIndicatorOptions,
 	LoginDialogComponent,
 	MarkdownTheme,
@@ -60,12 +59,12 @@ declare module "./interactive-mode-base.ts" {
 		getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined;
 		prefixAutocompleteDescription(description: string | undefined, sourceInfo?: SourceInfo): string | undefined;
 		getBuiltInCommandConflictDiagnostics(extensionRunner: ExtensionRunner): ResourceDiagnostic[];
-		getCodexFastModeCandidateModels(): Model<Api>[];
-		hasCodexFastModeSupportedModels(): boolean;
 		createBaseAutocompleteProvider(): AutocompleteProvider;
 		buildRemoteSlashCommands(localCommands: SlashCommand[]): SlashCommand[];
 		setupAutocompleteProvider(): void;
 		showStartupNoticesIfNeeded(targetContainer?: Container): void;
+		reportModelCatalogWarning(targetContainer?: Container): void;
+		reportedModelCatalogWarning: string | undefined;
 		hadLastChangelogVersionAtStartup: boolean;
 		firstRunNoticeVisible: boolean;
 		firstRunOnboardingNoticeComponents: Component[];
@@ -157,7 +156,8 @@ declare module "./interactive-mode-base.ts" {
 		setupExtensionShortcuts(extensionRunner: ExtensionRunner): void;
 		setExtensionStatus(key: string, text: string | undefined): void;
 		getWorkingLoaderMessage(): string;
-		createWorkingLoader(): Loader | AtomicWorkingLoader;
+		createWorkingLoader(): AtomicWorkingLoader;
+		clearWorkingLoader(): void;
 		stopWorkingLoader(): void;
 		showWorkingLoaderNow(): void;
 		setWorkingVisible(visible: boolean): void;
@@ -189,7 +189,7 @@ declare module "./interactive-mode-base.ts" {
 		clearExtensionTerminalInputListeners(): void;
 		getHostCustomUiState(): HostCustomUiState;
 		notifyHostCustomUiStateListeners(): void;
-		beginHostInlineCustomUi(): () => void;
+		beginHostInlineCustomUi(purpose?: "prompt" | "navigation"): () => void;
 		beginInlineCustomUiFocusDeferral(): () => void;
 		shouldDeferInlineCustomUiFocus(): boolean;
 		focusHostInlineCustomUi(): boolean;
@@ -228,6 +228,7 @@ declare module "./interactive-mode-base.ts" {
 				done: (result: T) => void,
 			) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
 			options?: {
+				purpose?: "prompt" | "navigation";
 				overlay?: boolean;
 				deferInlineCustomUiFocus?: boolean;
 				handlesInternalUiAction?: boolean;
@@ -249,7 +250,7 @@ declare module "./interactive-mode-base.ts" {
 		subscribeToAgent(): void;
 		handleEvent(event: AgentSessionEvent | JsonAgentSessionEvent): Promise<void>;
 		getUserMessageText(message: Message): string;
-		showStatus(message: string): void;
+		showStatus(message: string, persist?: boolean): void;
 		/** Report a managed-tool (fd/rg) readiness update inside the transcript. */
 		showManagedToolStatus(status: ToolStatus): void;
 		/** Bring fd/rg to readiness after first paint; progress lands in the transcript. */
@@ -258,6 +259,7 @@ declare module "./interactive-mode-base.ts" {
 		addRenderedChatEntry(entry: ChatMessageEntry): Component;
 		addCompactionBoundaryToChat(result: VerbatimCompactionResult): void;
 		addCompactionCostNotice(kind: "compaction" | "branch_summary", usage: Usage): void;
+		maybeShowAssistantDiagnostics(message: AssistantMessage): void;
 		addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void;
 		addCustomEntryToChat(entry: CustomEntry): void;
 		renderSessionContext(
@@ -328,11 +330,10 @@ declare module "./interactive-mode-base.ts" {
 		showSelector(
 			create: (done: () => void) => { component: Component; focus: Component; dispose?: () => void },
 		): void;
-		showFastModeSelector(): void;
 		showSettingsSelector(): void;
 		handleModelCommand(searchTerm?: string): Promise<void>;
 		handleThinkingCommand(searchTerm?: string): void;
-		selectThinkingLevel(level: ThinkingLevel, persist: boolean): void;
+		selectThinkingLevel(level: ThinkingLevel): void;
 		showThinkingSelector(): void;
 		findExactModelMatch(searchTerm: string): Promise<Model<Api> | undefined>;
 		getModelCandidates(): Promise<Model<Api>[]>;
@@ -376,7 +377,7 @@ declare module "./interactive-mode-base.ts" {
 		getPathCommandArgument(text: string, command: "/export" | "/import"): string | undefined;
 		handleImportCommand(text: string): Promise<void>;
 		handleShareCommand(): Promise<void>;
-		handleCopyCommand(options?: { preferSelection?: boolean }): Promise<void>;
+		handleCopyCommand(): Promise<void>;
 		handleNameCommand(text: string): void;
 		handleSessionCommand(): void;
 		handleChangelogCommand(): void;
@@ -384,8 +385,6 @@ declare module "./interactive-mode-base.ts" {
 		getEditorKeyDisplay(action: Keybinding): string;
 		jumpToTranscriptEnd(): void;
 		setFullscreenCopyOnSelect(enabled: boolean): void;
-		getFullscreenCopyOnSelect(): boolean | undefined;
-		copyActiveFullscreenSelection(): Promise<boolean | undefined>;
 		handleHotkeysCommand(): void;
 		handleClearCommand(): Promise<void>;
 		handleDebugCommand(): void;

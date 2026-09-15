@@ -4,6 +4,10 @@
 
 Prompt templates are Markdown snippets that expand into full prompts. Type `/name` in the editor to invoke a template, where `name` is the filename without `.md`.
 
+**Prerequisites:** Atomic installed and running in a project — see the [Quickstart](/quickstart). No code and no build step are required.
+
+**When to use this:** prompt templates are the lightest customization mechanism Atomic ships. Reach for them when you repeat the same instructions and want a slash command for them. If the agent should decide on its own when to load the instructions, use a [skill](/skills) instead; if you need to run code, use an [extension](/extensions).
+
 ## Locations
 
 Atomic loads prompt templates from:
@@ -94,3 +98,18 @@ Usage: `/component Button "onClick handler" "disabled support"`
 
 - Template discovery in `prompts/` is non-recursive.
 - If you want templates in subdirectories, add them explicitly via `prompts` settings or a package manifest.
+
+## Report feedback
+
+Use `/feedback <what happened or what you want to change>` to draft an Atomic bug report or enhancement. The bundled feedback skill runs one foreground debugger investigation for a bug and no subagent for an enhancement. It summarizes findings and unknowns rather than attaching files or transcripts.
+
+Review the Markdown draft and its `Privacy scrubbed:` summary. Ask for changes to get a revised, re-scrubbed draft, or say you want it posted. An unrelated request continues the conversation without creating an issue. Posting uses your own authenticated `gh` CLI login to create an issue in `bastani-inc/atomic`; install GitHub CLI and run `gh auth login` if needed. If posting fails, Atomic reports the error and keeps the draft in the conversation.
+
+The scrubber replaces recognized API tokens, bearer credentials, credential assignments, URL credentials, private keys and email addresses with `[REDACTED]`, and home-directory prefixes with `~`. Review before posting: arbitrary secrets and sensitive business context may remain. Blank lines and Markdown headings stop multiline credential matching; complete template placeholders and Markdown links are preserved. Content beyond those boundaries and secret text in links can therefore require manual removal. Scrubbing cannot remove information already sent to your model provider.
+
+## Next steps
+
+- [Skills](/skills) — instructions the agent loads on its own when a task matches, instead of on an explicit slash command.
+- [Subagents](/subagents) — delegate a focused, bounded task to a child agent.
+- [Atomic packages](/packages) — bundle your prompt templates with skills, themes, and extensions and share them.
+- [Build with Atomic](/build) — compare every customization mechanism.

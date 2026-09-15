@@ -31,9 +31,11 @@ import type { RunSnapshot } from "../shared/store-types.js";
 import type { WorkflowDefinition, WorkflowInputValues } from "../shared/types.js";
 import type { WorkflowRegistry } from "../workflows/registry.js";
 import { type DurableWorkflowBackend, resumableEntryFromHandle } from "./backend.js";
+import { durableWorkflowRunSnapshots } from "./completed-catalog.js";
 import { getAtomicExecutorId } from "./dbos-sdk-handle.js";
 import { getDurableBackend } from "./factory.js";
 import { isDurableWorkflowResumable, isForeignLiveWorkflow } from "./resume-eligibility.js";
+import { resolveToolResumeFrontier } from "./tool-resume-frontier.js";
 import type { ResumableWorkflowEntry } from "./types.js";
 
 export type ResumeDurableResult =
@@ -60,6 +62,8 @@ export interface ResumeDurableDeps {
 	readonly resolveDefinition?: (name: string, cwd: string | undefined) => Promise<WorkflowDefinition | undefined>;
 	/** Job tracker used by the detached resume launch. */
 	readonly jobs?: JobTracker;
+	readonly signal?: AbortSignal;
+	readonly onRunAccepted?: (runId: string) => void;
 }
 
 /** Hydrate current DBOS metadata and checkpoints before synchronous replay reads. */
@@ -102,6 +106,7 @@ export async function resumeDurableWorkflow(
 	deps: ResumeDurableDeps,
 	catalog?: readonly ResumableWorkflowEntry[],
 ): Promise<ResumeDurableResult> {
+	deps.signal?.throwIfAborted();
 	const backend = deps.durableBackend ?? getDurableBackend();
 	const resolvedCatalog = catalog ?? backend.listResumableWorkflows();
 	const resolved = resolveDurableEntry(workflowId, resolvedCatalog);
@@ -191,6 +196,23 @@ export async function resumeDurableWorkflow(
 			message: `invalid_inputs: ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
+	let toolContinuation: RunOpts["continuation"];
+	if (
+		handle.status === "failed" &&
+		(handle.failedToolNodeId !== undefined ||
+			/^atomic-workflows: ctx\.tool .* aborted by node abort$/s.test(handle.error ?? ""))
+	) {
+		const source = durableWorkflowRunSnapshots(backend, handle).find((run) => run.id === handle.workflowId);
+		const frontier = source === undefined ? undefined : resolveToolResumeFrontier(source, backend);
+		if (frontier?.ok !== true)
+			return {
+				ok: false,
+				reason: "startup_failed",
+				message: frontier?.message ?? `insufficient_state: missing tool frontier in run ${handle.workflowId}`,
+			};
+		toolContinuation = { source: source!, resumeFromToolNodeId: frontier.toolNodeId };
+	}
+	deps.signal?.throwIfAborted();
 	removeDurableResumeShadowRuns(deps.baseRunOpts.store, resolved.workflowId);
 
 	// Claim resume against concurrent deletion through the required transition seam.
@@ -209,12 +231,14 @@ export async function resumeDurableWorkflow(
 		...(handle.origin !== undefined ? { origin: handle.origin } : {}),
 		runId: resolved.workflowId,
 		durableBackend: backend,
+		...(toolContinuation === undefined ? {} : { continuation: toolContinuation }),
 	};
 
 	let launch: ReturnType<typeof launchDetachedUntilStartup>;
 	try {
 		launch = launchDetachedUntilStartup(def, inputs, {
 			...resumeRunOpts,
+			startupSignal: deps.signal,
 			...(deps.jobs !== undefined ? { jobs: deps.jobs } : {}),
 		});
 	} catch (error) {
@@ -227,6 +251,7 @@ export async function resumeDurableWorkflow(
 		};
 	}
 	const { accepted } = launch;
+	deps.onRunAccepted?.(accepted.runId);
 	const admission = await launch.wait;
 	if (!admission.started) {
 		const snapshot = deps.baseRunOpts.store?.runs().find((run) => run.id === accepted.runId);

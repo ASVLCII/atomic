@@ -10,7 +10,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "bun": ">=1.4.0"
+    "bun": ">=1.4.2"
   },
   "main": "./src/extension/index.ts",
   "types": "./src/extension/index.ts",
@@ -21,12 +21,16 @@
     "src/**/*.ts",
     "agents/",
     "skills/**/*",
+    "prompts/**/*",
     "README.md",
     "CHANGELOG.md"
   ],
   "pi": {
     "extensions": [
       "./src/extension/index.ts"
+    ],
+    "prompts": [
+      "./prompts"
     ],
     "skills": [
       "./skills"
@@ -35,8 +39,8 @@
   "peerDependencies": {
     "@bastani/atomic": "*",
     "@bastani/pi-ai": "*",
-    "@earendil-works/pi-agent-core": "^0.84.4",
-    "@earendil-works/pi-tui": "^0.84.4"
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1"
   },
   "peerDependenciesMeta": {
     "@bastani/atomic": {

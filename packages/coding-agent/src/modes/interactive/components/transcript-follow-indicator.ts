@@ -1,5 +1,5 @@
 import { type Component, hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { theme } from "../theme/theme.ts";
+import { theme } from "../theme/theme.js";
 
 export const TRANSCRIPT_JUMP_TO_END_URL = "atomic-ui://transcript/jump-to-end";
 const FULL_RESET = "\x1b[0m";
@@ -25,7 +25,7 @@ export class TranscriptFollowIndicator implements Component {
 		if (viewportWidth === 0) return [""];
 
 		const keyLabel = this.options.keyLabel();
-		const label = keyLabel.length > 0 ? `Jump to bottom (${keyLabel}) ↓` : "Jump to bottom ↓";
+		const label = keyLabel.length > 0 ? `↓ Jump to latest message · ${keyLabel}` : "↓ Jump to latest message";
 
 		// The highlight is the box: one padding column on each side, dropped when the
 		// viewport cannot afford both columns and a visible character.
@@ -41,9 +41,9 @@ export class TranscriptFollowIndicator implements Component {
 		// hole in the highlight; restore both colors after every reset it emits.
 		const restyled = truncatedLabel.replaceAll(
 			FULL_RESET,
-			`${FULL_RESET}${theme.getBgAnsi("selectedBg")}${theme.getFgAnsi("muted")}`,
+			`${FULL_RESET}${theme.getBgAnsi("selectedBg")}${theme.getFgAnsi("text")}`,
 		);
-		const highlighted = theme.bg("selectedBg", theme.fg("muted", `${pad}${restyled}${pad}`));
+		const highlighted = theme.bg("selectedBg", theme.fg("text", `${pad}${restyled}${pad}`));
 
 		return [`${leftPadding}${hyperlink(highlighted, TRANSCRIPT_JUMP_TO_END_URL)}`];
 	}

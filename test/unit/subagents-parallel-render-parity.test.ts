@@ -10,14 +10,13 @@ import { type AgentToolResult, type Details, theme } from "./subagents-render-st
 
 function parallelChild(
 	agent: string,
-	status: "ok" | "error" | "interrupted" | "continued" | "skipped",
+	status: Details["results"][number]["status"],
 	extra: {
 		interrupted?: boolean;
 		detached?: boolean;
 		cause?: string;
 		model?: string;
 		thinking?: string;
-		fastMode?: boolean;
 		progressIndex?: number;
 	} = {},
 ): Details["results"][number] {
@@ -64,6 +63,48 @@ function renderParallel(
 }
 
 describe("top-level parallel status reduction", () => {
+	for (const expanded of [false, true]) {
+		for (const withCompletedSibling of [false, true]) {
+			test(`${expanded ? "expanded" : "compact"} killed${withCompletedSibling ? " and completed" : "-only"} group is stopped and non-resumable`, () => {
+				const children = [parallelChild("alpha", "killed")];
+				if (withCompletedSibling) children.push(parallelChild("beta", "ok"));
+				const rendered = renderParallel(children, { expanded });
+				const header = rendered.split("\n")[0]!;
+				assert.match(header, expanded ? /^killed \(non-resumable\) parallel/ : /^■ parallel/);
+				assert.match(header, /killed \(non-resumable\)/i);
+				assert.match(header, withCompletedSibling ? /1\/2 done/ : /0\/1 done/);
+				assert.doesNotMatch(header, /✓|failed|^ok /);
+			});
+		}
+	}
+
+	for (const [status, compact, expanded] of [
+		["ok", "✓", "ok"],
+		["error", "✗", "failed"],
+		["interrupted", "■", "failed"],
+		["continued", "■", "failed"],
+		["skipped", "■", "failed"],
+	] as const) {
+		test(`${status} groups retain their compact and expanded summaries`, () => {
+			const children = [parallelChild("alpha", status)];
+			assert.ok(renderParallel(children, { expanded: false }).startsWith(`${compact} parallel`));
+			assert.ok(renderParallel(children).startsWith(`${expanded} parallel`));
+		});
+	}
+
+	test("killed siblings do not override parent cancellation, failure, running or handoff summaries", () => {
+		const killed = parallelChild("alpha", "killed");
+		const cancelled = parallelChild("beta", "interrupted", { interrupted: true, cause: "abort" });
+		assert.ok(renderParallel([killed, cancelled]).startsWith("cancelled parallel"));
+		assert.ok(renderParallel([killed, parallelChild("beta", "error")]).startsWith("failed parallel"));
+		assert.ok(renderParallel([killed, parallelChild("beta", "error")], { expanded: false }).startsWith("✗ parallel"));
+		const running = parallelChild("beta", "continued", { progressIndex: 1 });
+		running.progress!.status = "running";
+		assert.ok(renderParallel([killed, running]).startsWith("running parallel"));
+		assert.doesNotMatch(renderParallel([killed, running], { expanded: false }).split("\n")[0]!, /■|✓|killed/);
+		assert.ok(renderParallel([killed], { parentAskYielded: true }).startsWith("yielded parallel"));
+	});
+
 	test("one errored child reads failed, never paused", () => {
 		const rendered = renderParallel([parallelChild("alpha", "ok"), parallelChild("beta", "error")]);
 		assert.match(rendered, /failed parallel · 1\/2 done/);
@@ -139,19 +180,18 @@ describe("top-level parallel status reduction", () => {
 	});
 });
 
-test("parallel result rows keep each child's model and thinking metadata", () => {
+test("parallel result rows keep each child's canonical model ID and thinking metadata", () => {
 	const rendered = renderParallel([
 		parallelChild("alpha", "ok", {
-			model: "openai/gpt-5.1-codex",
+			model: "openai-codex/gpt-5.6-sol-fast",
 			thinking: "high",
-			fastMode: true,
 		}),
 		parallelChild("beta", "ok", {
 			model: "anthropic/claude-sonnet-4",
 			thinking: "low",
 		}),
 	]);
-	assert.match(rendered, /alpha.*gpt-5\.1-codex · thinking high · fast/);
+	assert.match(rendered, /alpha.*openai-codex\/gpt-5\.6-sol-fast · thinking high/);
 	assert.match(rendered, /beta.*claude-sonnet-4 · thinking low/);
-	assert.doesNotMatch(rendered, /claude-sonnet-4 · thinking low · fast/);
+	assert.doesNotMatch(rendered, / · fast(?: ·|\))/u);
 });

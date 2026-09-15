@@ -1,3 +1,4 @@
+import { ASK_REPLY_TIMEOUT_MS } from "./retry-policy.js";
 import type { Message, SessionInfo } from "./types.js";
 import { resolveSessionTarget, sessionTargetFailureReason } from "./session-target.js";
 
@@ -12,7 +13,7 @@ export class ReplyTracker {
   private readonly pendingTurnContexts: IntercomContext[] = [];
   private currentTurnContext: IntercomContext | null = null;
 
-  constructor(private readonly askTimeoutMs = 10 * 60 * 1000) {}
+  constructor(private readonly askTimeoutMs = ASK_REPLY_TIMEOUT_MS) {}
 
   recordIncomingMessage(from: SessionInfo, message: Message, receivedAt = Date.now()): IntercomContext {
     const context = { from, message, receivedAt };
@@ -43,6 +44,12 @@ export class ReplyTracker {
     this.currentTurnContext = null;
   }
 
+  /** A cancelled turn that produced nothing could not have replied; keep its context for the next turn. */
+  restoreTurnContext(): void {
+    if (this.currentTurnContext) this.pendingTurnContexts.unshift(this.currentTurnContext);
+    this.currentTurnContext = null;
+  }
+
   reset(): void {
     this.pendingAsks.clear();
     this.pendingTurnContexts.length = 0;
@@ -51,22 +58,23 @@ export class ReplyTracker {
 
 	resolveReplyTarget(options: { to?: string; replyTo?: string }, now = Date.now()): IntercomContext {
 		this.pruneExpired(now);
-		if (options.replyTo) {
-			const exact = this.pendingAsks.get(options.replyTo);
-			if (exact) {
-				if (options.to) {
-					const resolution = resolveSessionTarget([exact.from], options.to);
-					if (resolution.kind !== "resolved") throw new Error(`Pending ask "${options.replyTo}" is not from "${options.to}"`);
-				}
-				return exact;
+		if (options.replyTo !== undefined) {
+			const exact = this.pendingAsks.get(options.replyTo) ??
+				(this.currentTurnContext?.message.id === options.replyTo && !this.currentTurnContext.message.expectsReply
+					? this.currentTurnContext : undefined);
+			if (!exact) throw new Error(`No reply context for "${options.replyTo}"`);
+			if (options.to !== undefined) {
+				const resolution = resolveSessionTarget([exact.from], options.to);
+				if (resolution.kind !== "resolved") throw new Error(`Reply context "${options.replyTo}" is not from "${options.to}"`);
 			}
+			return exact;
 		}
-    if (this.currentTurnContext) {
+    if (options.to === undefined && this.currentTurnContext) {
       return this.currentTurnContext;
     }
 
     const pending = Array.from(this.pendingAsks.values());
-    if (options.to) {
+    if (options.to !== undefined) {
       const senders = [...new Map(
         pending.map((context) => [context.from.id, context.from] as const),
       ).values()];

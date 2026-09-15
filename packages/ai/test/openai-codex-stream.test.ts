@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { arch, platform, release, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +96,137 @@ function buildSSEPayload({
 
 	return `${events.join("\n\n")}\n\n`;
 }
+
+describe("openai-codex fast model routing", () => {
+	const baseModel: Model<"openai-codex-responses"> = {
+		id: "gpt-5.6-sol",
+		name: "GPT-5.6 Sol",
+		api: "openai-codex-responses",
+		provider: "openai-codex",
+		baseUrl: "https://chatgpt.com/backend-api",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 400000,
+		maxTokens: 128000,
+	};
+	const fastModel: Model<"openai-codex-responses"> = {
+		...baseModel,
+		id: "gpt-5.6-sol-fast",
+		fastRoute: { baseModelId: "gpt-5.6-sol", upstreamModelId: "gpt-5.6-sol", serviceTier: "priority" },
+	};
+	const astraFastModel: Model<"openai-codex-responses"> = {
+		...baseModel,
+		id: "gpt-6-astra-fast",
+		name: "GPT-6-Astra (fast)",
+		input: ["text", "image"],
+		fastRoute: { baseModelId: "gpt-6-astra", upstreamModelId: "gpt-6-astra", serviceTier: "priority" },
+	};
+	const context: Context = {
+		systemPrompt: "You are a helpful assistant.",
+		messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+	};
+
+	async function captureBody(
+		model: Model<"openai-codex-responses">,
+		run: typeof streamOpenAICodexResponses | typeof streamSimpleOpenAICodexResponses,
+	): Promise<Record<string, unknown> | null> {
+		let body: Record<string, unknown> | null = null;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+				body = decodeCodexRequestBody(init?.body);
+				return new Response(buildSSEPayload({ status: "completed", includeDone: true }), {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}),
+		);
+		await run(model, context, { apiKey: mockToken(), transport: "sse" }).result();
+		return body;
+	}
+
+	/**
+	 * The tier must default from the model, not only from a caller-supplied option: `streamSimple`
+	 * reaches this adapter through pi-ai's `buildBaseOptions` whitelist, which drops `serviceTier`.
+	 * Without the model-driven default a standalone caller silently got normal-tier service.
+	 */
+	it("sends the base upstream model plus the model's own tier through stream", async () => {
+		const body = await captureBody(fastModel, streamOpenAICodexResponses);
+
+		expect(body?.model).toBe("gpt-5.6-sol");
+		expect(body?.service_tier).toBe("priority");
+	});
+
+	it("sends GPT-6-Astra's base ID, priority tier, and encrypted reasoning request", async () => {
+		const body = await captureBody(astraFastModel, streamOpenAICodexResponses);
+
+		expect(body?.model).toBe("gpt-6-astra");
+		expect(body?.service_tier).toBe("priority");
+		expect(body?.include).toContain("reasoning.encrypted_content");
+	});
+
+	it("sends the base upstream model plus the model's own tier through streamSimple", async () => {
+		const body = await captureBody(fastModel, streamSimpleOpenAICodexResponses);
+
+		expect(body?.model).toBe("gpt-5.6-sol");
+		expect(body?.service_tier).toBe("priority");
+	});
+
+	it("sends no service tier for the normal sibling", async () => {
+		const body = await captureBody(baseModel, streamSimpleOpenAICodexResponses);
+
+		expect(body?.model).toBe("gpt-5.6-sol");
+		expect(body?.service_tier).toBeUndefined();
+	});
+
+	/**
+	 * The route is the authority. A fast variant is a distinct selected, recorded, persisted, and
+	 * billed identity, so a per-request option must not turn it into an ordinary request — that would
+	 * also suppress the Codex routing identity, which keys on the final payload's tier.
+	 */
+	it.each(["default", "flex"] as const)("keeps the fast route's tier when a request asks for %s", async (tier) => {
+		const captured: { body: Record<string, unknown> | null } = { body: null };
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+				captured.body = decodeCodexRequestBody(init?.body);
+				return new Response(buildSSEPayload({ status: "completed", includeDone: true }), {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}),
+		);
+		await streamOpenAICodexResponses(fastModel, context, {
+			apiKey: mockToken(),
+			transport: "sse",
+			serviceTier: tier,
+		}).result();
+
+		expect(captured.body?.service_tier).toBe("priority");
+	});
+
+	it.each(["default", "flex"] as const)("honors an explicit %s tier on the normal sibling", async (tier) => {
+		const captured: { body: Record<string, unknown> | null } = { body: null };
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+				captured.body = decodeCodexRequestBody(init?.body);
+				return new Response(buildSSEPayload({ status: "completed", includeDone: true }), {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}),
+		);
+		await streamOpenAICodexResponses(baseModel, context, {
+			apiKey: mockToken(),
+			transport: "sse",
+			serviceTier: tier,
+		}).result();
+
+		expect(captured.body?.service_tier).toBe(tier);
+	});
+});
 
 describe("openai-codex streaming", () => {
 	it("streams SSE responses into AssistantMessageEventStream", async () => {
@@ -207,6 +339,37 @@ describe("openai-codex streaming", () => {
 
 		expect(sawTextDelta).toBe(true);
 		expect(sawDone).toBe(true);
+	});
+
+	// Regression test for https://github.com/earendil-works/pi/issues/9047
+	it("processes a terminal SSE event without a trailing blank line", async () => {
+		const token = mockToken();
+		const sse = buildSSEPayload({ status: "completed" }).trimEnd();
+		const model: Model<"openai-codex-responses"> = {
+			id: "gpt-5.1-codex",
+			name: "GPT-5.1 Codex",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400000,
+			maxTokens: 128000,
+		};
+		const context: Context = {
+			systemPrompt: "You are a helpful assistant.",
+			messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+		};
+		const resultStream = streamOpenAICodexResponses(model, context, {
+			apiKey: token,
+			transport: "sse",
+			fetch: async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }),
+		});
+		const result = await resultStream.result();
+
+		assert.equal(result.stopReason, "stop");
+		assert.equal(result.content.find((content) => content.type === "text")?.text, "Hello");
 	});
 
 	it("completes after response.completed even when the SSE body stays open", async () => {
@@ -1029,11 +1192,51 @@ describe("openai-codex streaming", () => {
 		expect(requestedReasoning).toEqual({ effort: "low", summary: "auto" });
 	});
 
+	// Regression for upstream #9191: Off must reach Codex unless the model forbids it.
+	it.each([undefined, "none", "low", null] as const)("serializes the Off mapping %s", async (off) => {
+		const model: Model<"openai-codex-responses"> = {
+			id: "test-codex",
+			name: "Test Codex",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "http://127.0.0.1:9",
+			reasoning: true,
+			thinkingLevelMap: { off },
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 16384,
+		};
+		for (const reasoningEffort of [undefined, "none"] as const) {
+			let payload: { reasoning?: { effort: string; summary?: string } } | undefined;
+			await streamOpenAICodexResponses(
+				model,
+				{ messages: [{ role: "user", content: "Hello", timestamp: 0 }] },
+				{
+					apiKey: mockToken(),
+					transport: "sse",
+					reasoningEffort,
+					onPayload(value) {
+						payload = value as typeof payload;
+						throw new Error("payload captured");
+					},
+				},
+			).result();
+			expect(payload).toBeDefined();
+			expect(payload?.reasoning).toEqual(
+				off === null
+					? undefined
+					: { effort: off ?? "none", ...(reasoningEffort === undefined ? {} : { summary: "auto" }) },
+			);
+		}
+	});
+
 	it.each([
 		["gpt-5.1-codex", "flex", 0.5],
 		["gpt-5.1-codex", "priority", 2],
 		["gpt-5.5", "flex", 0.5],
 		["gpt-5.5", "priority", 2.5],
+		["gpt-6-astra", "priority", 2],
 	] as const)(
 		"uses the client-sent %s service tier for %s when Codex echoes default",
 		async (modelId, serviceTier, multiplier) => {

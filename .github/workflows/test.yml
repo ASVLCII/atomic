@@ -25,60 +25,34 @@ on:
     branches: [main]
   pull_request:
 
-# The work runs as four concurrent jobs instead of one sequential per-platform
-# job, so the wall clock is the longest *dependent* chain rather than the sum of
-# every step. Steps stay together only when one consumes another's build output:
+# The work runs as five independent jobs. Root suites duplicate setup so neither
+# waits for the other; no shared producer sits on their critical path.
 #
-#   suites          build package -> unit -> integration
+#   unit-tests      build package -> unit
+#   integration-tests build package -> integration
 #   agent-suite     build native bindings -> coding-agent vitest
 #   release-archive build package -> build-binaries.sh -> archive smoke
 #   static-checks   typecheck, docs, Mintlify, CI contracts (Linux)
 #   test            result gate; carries the two required check contexts
 #
-# Nothing is passed between jobs as an artifact: rebuilding in parallel is
-# cheaper in wall clock than serializing on an upload/download pair.
+# Nothing is passed between jobs as an artifact: waiting for a producer job
+# adds a serial dependency, regardless of how cheaply its output transfers.
 jobs:
-  suites:
-    name: suites (${{ matrix.os }}, ${{ matrix.binary_platform }})
+  unit-tests:
+    name: unit-tests (${{ matrix.os }}, ${{ matrix.binary_platform }})
     strategy:
       matrix:
         include:
           - os: blacksmith-4vcpu-ubuntu-2404
             binary_platform: linux-x64
-            timeout_minutes: 20
+            timeout_minutes: 22
           - os: blacksmith-4vcpu-windows-2025
             binary_platform: windows-x64
-            timeout_minutes: 20
+            timeout_minutes: 22
       fail-fast: false
     runs-on: ${{ matrix.os }}
-    # This job owns TWO retryable steps -- unit and integration each run behind
-    # the bounded flake-retry wrapper -- so its cap must cover a replay of both,
-    # not just one pass. The retry replays only those steps, so the budget is
-    # `setup + 2 x (unit + integration)` rather than 2x the whole job.
-    #
-    # Worst observed per step, runs 31085190975 and 31088323060:
-    #   Linux   setup 86s,  unit 355s, integration 31s -> 86 + 2*386 =  858s (14.3 min)
-    #   Windows setup 232s, unit 324s, integration 44s -> 232 + 2*368 = 968s (16.1 min)
-    # The Windows setup figure is a cold runner (122s "Set up job" alone), which
-    # is the right pessimistic input for a cap.
-    #
-    # Both legs take 20 min: 1.40x Linux, 1.24x Windows. A single number is
-    # deliberate. The previous 13/14 pair encoded a per-platform precision the
-    # measurements do not support -- these are 4-vCPU shared runners whose setup
-    # alone varied 73s to 232s across two samples of the same job -- and a split
-    # cap invites re-tuning each leg as suites grow, which is how 8/12 decayed
-    # into cancelling healthy runs. One cap tracks one question: has this job
-    # hung, given it may legitimately run its suites twice.
-    #
-    # The previous 13/14 pair sat BELOW both retry-inclusive figures, so any
-    # genuine failure that triggered the retry was cancelled at the cap rather
-    # than reporting a failure -- and `gh run view --log` refuses to serve logs
-    # until the whole run completes, so those cancellations arrived with no test
-    # names at all. That is how three PRs reported `cancelled` at 14m08s while
-    # the underlying defect was two ordinary Windows test bugs.
-    #
-    # This stays a hang detector, not a performance budget. Shortening the
-    # ~5.5 min unit step is still what would buy the headroom back.
+    # Run 34270757695: 869s Linux / 870s Windows, timeout-censored, plus 50%.
+    # Measurements and retry/cold-cache limitations are recorded in docs/ci.md.
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
       # Sticky disks are Blacksmith-Linux-only; Windows takes a standard clone.
@@ -100,7 +74,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           # Pinned to match publish.yml; `latest` cannot be cached by setup-bun.
-          bun-version: 1.4.0
+          bun-version: 1.4.2
       # Node now installs dependencies and runs every suite, so it is required
       # here rather than only by installed-package-node-extensions.test.ts.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -133,10 +107,7 @@ jobs:
       # Measured at 42s Linux / 86s Windows, both inside the existing caps.
       - name: Build native bindings for the root suites
         run: npm run build --workspace=@bastani/atomic-natives
-      # Both suites below consume this build. test/unit/pi-0.82.1-artifacts.test.ts
-      # silently degrades to test.skip when packages/coding-agent/dist is absent,
-      # so moving the unit suite out of this job would lose coverage without
-      # failing anything.
+      # Unit artifact tests require dist/ to retain their full coverage.
       - name: Build @bastani/atomic package
         working-directory: packages/coding-agent
         run: npm run build
@@ -145,22 +116,88 @@ jobs:
           bun run scripts/run-flaky-test-suite.ts --label "unit tests (${{ matrix.binary_platform }})"
           --no-retry-file flaky-test-suite-runner.test.ts
           -- npm run test:unit
-      - name: Integration tests (one bounded flake retry)
-        run: >-
-          bun run scripts/run-flaky-test-suite.ts --label "integration tests (${{ matrix.binary_platform }})"
-          -- npm run test:integration
-        env:
-          # Hard-require the installed-package Node smoke where the package
-          # build above guarantees dist/ exists on both supported hosts.
-          ATOMIC_REQUIRE_INSTALLED_NODE_SMOKE: "1"
       - name: Upload flaky-test diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Artifact names must be unique across every job in the run:
           # actions/upload-artifact@v4+ fails the whole run on a duplicate.
-          name: test-diagnostics-suites-${{ matrix.binary_platform }}
+          name: test-diagnostics-unit-tests-${{ matrix.binary_platform }}
           path: .ci-diagnostics/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  integration-tests:
+    name: integration-tests (${{ matrix.os }}, ${{ matrix.binary_platform }})
+    strategy:
+      matrix:
+        include:
+          - os: blacksmith-4vcpu-ubuntu-2404
+            binary_platform: linux-x64
+            timeout_minutes: 10
+          - os: blacksmith-4vcpu-windows-2025
+            binary_platform: windows-x64
+            timeout_minutes: 14
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    # Setup + two attempts at measured cost + 50% per host; September 11 Linux repair in docs/ci.md.
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    steps:
+      - uses: useblacksmith/checkout@6fd481652155169ed4d2f25ebaf97464f685175f # v1.1
+        if: runner.os == 'Linux'
+        with:
+          lfs: true
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: runner.os != 'Linux'
+        with:
+          lfs: true
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - id: rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        continue-on-error: true
+        timeout-minutes: 4
+        with:
+          toolchain: stable
+      - name: Retry Rust toolchain install
+        if: steps.rust.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        timeout-minutes: 4
+        with:
+          toolchain: stable
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Alias @earendil-works/pi-ai onto the workspace package
+        run: node scripts/alias-pi-ai.mjs
+      - name: Build @bastani/pi-ai
+        run: npm run build --workspace=@bastani/pi-ai
+      - name: Build native bindings for the root suites
+        run: npm run build --workspace=@bastani/atomic-natives
+      - name: Build @bastani/atomic package
+        working-directory: packages/coding-agent
+        run: npm run build
+      - name: Integration tests (one bounded flake retry)
+        run: >-
+          bun run scripts/run-flaky-test-suite.ts --label "integration tests (${{ matrix.binary_platform }})"
+          -- npm run test:integration
+        env:
+          # Hard-require the installed-package Node smoke on both supported hosts.
+          ATOMIC_REQUIRE_INSTALLED_NODE_SMOKE: "1"
+      - name: Upload flaky-test diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-diagnostics-integration-tests-${{ matrix.binary_platform }}
+          path: .ci-diagnostics/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
 
@@ -171,27 +208,19 @@ jobs:
         include:
           - os: blacksmith-4vcpu-ubuntu-2404
             binary_platform: linux-x64
-            timeout_minutes: 8
+            timeout_minutes: 10
           - os: blacksmith-4vcpu-windows-2025
             binary_platform: windows-x64
-            timeout_minutes: 12
+            timeout_minutes: 14
       fail-fast: false
     runs-on: ${{ matrix.os }}
-    # Measured on sha 772a373: 154s / 250s in the green run 31047542976, and a
-    # worst observation of 221s Linux / 270s Windows across both events on that
-    # SHA; the first split run measured 138s / 349s. Linux moves 6 -> 8 min
-    # (480s, 2.17x of the 221s worst observation) because 6 min had decayed to
-    # 1.6x, the same drift that cancelled `suites`. Windows stays at 12 min
-    # (720s), still 2.06x the 349s worst case this job has ever produced. This
-    # is the critical path of the whole workflow, so it is the chain to shard
-    # first if a further cut is wanted.
+    # Run 34270757695: 382s Linux / 552s Windows, timeout-censored, plus 50%; see docs/ci.md.
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
       - uses: useblacksmith/checkout@6fd481652155169ed4d2f25ebaf97464f685175f # v1.1
         if: runner.os == 'Linux'
         with:
-          # The only LFS fixtures in the repository live under
-          # packages/coding-agent/test/fixtures, so this job genuinely needs them.
+          # Package LFS assets include session fixtures and the runtime PNG.
           lfs: true
           fetch-depth: 0
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -202,7 +231,7 @@ jobs:
       # Bun still compiles binaries and runs scripts/*.ts, including the wrapper.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -243,6 +272,7 @@ jobs:
         with:
           name: test-diagnostics-agent-suite-${{ matrix.binary_platform }}
           path: .ci-diagnostics/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
 
@@ -253,16 +283,14 @@ jobs:
         include:
           - os: blacksmith-4vcpu-ubuntu-2404
             binary_platform: linux-x64
-            timeout_minutes: 5
+            timeout_minutes: 4
           - os: blacksmith-4vcpu-windows-2025
             binary_platform: windows-x64
-            timeout_minutes: 9
+            timeout_minutes: 7
       fail-fast: false
     runs-on: ${{ matrix.os }}
-    # The warm sample measured 162s, but cold acquisition consumed 152s for
-    # rust-toolchain and 71s for checkout, on top of ~110s native build and
-    # ~40s archive smoke: an observed tail near 6m50s versus a healthy 4m04s.
-    # Keep 9m of headroom for that cold toolchain tail.
+    # Linux: censored build + remaining packaging/smoke + 50%; September 11 repair in docs/ci.md.
+    # Windows: run 34035777039 was cancelled at 244s after successful steps; ceil(244 * 1.5 / 60) = 7.
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
       - uses: useblacksmith/checkout@6fd481652155169ed4d2f25ebaf97464f685175f # v1.1
@@ -278,7 +306,7 @@ jobs:
       # `bun build --compile` is still the binary compiler, exactly as upstream.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -320,6 +348,7 @@ jobs:
           rm -rf "$smoke_dir"
           mkdir -p "$smoke_dir"
           tar -xzf packages/coding-agent/binaries/atomic-linux-x64.tar.gz -C "$smoke_dir"
+          node scripts/smoke-postgres-runtime.mjs "$smoke_dir/atomic/node_modules/@bastani/atomic-natives" linux-x64
           "$smoke_dir/atomic/atomic" --version
           bun run scripts/assert-builtin-set.ts "$smoke_dir/atomic/builtin"
           for required_path in \
@@ -368,6 +397,8 @@ jobs:
           Remove-Item -Recurse -Force $smokeDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $smokeDir | Out-Null
           Expand-Archive -Path packages/coding-agent/binaries/atomic-windows-x64.zip -DestinationPath $smokeDir
+          node scripts/smoke-postgres-runtime.mjs (Join-Path $smokeDir "node_modules/@bastani/atomic-natives") windows-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $atomic = Join-Path $smokeDir "atomic.exe"
           & $atomic --version
           if ($LASTEXITCODE -ne 0) {
@@ -415,10 +446,11 @@ jobs:
 
   static-checks:
     name: static-checks (linux-x64)
-    # Platform-independent checks. They need no Rust toolchain, so they run once
-    # on Linux instead of twice.
+    # Platform-independent checks run once on Linux. The CI project's native
+    # global setup still builds a missing binding, so a cold job needs Rust.
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 6
+    # Run 34873678170: all steps passed, but 182s finalization hit the 3-minute cap. Add 50% headroom.
+    timeout-minutes: 5
     steps:
       - uses: useblacksmith/checkout@6fd481652155169ed4d2f25ebaf97464f685175f # v1.1
         with:
@@ -428,7 +460,7 @@ jobs:
       # TypeScript script, and scripts/*.ts run under Bun by design.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -487,7 +519,7 @@ jobs:
   # meaning this context had before.
   test:
     name: test (${{ matrix.os }}, ${{ matrix.binary_platform }})
-    needs: [suites, agent-suite, release-archive, static-checks]
+    needs: [unit-tests, integration-tests, agent-suite, release-archive, static-checks]
     if: always()
     strategy:
       matrix:
@@ -498,7 +530,7 @@ jobs:
             binary_platform: windows-x64
       fail-fast: false
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 5
+    timeout-minutes: 1
     steps:
       - name: Require every work job to have succeeded
         shell: bash

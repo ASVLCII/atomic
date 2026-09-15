@@ -40,6 +40,9 @@ InteractiveModeBase.prototype.getHostCustomUiState = function (this: Interactive
 		blockingInlineCustomUiDepth: this.blockingInlineCustomUiDepth,
 		blockingInlineCustomUiActive: this.blockingInlineCustomUiDepth > 0,
 		...(focusDeferred ? { blockingInlineCustomUiFocusDeferred: true } : {}),
+		...(this.navigationInlineCustomUiDepth > 0
+			? { blockingInlineCustomUiNeedsInput: this.blockingInlineCustomUiDepth > this.navigationInlineCustomUiDepth }
+			: {}),
 	};
 };
 
@@ -54,14 +57,20 @@ InteractiveModeBase.prototype.notifyHostCustomUiStateListeners = function (this:
 	}
 };
 
-InteractiveModeBase.prototype.beginHostInlineCustomUi = function (this: InteractiveModeBase): () => void {
+InteractiveModeBase.prototype.beginHostInlineCustomUi = function (
+	this: InteractiveModeBase,
+	purpose?: "prompt" | "navigation",
+): () => void {
 	let released = false;
 	this.blockingInlineCustomUiDepth++;
+	if (purpose === "navigation") this.navigationInlineCustomUiDepth = (this.navigationInlineCustomUiDepth ?? 0) + 1;
 	this.notifyHostCustomUiStateListeners();
 	return () => {
 		if (released) return;
 		released = true;
 		this.blockingInlineCustomUiDepth = Math.max(0, this.blockingInlineCustomUiDepth - 1);
+		if (purpose === "navigation")
+			this.navigationInlineCustomUiDepth = Math.max(0, this.navigationInlineCustomUiDepth - 1);
 		this.notifyHostCustomUiStateListeners();
 	};
 };
@@ -69,6 +78,7 @@ InteractiveModeBase.prototype.beginHostInlineCustomUi = function (this: Interact
 InteractiveModeBase.prototype.beginInlineCustomUiFocusDeferral = function (this: InteractiveModeBase): () => void {
 	let released = false;
 	this.deferredInlineCustomUiFocusDepth++;
+	this.notifyHostCustomUiStateListeners();
 	return () => {
 		if (released) return;
 		released = true;
@@ -76,6 +86,7 @@ InteractiveModeBase.prototype.beginInlineCustomUiFocusDeferral = function (this:
 		if (this.deferredInlineCustomUiFocusDepth === 0) {
 			this.focusHostInlineCustomUi();
 		}
+		this.notifyHostCustomUiStateListeners();
 	};
 };
 
@@ -137,14 +148,18 @@ InteractiveModeBase.prototype.createProjectTrustContext = function (
 	cwd: string,
 ): ProjectTrustContext {
 	const ui = this.createExtensionUIContext();
+	const runner = this.session.extensionRunner;
 	return {
 		cwd,
 		mode: "tui",
 		hasUI: true,
 		ui: {
-			select: ui.select,
-			confirm: ui.confirm,
-			input: ui.input,
+			select: (title, options, opts) =>
+				runner.withProjectTrustPrompt("select", title, () => ui.select(title, options, opts)),
+			confirm: (title, message, opts) =>
+				runner.withProjectTrustPrompt("confirm", title, () => ui.confirm(title, message, opts)),
+			input: (title, placeholder, opts) =>
+				runner.withProjectTrustPrompt("input", title, () => ui.input(title, placeholder, opts)),
 			notify: ui.notify,
 		},
 	};

@@ -25,9 +25,10 @@
  *     `Theme` when the overlay mounts.
  */
 
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { StageSnapshot, StageStatus } from "../shared/store-types.js";
 import { elapsedStageMs } from "../shared/timing.js";
-import { BOLD, hexBg, hexToAnsi, lerpColor, paint, RESET } from "./color-utils.js";
+import { BOLD, DEFAULT_BG, hexToAnsi, lerpColor, paint, RESET } from "./color-utils.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { NODE_H, NODE_W } from "./layout.js";
 import { wrapIdentifierLines } from "./run-identity-rows.js";
@@ -44,9 +45,7 @@ export interface NodeCardOpts {
 	/** Run stages, used to resolve blockedByStageId into a short upstream name. */
 	stages?: readonly StageSnapshot[];
 	/**
-	 * Pending steering/follow-up messages on this stage's live session. A
-	 * nonzero count claims the final body row so a queued message stays visible
-	 * while the user is detached from the stage chat.
+	 * Counts occupy their own row, reusing empty space before increasing height.
 	 */
 	queuedMessageCount?: number;
 }
@@ -126,10 +125,31 @@ function durationText(stage: StageSnapshot): string {
 }
 
 function metaText(stage: StageSnapshot): string {
-	if (stage.topologyState === "unavailable") return "topology unavailable";
-	const deps = stage.parentIds.length;
-	const dependencyText = deps === 0 ? "root" : deps === 1 ? "1 dep" : `${deps} deps`;
-	return dependencyText;
+	return stage.topologyState === "unavailable" ? "topology unavailable" : "";
+}
+
+/**
+ * Compact model label for the card's dedicated model row (~22 cells): the
+ * provider prefix is dropped, the thinking level is appended when set (omitted
+ * when off). On overflow the model name is truncated first, preserving the
+ * canonical `-fast` identity suffix and the complete thinking level.
+ * Empty when no model is resolved yet.
+ */
+function modelText(stage: StageSnapshot, innerWidth: number): string {
+	const model = stage.model;
+	if (model === undefined || model === "") return "";
+	const slash = model.lastIndexOf("/");
+	const short = slash >= 0 ? model.slice(slash + 1) : model;
+	const level = stage.thinkingLevel;
+	const showLevel = level !== undefined && level !== "" && level !== "off";
+	const suffix = showLevel ? ` · ${level}` : "";
+	const full = `${short}${suffix}`;
+	if (visibleWidth(full) <= innerWidth) return full;
+	// #1859: preserve identity text, without inferring routing from the suffix.
+	const modelSuffix = short.endsWith("-fast") ? "-fast" : "";
+	const name = modelSuffix ? short.slice(0, -modelSuffix.length) : short;
+	const room = Math.max(1, innerWidth - visibleWidth(modelSuffix + suffix));
+	return `${truncateToWidth(name, room, "…")}${modelSuffix}${suffix}`;
 }
 
 function workflowChildRunRows(stage: StageSnapshot, width: number): string[] {
@@ -154,7 +174,26 @@ function workflowChildMetaText(stage: StageSnapshot): string | undefined {
 
 function joinCompactStatusMeta(status: string, meta: string, width: number): string {
 	const candidates = [`${status} · ${meta}`, `${status} ·${meta}`, `${status}· ${meta}`, `${status}·${meta}`];
-	return candidates.find((candidate) => visibleWidth(candidate) <= width) ?? meta;
+	return candidates.find((candidate) => visibleWidth(candidate) <= width) ?? status;
+}
+
+/** Minimum height that preserves content and a separate queued-message row. */
+export function nodeCardHeight(
+	stage: StageSnapshot,
+	opts: Pick<NodeCardOpts, "width" | "queuedMessageCount"> = {},
+): number {
+	const queuedRows = queuedBadgeCount(opts.queuedMessageCount) > 0 ? 1 : 0;
+	const modelRows = stage.model !== undefined && stage.model !== "" ? 1 : 0;
+	let bodyRows: number;
+	if (stage.status === "awaiting_input") {
+		bodyRows = 2 + modelRows + queuedRows;
+	} else if (stage.workflowChild !== undefined || stage.workflowChildRun !== undefined) {
+		const innerWidth = Math.max(2, (opts.width ?? NODE_W) - 2);
+		bodyRows = workflowChildRunRows(stage, innerWidth).length + 1 + queuedRows;
+	} else {
+		bodyRows = 2 + modelRows + (metaText(stage) ? 1 : 0) + queuedRows;
+	}
+	return Math.max(NODE_H, bodyRows + 2);
 }
 
 function statusLabel(status: StageStatus): string {
@@ -215,7 +254,9 @@ function buildTitleSlot(
 	compact = false,
 ): { slot: string; visibleWidth: number } {
 	const maxName = Math.max(2, compact ? innerWidth - 1 : innerWidth - 4);
-	const safeName = truncate(name, maxName);
+	// Labels are plain text. Remove the truncator's resets before styling the
+	// whole tab so its ellipsis keeps the same background, foreground and weight.
+	const safeName = stripTerminalSequences(truncate(name, maxName));
 	if (focused) {
 		// Flanking spaces sit on the accent tab so the pill reads as a
 		// single coloured run. Use `paint` to combine bg + fg + bold +
@@ -239,19 +280,16 @@ function buildTitleSlot(
  */
 export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string[] {
 	const width = opts.width ?? NODE_W;
-	const height = opts.height ?? NODE_H;
+	const height = opts.height ?? nodeCardHeight(stage, opts);
 	const focused = opts.focused ?? false;
 	const phase = opts.pulsePhase ?? 0;
 	const theme = opts.theme;
 
 	const borderHex = pickBorder(stage.status, focused, phase, theme);
 	const bc = hexToAnsi(borderHex);
-	// Card stratum bg — painted explicitly on every cell so internal
-	// RESETs never let the terminal default leak through as a shadow
-	// strip on the right/bottom of the card. Per DESIGN.md the card
-	// background is `base` (same as the canvas), so this paints flush
-	// with the body bg and only the border outline reads visually.
-	const bg = hexBg(theme.bg);
+	// Node interiors share the unpainted canvas. Reset after the focused
+	// title tab so its accent background does not spill into the card.
+	const bg = DEFAULT_BG;
 	const innerWidth = Math.max(2, width - 2);
 
 	// Child workflow boundaries use the compact title path so their workflow
@@ -274,8 +312,8 @@ export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string
 
 	// A tool card is a fixed-size graph node, not a result preview: the read-only
 	// detail view owns args, result, error, and timing. The body is constant in
-	// every state so the card stops competing with it, while the status, meta,
-	// and dependency rows below keep their own content.
+	// every state so the card stops competing with it, while status and model
+	// information occupy the remaining rows.
 	const bodyText =
 		stage.nodeKind === "tool"
 			? "durable tool"
@@ -284,6 +322,7 @@ export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string
 				: durationText(stage);
 	const bodyHex = durationColor(stage.status, theme);
 	const statusText = `${statusIcon(stage.status)} ${stage.toolStatus ?? statusLabel(stage.status)}`;
+	const queuedCount = queuedBadgeCount(opts.queuedMessageCount);
 	const statusLine =
 		`${bg}${bc}│${RESET}` +
 		centreColored(statusText, innerWidth, bodyHex, bg, {
@@ -299,15 +338,13 @@ export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string
 
 	const contentRows = Math.max(0, height - 2);
 	const metaLine = `${bg}${bc}│${RESET}${centreColored(metaText(stage), innerWidth, theme.dim, bg)}${bg}${bc}│${RESET}`;
+	const model = modelText(stage, innerWidth);
+	const modelLine = `${bg}${bc}│${RESET}${centreColored(model, innerWidth, theme.textMuted, bg)}${bg}${bc}│${RESET}`;
 	const childRunLines = workflowChildRunRows(stage, innerWidth).map(
 		(row) => `${bg}${bc}│${RESET}${centreColored(row, innerWidth, theme.dim, bg)}${bg}${bc}│${RESET}`,
 	);
-	const queuedCount = queuedBadgeCount(opts.queuedMessageCount);
 	const childMeta = workflowChildMetaText(stage);
-	const childSummary =
-		childMeta === undefined
-			? undefined
-			: joinCompactStatusMeta(statusText, queuedCount > 0 ? queuedBadgeText(queuedCount) : childMeta, innerWidth);
+	const childSummary = childMeta === undefined ? undefined : joinCompactStatusMeta(statusText, childMeta, innerWidth);
 	const childSummaryLine =
 		childSummary === undefined
 			? undefined
@@ -317,41 +354,41 @@ export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string
 				}) +
 				`${bg}${bc}│${RESET}`;
 
+	const queuedLines =
+		queuedCount > 0
+			? [
+					`${bg}${bc}│${RESET}` +
+						centreColored(queuedBadgeText(queuedCount), innerWidth, theme.info, bg, { bold: true }) +
+						`${bg}${bc}│${RESET}`,
+				]
+			: [];
+	const modelLines = model === "" ? [] : [modelLine];
 	const interior: string[] =
 		stage.status === "awaiting_input"
 			? [
+					...modelLines,
 					statusLine,
-					`${bg}${bc}│${RESET}` +
-						centreColored("waiting for response", innerWidth, theme.info, bg) +
-						`${bg}${bc}│${RESET}`,
+					...(model === "" && queuedCount === 0
+						? [
+								`${bg}${bc}│${RESET}` +
+									centreColored("waiting for response", innerWidth, theme.info, bg) +
+									`${bg}${bc}│${RESET}`,
+							]
+						: []),
+					...queuedLines,
 					`${bg}${bc}│${RESET}` +
 						centreColored("↵ enter to respond", innerWidth, theme.dim, bg) +
 						`${bg}${bc}│${RESET}`,
 				]
 			: childSummaryLine === undefined
-				? [durLine, statusLine, metaLine]
-				: [...childRunLines, childSummaryLine];
-
-	// A queued steer/follow-up is invisible once the user leaves the stage chat,
-	// so it claims one existing body row rather than competing for space inside a
-	// line that would truncate. Child boundaries pack it beside status except when
-	// the awaiting-input interior leaves its redundant response row available.
-	const preferredBadgeRow =
-		stage.status === "awaiting_input" ? 1 : childSummaryLine === undefined ? interior.length - 1 : -1;
+				? [durLine, ...modelLines, statusLine, ...(metaText(stage) ? [metaLine] : []), ...queuedLines]
+				: [...childRunLines, childSummaryLine, ...queuedLines];
 
 	// Pad / clip to exactly `height` lines.
 	while (interior.length < contentRows) {
 		interior.push(`${bg}${bc}│${RESET}${bg}${" ".repeat(innerWidth)}${bg}${bc}│${RESET}`);
 	}
 	if (interior.length > contentRows) interior.length = contentRows;
-
-	if (queuedCount > 0 && interior.length > 0 && preferredBadgeRow >= 0) {
-		const badgeRow = preferredBadgeRow < interior.length ? preferredBadgeRow : interior.length - 1;
-		interior[badgeRow] =
-			`${bg}${bc}│${RESET}` +
-			centreColored(queuedBadgeText(queuedCount), innerWidth, theme.info, bg, { bold: true }) +
-			`${bg}${bc}│${RESET}`;
-	}
 
 	return [top, ...interior, bottom];
 }

@@ -68,6 +68,18 @@ describe("subagent skill resolution", () => {
 		);
 	});
 
+	test("resolves builtin herdr beside tmux and preserves its upstream safety contract", () => {
+		const result = resolveSkills(["herdr", "tmux"], repoRoot);
+		assert.deepEqual(result.missing, []);
+		const herdr = result.resolved.find((skill) => skill.name === "herdr");
+		assert.equal(herdr?.source, "builtin");
+		assert.equal(herdr?.path, join(builtinSubagentsSkillsRoot, "herdr", "SKILL.md"));
+		assert.match(herdr?.content ?? "", /If the check fails.*stop/);
+		assert.match(herdr?.content ?? "", /HERDR_ENV/);
+		assert.match(herdr?.content ?? "", /Do not run bare `herdr` for discovery/);
+		assert.match(buildSkillInjection(result.resolved), /<skill name="herdr">/);
+	});
+
 	test("builds skill injection for builtin skills without YAML frontmatter", () => {
 		const result = resolveSkills(["tdd", "playwright-cli"], repoRoot);
 		const injection = buildSkillInjection(result.resolved);
@@ -185,12 +197,16 @@ describe("subagent skill resolution", () => {
 		assert.equal(skillsWarning(cwd, ["subagent@builtin"], catalog), "Warning: skills not found: subagent@builtin.");
 	});
 
-	test("documents the debugger model, skills, tools, and coordination", () => {
+	test("documents debugger capabilities and points to current model configuration", () => {
 		const guidance = readFileSync(builtinSubagentSkillPath, "utf8");
 
 		const debuggerRow = guidance.split("\n").find((line) => line.startsWith("| `debugger`"));
 		assert.ok(debuggerRow, "missing debugger guidance row");
-		assert.match(debuggerRow, /`openai-codex\/gpt-5\.6-sol:xhigh`/);
+		const builtinGuidance = guidance.split("## Builtin Agents")[1]?.split("## Prompting specialist subagents")[0];
+		assert.ok(builtinGuidance, "missing builtin agent guidance");
+		assert.doesNotMatch(builtinGuidance, /Default model|\| Thinking \||Astra|Fable|gpt-6-astra/);
+		assert.match(builtinGuidance, /subagent\(\{ action: "get", agent: "debugger" \}\)/);
+		assert.match(builtinGuidance, /model, reasoning level, and ordered fallback chain in its agent definition/);
 		for (const capability of ["intercom", "contact_supervisor", "todo"]) {
 			assert.match(debuggerRow, new RegExp(`\\b${capability}\\b`));
 		}

@@ -7,9 +7,9 @@ import type {
 	HostInputFormRequest,
 	HostSessionPickerRequest,
 	WorkingIndicatorOptions,
-} from "../../core/extensions/index.ts";
+} from "../../core/extensions/index.js";
 import type { FooterDataProvider } from "../../core/footer-data-provider.ts";
-import { type Theme, theme } from "../interactive/theme/theme.ts";
+import { type Theme, theme } from "../interactive/theme/theme.js";
 import type { EngineCustomUiService } from "../interactive-engine/engine-custom-ui.ts";
 import type { EngineInputFormService } from "../interactive-engine/engine-input-form.ts";
 import type { EngineSessionPickerService } from "../interactive-engine/engine-session-picker.ts";
@@ -216,6 +216,7 @@ export function createRpcExtensionUIContext({
 					widgetKey: key,
 					widgetLines: content as string[],
 					widgetPlacement: options?.placement,
+					...(options?.scroll ? { widgetScroll: options.scroll } : {}),
 				});
 				return;
 			}
@@ -225,6 +226,7 @@ export function createRpcExtensionUIContext({
 					key,
 					content as (tui: TUI, theme: Theme) => Component & { dispose?(): void },
 					options?.placement,
+					options?.scroll,
 				);
 				return;
 			}

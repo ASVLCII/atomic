@@ -1,5 +1,5 @@
 import type { RunSnapshot } from "../shared/store-types.js";
-import { hexBg, hexToAnsi, RESET } from "./color-utils.js";
+import { fillBackground, hexBg, hexToAnsi, RESET } from "./color-utils.js";
 import { GraphViewGraphRenderer } from "./graph-view-graph-render.js";
 import { GRAPH_HEADER_ROWS, GraphViewLayout, graphLayoutNaturalHeight } from "./graph-view-layout.js";
 import { toolExpandKey } from "./graph-view-render-helpers.js";
@@ -67,6 +67,7 @@ export abstract class GraphViewRenderer extends GraphViewGraphRenderer {
 	/** Render to string lines. width = terminal columns. */
 	render(width: number): string[] {
 		if (this.mode === "widget") return this._renderWidget(width);
+		this._refreshQueuedNodeHeights();
 		return this._renderOverlay(width);
 	}
 
@@ -217,7 +218,8 @@ export abstract class GraphViewRenderer extends GraphViewGraphRenderer {
 			if (node) {
 				let next = scrollView.scrollTop;
 				if (node.y < next) next = node.y;
-				else if (node.y + NODE_H > next + viewportRows) next = node.y + NODE_H - viewportRows;
+				else if (node.y + (node.height ?? NODE_H) > next + viewportRows)
+					next = node.y + (node.height ?? NODE_H) - viewportRows;
 				scrollView.scrollTo(next);
 
 				const graphInner = Math.max(1, width - 4);
@@ -249,7 +251,7 @@ export abstract class GraphViewRenderer extends GraphViewGraphRenderer {
 			`${chromeBg} ${RESET}${top}${chromeBg}${" ".repeat(6 + fillerVisible)}${" ".repeat(2)}${RESET}`,
 			`${chromeBg} ${RESET}${mid}${chromeBg}  ${muted}idle${RESET}${filler}${" ".repeat(2)}${RESET}`,
 			`${chromeBg} ${RESET}${bot}${chromeBg}${" ".repeat(6 + fillerVisible)}${" ".repeat(2)}${RESET}`,
-		];
+		].map((line) => fillBackground(line, width, chromeBg));
 	}
 
 	private _renderBody(width: number, top: number, rows: number, _contentRows: number): string[] {

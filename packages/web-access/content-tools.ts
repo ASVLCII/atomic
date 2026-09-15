@@ -26,15 +26,16 @@ export function registerContentTools(pi: ExtensionAPI, deps: RegisterContentTool
 	pi.registerTool({
 		name: "code_search",
 		label: "Code Search",
-		description: "Search for code examples, documentation, and API references. Returns relevant code snippets and docs from GitHub, Stack Overflow, and official documentation. Use for any programming question — API usage, library examples, debugging help.",
+		description: "Ask DeepWiki about code, architecture, and APIs in a public GitHub repository. Requires repoName in owner/repo format. No API key required; no web-search fallback.",
 		promptSnippet:
-			"Use for programming/API/library questions to retrieve concrete examples and docs before implementing or debugging code.",
+			"Use for repository-specific programming questions. Supply repoName (owner/repo) and query; use web_search for broader discovery.",
 		parameters: Type.Object({
-			query: Type.String({ description: "Programming question, API, library, or debugging topic to search for" }),
+			repoName: Type.String({ pattern: "^[^\\s/]+/[^\\s/]+$", description: "Public GitHub repository in owner/repo format" }),
+			query: Type.String({ pattern: "\\S", description: "Question about the repository, sent verbatim to DeepWiki" }),
 			maxTokens: Type.Optional(Type.Integer({
 				minimum: 1000,
 				maximum: 50000,
-				description: "Maximum tokens of code/documentation context to return (default: 5000)",
+				description: "Best-effort output limit, approximately four characters per token (default: 5000)",
 			})),
 		}),
 
@@ -57,39 +58,35 @@ export function registerContentTools(pi: ExtensionAPI, deps: RegisterContentTool
 	pi.registerTool({
 		name: "fetch_content",
 		label: "Fetch Content",
-		description: "Fetch URL(s) and extract readable content as markdown. Supports YouTube video transcripts (with thumbnail), GitHub repository contents, and local video files (with frame thumbnail). Video frames can be extracted via timestamp/range or sampled across the entire video with frames alone. Falls back to Gemini for pages that block bots or fail Readability extraction. For YouTube and video files: ALWAYS pass the user's specific question via the prompt parameter — this directs the AI to focus on that aspect of the video, producing much better results than a generic extraction. Content is always stored and can be retrieved with get_search_content.",
+		description: 'Fetch webpages, PDFs, GitHub repositories, YouTube videos, or local video files. For ordinary pages, pass only {"urls":["https://example.com"]}; readable content is returned as markdown. For video analysis, include the user\'s question in prompt. Optional frames and timestamp extract images only from YouTube or local videos and are ignored for other inputs, including in mixed batches. Content is stored for get_search_content. Blocked or unreadable pages use extraction fallbacks.',
 		promptSnippet:
-			"Use to extract readable content from URL(s), YouTube, GitHub repos, or local videos. For video questions, pass the user's exact question in prompt.",
+			"Fetch webpages with urls only. For YouTube or local video analysis, include the user's question in prompt; omit frames and timestamp unless images are wanted.",
 		parameters: Type.Object({
-			url: Type.Optional(Type.String({ description: "Single URL to fetch" })),
-			urls: Type.Optional(Type.Array(Type.String(), { description: "Multiple URLs (parallel)" })),
+			urls: Type.Array(Type.String({ minLength: 1 }), {
+				minItems: 1,
+				description: 'URLs or local video paths to fetch. Always use an array, even for one URL: {"urls":["https://example.com"]}. Multiple URLs are fetched in parallel.',
+			}),
 			forceClone: Type.Optional(Type.Boolean({
-				description: "Force cloning large GitHub repositories that exceed the size threshold",
+				description: "GitHub repositories only: allow cloning above the configured size threshold. Omit for webpages and videos.",
 			})),
 			prompt: Type.Optional(Type.String({
-				description: "Question or instruction for video analysis (YouTube and video files). Pass the user's specific question here — e.g. 'describe the book shown at the advice for beginners section'. Without this, a generic transcript extraction is used which may miss what the user is asking about.",
+				description: "YouTube/local video analysis only: the user's specific question. Omit for webpages; this is not a webpage search or extraction filter.",
 			})),
 			timestamp: Type.Optional(Type.String({
-				description: "Extract video frame(s) at a timestamp or time range. Single: '1:23:45', '23:45', or '85' (seconds). Range: '23:41-25:00' extracts evenly-spaced frames across that span (default 6). Use frames with ranges to control density; single+frames uses a fixed 5s interval. YouTube requires yt-dlp + ffmpeg; local videos require ffmpeg. Use a range when you know the approximate area but not the exact moment — you'll get a contact sheet to visually identify the right frame.",
+				description: "YouTube/local video images only: seconds ('85'), time ('1:25'), or range ('1:25-2:00'). Omit for text/transcripts. Ignored for non-video inputs. Ranges default to 6 frames; use frames to adjust.",
 			})),
 			frames: Type.Optional(Type.Integer({
 				minimum: 1,
 				maximum: 12,
-				description: "Number of frames to extract. Use with timestamp range for custom density, with single timestamp to get N frames at 5s intervals, or alone to sample across the entire video. Requires yt-dlp + ffmpeg for YouTube, ffmpeg for local video.",
+				description: "YouTube/local video images only: 1-12 frames. Alone, samples the whole video; with a range, samples that span; with a single timestamp, uses 5s intervals. Ignored for non-video inputs. Omit for text/transcripts. Requires ffmpeg, plus yt-dlp for YouTube.",
 			})),
 			model: Type.Optional(Type.String({
-				description: "Override the Gemini model for video/YouTube analysis (e.g. 'gemini-2.5-flash', 'gemini-3-flash-preview'). Defaults to config or gemini-3-flash-preview.",
+				description: "Gemini model override for YouTube/local video analysis only. Omit to use the configured default; does not select the webpage extraction model.",
 			})),
-		}),
+		}, { additionalProperties: false }),
 
 		async execute(_toolCallId, params, signal, onUpdate) {
-			const urlList = params.urls ?? (params.url ? [params.url] : []);
-			if (urlList.length === 0) {
-				return {
-					content: [{ type: "text", text: "Error: No URL provided." }],
-					details: { error: "No URL provided" },
-				};
-			}
+			const urlList = params.urls;
 
 			onUpdate?.({
 				content: [{ type: "text", text: `Fetching ${urlList.length} URL(s)...` }],
@@ -173,17 +170,34 @@ export function registerContentTools(pi: ExtensionAPI, deps: RegisterContentTool
 			for (const { url, title, content, error } of fetchResults) {
 				if (error) {
 					output += `- ${url}: Error - ${error}\n`;
+					if (content.length > 0) {
+						output += `\nPartial content (incomplete):\n${content.slice(0, deps.maxInlineContent)}\n`;
+						if (content.length > deps.maxInlineContent) output += "[Partial content truncated...]\n";
+						output += "\n";
+					}
 				} else {
 					output += `- ${title || url} (${content.length} chars)\n`;
 				}
 			}
-			output += `\n---\nUse get_search_content({ responseId: "${responseId}", urlIndex: 0 }) to retrieve full content.`;
-
 			const allFailed = successful === 0;
+			if (allFailed) {
+				const contentStatus = totalChars > 0
+					? "Partial content was retained; extraction is incomplete."
+					: "No content was retrieved.";
+				output = `All ${urlList.length} URL fetch(es) failed. ${contentStatus}\n\n${output}` +
+					"\nCheck each URL and its error above. Retry transient failures individually with " +
+					'fetch_content({ urls: ["<failed URL>"] }). If access is blocked or extraction keeps failing, ' +
+					"try an accessible alternate URL or use web_search to find the information. " +
+					(totalChars > 0
+						? "get_search_content cannot recover the missing content; use the incomplete excerpts above with caution."
+						: "get_search_content cannot recover content from these failed fetches.");
+			} else {
+				output += `\n---\nUse get_search_content({ responseId: "${responseId}", urlIndex: 0 }) to retrieve full content.`;
+			}
 			return {
 				content: [{ type: "text", text: output }],
 				details: {
-					...(allFailed ? { outcome: "all_failed", stage: "fetch", error: `All ${urlList.length} URL fetch(es) failed`, failedUrls: urlList.length } : {}),
+					...(allFailed ? { outcome: "all_failed", stage: "fetch", error: output, failedUrls: urlList.length } : {}),
 					urls: urlList, urlCount: urlList.length, successful, totalChars, responseId,
 				},
 			};

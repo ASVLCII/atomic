@@ -9,19 +9,19 @@ import {
 	setCapabilityOverrides,
 	type TuiInputListener,
 } from "@earendil-works/pi-tui";
-
 import type { AgentSessionQueuePauseControl } from "../../core/agent-session-methods.ts";
 import type { MarkdownTransformer } from "../../core/extensions/types.ts";
 import type { FullscreenExitOutput, MermaidRenderingMode } from "../../core/settings-manager.ts";
 import type { EarlyInputSnapshot } from "../../main-early-input.ts";
 import { readClipboardText } from "../../utils/clipboard.ts";
-import { renderEngineDiagnostic } from "../interactive-engine/engine-diagnostic-view.ts";
+import { renderEngineDiagnostic } from "../interactive-engine/engine-diagnostic-view.js";
 import { attachInteractiveEngineHost } from "../interactive-engine/extension-ui-bridge.ts";
 import type { RemoteToolExecutionComponent } from "../interactive-engine/remote-renderer.ts";
 import { KeybindingsReloadCoordinator } from "../rpc/rpc-keybindings-reload.ts";
 import type { AtomicWorkingLoader } from "./components/atomic-working-status.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
 import type { TranscriptOverlayReserve } from "./components/reserved-bottom-overlay.ts";
+import { WidgetContainer } from "./components/scroll-widget.js";
 import {
 	type AgentSession,
 	type AgentSessionRuntime,
@@ -186,6 +186,20 @@ export interface InteractiveTuiInputSubscription {
 	unsubscribe: () => void;
 }
 
+interface WorkingStatusEditor extends EditorComponent {
+	readonly embedWorkingStatus: boolean;
+	setWorkingStatusIndicator(indicator: AtomicWorkingLoader | undefined): void;
+}
+
+function isWorkingStatusEditor(editor: EditorComponent): editor is WorkingStatusEditor {
+	return (
+		"embedWorkingStatus" in editor &&
+		editor.embedWorkingStatus === true &&
+		"setWorkingStatusIndicator" in editor &&
+		typeof editor.setWorkingStatusIndicator === "function"
+	);
+}
+
 export class InteractiveModeBase {
 	runtimeHost: AgentSessionRuntime;
 
@@ -223,15 +237,6 @@ export class InteractiveModeBase {
 
 	setFullscreenCopyOnSelect(enabled: boolean): void {
 		if (this.renderer.mode === "fullscreen") this.renderer.setCopyOnSelect(enabled);
-	}
-
-	getFullscreenCopyOnSelect(): boolean | undefined {
-		return this.renderer.mode === "fullscreen" ? this.renderer.getCopyOnSelect() : undefined;
-	}
-
-	async copyActiveFullscreenSelection(): Promise<boolean | undefined> {
-		if (this.renderer.mode !== "fullscreen" || !this.renderer.hasActiveSelection()) return undefined;
-		return this.renderer.copyActiveSelectionToClipboard();
 	}
 
 	private readonly onRightClickPaste = (): void => {
@@ -284,6 +289,7 @@ export class InteractiveModeBase {
 	interactiveEngineShortcutHandler: ((data: string) => boolean) | undefined;
 
 	disposeInteractiveEngineHost: () => void = () => {};
+	disposeMarkitDiagnosticSink: () => void = () => {};
 
 	version: string;
 
@@ -298,6 +304,7 @@ export class InteractiveModeBase {
 	startupReplayActiveInput: string | undefined = undefined;
 
 	startupDraftText: string | undefined = undefined;
+	workingIndicatorEmbedded = false;
 
 	startupCookedInputRecovered = false;
 
@@ -313,7 +320,7 @@ export class InteractiveModeBase {
 
 	workingIndicatorOptions: LoaderIndicatorOptions | undefined = undefined;
 
-	readonly defaultWorkingMessage = "Working...";
+	readonly defaultWorkingMessage = "Working";
 
 	readonly defaultHiddenThinkingLabel = "Thinking...";
 
@@ -326,6 +333,8 @@ export class InteractiveModeBase {
 	changelogMarkdown: string | undefined = undefined;
 
 	startupNoticesShown = false;
+	/** Last model-catalog warning already shown, so the deferred re-read only speaks on a change. */
+	reportedModelCatalogWarning: string | undefined;
 	startupNoticesPrepared = false;
 
 	anthropicSubscriptionWarningShown = false;
@@ -398,7 +407,7 @@ export class InteractiveModeBase {
 	promptTurnWorkingLoaderActive = false;
 
 	// Auto-retry state
-	retryLoader: Loader | undefined = undefined;
+	retryLoader: AtomicWorkingLoader | undefined = undefined;
 	fallbackLoader: Loader | undefined = undefined;
 
 	retryCountdown: CountdownTimer | undefined = undefined;
@@ -438,9 +447,14 @@ export class InteractiveModeBase {
 
 	blockingInlineCustomUiDepth = 0;
 
+	navigationInlineCustomUiDepth = 0;
+
 	deferredInlineCustomUiFocusDepth = 0;
 
 	pendingInlineCustomUiFocus: Component | undefined = undefined;
+
+	/** Pending inline mounts in display order, oldest first. */
+	inlineCustomUiStack: { component: Component }[] = [];
 
 	hostCustomUiStateListeners = new Set<HostCustomUiStateListener>();
 
@@ -569,9 +583,17 @@ export class InteractiveModeBase {
 		// `resume-hint` keeps whatever the alternate screen held: the prior
 		// shell contents reappear and shutdown prints only the resume line.
 		this.ui.stop({ preserveScreen: isFullscreen && fullscreenExitOutput === "resume-hint" });
+		this.disposeMarkitDiagnosticSink();
 	}
 
 	declare options: InteractiveModeOptions;
+
+	setEditorWorkingStatusIndicator(indicator: AtomicWorkingLoader | undefined): boolean {
+		this.defaultEditor.setWorkingStatusIndicator(undefined);
+		if (!isWorkingStatusEditor(this.editor)) return false;
+		this.editor.setWorkingStatusIndicator(indicator);
+		return true;
+	}
 
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
@@ -619,8 +641,8 @@ export class InteractiveModeBase {
 		this.chatContainer.addChild(this.startupNoticesContainer);
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
-		this.widgetContainerAbove = new Container();
-		this.widgetContainerBelow = new Container();
+		this.widgetContainerAbove = new WidgetContainer();
+		this.widgetContainerBelow = new WidgetContainer();
 		this.keybindings = KeybindingsManager.create(runtimeHost.services.agentDir);
 		this.reloadCoordinator = new KeybindingsReloadCoordinator(this.keybindings);
 		setKeybindings(this.keybindings);
@@ -635,7 +657,12 @@ export class InteractiveModeBase {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		this.footer = new FooterComponent(
+			this.session,
+			this.footerDataProvider,
+			undefined,
+			() => this.navigationInlineCustomUiDepth > 0,
+		);
 		this.footerContainer = new Container();
 		this.footerContainer.addChild(this.footer);
 		this.usageMeter = new UsageMeterComponent(this.session);
@@ -659,7 +686,7 @@ export class InteractiveModeBase {
 			(diagnostic) =>
 				renderEngineDiagnostic(diagnostic, {
 					stopWorkingLoader: () => this.stopWorkingLoader(),
-					showStatus: (message) => this.showStatus(message),
+					showStatus: (message, persist) => this.showStatus(message, persist),
 					showError: (message) => this.showError(message),
 				}),
 			{

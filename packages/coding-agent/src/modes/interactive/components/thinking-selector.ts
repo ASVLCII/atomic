@@ -5,16 +5,15 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
-	matchesKey,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
 	Spacer,
 	Text,
 } from "@earendil-works/pi-tui";
-import { getSelectListTheme, theme } from "../theme/theme.ts";
+import { getSelectListTheme, theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyDisplayText } from "./keybinding-hints.ts";
+import { keyDisplayText } from "./keybinding-hints.js";
 
 const THINKING_SELECT_LIST_LAYOUT: SelectListLayoutOptions = { minPrimaryColumnWidth: 12, maxPrimaryColumnWidth: 32 };
 const LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
@@ -34,7 +33,6 @@ export class ThinkingSelectorComponent extends Container implements Focusable {
 	private allItems: SelectItem[];
 	private readonly onSelectLevel: (level: ThinkingLevel) => void;
 	private readonly onCancelSelect: () => void;
-	private readonly onSelectAsDefault?: (level: ThinkingLevel) => void;
 	private _focused = false;
 
 	get focused(): boolean {
@@ -50,13 +48,11 @@ export class ThinkingSelectorComponent extends Container implements Focusable {
 		availableLevels: ThinkingLevel[],
 		onSelectLevel: (level: ThinkingLevel) => void,
 		onCancelSelect: () => void,
-		onSelectAsDefault?: (level: ThinkingLevel) => void,
 		defaultThinkingLevel?: ThinkingLevel,
 	) {
 		super();
 		this.onSelectLevel = onSelectLevel;
 		this.onCancelSelect = onCancelSelect;
-		this.onSelectAsDefault = onSelectAsDefault;
 		this.allItems = availableLevels.map((level) => ({
 			value: level,
 			label: `${level === currentLevel ? "✓ " : "  "}${level}`,
@@ -66,7 +62,7 @@ export class ThinkingSelectorComponent extends Container implements Focusable {
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 		this.addChild(new Text("Thinking Level", 0, 0));
-		this.addChild(new Text(`${keyDisplayText("app.thinking.cycle")} cycles thinking levels in-session`, 0, 0));
+		this.addChild(new Text(`${keyDisplayText("app.thinking.cycle")} cycles thinking levels`, 0, 0));
 		this.addChild(new Spacer(1));
 		this.searchInput = new Input();
 		this.searchInput.onSubmit = () => this.selectList.handleInput("\r");
@@ -75,7 +71,16 @@ export class ThinkingSelectorComponent extends Container implements Focusable {
 		this.selectList = this.buildSelectList(this.allItems, currentLevel);
 		this.selectListChildIndex = this.children.length;
 		this.addChild(this.selectList);
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · Ctrl+S to set as default · Esc to cancel"), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					`  ${keyDisplayText("tui.select.confirm")} to select · ${keyDisplayText("tui.select.cancel")} to cancel`,
+				),
+				0,
+				0,
+			),
+		);
 		this.addChild(new DynamicBorder());
 	}
 
@@ -99,11 +104,6 @@ export class ThinkingSelectorComponent extends Container implements Focusable {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesKey(keyData, "ctrl+s") && this.onSelectAsDefault) {
-			const item = this.selectList.getSelectedItem();
-			if (item) this.onSelectAsDefault(item.value as ThinkingLevel);
-			return;
-		}
 		const kb = getKeybindings();
 		if (
 			kb.matches(keyData, "tui.select.up") ||

@@ -28,6 +28,7 @@ async function registerIsolatedTests(): Promise<void> {
 	// Only ever reached inside the `bun test` child spawned below, where
 	// `bun:test`'s module registry is the real one. vitest has no equivalent.
 	const { mock } = await import("bun:test");
+	const { stripTerminalSequences } = await import("@earendil-works/pi-tui/dist/utils.js");
 	class TestComponent {}
 	const [{ ScrollView }, { VStack }, { Input }] = await Promise.all([
 		import("@earendil-works/pi-tui/dist/components/scroll-view.js"),
@@ -56,6 +57,7 @@ async function registerIsolatedTests(): Promise<void> {
 		},
 		decodeKittyPrintable: () => undefined,
 		matchesKey: (data: string, key: string) => data === key,
+		stripTerminalSequences,
 		truncateToWidth: (text: string, width: number) => text.slice(0, width),
 		visibleWidth: (text: string) => text.length,
 		wrapTextWithAnsi: (text: string) => [text],
@@ -63,6 +65,9 @@ async function registerIsolatedTests(): Promise<void> {
 
 	mock.module("@bastani/atomic", () => ({
 		ChatSessionHost: TestComponent,
+		classifyChatCommand: () => assert.fail("graph overlay checks must not classify stage-chat commands"),
+		createSessionSkillAutocompleteProvider: () =>
+			assert.fail("graph overlay checks must not create skill completion"),
 		TranscriptFollowIndicator: TestComponent,
 		TRANSCRIPT_JUMP_TO_END_URL: "atomic-ui://transcript/jump-to-end",
 		keyHint: (key: string) => key,
@@ -117,6 +122,7 @@ async function registerIsolatedTests(): Promise<void> {
 		const pi: OverlayPiSurface = {
 			ui: {
 				custom: (factory, options) => {
+					assert.equal(options.purpose, "navigation", "graph inspection must not open an approval span");
 					options.onHandle?.(handle);
 					const tui: PiCustomOverlayFactoryTui = {
 						requestRender: () => {

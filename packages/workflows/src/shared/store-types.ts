@@ -258,6 +258,24 @@ export interface PendingStageMessage {
 	/** Deterministic outbox identity retained until the correlated sender notification is acknowledged. */
 	readonly undeliverableNotificationId?: string;
 	readonly undeliverableNotifiedAt?: string;
+	/** Slice 3 (D3): sticky entry delivered to every future matching stage until the root run terminates. */
+	readonly sticky?: true;
+	/** Verbatim target string as sent (path or pattern form, `workflow:<rootRunId>/...`). */
+	readonly targetPath?: string;
+	/** D4 speculative accept: target was not present in the persisted possible-stage set. */
+	readonly notInKnownSet?: true;
+	/** One immutable record per (entry, materialized stage) delivery; the exactly-once ledger (D3). */
+	readonly deliveries?: readonly PendingStageMessageDelivery[];
+	/** Total recorded deliveries; observable on the entry. */
+	readonly deliveryCount?: number;
+}
+
+/** One exactly-once delivery of a sticky pending-stage entry to one materialized stage. */
+export interface PendingStageMessageDelivery {
+	readonly runId: string;
+	readonly stageId: string;
+	readonly stageName?: string;
+	readonly deliveredAt: string;
 }
 
 export type PendingStageMessageInput = Omit<
@@ -271,7 +289,16 @@ export type PendingStageMessageInput = Omit<
 	| "undeliverableReason"
 	| "undeliverableNotificationId"
 	| "undeliverableNotifiedAt"
+	| "sticky"
+	| "deliveries"
+	| "deliveryCount"
 >;
+
+/** Input for a sticky (D3) pending-stage entry: the target is a path/pattern, not one exact stage. */
+export type PendingStickyStageMessageInput = PendingStageMessageInput & {
+	readonly targetPath: string;
+	readonly notInKnownSet?: true;
+};
 
 export type PendingStageQueueResult =
 	| {
@@ -395,10 +422,21 @@ export interface StageSnapshot {
 	 */
 	sessionId?: string;
 	sessionFile?: string;
+	/** Live startup phase/age. Historical snapshots do not prove an active owner. */
+	startup?: import("./stage-startup.js").StageStartupSnapshot;
 	/** Effective model id selected for this stage after fallback resolution. */
 	model?: string;
-	/** True when Codex fast mode applied to this workflow stage. */
-	fastMode?: boolean;
+	/**
+	 * Effective reasoning/thinking level in force for this stage's session
+	 * (e.g. "off", "low", "high"). Populated on the live snapshot alongside
+	 * {@link model} so the `/workflow connect` graph node cards can show the
+	 * same model + thinking identity the main session footer shows, and
+	 * restored onto replayed stages from the durable checkpoint so
+	 * `/workflow resume` keeps that identity. Optional: absent for stages
+	 * whose model has no reasoning control, and for runs checkpointed before
+	 * this field was persisted.
+	 */
+	thinkingLevel?: string;
 	/** Ordered model ids attempted by fallback orchestration. */
 	attemptedModels?: readonly string[];
 	/** Per-model fallback attempt outcomes. */
@@ -530,6 +568,8 @@ export interface RunSnapshot {
 	pendingPrompt?: PendingPrompt;
 	/** Durable messages queued for workflow stages that have not started yet. */
 	pendingStageMessages?: PendingStageMessage[];
+	/** Possible stage targets from the D1 static scan; root runs only; empty when not scanned (D10). */
+	possibleStages?: readonly string[];
 }
 
 export interface StoreSnapshot {

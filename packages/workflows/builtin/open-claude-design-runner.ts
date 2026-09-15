@@ -102,22 +102,27 @@ export async function runOpenClaudeDesignWorkflow(ctx: OpenClaudeDesignContext):
     }
   };
 
-  // Anthropic-heavy chain for design taste. Opus stays at :xhigh here because
-  // visual quality, rather than cost per task, is the primary objective.
+  // Fable 5.1 medium leads the design stages, followed by Astra medium.
+  // Keep the design-specific ordering of the older model fallbacks.
   const designModelConfig = {
-    model: "anthropic/claude-opus-5:high",
+    model: "anthropic/claude-fable-5-1:medium",
     fallbackModels: [
+      "github-copilot/claude-fable-5-1:medium",
+      "openai-codex/gpt-6-astra:medium",
+      "github-copilot/gpt-6-astra:medium",
+      "openai/gpt-6-astra:medium",
+      "anthropic/claude-opus-5:high",
       "github-copilot/claude-opus-5:high",
-      "anthropic/claude-fable-5:high",
-      "github-copilot/claude-fable-5:high",
+      "anthropic/claude-fable-5:medium",
+      "github-copilot/claude-fable-5:medium",
       "kimi-coding/k3:max",
       "moonshotai/kimi-k3:max",
       "moonshotai-cn/kimi-k3:max",
       "anthropic/claude-opus-4-8:high",
       "github-copilot/claude-opus-4.8:high",
-      "openai-codex/gpt-5.6-sol:xhigh",
-      "github-copilot/gpt-5.6-sol:xhigh",
-      "openai/gpt-5.6-sol:xhigh",
+      "openai-codex/gpt-5.6-sol:high",
+      "github-copilot/gpt-5.6-sol:high",
+      "openai/gpt-5.6-sol:high",
       "xai/grok-4.6:xhigh",
       "github-copilot/grok-4.6:xhigh",
       "zai/glm-5.3:high",
@@ -126,13 +131,15 @@ export async function runOpenClaudeDesignWorkflow(ctx: OpenClaudeDesignContext):
       "zai-coding-cn/glm-5.3-flash:high",
       "baseten/zai-org/GLM-5.3:high",
       "baseten/zai-org/GLM-5.3-Flash:high",
+      "openrouter/anthropic/claude-fable-5-1:medium",
+      "openrouter/openai/gpt-6-astra:medium",
       "openrouter/anthropic/claude-opus-5:high",
-      "openrouter/anthropic/claude-fable-5:high",
+      "openrouter/anthropic/claude-fable-5:medium",
       "openrouter/anthropic/claude-opus-4-8:high",
       "openrouter/moonshotai/kimi-k3:max",
-      "openrouter/openai/gpt-5.6-sol:xhigh",
+      "openrouter/openai/gpt-5.6-sol:high",
       "openrouter/sakana/fugu-ultra:high",
-      "openrouter/x-ai/grok-4.6",
+      "openrouter/x-ai/grok-4.6:xhigh",
       "openrouter/z-ai/glm-5.3:high",
       "openrouter/z-ai/glm-5.3-flash:high",
     ],

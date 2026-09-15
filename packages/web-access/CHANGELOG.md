@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.19] - 2026-09-13
+
+Cumulative release of the `0.9.19-alpha.6` through `0.9.19-alpha.9` prereleases. Per-change details remain in the unchanged prerelease sections below.
+
+### Breaking Changes
+
+- `fetch_content` requires a nonempty `urls` array of nonempty strings. Replace `{ url: "..." }` with `{ urls: ["..."] }`. Invalid shapes and unrecognized fields are rejected before fetching; `get_search_content` selectors are unchanged.
+- `code_search` requires `repoName` in `owner/repo` format alongside `query` and uses DeepWiki MCP for public-repository questions instead of Exa. Update query-only calls to include the repository. No API key is required and there is no Exa fallback; `maxTokens` remains a best-effort output bound and `web_search` is unchanged.
+
+### Fixed
+
+- Failed `fetch_content` batches show each URL's error and recovery steps. Retained partial content is labeled incomplete rather than absent.
+- Video frame options are ignored for non-video inputs, preventing video-only errors for webpages and mixed batches. Tool descriptions distinguish page fetching, video analysis and frame extraction.
+
+## [0.9.19-alpha.9] - 2026-09-12
+
+### Fixed
+
+- `fetch_content` ignores video frame options for non-video inputs, so webpages and mixed batches no longer fail with video-only errors. Tool and parameter descriptions now distinguish ordinary page fetching, video analysis, and frame extraction.
+
+## [0.9.19-alpha.7] - 2026-09-12
+
+### Fixed
+
+- `fetch_content` now shows each URL's error and recovery steps when an entire batch fails, instead of hiding the causes behind a generic failure count. Retained partial content is shown as incomplete excerpts rather than incorrectly reported as absent.
+
+## [0.9.19-alpha.6] - 2026-09-11
+
+### Breaking Changes
+
+- `fetch_content` now requires a nonempty `urls` array of nonempty strings for both single and batch requests. Replace `{ url: "..." }` with `{ urls: ["..."] }`. Invalid argument shapes and unrecognized fields are rejected before fetching; the `get_search_content` selectors are unchanged.
+- `code_search` now requires a single `repoName` in `owner/repo` format alongside `query`. It asks DeepWiki about that public GitHub repository instead of searching Exa, with no Exa fallback. Update query-only calls to include the repository. No API key is required; `maxTokens` remains a best-effort local output bound. Unrelated `web_search` providers are unchanged.
+
 ## [0.9.14] - 2026-08-19
 
 Cumulative release of the `0.9.14-alpha.3` – `0.9.14-alpha.4` prereleases. The summary below covers the user-visible outcome of that work; the per-change detail remains in the prerelease sections below.

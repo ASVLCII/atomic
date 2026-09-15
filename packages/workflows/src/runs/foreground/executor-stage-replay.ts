@@ -2,8 +2,9 @@ import type { GraphFrontierTracker } from "../../engine/graph-inference.js";
 import type { EngineStageRuntimeOptions } from "../../engine/options.js";
 import { appendStageEnd, appendStageStart } from "../../shared/persistence-session-entries.js";
 import type { Store } from "../../shared/store.js";
+import { workflowObservationRuntime } from "../../shared/store-factory.js";
 import type { StageSnapshot } from "../../shared/store-types.js";
-import { elapsedStageMs } from "../../shared/timing.js";
+import { workflowActivityNodeKey } from "../../shared/workflow-activity.js";
 import { stageReplayFields } from "./executor-lifecycle.js";
 import type { WorkflowExitCleanup } from "./executor-types.js";
 import type { InternalStageContext } from "./stage-runner.js";
@@ -22,6 +23,7 @@ export function createReplayStageContext(input: {
 	readonly throwIfWorkflowExitSelected: () => void;
 }): InternalStageContext {
 	const { runId, name, stageId, stageSnapshot, replaySource } = input;
+	workflowObservationRuntime(input.activeStore).replayStageIds.add(workflowActivityNodeKey(runId, stageId));
 	let replayFinalized = false;
 	let unregisterWorkflowExitCleanup = (): void => {};
 	let stageStartEntryAppended = false;
@@ -35,7 +37,7 @@ export function createReplayStageContext(input: {
 			name,
 			parentIds: stageSnapshot.parentIds,
 			...stageReplayFields(stageSnapshot),
-			ts: stageSnapshot.startedAt ?? Date.now(),
+			ts: stageSnapshot.startedAt,
 		});
 	};
 
@@ -45,7 +47,8 @@ export function createReplayStageContext(input: {
 			runId,
 			stageId,
 			status: stageSnapshot.status,
-			durationMs: stageSnapshot.durationMs ?? 0,
+			durationMs: stageSnapshot.durationMs,
+			endedAt: stageSnapshot.endedAt,
 			...(stageSnapshot.status === "completed" && stageSnapshot.result !== undefined
 				? { summary: stageSnapshot.result }
 				: {}),
@@ -65,8 +68,6 @@ export function createReplayStageContext(input: {
 			delete stageSnapshot.result;
 			stageSnapshot.skippedReason = input.workflowExitSkippedReason(reason);
 		}
-		stageSnapshot.endedAt = Date.now();
-		stageSnapshot.durationMs = elapsedStageMs(stageSnapshot, stageSnapshot.endedAt);
 		input.activeStore.recordStageEnd(runId, stageSnapshot);
 		input.opts.onStageEnd?.(runId, stageSnapshot);
 		appendReplayStageEnd();
@@ -96,6 +97,7 @@ export function createReplayStageContext(input: {
 	return {
 		name,
 		prompt: replayText,
+		__continuePrompt: replayText,
 		complete: replayText,
 		sendUserMessage: async () => rejectReplayMutation("send a user message"),
 		__sendUserMessage: async () => rejectReplayMutation("send a user message"),
@@ -120,7 +122,7 @@ export function createReplayStageContext(input: {
 			return replaySource.model as never;
 		},
 		get thinkingLevel() {
-			return undefined as never;
+			return replaySource.thinkingLevel as never;
 		},
 		get messages() {
 			return [] as never;
@@ -144,7 +146,7 @@ export function createReplayStageContext(input: {
 		__pendingMessageCount: () => 0,
 		__modelFallbackMeta: () => ({
 			...(replaySource.model !== undefined ? { model: replaySource.model } : {}),
-			...(replaySource.fastMode === true ? { fastMode: replaySource.fastMode } : {}),
+			...(replaySource.thinkingLevel !== undefined ? { thinkingLevel: replaySource.thinkingLevel } : {}),
 			...(replaySource.attemptedModels !== undefined ? { attemptedModels: replaySource.attemptedModels } : {}),
 			...(replaySource.modelAttempts !== undefined ? { modelAttempts: replaySource.modelAttempts } : {}),
 		}),

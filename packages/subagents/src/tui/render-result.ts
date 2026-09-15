@@ -15,6 +15,7 @@ import {
 } from "./render-result-animation.js";
 import { renderMultiCompact, renderSingleCompact } from "./render-result-compact.js";
 import { subagentResultRenderKey } from "./render-stable-output.js";
+import { renderSubagentStatus } from "./render-status.js";
 import {
 	buildLiveStatusLine,
 	displayProgressDurationMs,
@@ -83,6 +84,7 @@ export function renderSubagentResult(
 	theme: Theme,
 ): Component {
 	const d = result.details;
+	if (d?.statusGroups) return renderSubagentStatus(d.statusGroups, options.expanded, theme);
 	const liveMultiProgress = d?.mode === "parallel" && (d?.progress?.length ?? 0) > 0;
 	if (!d?.results.length && !liveMultiProgress) {
 		const t = result.content[0];
@@ -110,11 +112,13 @@ export function renderSubagentResult(
 				? theme.fg("warning", "yielded")
 				: r.detached || r.status === "continued"
 					? theme.fg("warning", "detached")
-					: isParentCancellation(r.cause) && (r.interrupted || r.status === "interrupted")
-						? theme.fg("warning", "cancelled")
-						: r.status === "ok"
-							? theme.fg("success", "ok")
-							: theme.fg("error", "failed");
+					: r.status === "killed"
+						? theme.fg("warning", "killed (non-resumable)")
+						: isParentCancellation(r.cause) && (r.interrupted || r.status === "interrupted")
+							? theme.fg("warning", "cancelled")
+							: r.status === "ok"
+								? theme.fg("success", "ok")
+								: theme.fg("error", "failed");
 		const contextBadge = d.context === "fork" ? theme.fg("warning", " [fork]") : "";
 		const output = r.truncation?.text || getSingleResultOutput(r);
 
@@ -127,7 +131,7 @@ export function renderSubagentResult(
 
 		const w = getTermWidth() - 4;
 		const fit = (text: string) => (expanded ? text : truncLine(text, w));
-		const modelDisplay = modelThinkingBadge(theme, r.model, r.thinking, r.fastMode);
+		const modelDisplay = modelThinkingBadge(theme, r.model, r.thinking);
 		const toolCallLines = getToolCallLines(r, expanded);
 		const c = new Container();
 		c.addChild(
@@ -227,19 +231,22 @@ export function renderSubagentResult(
 	const hasCancelled = d.results.some(
 		(result) => isParentCancellation(result.cause) && (result.interrupted || result.status === "interrupted"),
 	);
+	const hasKilled = d.results.some((result) => result.status === "killed");
 	const icon = hasRunning
 		? theme.fg("warning", "running")
 		: d.parentAskYielded
 			? theme.fg("warning", "yielded")
-			: hasEmptyWithoutTarget
-				? theme.fg("warning", "warning")
-				: ok === d.results.length
-					? theme.fg("success", "ok")
-					: d.results.some((result) => result.status === "error")
-						? theme.fg("error", "failed")
-						: hasCancelled
-							? theme.fg("warning", "cancelled")
-							: theme.fg("error", "failed");
+			: hasKilled && !hasCancelled && !d.results.some((result) => result.status === "error")
+				? theme.fg("warning", "killed (non-resumable)")
+				: hasEmptyWithoutTarget
+					? theme.fg("warning", "warning")
+					: ok === d.results.length
+						? theme.fg("success", "ok")
+						: d.results.some((result) => result.status === "error")
+							? theme.fg("error", "failed")
+							: hasCancelled
+								? theme.fg("warning", "cancelled")
+								: theme.fg("error", "failed");
 
 	const totalSummary =
 		d.progressSummary ||
@@ -309,12 +316,7 @@ export function renderSubagentResult(
 				| undefined;
 			if (runningProg) {
 				const runningStats = ` | ${runningProg.toolCount} tools, ${formatDuration(displayProgressDurationMs(runningProg, options.now))}`;
-				const runningBadge = modelThinkingBadge(
-					theme,
-					runningProg.model,
-					runningProg.thinking,
-					runningProg.fastMode,
-				);
+				const runningBadge = modelThinkingBadge(theme, runningProg.model, runningProg.thinking);
 				c.addChild(
 					new Text(
 						fit(
@@ -354,7 +356,10 @@ export function renderSubagentResult(
 				? theme.fg("error", "failed")
 				: isParentCancellation(r.cause) && (r.interrupted || r.status === "interrupted")
 					? theme.fg("warning", "cancelled")
-					: r.status === "skipped" || r.status === "interrupted" || r.status === "continued"
+					: r.status === "killed" ||
+							r.status === "skipped" ||
+							r.status === "interrupted" ||
+							r.status === "continued"
 						? theme.fg("warning", r.status)
 						: hasEmptyTextOutputWithoutOutputTarget(r.task, resultOutput)
 							? theme.fg("warning", "warning")
@@ -362,12 +367,7 @@ export function renderSubagentResult(
 		const stats = rProg
 			? ` | ${rProg.toolCount} tools, ${formatDuration(displayProgressDurationMs(rProg, options.now))}`
 			: "";
-		const modelDisplay = modelThinkingBadge(
-			theme,
-			r.model ?? rProg?.model,
-			r.thinking ?? rProg?.thinking,
-			r.fastMode ?? rProg?.fastMode,
-		);
+		const modelDisplay = modelThinkingBadge(theme, r.model ?? rProg?.model, r.thinking ?? rProg?.thinking);
 		const stepLabel = resultRowLabel(d, multiLabel, i, stepNumber);
 		const stepHeader = rRunning
 			? `${statusIcon} ${stepLabel}: ${theme.bold(theme.fg("warning", r.agent))}${modelDisplay}${stats}`

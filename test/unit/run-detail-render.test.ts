@@ -6,6 +6,7 @@
  */
 
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { describe, test } from "vitest";
 import type { RunDetail } from "../../packages/workflows/src/runs/background/status.js";
 import { inspectRun } from "../../packages/workflows/src/runs/background/status.js";
@@ -14,6 +15,7 @@ import type { RunSnapshot, StageSnapshot } from "../../packages/workflows/src/sh
 import { deriveGraphTheme } from "../../packages/workflows/src/tui/graph-theme.js";
 import { renderRunDetail } from "../../packages/workflows/src/tui/run-detail.js";
 import { visibleWidth } from "../../packages/workflows/src/tui/text-helpers.js";
+import { bunExecutable, spawnSyncCollect } from "../helpers/runtime.js";
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const stripAnsi = (s: string) => s.replace(ANSI_RE, "");
@@ -114,8 +116,80 @@ describe("inspectRun", () => {
 // renderRunDetail
 // ---------------------------------------------------------------------------
 
+// Issue #3008: set TZ only on a fresh process, never on a parallel test worker.
+for (const [tz, startedAt, started, ended] of [
+	["UTC", 1789202285073, "08:38:05", "08:38:57"],
+	["Europe/Zurich", 1789202285073, "10:38:05", "10:38:57"],
+	["Europe/Zurich", Date.parse("2026-01-12T08:38:05.073Z"), "09:38:05", "09:38:57"],
+	["Asia/Kathmandu", 1789202285073, "14:23:05", "14:23:57"],
+	// Spring-forward changes wall-clock hours, not the 52-second elapsed interval.
+	["Europe/Zurich", Date.parse("2026-03-29T00:59:30.000Z"), "01:59:30", "03:00:22"],
+] as const) {
+	test(`run detail uses system local time in ${tz} at ${startedAt}`, () => {
+		const originalTZ = process.env.TZ;
+		const renderer = fileURLToPath(new URL("../../packages/workflows/src/tui/run-detail.ts", import.meta.url));
+		const themes = fileURLToPath(new URL("../../packages/workflows/src/tui/graph-theme.ts", import.meta.url));
+		const details = [
+			detailFromRun(makeRun({ startedAt })),
+			detailFromRun(makeRun({ startedAt, status: "paused", pausedAt: startedAt + 32_000 })),
+			detailFromRun(makeRun({ startedAt, status: "completed", endedAt: startedAt + 52_000 })),
+			detailFromRun(makeRun({ startedAt, status: "failed", endedAt: startedAt + 52_000, durationMs: 42_000 })),
+		];
+		const child = spawnSyncCollect(
+			[
+				bunExecutable(),
+				"-e",
+				`
+			import { renderRunDetail } from ${JSON.stringify(renderer)};
+			import { deriveGraphTheme } from ${JSON.stringify(themes)};
+			const details = ${JSON.stringify(details)};
+			const output = details.map(detail => [undefined, deriveGraphTheme({})].map(theme =>
+				renderRunDetail(detail, { theme, width: 100, now: ${startedAt + 52_000} })));
+			console.log(JSON.stringify({ output, details }));
+		`,
+			],
+			{ env: { ...process.env, TZ: tz } },
+		);
+		assert.equal(child.exitCode, 0, child.stderr.toString());
+		const result = JSON.parse(child.stdout.toString()) as { output: string[][]; details: RunDetail[] };
+		assert.deepEqual(
+			result.details,
+			JSON.parse(JSON.stringify(details)),
+			"rendering preserves raw timestamps and duration",
+		);
+		for (const [index, outputs] of result.output.entries()) {
+			for (const output of outputs) {
+				const plain = stripAnsi(output);
+				assert.match(plain, new RegExp(`started\\s+${started}\\s`));
+				if (index < 2) {
+					assert.doesNotMatch(plain, /ended\s/);
+					assert.match(plain, new RegExp(`elapsed\\s+${index === 0 ? 52 : 32}s\\s`));
+				} else {
+					assert.match(plain, new RegExp(`ended\\s+${ended}\\s`));
+					assert.match(plain, new RegExp(`duration\\s+${index === 2 ? 52 : 42}s\\s`));
+				}
+			}
+		}
+		assert.equal(process.env.TZ, originalTZ);
+	});
+}
+
+// PR #2973: the resumable action must not be described as cancellation.
+test("active run detail labels its pause action consistently across rendering modes", () => {
+	const detail = detailFromRun(makeRun({ id: "aaaaaaaa-1111-4111-8111-111111111111" }));
+	for (const theme of [undefined, deriveGraphTheme({})]) {
+		for (const width of [48, 100]) {
+			const plain = stripAnsi(renderRunDetail(detail, { theme, width, now: 2_000 }));
+			assert.match(plain, /workflow pause/);
+			assert.match(plain, /pause workflow/);
+			assert.doesNotMatch(plain, /cancel/);
+			for (const line of plain.split("\n")) assert.ok(visibleWidth(line) <= width);
+		}
+	}
+});
+
 describe("renderRunDetail — themed", () => {
-	test("emits rounded run panel, stage cards, and a cancel hint for an active run", () => {
+	test("emits rounded run panel, stage cards, and a pause hint for an active run", () => {
 		const now = 1_000_000;
 		const run = makeRun({
 			id: "abc123uuid",
@@ -146,8 +220,8 @@ describe("renderRunDetail — themed", () => {
 		assert.match(plain, /● planner/);
 		assert.match(plain, /○ worker/);
 
-		// Active run keeps the complete id in the interrupt action hint.
-		assert.match(plain, /workflow interrupt\s+id=abc123uuid/);
+		// Active run keeps the complete id in the pause action hint.
+		assert.match(plain, /workflow pause\s+id=abc123uuid/);
 		assert.doesNotMatch(plain, /workflow resume/);
 	});
 
@@ -174,12 +248,13 @@ describe("renderRunDetail — themed", () => {
 		assert.match(plain, /state\s+❚❚ paused/);
 		assert.match(plain, /workflow resume\s+id=pause123uuid/);
 		assert.match(plain, /continue workflow/);
-		assert.doesNotMatch(plain, /workflow interrupt/);
+		assert.doesNotMatch(plain, /workflow pause/);
 		assert.doesNotMatch(plain, /○ pending/);
 	});
 
 	test("ended non-resumable run offers read-only inspection and reports duration", () => {
-		const now = 1_000_000;
+		// Local wall-clock fixture; the explicit TZ regressions above fix the offsets.
+		const now = new Date(2026, 0, 12, 0, 16, 40).getTime();
 		const runId = "339e05a4-2289-408e-9076-d1a348f582ae";
 		const detail = detailFromRun(
 			makeRun({
@@ -200,12 +275,12 @@ describe("renderRunDetail — themed", () => {
 		assert.match(plain, /ended\s+00:16:32/);
 		assert.doesNotMatch(plain, /\([^)]*ago\)/);
 		assert.match(plain, /duration/);
-		assert.doesNotMatch(plain, /workflow interrupt/);
+		assert.doesNotMatch(plain, /workflow pause/);
 		assert.match(plain, /workflow status\s+id=/);
 		assert.doesNotMatch(plain, /workflow resume/);
 	});
 
-	test("foreign-live durable detail does not promise local interruption", () => {
+	test("foreign-live durable detail does not promise local pause", () => {
 		const detail: RunDetail = {
 			...detailFromRun(makeRun({ id: "foreign-live", name: "foreign-live", status: "running" })),
 			ownerActiveElsewhere: true,
@@ -215,7 +290,7 @@ describe("renderRunDetail — themed", () => {
 
 		assert.match(plain, /workflow status\s+id=foreign-live/);
 		assert.match(plain, /owner active elsewhere/);
-		assert.doesNotMatch(plain, /workflow interrupt/);
+		assert.doesNotMatch(plain, /workflow pause/);
 		assert.doesNotMatch(plain, /workflow resume/);
 	});
 
@@ -304,7 +379,7 @@ describe("renderRunDetail — themed", () => {
 			}),
 		);
 		const plain = stripAnsi(renderRunDetail(detail, { theme: deriveGraphTheme({}), width: 100 }));
-		assert.match(plain, /pending target {2}detail-run:review-a/);
+		assert.ok(plain.includes("pending target  workflow:detail-run/review-a"));
 		assert.match(plain, /pending id {6}offline · delivery unavailable/);
 		assert.doesNotMatch(plain, /detail-run:offline/);
 	});
@@ -316,12 +391,12 @@ describe("renderRunDetail — themed", () => {
 			}),
 		);
 		const out = renderRunDetail(detail, { width: 80 });
-		assert.match(out, /pending target {2}plain-run:worker-id/);
+		assert.ok(out.includes("pending target  workflow:plain-run/worker-id"));
 		for (const line of renderRunDetail(detail, { width: 32 }).split("\n")) assert.equal(visibleWidth(line), 32);
 	});
 	test("never ellipsizes a projected pending-stage target at widths 32 through 200", () => {
 		const runId = "aaaaaaaa-1111-4111-8111-111111111111";
-		const target = `${runId}:review-a`;
+		const target = `workflow:${runId}/review-a`;
 		const localStore = createStore();
 		localStore.recordRunStart(
 			makeRun({
@@ -371,7 +446,7 @@ describe("renderRunDetail — themed", () => {
 
 		assert.match(plain, /✗ failed/);
 		assert.match(plain, /pending id {6}review-a · delivery unavailable/);
-		assert.doesNotMatch(plain, new RegExp(`${runId}:review-a`));
+		assert.doesNotMatch(plain, new RegExp(`workflow:${runId}/review-a`));
 	});
 });
 

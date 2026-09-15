@@ -6,9 +6,10 @@ Atomic publishes `@bastani/atomic` from `packages/coding-agent`, `@bastani/atomi
 
 ```text
 Pull request / selected branch push
-└─ test.yml (four concurrent work jobs + one result gate)
-   ├─ suites (Linux, Windows): build package -> unit -> integration
-   ├─ agent-suite (Linux, Windows): native bindings -> coding-agent vitest (Node, then Bun)
+└─ test.yml (five concurrent work jobs + one result gate)
+   ├─ unit-tests (Linux, Windows): build package -> unit
+   ├─ integration-tests (Linux, Windows): build package -> integration
+   ├─ agent-suite (Linux, Windows): native bindings -> coding-agent vitest (Node)
    ├─ release-archive (Linux, Windows): build package -> binaries -> smoke
    ├─ static-checks (Linux): typecheck, docs, installer container smoke, contracts
    └─ test (2 legs): result gate carrying both required contexts
@@ -18,10 +19,11 @@ Release tag push (`0.9.10` or `0.9.10-alpha.1`)
    ├─ integrity: tag package version = tag and tag commit subject = `Release <tag>`
    ├─ native-artifacts: eight-platform NAPI matrix
    ├─ linux-binary-smoke + windows-binary-smoke (also builds both shipped
-   │  Windows archives on the Windows runner) + alpine-binary-smoke
-   ├─ build: shrinkwrap/package validation, six non-Windows archives plus the
-   │  Windows-built pair, ten npm tarballs,
-   │  release notes, and SHA256SUMS
+   │  Windows archives on the Windows runner) + alpine-binary-smoke, whose
+   │  x64/ARM64 legs run embedded PostgreSQL initdb, start, connect, and shutdown
+   ├─ build: shrinkwrap/package validation, target PostgreSQL staging in all eight
+   │  native npm leaves, six non-Windows archives plus the Windows-built pair,
+   │  eleven npm tarballs, release notes, and SHA256SUMS
    ├─ stage-github-release: create a verified draft and refuse to change a
    │  published release
    ├─ publish-npm: tokenless OIDC publication, skipping existing versions
@@ -36,86 +38,32 @@ Manual dispatch on `main`
 
 This release graph follows pi's draft-first publication shape. Public GitHub Release publication remains last so users never see a release whose npm publication failed.
 
+The release build downloads checksum-pinned PostgreSQL artifacts while preparing packages, never during package installation or first use. All eight native npm leaves receive a `postgres-runtime` payload. Pack verification extracts each tarball and validates target provenance, executable architecture/libc, required libraries/catalog/licenses, and the payload file checksums; missing or wrong payloads fail packaging. Every standalone archive independently stages its target under the archive-local `@bastani/atomic-natives` package rather than relying on host-installed optional leaves. Existing native Linux glibc and macOS runners exercise scriptless pack/install and SQL persistence across restart; Linux and Windows x64 archive jobs do the same against extracted runtime paths. The Alpine smoke legs execute initdb, protocol queries, restart, and persisted-row checks on both native runner architectures. Windows ARM64 remains content- and architecture-validated only because the available Windows runner is x64; it cannot authoritatively exercise Windows 11 ARM64 x64 emulation.
+
 ## Tests (`test.yml`)
 
-The test workflow runs on pushes to `main` and on every pull request. Release
-branches carry no push trigger: `release/**` and `prerelease/**` always reach CI
-through their pull request, so listing those globs made one SHA run the whole
-workflow twice — two sets of runners competing for the same pool, and two
-competing check runs per required context. GitHub keeps the latest result per
-context name, so a spurious failure in either copy blocked the pull request even
-when the other copy was fully green. Runs `31047506585` (push, Linux `suites`
-cancelled on its cap) and `31047542976` (pull_request, every job green) on the
-same sha `772a373` are the worked example.
+The workflow runs on pushes to `main` and every pull request. Release branches
+reach CI through their PRs, without duplicate push runs. There is no
+`concurrency:` cancellation group: cancelling an in-flight run can leave a
+required context cancelled without a successful replacement for that SHA.
 
-There is deliberately no `concurrency:` block. A group that cancels an
-in-flight run can kill a run that has already published `test (...)`, leaving a
-cancelled required context on a SHA with no superseding successful run — the
-failure above, not a fix for it.
+Five independent job definitions expand to nine work-job instances and two
+result gates. Unit and integration suites run on separate Linux/Windows VMs,
+each building its own prerequisites. This duplicates setup cost but avoids
+serial dependencies between suites; it does not shard or remove tests.
 
-Its work runs as four independent jobs so the wall clock is one job's longest dependent chain rather than the sum of every step in file order.
-
-| Job | Platforms | Chain | Linux | Windows |
-| --- | --- | --- | ---: | ---: |
-| `suites` | both | build `@bastani/atomic` -> unit -> integration | 121 s | 195 s |
-| `agent-suite` | both | build native bindings -> coding-agent vitest (Node), then its Bun-hosted SQLite selector project | 126 s | 232 s |
-| `release-archive` | both | build package -> `scripts/build-binaries.sh` -> archive smoke | 74 s | 149 s warm / 4m04s healthy p100 |
-| `static-checks` | Linux only | typecheck, docs links, Mintlify, Alpine/Debian installer smoke, CI contracts | 30 s | – |
-| `test` | 2 gate legs | assert every work-job result is `success` | 15 s | – |
-
-The release-archive Windows samples above are warm-toolchain measurements. A cold
-run reached 6m12s and 6m13s before cancellation: `rust-toolchain` took 152s and
-140s (versus 12s and 36s warm), checkout took 71s and 64s, and the native build
-and archive smoke add roughly 110s and 40s. The 9-minute cap covers that observed
-near-6m50s tail rather than only the healthy 4m04s p100.
-
-Those are the per-step costs sampled from four sequential-job runs, which put the critical path on the Windows `agent-suite` chain at about 247 s against the 452 s (434–483 s, n=3 healthy) the single sequential job measured. Runner-seconds rise about 35 % (709 s to roughly 957 s); that is the price of the wall-clock cut.
-
-### Observed on the first two split runs (30527771985, 30528920082)
-
-| Job | run 1 | run 2 |
-| --- | ---: | ---: |
-| `static-checks (linux-x64)` | 32 s | 50 s |
-| `release-archive` Linux / Windows | 84 s / 162 s (warm) | 83 s / 175 s (warm) |
-| `suites` Linux / Windows | 230 s / 348 s | 147 s / 238 s |
-| `agent-suite` Linux / Windows | 138 s / **349 s** | 203 s / **380 s** |
-| `test` gate, both legs | 3 s / 4 s | 4 s / 5 s |
-| **whole run** | **433 s** | **440 s** |
-
-The older split-run release-archive values in this table are warm samples; later
-healthy Windows runs reached 4m04s, while two cold runs reached 6m12s and 6m13s
-and were cancelled by the former 6-minute cap. The Windows cap is therefore 9
-minutes to cover the cold toolchain and checkout tail.
-
-Read this carefully before planning further work, because it says two different things.
-
-The topology behaves exactly as designed. All seven work jobs started within 68 s of run creation, so Blacksmith does not cap concurrency below seven and the queueing risk did not materialize. `static-checks` was green in 32–50 s, giving feedback on typecheck that used to arrive only at the end of a 257 s job. The gate costs 3–5 s. Both required contexts appear with byte-identical names.
-
-The saving is nevertheless about 15 s, not the estimated 205 s, because the sequential-job sampling that produced the table above understated the Windows steps by roughly 1.5x:
-
-| step | sampled | run 1 | run 2 |
-| --- | ---: | ---: | ---: |
-| Windows `coding-agent vitest` | 142 s | 221 s | 237 s |
-| Windows native binding build | 42 s | 63 s | 72 s |
-| Linux `coding-agent vitest` | 70 s | 78 s | 126 s |
-| Windows unit step | 127 s | 267 s (retried) | 150 s |
-| Linux unit step | 84 s | 190 s (retried) | 101 s |
-
-On both runs the critical path was Windows `agent-suite`, whose real cost is 349–380 s rather than the 232 s the estimate assumed. Run 1 also fired the unit step's one bounded flake retry on both platforms, from two different pre-existing flakes that each passed on the retry.
-
-The structural result still stands and is what matters for the next decision: wall clock is now dominated by **two** steps instead of fourteen. Sharding `coding-agent vitest` therefore has a direct effect where before the split it would have been diluted by everything else in the job. Each shard must repeat the native binding build, so the arithmetic to beat is `setup + native build + vitest/2`. Confirm the steady-state numbers over more runs first.
 
 ### Why steps are grouped this way
 
-Steps stay in one job only when one consumes another's build output. Nothing is passed between jobs as an artifact, because rebuilding in parallel is cheaper in wall clock than serializing on an upload/download pair.
+Steps stay in one job only when one consumes another's build output. Nothing is passed between jobs as an artifact because waiting for a producer job introduces a serial dependency. The dependency edge can lengthen the critical path; this is not a claim that uploading and downloading the bytes costs more than recompiling.
 
 - `test/unit/pi-0.82.1-artifacts.test.ts` gates its assertions on `packages/coding-agent/dist` and degrades to `test.skip` with a warning when the build has not run, so the unit suite must stay behind the package build. Moving it into a build-less job would lose coverage without failing anything.
-- `test/integration/installed-package-node-extensions.test.ts` needs `dist/` and Node and is hard-required by `ATOMIC_REQUIRE_INSTALLED_NODE_SMOKE=1`, so `suites` is the only job that installs Node.
+- `test/integration/installed-package-node-extensions.test.ts` needs `dist/` and Node and is hard-required by `ATOMIC_REQUIRE_INSTALLED_NODE_SMOKE=1`. All five work-job definitions install Node; `integration-tests` owns this package smoke.
 - `packages/coding-agent/test/native-binding-exports.test.ts` is hard-required by `ATOMIC_REQUIRE_NATIVE_BINDING_SMOKE=1`, so the vitest suite stays behind `npm run build --workspace=@bastani/atomic-natives`.
-- `scripts/build-binaries.sh` reuses `packages/natives/native/*.node` when present and otherwise builds them, so `release-archive` carries its own Rust toolchain and pays that build again rather than waiting on `agent-suite`. `suites` and `static-checks` need no Rust at all.
-- `agent-suite` runs the coding-agent package in one step; its SQLite selectors resolve `node:sqlite` on both runtimes (Bun ships it from 1.4.0, the repository's Bun floor).
+- `scripts/build-binaries.sh` reuses `packages/natives/native/*.node` when present and otherwise builds them, so `release-archive` carries its own Rust toolchain and pays that build again rather than waiting on `agent-suite`. Both root-suite jobs also build native bindings explicitly. The CI project's native global setup builds a missing binding in `static-checks`, so a cold static job needs Rust despite having no explicit toolchain step.
+- `agent-suite` runs the coding-agent package in one step; its SQLite selectors resolve `node:sqlite` on both runtimes (Bun ships it from 1.4.0; the repository's Bun floor is now 1.4.2).
 
-No suite uses `--parallel`, `--shard`, `--concurrent`, or `--max-concurrency`. `--parallel` implies `--isolate`, and 20 files in `test/unit` import 108 sibling `*.test.ts` files, so a fresh module registry per file re-executes those tests: 5407 executions against 4426 distinct tests, with the duplicates scored twice by the duration guard, once under contention. `--shard` is deterministic and roughly 1.85x faster locally, but it buys no wall clock while Windows `agent-suite` is the critical path. If a further cut is wanted, shard vitest first, then unit; that is worth roughly 70 s for a 60 % increase in runner count.
+No suite uses `--parallel`, `--shard`, `--concurrent`, or `--max-concurrency`. Twenty unit files still import 108 sibling `*.test.ts` files, so an isolated module registry executes those registrations again. Those executions and their per-attempt diagnostics are intentional retained coverage here. Keep default isolation and worker sizing; do not remove duplicate executions, serialize suites or introduce worker caps to manufacture a timing improvement.
 
 ### The `test` job is a result gate
 
@@ -136,57 +84,59 @@ If maintainers later prefer real per-job required contexts, that is a separate d
 
 ### Per-job time limits
 
-The blanket 10/15-minute pair is gone. Each job declares its own cap as a hang
-detector with room for the bounded flake retries it owns: `suites` 20/20,
-`agent-suite` 8/12, `release-archive` 5/9, `static-checks` 6, gate 5. The
-contract test in `test/ci/test-workflow-topology.test.ts` pins every value.
+Current whole-job caps include setup, execution, retries and teardown. Queue
+time before a runner starts is excluded. Step limits never extend the enclosing
+job deadline.
 
-A cap has to cover the retries its job owns. `scripts/run-flaky-test-suite.ts`
-replays only the step it wraps, so the budget is `setup + 2 × (retryable steps)`
-rather than 2× the whole job — and `suites` wraps **two** steps, unit and
-integration, so a legitimate retried run is close to double its test time.
+| Job | Linux | Windows | Calibration source |
+| --- | ---: | ---: | --- |
+| Unit tests | 22 min | 22 min | [Observed timeout boundaries](https://github.com/bastani-inc/atomic/actions/runs/34270757695) |
+| Integration tests | 10 min | 14 min | [Linux setup](https://github.com/bastani-inc/atomic/actions/runs/34652319107/job/103437056550), [Windows retry](https://github.com/bastani-inc/atomic/actions/runs/34275410217/job/102227085985) |
+| Agent suite | 10 min | 14 min | [Observed timeout boundaries](https://github.com/bastani-inc/atomic/actions/runs/34270757695) |
+| Release archive | 4 min | 7 min | [Linux build](https://github.com/bastani-inc/atomic/actions/runs/34653564242/job/103440964907), [Windows finalization](https://github.com/bastani-inc/atomic/actions/runs/34035777039/job/101493452122) |
+| Static checks | 5 min | not run | [182-second finalization timeout](https://github.com/bastani-inc/atomic/actions/runs/34873678170/job/104075487913) |
+| Result gate | 1 min | 1 min | Both labeled legs execute on Linux |
 
-Worst observed per step, runs `31085190975` and `31088323060`:
+The default calibration is `ceil(observed job seconds × 1.5 / 60)`. Integration
+caps instead reserve setup plus two full test attempts and teardown; the Linux
+archive cap includes projected packaging and smoke work. The exact formulas
+are pinned in [`test-workflow-topology.test.ts`](../test/ci/test-workflow-topology.test.ts).
 
-| Job | Platform | Setup | Retryable steps | Worst with retry | Cap | Ratio |
-| --- | --- | --- | --- | --- | --- | --- |
-| `suites` | Linux | 86 s | unit 355 s + integration 31 s | 858 s (14.3 min) | 20 | 1.40× |
-| `suites` | Windows | 232 s | unit 324 s + integration 44 s | 968 s (16.1 min) | 20 | 1.24× |
-| `agent-suite` | Linux | 72 s | suite 105 s | 282 s (4.7 min) | 8 | 1.70× |
-| `agent-suite` | Windows | 125 s | suite 208 s | 541 s (9.0 min) | 12 | 1.33× |
+Recalibrate from fresh job and step evidence, separating successful completion
+from timeout-censored runs, projected retries and cold-cache assumptions. A
+timeout boundary is not a measured completion or an upper bound. Static checks
+hit the old three-minute cap at 182 seconds despite every step succeeding;
+`ceil(182 × 1.5 / 60) = 5` leaves finalization headroom. Three recent successful
+samples were [150 s](https://github.com/bastani-inc/atomic/actions/runs/34867753417/job/104055765352),
+[93 s](https://github.com/bastani-inc/atomic/actions/runs/34811244121/job/103872866251) and
+[106 s](https://github.com/bastani-inc/atomic/actions/runs/34809819763/job/103868771048),
+all on Blacksmith 4-vCPU Linux. These are a small observational sample, not
+controlled cache or runner comparisons. Keep detailed incident history in PRs
+and linked runs rather than growing this guide with each calibration.
 
-The previous `suites` pair was 13/14, **below both retry-inclusive figures**. A
-genuine failure that triggered the retry was therefore cancelled at the cap
-instead of reporting a failure, and GitHub withholds job logs until the whole
-run completes, so the cancellation arrived with no test names. Three PRs
-reported `cancelled` at 14m08s while the underlying defect was two ordinary
-Windows test bugs; each cost a full diagnostic cycle to recover.
+Do not raise per-test budgets or duration-score thresholds to repair a job cap.
+The shared test default remains 30000 ms, with warnings at 40% and failure at
+70% of each test's effective budget. The flaky-suite wrapper permits one bounded
+retry. npm's request policy allows at most 85 seconds for one stalled request
+and two retries; that is less than the smallest npm-installing job cap, but does
+not guarantee a whole install fits. Rust installation and its retry each have
+a four-minute step cap; PR-only Mintlify validation has a five-minute step cap.
 
-Both `suites` legs now share one 20-minute cap. The per-platform split encoded a
-precision these shared 4-vCPU runners do not support — setup alone varied 73 s to
-232 s across two samples of the same job — and it invited re-tuning each leg as
-the suites grew, which is how the earlier 8/12 pair decayed to about 1.2× and
-cancelled the Linux leg at 497 s on run `31047506585` while the same commit
-passed on the pull_request event. One cap tracks one question: has this job hung,
-given it may legitimately run its suites twice.
+### Diagnostics and smoke coverage
 
-`agent-suite` keeps its 8/12 pair because it already clears its retry-inclusive
-worst case, and `release-archive` keeps 5/9 because it runs no retryable step at
-all; its Windows cap is 9 because cold setup observed a 152 s Rust toolchain
-acquisition and 71 s checkout before the roughly 110 s native build and 40 s
-archive smoke. A cap that cancels a passing retried run is worse than a late hang
-detection.
+Suite jobs upload `.ci-diagnostics/` under unique
+`test-diagnostics-<job>-<binary_platform>` artifact names. Preserve `always()`,
+`include-hidden-files: true`, the narrow upload path, 14-day retention and
+`if-no-files-found: ignore`. Jobs failing before test execution may have no
+diagnostic artifact. Inspect all attempts, not only the successful retry.
 
-These caps are wall-clock ceilings, not performance budgets. Shortening the
-~5.5 min unit step is what buys headroom back; raising a cap again should come
-with fresh measurements, and the contract test bounds every cap at 20 minutes so
-that stays a deliberate decision.
+Archive smoke tests check bundled builtins, native modules, runtime dependencies,
+`--version` and startup without extension-load failures. The static job also runs
+`scripts/test-installers-containers.sh` with a restricted PATH and local release
+fixtures in Alpine BusyBox `sh` and Debian slim. Neither fixture supplies a
+JavaScript runtime or package manager; Alpine also omits `ldd` to exercise musl
+detection through `/etc/alpine-release`.
 
-Every job that runs a suite through `scripts/run-flaky-test-suite.ts` uploads `.ci-diagnostics/` under a job-unique artifact name (`test-diagnostics-<job>-<binary_platform>`). `actions/upload-artifact@v4+` fails the entire run when two jobs upload the same name.
-
-Archive smoke tests verify bundled builtins, native modules, runtime dependencies, `--version`, and startup far enough to reject extension-load failures.
-
-The static job also runs `scripts/test-installers-containers.sh`. It executes `install.sh` with a restricted PATH and local release fixture inside `alpine:3.22` BusyBox `sh` and `debian:bookworm-slim`, checks the full payload and launcher, and gives the installer no JavaScript runtime or package manager. The Alpine fixture omits `ldd` from `PATH`, proving the `/etc/alpine-release` musl path.
 
 ## Direct release trigger and recovery
 
@@ -198,6 +148,8 @@ The static job also runs `scripts/test-installers-containers.sh`. It executes `i
 | `0.9.10-alpha.1` | `next` | prerelease, not latest |
 
 A manual dispatch is available only for release recovery. It requires `tag` and accepts optional `source_ref`; when omitted, `source_ref` defaults to the tag. The integrity job always verifies the release tag itself. Native, smoke, and payload builds consume `source_ref`, matching pi's recovery model; payload metadata validation still requires the recovery source's package version to equal the release tag.
+
+For a workflow-only repair, dispatch with `--ref` selecting the reviewed branch containing the corrected workflow, supply the original `tag`, and omit `source_ref`. This executes the corrected workflow while building the unchanged tagged source. `source_ref` selects build inputs, not the workflow definition. Do not move the release tag to repair CI tooling.
 
 Concurrency is scoped per release tag and does not cancel an in-progress publication.
 
@@ -257,78 +209,58 @@ The native job always rebuilds and uploads one artifact for each shipped `@basta
 | Windows x64 | `blacksmith-4vcpu-ubuntu-2404` | `x86_64-pc-windows-msvc` |
 | Windows arm64 | `blacksmith-4vcpu-ubuntu-2404` | `aarch64-pc-windows-msvc` |
 
-The old publisher built both Linux GNU bindings directly on Ubuntu 24.04, so its shipped cdylibs could acquire that runner's newer glibc symbol floor. The new pipeline fixes that portability bug: workflow-level `GLIBC_FLOOR=2.17` leaves rustup on each bare Linux target but passes `x86_64-unknown-linux-gnu.2.17` or `aarch64-unknown-linux-gnu.2.17` to `packages/natives/scripts/build-native.ts`. Only GNU Linux targets receive that suffix; musl targets stay bare and use NAPI-RS's `--cross-compile` path. That script invokes cargo-zigbuild for GNU builds and copies the cdylib from Cargo's bare-target output directory, explicitly handling the bare-vs-glibc-suffixed target split. Windows targets use LLVM and cargo-xwin. Darwin x64 and arm64 build on real Intel and Apple Silicon macOS runners. The matrix has `fail-fast: false`, names artifacts with distinct platform/libc slugs, and never downloads native artifacts from another run.
+GNU Linux builds use `GLIBC_FLOOR=2.17`: rustup installs the bare target while
+`build-native.ts` passes the glibc-suffixed target to cargo-zigbuild and copies
+the result from Cargo's bare-target output directory. Musl targets stay bare
+and use NAPI-RS `--cross-compile`; Windows uses LLVM and cargo-xwin. Both Darwin
+targets build on their native architecture. The matrix uses `fail-fast: false`,
+distinct platform/libc artifact names and only same-run native artifacts.
 
 The build job downloads the eight same-run bindings, generates the eight platform npm packages, and populates the root native package's exact-version optional dependencies without publishing during preparation.
 
 ### Dependency-fetch bounds in the native matrix
 
-`native-artifacts` compiles for 20–30 s on Linux and Windows. Everything else in
-its budget is a third-party download, and two releases have been damaged by one.
-The native compile now has one bounded retry: the first attempt is allowed to
-finish with an error so the retry can run, while a second failure remains fatal.
+Step bounds detect stalled downloads; job caps bound the full attempt/retry
+chain. Each native compile has one bounded retry, with a second failure fatal.
 
-| Release | Run | Leg | Stall |
-| --- | --- | --- | --- |
-| `0.9.11-alpha.7` (2026-07-29) | `30416909872` | Native linux x64 | `zigmirror.hryx.net` held a TCP connect open for **437.6 s**, then the next mirror served the tarball in 5.2 s |
-| `0.9.11-alpha.8` (2026-07-30) | `30517879019` | Native linux arm64 | `zig.bcr.ist` trickled for **795.9 s** and then succeeded; the job was cancelled by its 15-minute cap 8 s after `actions/upload-artifact` had already succeeded, and `build`, `stage-github-release`, `publish-npm`, and `publish-github-release` were all skipped, so the tag shipped nothing |
+| Acquisition or check | Step limit |
+| --- | --- |
+| `mlugg/setup-zig`, plus one retry | 2 min each |
+| `dtolnay/rust-toolchain` | 4 min |
+| `taiki-e/install-action` | 3 min |
+| Verify installed LLVM 18 | 1 min |
+| `cargo-xwin xwin cache xwin` | 8 min |
 
-`mlugg/setup-zig` fetches the community mirror list at run time and shuffles it,
-and applies no per-mirror deadline, so before this change the only bound on a
-stalled mirror was the job budget.
+| Native leg | Compile limit per attempt | Whole-job cap |
+| --- | ---: | ---: |
+| linux-x64-gnu | 5 min | 16 min |
+| linux-arm64-gnu | 5 min | 17 min |
+| linux-x64-musl | 5 min | 17 min |
+| linux-arm64-musl | 5 min | 18 min |
+| darwin-x64 | 8 min | 19 min |
+| darwin-arm64 | 5 min | 12 min |
+| win32-x64-msvc | 5 min | 20 min |
+| win32-arm64-msvc | 5 min | 20 min |
 
-**Step bounds are the stall detector; job caps are only hang detectors.** A job
-cap cannot distinguish a stall from slow work, and cancelling a job silently
-skips every job that `needs` it. Each acquisition or compile attempt therefore
-carries its own `timeout-minutes`:
+These caps reserve measured setup, both compile attempts, bounded Zig or xwin
+acquisition and one minute for artifact upload. Re-measure before tightening
+them, using at least five samples and including recovery paths. Keep the
+explicit job names so matrix budget changes do not rename check contexts.
 
-| Step | Bound | Basis |
-| --- | --- | --- |
-| `mlugg/setup-zig`, plus one retry | 2 min each | 3.2× the worst healthy acquisition over eight releases (37 s); the retry re-shuffles the 16-mirror list, so a stall costs at most 4 min and fails loudly |
-| `dtolnay/rust-toolchain` | 4 min | one rustup fetch took 135 s against a 4–14 s norm |
-| `taiki-e/install-action` | 3 min | |
-| `apt-get` LLVM install | 5 min | |
-| `cargo-xwin xwin cache xwin` | 8 min | 1.27× the worst measured full CRT/SDK download (6 m 19 s) |
-| `Build native binding`, plus one retry | `matrix.build_timeout_minutes` each | each attempt keeps the leg's measured p100 compile bound; a stall costs at most two bounds and the retry fails loudly if needed |
+### Windows host LLVM
 
-The former blanket 15-minute job cap is replaced by per-leg caps. A cap has to
-contain every bounded recovery path the leg owns, not the time a green run
-happened to take: a cap sized on observed setup cancels the job part-way through
-the retry, which is the exact failure the retry exists to survive. Two steps are
-therefore reserved at their bound rather than at their measurement — both
-`setup-zig` attempts (2 + 2 min, Linux) and `cargo-xwin xwin cache xwin` (8 min,
-Windows, whose measured cost is its cache-miss path) — and every leg reserves one
-minute for `upload-artifact`, measured at 4 s or less.
+Both Windows targets build on x64 Ubuntu runners. The publisher selects `/usr/lib/llvm-18/bin`, verifies `clang`, `clang-cl`, `lld-link`, `llvm-ar`, `llvm-lib`, `llvm-dlltool`, and `llvm-ml`, logs compiler/linker versions, and prepends that directory through `GITHUB_PATH`. Missing tools fail the job rather than silently selecting another compiler version.
 
-We measured setup from job start to `Build native binding` over six successful
-publishes (`31689424903`, `31634036246`, `31060235600`, `30892885915`,
-`30889823603`, `30835115933`). The cap arithmetic is `ceil(measured setup minus
-the steps reserved at their bound) + those bounds + 2 x build_timeout_minutes +
-1 upload`:
+LLVM comes from the runner image rather than apt downloads. Patch versions are
+image-provided; preserve both Windows build checks when changing the image or LLVM major.
 
-| Leg | Setup p100 (excl. reserved) | Reserved at bound | Build timeout | Cap arithmetic | Job cap |
-| --- | ---: | ---: | ---: | --- | ---: |
-| linux-x64-gnu | 46 − 18 = 28 s | zig 4 min | 5 min | 1 + 4 + 2 x 5 + 1 = 16 | 16 min |
-| linux-arm64-gnu | 128 − 8 = 120 s | zig 4 min | 5 min | 2 + 4 + 2 x 5 + 1 = 17 | 17 min |
-| linux-x64-musl | 107 − 3 = 104 s | zig 4 min | 5 min | 2 + 4 + 2 x 5 + 1 = 17 | 17 min |
-| linux-arm64-musl | 142 − 5 = 137 s | zig 4 min | 5 min | 3 + 4 + 2 x 5 + 1 = 18 | 18 min |
-| darwin-x64 | 98 s | — | 8 min | 2 + 2 x 8 + 1 = 19 | 19 min |
-| darwin-arm64 | 26 s | — | 5 min | 1 + 2 x 5 + 1 = 12 | 12 min |
-| win32-x64-msvc | 291 − 249 = 42 s | xwin 8 min | 5 min | 1 + 8 + 2 x 5 + 1 = 20 | 20 min |
-| win32-arm64-msvc | 384 − 343 = 41 s | xwin 8 min | 5 min | 1 + 8 + 2 x 5 + 1 = 20 | 20 min |
-
-`native-artifacts` sets an explicit `name:`, so these matrix columns do not
-rename its jobs. Re-measure before tightening any of them further, and never
-tighten a leg on fewer than five samples: a cap below a real p100 turns a slow
-but healthy run into the cancellation this section exists to prevent.
+The x64 and ARM64 Alpine smoke jobs and the payload job likewise verify the image-provided `patchelf` with `command -v` and `--version` instead of refreshing apt indexes. These checks have a one-minute bound and fail on missing tooling. Validate ELF editing on both host architectures when changing the runner image.
 
 ### MSVC CRT cache epoch
 
-Both Windows legs cross-compile with `cargo-xwin`, which downloaded the MSVC CRT
-and Windows SDK on every release: 3 m 46 s to 6 m 19 s per leg, for a ~25 s
-compile. That download now happens in its own bounded step behind an
-`actions/cache` entry keyed `xwin-v1-<arch>-17`, and each leg sets `XWIN_ARCH` so
-it stops downloading the architecture it does not link.
+Both Windows legs use cargo-xwin and a bounded CRT/SDK acquisition step backed
+by `actions/cache`, keyed `xwin-v1-<arch>-17`. Each leg sets `XWIN_ARCH` to avoid
+downloading an architecture it does not link.
 
 `XWIN_SDK_VERSION` and `XWIN_CRT_VERSION` default to `latest`, so the key cannot
 express the content version: a cache hit pins the leg to whichever SDK was first
@@ -341,44 +273,24 @@ trailing `17` is `XWIN_VERSION`, the Visual Studio major version.
 
 ### Warming the release toolchain caches
 
-`actions/cache` entries are scoped per branch or tag with a read fallback to the
-default branch. `publish.yml` only ever runs on `refs/tags/*` and nothing on
-`main` writes the Zig or CRT keys, so every release tag has been a guaranteed
-cold fetch on both Linux legs (six of six observed misses; a re-run of the *same*
-tag hits).
+Cache entries are scoped by branch or tag, with a default-branch read fallback.
+`warm-toolchain-cache.yml` acquires Zig and the CRT/SDK on `main` so release tags
+can reuse those entries. It is dispatch-only; cross-ref reuse on Blacksmith is
+not established by this guide.
 
-`.github/workflows/warm-toolchain-cache.yml` performs only those two
-acquisitions so the default-branch scope holds fresh entries. It is
-**dispatch-only and deliberately not yet scheduled**: whether a `refs/tags/*` run
-can read a `refs/heads/main` entry on Blacksmith's colocated cache is documented
-but unverified here. Verify it before relying on it:
-
-1. Dispatch `warm-toolchain-cache.yml` on `main` and confirm the
-   `setup-zig-tarball-zig-x86_64-linux-0.16.0` save.
-2. Dispatch `publish.yml` against an existing tag with `source_ref` set.
-3. Check whether the Linux legs log `Cache hit for: setup-zig-tarball-…`.
-
-A hit justifies adding a daily `schedule:` trigger, which is what keeps the
-entries alive (they evict after 7 days of inactivity). A miss means the warm
-workflow buys nothing and should be deleted; the step bounds above, not the
-cache, are what hold the line.
+Before relying on warming, dispatch it on `main`, confirm the expected key was
+saved, then inspect an authorized release/recovery run for a matching cache hit.
+Do not dispatch publication solely to test a cache. Schedule warming only after
+cross-ref reuse is demonstrated; bounded acquisition steps must remain safe on
+a miss. Cache entries expire after seven days without access.
 
 ### Sticky-disk checkout is Linux-only
 
-`useblacksmith/checkout@v1` consumes a Blacksmith sticky disk. Sticky disks are
-ext4 block devices, so they exist only on Blacksmith **Linux** runners. On
-`blacksmith-4vcpu-windows-2025` the action warns (`sticky disks are not supported
-on Windows runners`) and falls back to a standard clone; on
-`blacksmith-6vcpu-macos-26` it blocked 78 s on a gRPC connect timeout in eight of
-eight releases before falling back. The warning's advice to "remove the sticky
-disk step" is misleading — there is no sticky-disk step, the checkout action is
-the consumer.
-
-Both workflows therefore use `useblacksmith/checkout` behind
-`if: runner.os == 'Linux'` and `actions/checkout` otherwise. The two `win32` legs
-of `native-artifacts` cross-compile on Linux and keep the git mirror. Do not
-remove the mirror from a Linux leg: `test.yml` checks out with `fetch-depth: 0`
-and `lfs: true`, which the mirror serves in about 8 s.
+`useblacksmith/checkout` uses ext4 sticky disks and is restricted to Linux.
+Both workflows select it with `if: runner.os == 'Linux'` and use
+`actions/checkout` otherwise. The Windows native cross-compilation legs run on
+Linux and retain the mirror. Test checkouts preserve `fetch-depth: 0` and
+`lfs: true`.
 
 ### Pinned actions and build tools
 
@@ -392,14 +304,12 @@ maintains both the pins and the comments.
 `taiki-e/install-action` is given exact tool versions (`cargo-zigbuild@0.23.0`,
 `cargo-xwin@0.23.0`). Unversioned, it resolves to `@latest`, which floats the
 build toolchain of a published, provenance-signed native artifact with no diff.
-`test.yml` pins `bun-version: 1.4.0` to match `publish.yml`; `latest` cannot be
+`test.yml` pins `bun-version: 1.4.2` to match `publish.yml`; `latest` cannot be
 cached by `setup-bun` and left the suite testing a different Bun from the one
 that builds the shipped artifact.
 
-A SHA pin would not have prevented either Zig stall: `mlugg/setup-zig@v2`
-resolved to the same commit in the failing attempt and the succeeding re-run, and
-the mirror list is fetched at run time rather than shipped in the action. The
-pins are supply-chain hygiene, not a fix for this incident.
+Action pins do not bound remote downloads; preserve acquisition deadlines even
+when the action commit is pinned.
 
 ### Binary smoke tests
 
@@ -416,7 +326,7 @@ After native and smoke jobs pass, `build`:
 3. Hydrates `@bastani/pi-ai` model data from models.dev, then runs `scripts/build-binaries.sh --skip-install --offline-model-data` for all eight archives. The script uses the just-staged `packages/natives/native/*.node` artifacts and does not `npm install` `@bastani/atomic-natives-*@$VERSION` from the registry (those packages are what this release publishes). If a registry install is attempted and fails, restore is `npm ci --ignore-scripts` followed by re-aliasing `@earendil-works/pi-ai` onto `packages/ai` and rebuilding `@bastani/pi-ai`.
    Musl payload assembly downloads pinned Alpine 3.22 `libgcc` and `libstdc++` packages, verifies their SHA256 hashes, copies only the matching runtime libraries under `atomic/lib`, and sets payload-local ELF search paths with `patchelf`.
 4. Validates package identity, versions, public/private metadata, binary entrypoint, workspace dependency ranges, build outputs, eight native modules, and eight exact-version native optional dependencies.
-5. Packs exactly ten npm tarballs.
+5. Packs exactly eleven npm tarballs.
 6. Extracts release notes from `packages/coding-agent/CHANGELOG.md`.
 7. Creates `SHA256SUMS` for the eight binary archives.
 8. Uploads the npm tarballs and GitHub Release assets as one same-run artifact.
@@ -486,4 +396,4 @@ Both polling doors run through durable `ctx.tool` nodes, forward their `AbortSig
 3. From a clean checkout, run `bun run scripts/cut-release.ts <version> --base <base> --push`.
 4. Inspect the single `Publish <version>` push run. Do not start a duplicate manual run during normal publication.
 5. If recovery is required, manually dispatch `publish.yml` with the original `tag`; set `source_ref` to the exact recovery ref whose package version still matches that tag.
-6. Confirm all ten npm packages and the public GitHub Release exist with the expected dist-tag and assets.
+6. Confirm all eleven npm packages and the public GitHub Release exist with the expected dist-tag and assets.

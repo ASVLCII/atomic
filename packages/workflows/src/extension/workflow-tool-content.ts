@@ -1,5 +1,6 @@
 import { runIndicatorStatus } from "../shared/run-indicator-status.js";
 import { deriveInputFields } from "../shared/schema-introspection.js";
+import { formatStageStartup } from "../shared/stage-startup.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import type { WorkflowSerializableValue } from "../shared/types.js";
 import { fmtDuration, statusIcon } from "../tui/status-helpers.js";
@@ -17,7 +18,7 @@ function compactWorkflowToolMessage(
 	result: Extract<
 		WorkflowToolResult,
 		{
-			action: "answer" | "pause" | "reload" | "interrupt" | "quit" | "resume";
+			action: "answer" | "pause" | "reload" | "quit" | "resume";
 		}
 	>,
 ): string {
@@ -129,7 +130,7 @@ function renderStatusToolContent(result: Extract<WorkflowToolResult, { action: "
 		}
 	});
 	lines.push(
-		"hint: status with runId returns full run detail; workflow answer answers pending prompts using runId/stageId/promptId; workflow resume controls paused runs; pause/interrupt/quit also accept runId. Ordinary Intercom handles free-form workflow-stage communication at <runId>:<stageKey>: live stage delivery is immediate; a known pending stage `send` queues before its first model turn; `ask` requires a live reply-capable stage.",
+		"hint: status with runId returns full run detail; workflow answer answers pending prompts using runId/stageId/promptId; workflow resume controls paused runs; pause/quit also accept runId. Ordinary Intercom handles free-form workflow-stage communication at workflow:<rootRunId>/<segment>[/<segment>...]: live stage delivery is immediate; a known pending stage `send` queues before its first model turn; `ask` requires a live reply-capable stage.",
 	);
 	return lines.join("\n");
 }
@@ -184,6 +185,7 @@ function renderStagesToolContent(result: Extract<WorkflowToolResult, { action: "
 	lines.push("stages:");
 	result.stages.forEach((stage, index) => {
 		lines.push(`[${index + 1}] ${stage.name} (${stage.id}) ${stage.status}`);
+		if (stage.startup) lines.push(formatStageStartup(stage.startup));
 		if (stage.sessionId) lines.push(`sessionId: ${stage.sessionId}`);
 		if (stage.sessionFile) lines.push(`sessionFile: ${stage.sessionFile}`);
 		if (stage.sessionFile) lines.push(`sessionFileJson: ${JSON.stringify(stage.sessionFile)}`);
@@ -215,6 +217,7 @@ function renderStageToolContent(result: Extract<WorkflowToolResult, { action: "s
 		return lines.join("\n");
 	}
 	lines.push("stage:");
+	if (result.stage.startup) lines.push(formatStageStartup(result.stage.startup));
 	lines.push(JSON.stringify(result.stage, null, 2));
 	if (result.stage.sessionFile) {
 		lines.push(`transcriptPath: ${result.stage.sessionFile}`);
@@ -236,7 +239,6 @@ export function renderWorkflowToolContent(result: WorkflowRegisteredToolResult, 
 		case "answer":
 		case "pause":
 		case "reload":
-		case "interrupt":
 		case "quit":
 		case "resume":
 			return compactWorkflowToolMessage(result);

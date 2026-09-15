@@ -22,7 +22,7 @@ Use this skill when bounded specialist delegation adds value and the parent shou
 - **Debug and fix**: use `debugger` for actual failures that need reproduction, root-cause diagnosis, and a validated patch; conceptual or exploratory debugging can stay inline.
 - **Refinement**: use `code-simplifier` to clean up recently changed code without altering behavior.
 - **Adversarial review**: compose read-only specialists (`codebase-analyzer`, `codebase-pattern-finder`, `debugger` in inspect-only mode, `codebase-online-researcher`) into a parallel review pass — there is no generic `reviewer` agent.
-- **Subagent control**: watch needs-attention signals and soft-interrupt only when a delegated run is genuinely blocked.
+- **Subagent control**: watch needs-attention signals and kill only when a delegated run is genuinely blocked.
 - **Agent authoring**: create, update, or override agents for a project.
 
 ## Tool
@@ -65,19 +65,19 @@ Use this after implementation when the user wants cleanup review or when a final
 
 Builtin agents load at the lowest priority. Project agents override user agents, and user/project agents override builtins with the same name.
 
-| Agent                        | Purpose                                                           | Default model         | Thinking | Tools                                                                                  | Notes                                                                                                      |
-| ---------------------------- | ----------------------------------------------------------------- | --------------------- | -------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `codebase-locator`           | Locate files, directories, tests, and configs relevant to a topic | `openai/gpt-5.4-mini` | low      | read, search, find, ls, bash                                                             | Read-only finder. Returns a categorized file map; no analysis.                                             |
-| `codebase-analyzer`          | Explain how specific code currently works                         | `openai/gpt-5.5`      | low      | read, search, find, ls, bash                                                             | Read-only. Traces flow with `file:line` references; does not critique.                                     |
-| `codebase-pattern-finder`    | Find similar implementations or conventions                       | `openai/gpt-5.4-mini` | low      | read, search, find, ls, bash                                                             | Read-only. Returns code snippets with `file:line` references.                                              |
-| `codebase-research-locator`  | Discover prior `research/` and `specs/` docs                      | `openai/gpt-5.4-mini` | low      | read, search, find, ls, bash                                                             | Read-only. Sorts by date, tiers by recency, flags supersession.                                            |
-| `codebase-research-analyzer` | Extract decisions and constraints from prior docs                 | `openai/gpt-5.5`      | low      | read, search, find, ls, bash                                                             | Read-only. Filters aggressively for what still applies today.                                              |
-| `codebase-online-researcher` | Web research with authoritative sources                           | `openai/gpt-5.5`      | low      | read, search, find, ls, bash, write, web_search, fetch_content, get_search_content       | Has the `playwright-cli` skill. Persists keepers to `research/web/`.                                       |
-| `code-simplifier`            | Clean up recently changed code without changing behavior          | `openai/gpt-5.5`      | low      | read, edit, write, search, find, ls, bash                                                | **Writer.** Scopes to recently modified code by default; preserves all observable behavior.                |
-| `debugger`                   | Reproduce, diagnose, and fix failing behavior                     | `openai-codex/gpt-5.6-sol:xhigh` | xhigh | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Can coordinate with the parent; inspect-only mode requires an explicit instruction. |
-| `worker`                     | Implement normal tasks and approved orchestrator handoffs         | `openai-codex/gpt-5.6-sol:medium` | medium | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Defaults to forked context; escalates unapproved decisions instead of guessing. |
+| Agent | Purpose | Tools | Notes |
+| --- | --- | --- | --- |
+| `codebase-locator` | Locate files, directories, tests, and configs relevant to a topic | read, search, find, ls, bash | Read-only finder. Returns a categorized file map; no analysis. |
+| `codebase-analyzer` | Explain how specific code currently works | read, search, find, ls, bash | Read-only. Traces flow with `file:line` references; does not critique. |
+| `codebase-pattern-finder` | Find similar implementations or conventions | read, search, find, ls, bash | Read-only. Returns code snippets with `file:line` references. |
+| `codebase-research-locator` | Discover prior `research/` and `specs/` docs | read, search, find, ls, bash | Read-only. Sorts by date, tiers by recency, flags supersession. |
+| `codebase-research-analyzer` | Extract decisions and constraints from prior docs | read, search, find, ls, bash | Read-only. Filters aggressively for what still applies today. |
+| `codebase-online-researcher` | Web research with authoritative sources | read, search, find, ls, bash, write, web_search, fetch_content, get_search_content | Has the `playwright-cli` skill. Persists keepers to `research/web/`. |
+| `code-simplifier` | Clean up recently changed code without changing behavior | read, edit, write, search, find, ls, bash | **Writer.** Scopes to recently modified code by default; preserves all observable behavior. |
+| `debugger` | Reproduce, diagnose, and fix failing behavior | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Can coordinate with the parent; inspect-only mode requires an explicit instruction. |
+| `worker` | Implement normal tasks and approved orchestrator handoffs | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Defaults to forked context; escalates unapproved decisions instead of guessing. |
 
-Each builtin declares an explicit `model` and `fallbackModels` sequence (typically `github-copilot/<same>`, then `anthropic/claude-opus-4-8`, then `github-copilot/claude-opus-4.7`). The current user-selected model is automatically appended as the last fallback and de-duplicated. Override per run with inline config:
+Each builtin declares its model, reasoning level, and ordered fallback chain in its agent definition. Inspect the current configuration with `subagent({ action: "get", agent: "debugger" })` rather than relying on a fixed list of defaults. The current user-selected model is automatically appended as the last fallback and de-duplicated. Override per run with inline config:
 
 ```typescript
 subagent({ agent: "codebase-analyzer", task: "Trace the auth flow", model: "anthropic/claude-sonnet-4" })
@@ -207,11 +207,17 @@ Avoid duplicate output paths in parallel tasks. Concurrent children should not w
 Concurrent writers conflict. `code-simplifier` and `debugger` change files. Do not run two writers in parallel against the same worktree unless you isolate them with `worktree: true`.
 
 
-### Foreground execution and fresh follow-ups
+### Foreground, background, and automatic yielding
 
-All subagent execution runs in the foreground and returns its result to the parent call. Parallel tasks may still run concurrently within one foreground invocation, and forked context still creates branched child sessions.
+Keep immediately blocking work local unless specialist expertise, context isolation, or an explicit user request justifies delegation. Prefer independent tasks you can overlap with useful parent work. Do not spawn a child merely to wait immediately, or duplicate its assigned work while it runs.
 
-Completed, interrupted, and parent-question children are terminal for continuation. Do not address a prior child or sibling set by run ID. Start follow-up work with the normal launch form and an explicit handoff:
+Choose the observation mode for each authorized task. No extra user confirmation is needed merely to choose foreground or background. In owner-bound main and workflow-stage sessions, omitted `wait` or `wait: { kind: "background" }` returns after admission. Use `wait: { kind: "foreground", budgetMs: 30000 }` when the result is needed next. If the observation budget expires, the same child keeps running in the background; do not relaunch it. This applies to single and parallel calls.
+
+Use `subagent({ action: "wait", id: taskId })` to observe an existing task with the owner's budget, `status` to inspect its state, or `kill` to terminally stop it. Wait when the result becomes a dependency; otherwise rely on completion notices. Avoid repeated short waits or status polls; override the budget only for a concrete responsiveness need. A yielded receipt is not a terminal result. Background counts stay below the prompt; `/tasks` opens inspection only on command. A shaded completion notification reaches the owning chat without requiring a model reply. A later wait does not extend the owner's lifetime.
+
+Intercom `ask` cannot revive a completed, failed, interrupted, or cancelled noninteractive child, even if its retained registration says `idle`. New asks fail immediately, and termination fails an already-admitted ask that has not received a reply. Use a fresh child for follow-up work. Live interactive idle sessions and workflow post-mortem conversations remain separate reply-capable cases; `send` transport behavior is unchanged.
+
+Completed, killed, interrupted, and parent-question children are terminal for continuation. Do not address a prior child or sibling set by run ID. Start follow-up work with the normal launch form and an explicit handoff:
 
 ```typescript
 subagent({ agent: "worker", task: "[TASK_CONTEXT] Continue with this supervisor answer: ..." })
@@ -221,23 +227,23 @@ A parent-ask handoff supplies the original question, ordered attachments, previo
 
 ### Subagent control
 
-Subagent control is the runtime visibility and intervention layer for delegated runs. Lifecycle status distinguishes queued and running children from terminal completed, failed, or interrupted results. Activity reporting is factual: it tracks the last observed activity time and the current tool when known. It does not pretend to know that a child is truly stuck.
+Subagent control is the runtime visibility and intervention layer for delegated runs. Lifecycle status distinguishes queued and running children from terminal completed, failed, killed, or cancelled results. Activity reporting is factual: it tracks the last observed activity time and the current tool when known. It does not pretend to know that a child is truly stuck.
 
-Default behavior is intentionally conservative. When no activity has been observed past the configured threshold, the run emits a `needs_attention` control event. Foreground runs push this as a `subagent:control-event` event, and notification-worthy control events are inserted into the visible transcript so both the user and the parent agent can see them, with a proactive hint plus concrete `nudge`, `status`, and `interrupt` options. Visible notifications fire once per child run and attention state.
+Default behavior is intentionally conservative. When no activity has been observed past the configured threshold, the run emits a `needs_attention` control event. Foreground runs push this as a `subagent:control-event` event, and notification-worthy control events are inserted into the visible transcript so both the user and the parent agent can see them, with a proactive hint plus concrete `nudge`, `status`, and `kill` options. Visible notifications fire once per child run and attention state.
 
-Use soft interrupt when a child is clearly blocked or drifting and the parent needs to regain control:
+Use kill when a child is clearly blocked or drifting and the parent needs to terminally stop it:
 
 ```typescript
-subagent({ action: "interrupt" })
+subagent({ action: "kill", id: taskId })
 ```
 
 Pass `id` when targeting a specific controllable run:
 
 ```typescript
-subagent({ action: "interrupt", id: "abc123" })
+subagent({ action: "kill", id: "abc123" })
 ```
 
-A soft interrupt cancels the current child turn and terminally records the child as interrupted. It does not mean the delegated task succeeded. Decide the next explicit action: launch a fresh child with the relevant task context, replace the task, ask the user, or stop the workflow.
+Kill terminally stops the child and records it as killed. It cannot be resumed and does not mean the delegated task succeeded. Decide the next explicit action: launch a fresh child with the relevant task context, replace the task, ask the user, or stop the workflow.
 
 Per-run control thresholds can be overridden when a task legitimately runs without observable output for longer than usual:
 
@@ -400,17 +406,17 @@ If a prompt-template extension is installed, additional user prompt templates ca
 
 - **Forking requires a persisted parent session.** If the current session does not have a persisted session file, forked runs fail.
 - **Forked runs inherit parent history.** They are branched threads, not fresh filtered contexts. Use fresh context for adversarial review unless the user explicitly asks for forked context.
-- **Delegation is one level deep and not configurable.** A subagent cannot call `subagent`: every launch and `interrupt` from inside a child is refused. Only `list`, `get`, and `status` stay available to a child.
-- **Attention signals are not lifecycle state.** `needs_attention` means no activity has been observed past the configured threshold. `interrupted` means the child turn ended before completion; it is terminal for continuation and is not the same as `failed`.
+- **Delegation is one level deep and not configurable.** A subagent cannot call `subagent`: every launch and `kill` from inside a child is refused. Only `list`, `get`, and `status` stay available to a child.
+- **Attention signals are not lifecycle state.** `needs_attention` means no activity has been observed past the configured threshold. `killed` means the child was terminally stopped by the kill command; it cannot be resumed and is not the same as `failed`.
 - **Builtin coordination varies by agent.** `debugger` and `worker` declare `intercom` and `contact_supervisor`; the other builtin specialists do not. For agents without bridge tools, decide the task up front or use a custom agent when mid-run coordination is required.
 - **Intercom asks are blocking.** A session can only maintain one pending outbound ask wait state at a time.
 - **Keep conversational authority clear.** Advisory specialists should not silently become second decision-makers.
 
 ## Best Practices
 
-### Choose foreground intentionally
+### Choose observation intentionally
 
-Use foreground runs for every delegated call so the result gates the parent's next action. Do not duplicate a delegated job while waiting.
+Use background observation for independent work and foreground-first observation when the next action depends on the result. If foreground observation yields, wait for the existing task's actual completion before consuming its result. Do not duplicate delegated work or mistake a launch receipt for a finished report. The owner's usual agent observation budget is 30 seconds, independent of execution lifetime.
 
 ### Keep writes single-threaded by default
 
@@ -437,11 +443,11 @@ Give subagents specific tasks rather than vague mandates.
 
 ### Escalate decisions upward
 
-Most builtin specialists return on completion rather than pausing for parent decisions. The builtin `debugger` and `worker` can use `contact_supervisor` when an active bridge route exists, but resolve known scope, product, and architecture questions before launching any writer. If the parent realizes mid-run that the scope is wrong, steer a reachable writer or soft-interrupt it.
+Most builtin specialists return on completion rather than pausing for parent decisions. The builtin `debugger` and `worker` can use `contact_supervisor` when an active bridge route exists, but resolve known scope, product, and architecture questions before launching any writer. If the parent realizes mid-run that the scope is wrong, steer a reachable writer or kill it.
 
 ### Intervene only on clear control signals
 
-Use subagent control proactively when a delegated run emits `needs_attention`, or when a human asks you to regain control. Do not interrupt just because a child has briefly produced no output. Silence can be normal during long tool calls, test runs, or model reasoning.
+Use subagent control proactively when a delegated run emits `needs_attention`, or when a human asks you to regain control. Do not kill just because a child has briefly produced no output. Silence can be normal during long tool calls, test runs, or model reasoning.
 
 ### Name sessions meaningfully
 
@@ -451,12 +457,12 @@ Use `/name` so intercom targeting stays stable.
 
 ### Locate, analyze, fix
 
-Use explicit follow-up calls when each result should guide the next task:
+When each result guides the next task, wait for its terminal completion before starting the dependent step:
 
 ```typescript
-const context = await subagent({ agent: "codebase-locator", task: "Map the auth files and tests relevant to: ..." });
-const analysis = await subagent({ agent: "codebase-analyzer", task: "Trace current behavior of the mapped files. Use the returned context: ..." });
-await subagent({ agent: "debugger", task: "Reproduce the failure and patch the root cause. Use the returned analysis: ..." });
+subagent({ agent: "codebase-locator", task: "Map the relevant auth files.", wait: { kind: "foreground" } })
+// If yielded, observe the returned task ID or await its completion notice.
+// Only then give the result to codebase-analyzer, and later to debugger.
 ```
 
 ### Clarify → Discover → Implement → Review (self-orchestrated workflow)
@@ -474,13 +480,13 @@ clarify when needed → validation contract → optional bounded discovery → o
 
 The validation contract defines completion before code is written: expected behavior, checks, commands or user flows to exercise, and evidence the writer should return. Keep it lightweight for small tasks, but make it explicit enough that reviewers and validators are checking the intended outcome rather than the writer’s own assumptions. Subagent runs do not carry a structured `acceptance` field, infer acceptance policies, inject acceptance-report prompts, or run acceptance gates; put any evidence requirements directly in the task text. Do not set removed acceptance config fields on `subagent()` calls, parallel task items, or agent frontmatter; move those requirements into the assigned task text instead.
 
-The first writer implements the approved change. The parent waits for its foreground handoff before review, and does not make parallel edits to the same worktree. Treat the writer handoff as the transition into review, not as final completion, unless the user explicitly asked for writer-only work, review-only output, or to stop after implementation. Specialist reviewers inspect the resulting diff from fresh context when warranted. The final fix writer applies synthesized fixes, then the parent looks over the final diff before completing. Ask only needed questions before a non-interactive launch.
+The first writer implements the approved change. The parent waits for its terminal handoff before review, even if the foreground observation has yielded, and does not make parallel edits to the same files. Treat the handoff as the transition into review unless the user requested writer-only work. Reviewers inspect the resulting diff from fresh context. The fix writer applies accepted findings, then the parent checks the final diff. Ask only needed scope questions before a non-interactive launch.
 
 For complex or risky changes, increase review and validation fanout when user intent or correctness risk materially warrants it rather than automatically trusting one reviewer. Use distinct angles such as correctness/regressions (`codebase-analyzer`), failure-mode hunt (`debugger` inspect-only), pattern fit (`codebase-pattern-finder`), prior-decision conformance (`codebase-research-*`), and external-spec conformance (`codebase-online-researcher`). When reviewers find non-trivial issues or the fix writer touches many lines, consider another focused review round before final validation.
 
 For very large work, split into serial milestones instead of launching a swarm of writers. Each milestone gets one writer, a validation contract, fresh-context review, a fix pass, and parent approval before the next milestone starts. Use parallel subagents inside a milestone for read-only context, research, and review only.
 
-Keep orchestration authority in the parent session. Child subagents cannot launch more subagents or run their own orchestration loops: delegation is one level deep and nothing configures it. This skill is parent-only and is stripped from every child prompt. A child may still have the `subagent` extension tool registered, because bundled extensions load through normal discovery; registration is not authority. Typed admission policy lets a child use only `list`, `get`, and `status`, and refuses delegation and `interrupt`. Spawned children also do not receive parent-only status/control/slash messages or prior parent `subagent` tool-call/tool-result artifacts, and child context filtering strips old hidden orchestration-instruction messages when they appear in inherited history. Every child also receives a boundary instruction that says the parent owns orchestration, that the `subagent` tool refuses every launch and `interrupt` from inside a subagent, and that writer children must call real edit/write tools instead of printing pseudo tool calls. Pass children concrete role-specific work instead.
+Keep orchestration authority in the parent session. Child subagents cannot launch more subagents or run their own orchestration loops: delegation is one level deep and nothing configures it. This skill is parent-only and is stripped from every child prompt. A child may still have the `subagent` extension tool registered, because bundled extensions load through normal discovery; registration is not authority. Typed admission policy lets a child use only `list`, `get`, and `status`, and refuses delegation and `kill`. Spawned children also do not receive parent-only status/control/slash messages or prior parent `subagent` tool-call/tool-result artifacts, and child context filtering strips old hidden orchestration-instruction messages when they appear in inherited history. Every child also receives a boundary instruction that says the parent owns orchestration, that the `subagent` tool refuses every launch and `kill` from inside a subagent, and that writer children must call real edit/write tools instead of printing pseudo tool calls. Pass children concrete role-specific work instead.
 
 1. Clarify only when needed. Use existing context first; gather missing code or research context selectively, then ask only unresolved questions that materially affect scope, completion criteria, constraints, or non-goals.
 2. Define the validation contract. State completion expectations before implementation: expected behavior, checks to run, user flows to exercise, and evidence required in the writer handoff. For UI, CLI, integration, or workflow changes, include at least one validator angle that uses the product the way a user would rather than only reading code.
@@ -528,7 +534,7 @@ subagent({
 
 When implementation review is part of the requested shape, do not treat the first review as the final step: synthesize findings against user scope and the validation contract, then launch one writer for accepted fixes when implementation is authorized.
 
-When a writer completes, treat its handoff as an intermediate state when review is part of the requested shape. The next parent action is bounded review, then synthesis, then a fix writer if reviewers found fixes worth doing now. Keep these calls in the foreground so each handoff is available before the next action.
+When a writer completes, treat its handoff as an intermediate state when review is part of the requested shape. The next action is review, then synthesis and a fix writer if needed. Foreground-first observation is convenient, but a yield requires waiting for the original task's terminal handoff before the next dependent action.
 
 When the user explicitly asks to keep reviewing until the work is clean, repeat writer → fresh-specialist-reviewers → synthesized-fix-writer cycles until reviewers find no blockers or fixes worth doing now, remaining feedback is optional or intentionally deferred, an unapproved product/scope/architecture decision needs the user, or the max review-round cap is reached. Default to 3 review rounds unless the user sets a different cap.
 

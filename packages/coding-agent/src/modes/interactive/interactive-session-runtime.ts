@@ -4,17 +4,14 @@ import { type AgentSession, setRegisteredThemes, stopThemeWatcher } from "./inte
 
 InteractiveModeBase.prototype.bindCurrentSessionExtensions = async function (this: InteractiveModeBase): Promise<void> {
 	const uiContext = this.createExtensionUIContext();
+	this.runtimeHost?.setProjectTrustContextFactory?.((cwd) => this.createProjectTrustContext(cwd));
 	await this.session.bindExtensions({
 		uiContext,
 		mode: "tui",
 		commandContextActions: {
 			waitForIdle: () => this.session.agent.waitForIdle(),
 			newSession: async (options) => {
-				if (this.loadingAnimation) {
-					this.loadingAnimation.stop();
-					this.loadingAnimation = undefined;
-				}
-				this.statusContainer.clear();
+				InteractiveModeBase.prototype.clearWorkingLoader.call(this);
 				try {
 					const result = await this.runtimeHost.newSession(options);
 					if (!result.cancelled) {

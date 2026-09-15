@@ -1,11 +1,14 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import type { ToolDefinitionEntry } from "./agent-session-types.ts";
-import { ExtensionRunner, type ToolDefinition, wrapRegisteredTools } from "./extensions/index.ts";
+import { ExtensionRunner, type ToolDefinition, wrapRegisteredTools } from "./extensions/index.js";
 import { isMandatoryRuntimeTool, isTrustedMandatoryRuntimeTool } from "./mandatory-runtime-tools.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { createSyntheticSourceInfo } from "./source-info.ts";
+import { createLocalBashOperations } from "./tools/bash.js";
+import { buildMutationRequester } from "./tools/file-mutation-coordinator.ts";
 import { createAllToolDefinitions, getDefaultToolNames } from "./tools/index.ts";
+import { createLocalPowerShellOperations } from "./tools/powershell.ts";
 import { resolveSessionTempDirPath } from "./tools/session-temp-dir.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 
@@ -123,6 +126,7 @@ export function _buildRuntime(
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
 		includeAllExtensionTools?: boolean;
+		preserveRunner?: boolean;
 	},
 ): void {
 	const autoResizeImages = this.settingsManager.getImageAutoResize();
@@ -134,6 +138,10 @@ export function _buildRuntime(
 		return true;
 	};
 	const activeBuiltinTools = (options.activeToolNames ?? [...getDefaultToolNames()]).filter(isAllowedBuiltinTool);
+	// Resolve ownership per call, just like command execution. Each wait receives
+	// a stable binding so observation cleanup can finish after session disposal.
+	const getTaskOwner = () =>
+		this._subagentPolicy?.depth && this._subagentPolicy.depth >= 1 ? undefined : this.getAgentTaskHost().ownerBinding;
 	const baseToolDefinitions = this._baseToolsOverride
 		? Object.fromEntries(
 				Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -142,10 +150,34 @@ export function _buildRuntime(
 				]),
 			)
 		: createAllToolDefinitions(this._cwd, {
+				// Resolved per execution for the same reason as `sessionTempDir` below: a
+				// requester captured at construction would keep a stale session id across
+				// fork/branch/resume, which is exactly the relaunch this makes legible.
+				resolveMutationRequester: (toolCallId) =>
+					buildMutationRequester({
+						sessionId: this.sessionManager.getSessionId(),
+						...(this._orchestrationContext ? { orchestration: this._orchestrationContext } : {}),
+						...(this._subagentPolicy?.intercom ? { intercom: this._subagentPolicy.intercom } : {}),
+						toolCallId,
+					}),
 				read: { autoResizeImages },
 				bash: {
 					commandPrefix: shellCommandPrefix,
 					shellPath,
+					get taskOwner() {
+						return getTaskOwner();
+					},
+					...(!(this._subagentPolicy?.depth && this._subagentPolicy.depth >= 1)
+						? {
+								operations: {
+									exec: (command, cwd, options) =>
+										createLocalBashOperations({
+											shellPath,
+											taskOwner: this.getAgentTaskHost().ownerBinding,
+										}).exec(command, cwd, options),
+								},
+							}
+						: {}),
 					interceptorEnabled: () => this.settingsManager.getBashInterceptorEnabled(),
 					availableTools: activeBuiltinTools,
 					// Resolved per execution so bash spill files follow the live
@@ -160,6 +192,24 @@ export function _buildRuntime(
 						});
 						return result;
 					},
+				},
+				powershell: {
+					get taskOwner() {
+						return getTaskOwner();
+					},
+					...(!(this._subagentPolicy?.depth && this._subagentPolicy.depth >= 1)
+						? {
+								operations: {
+									exec: (command, cwd, options) =>
+										createLocalPowerShellOperations({
+											taskOwner: this.getAgentTaskHost().ownerBinding,
+										}).exec(command, cwd, options),
+								},
+							}
+						: {}),
+				},
+				kill: {
+					taskOwner: () => this.getAgentTaskHost().ownerBinding,
 				},
 				search: {
 					contextBefore: this.settingsManager.getSearchContextBefore(),
@@ -180,20 +230,22 @@ export function _buildRuntime(
 		}
 	}
 
-	this._extensionRunner = new ExtensionRunner(
-		extensionsResult.extensions,
-		extensionsResult.runtime,
-		this._cwd,
-		this.sessionManager,
-		new ModelRegistry(this._modelRuntime),
-		this._orchestrationContext,
-		this._subagentPolicy,
-	);
-	if (this._extensionRunnerRef) {
-		this._extensionRunnerRef.current = this._extensionRunner;
+	if (!options.preserveRunner) {
+		this._extensionRunner = new ExtensionRunner(
+			extensionsResult.extensions,
+			extensionsResult.runtime,
+			this._cwd,
+			this.sessionManager,
+			new ModelRegistry(this._modelRuntime),
+			this._orchestrationContext,
+			this._subagentPolicy,
+		);
+		if (this._extensionRunnerRef) {
+			this._extensionRunnerRef.current = this._extensionRunner;
+		}
+		this._bindExtensionCore(this._extensionRunner);
+		this._applyExtensionBindings(this._extensionRunner);
 	}
-	this._bindExtensionCore(this._extensionRunner);
-	this._applyExtensionBindings(this._extensionRunner);
 
 	const defaultActiveToolNames = this._baseToolsOverride
 		? Object.keys(this._baseToolsOverride)

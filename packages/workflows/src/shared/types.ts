@@ -28,6 +28,8 @@ export type StageUserMessageDelivery = "steer" | "followUp";
 export interface StageSendUserMessageOptions {
 	/** Delivery mode to use when the stage session is already streaming. Defaults to followUp. */
 	readonly deliverAs?: StageUserMessageDelivery;
+	/** Opt in to existing session command/template expansion. Ordinary programmatic messages stay literal. */
+	readonly expandPromptTemplates?: boolean;
 }
 
 export type WorkflowModelValue = NonNullable<CreateAgentSessionOptions["model"]> | string;
@@ -237,6 +239,10 @@ export interface StageExecutionMeta {
 	executionMode?: WorkflowExecutionMode;
 	/** Internal stage-generation context reused across model-fallback sessions. */
 	orchestrationContext?: CreateAgentSessionOptions["orchestrationContext"];
+	/** Internal startup observation; does not authorize delivery or release ownership. */
+	onStartupPhase?: (phase: import("./stage-startup.js").StageStartupPhase) => void;
+	/** Creation-generation cancellation, separate from the session's lifetime signal. */
+	startupSignal?: AbortSignal;
 }
 
 export interface CompleteStageOpts extends WorkflowModelFallbackFields {

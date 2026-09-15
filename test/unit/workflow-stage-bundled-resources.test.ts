@@ -31,6 +31,11 @@ import {
 	prepareAtomicStageSessionOptions,
 } from "../../packages/workflows/src/extension/wiring.js";
 import type { StageSessionRuntime } from "../../packages/workflows/src/runs/foreground/stage-runner.js";
+import {
+	debuggerFallbacks,
+	locatorAgentFallbacks,
+	ordinaryAgentFallbacks,
+} from "./latest-model-config-expectations.js";
 
 const REAL_WORKFLOW_STAGE_RESOURCE_TIMEOUT_MS = 120_000;
 const tempDirs: string[] = [];
@@ -248,6 +253,25 @@ describe("workflow stage bundled resources", () => {
 				"worker",
 			]) {
 				assert.ok(builtinNames.has(name), `expected bundled subagent ${name}`);
+				const agent = builtinAgents.find((entry) => entry.name === name);
+				assert.ok(agent, name);
+				const isLocator = ["codebase-locator", "codebase-pattern-finder", "codebase-research-locator"].includes(
+					name,
+				);
+				assert.equal(
+					agent.model,
+					name === "debugger"
+						? "openai-codex/gpt-6-astra:medium"
+						: isLocator
+							? "openai-codex/gpt-5.6-luna:xhigh"
+							: "openai-codex/gpt-6-astra:low",
+					name,
+				);
+				assert.deepEqual(
+					agent.fallbackModels,
+					name === "debugger" ? debuggerFallbacks : isLocator ? locatorAgentFallbacks : ordinaryAgentFallbacks,
+					name,
+				);
 			}
 			const debuggerAgent = builtinAgents.find((agent) => agent.name === "debugger");
 			const workerAgent = builtinAgents.find((agent) => agent.name === "worker");
@@ -340,18 +364,30 @@ describe("workflow stage bundled resources", () => {
 				await session.bindExtensions({});
 				const tool = session.getToolDefinition("subagent");
 				assert.ok(tool, "workflow stages must register the subagent tool");
+				// RFC #2884 §5.2: a task-bound single launch returns an observation DTO, not the legacy
+				// `results[]` execution shape. A foreground wait settles on the in-process child result.
 				const result = await tool.execute(
 					"stage-delegation",
-					{ agent: "worker", task: "complete this test task", context: "fresh" } as never,
+					{
+						agent: "worker",
+						task: "complete this test task",
+						context: "fresh",
+						wait: { kind: "foreground", budgetMs: 60_000 },
+					} as never,
 					undefined,
 					undefined,
 					session.extensionRunner.createContext(),
 				);
 				const details = result.details as Details;
+				const response = details.taskResponse;
 				assert.ok(
-					details.results.some((child) => child.envelope?.includes("done") === true),
-					"the stage tool must return the in-process child result",
+					response?.kind === "admitted" && response.observation.kind === "settled",
+					`the stage tool must admit and settle the in-process child: ${JSON.stringify(response)}`,
 				);
+				const settled = response.observation.result;
+				assert.equal(settled.kind, "completed", "the stage tool must return the in-process child result");
+				// The in-process test child answers "done"; its terminal output is the settled output artifact.
+				assert.equal(settled.output?.byteCount, String(Buffer.byteLength("done")));
 			} finally {
 				session.dispose();
 			}

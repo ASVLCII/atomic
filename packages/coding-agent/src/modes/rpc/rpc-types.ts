@@ -15,7 +15,7 @@ import type {
 } from "@bastani/pi-ai";
 import type { Api, ImageContent, Model } from "@bastani/pi-ai/compat";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { CompactionReason, SessionStats } from "../../core/agent-session.ts";
+import type { CompactionReason, SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { VerbatimCompactionResult } from "../../core/compaction/index.ts";
 import type { ResourceOverlap } from "../../core/diagnostics.ts";
@@ -69,6 +69,7 @@ export type RpcCommand =
 
 	// State
 	| { id?: string; type: "get_state" }
+	| { id?: string; type: "open_task_inspector"; taskId?: string }
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string; persist?: boolean }
@@ -109,7 +110,7 @@ export type RpcCommand =
 	// Session
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
-	| { id?: string; type: "switch_session"; sessionPath: string }
+	| { id?: string; type: "switch_session"; sessionPath: string; cwdOverride?: string }
 	| { id?: string; type: "import_session"; inputPath: string; cwdOverride?: string }
 	| { id?: string; type: "fork"; entryId: string }
 	| { id?: string; type: "clone" }
@@ -189,6 +190,8 @@ export interface RpcSessionState {
 	messageCount: number;
 	pendingMessageCount: number;
 	queuedMessagesPaused: boolean;
+	/** Authoritative engine trust state; absent on older RPC peers. */
+	projectTrusted?: boolean;
 	resourceOverlaps?: ResourceOverlap[];
 	resourceExtensions?: RpcResourceExtension[];
 }
@@ -215,6 +218,7 @@ export type RpcResponse =
 
 	// State
 	| { id?: string; type: "response"; command: "get_state"; success: true; data: RpcSessionState }
+	| { id?: string; type: "response"; command: "open_task_inspector"; success: true }
 
 	// Model
 	| {
@@ -452,6 +456,7 @@ export type RpcExtensionUIRequest =
 			widgetKey: string;
 			widgetLines: string[] | undefined;
 			widgetPlacement?: "aboveEditor" | "belowEditor";
+			widgetScroll?: { maxHeight: number; maxHeightFraction?: number };
 	  }
 	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
 	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }

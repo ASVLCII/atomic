@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 import { parse as parseYaml } from "yaml";
@@ -29,7 +29,7 @@ const warmPath = join(root, ".github/workflows/warm-toolchain-cache.yml");
 
 /**
  * The `test` job's own topology contracts live in test-workflow-topology.test.ts.
- * It is now a result gate over four concurrent work jobs, and the
+ * It is now a result gate over five concurrent work jobs, and the
  * anti-un-protection assertions belong beside the ones describing that split.
  */
 /**
@@ -76,7 +76,76 @@ test("every test suite entry point resolves to one shared per-test timeout", asy
 	assert.match(await readText(join(root, ".github/workflows/test.yml")), /run-flaky-test-suite\.ts/u);
 });
 
-test("global setups provide artifacts and native bindings to every project", async () => {
+test("workflows workspace test scripts delegate to the root Vitest suites", async () => {
+	const manifest = await readJson<{ scripts: Record<string, string> }>(join(root, "packages/workflows/package.json"));
+	// npm test visits workspace test scripts after running the root suites.
+	// Delegate to the same root entry points as CI, never back to root `test`.
+	for (const [entry, target] of Object.entries({
+		test: "test:unit",
+		"test:unit": "test:unit",
+		"test:integration": "test:integration",
+		"test:all": "test:all",
+	})) {
+		assert.equal(manifest.scripts[entry], `npm --prefix ../.. run ${target} --`, `${entry} bypasses root test setup`);
+	}
+});
+
+/**
+ * Run 33833721342 reached `npm ci` with an exact-key cache hit, then emitted
+ * nothing for the full six-minute static-checks job cap. npm's former default
+ * allowed one HTTP request to wait 300 seconds before either of its retries,
+ * so the install policy could not recover before the job that owned it died.
+ *
+ * Bound one request conservatively as every attempt consuming fetch-timeout
+ * plus every retry consuming the maximum backoff. The measured job caps no
+ * longer reserve three times that allowance. Keep it below the smallest cap
+ * among jobs that install with npm; the npm-free result gate is irrelevant.
+ * This is not a completion guarantee: setup and other work share the cap, and
+ * the enclosing job deadline can interrupt a request or its retries.
+ */
+test("npm registry request retries are bounded below npm-installing CI job caps", async () => {
+	const npmConfig = new Map(
+		(await readText(join(root, ".npmrc")))
+			.split("\n")
+			.map((line) => /^(?<key>[a-z][a-z-]*)=(?<value>\S+)$/u.exec(line)?.groups)
+			.filter((entry): entry is { key: string; value: string } => entry !== undefined)
+			.map(({ key, value }) => [key, value]),
+	);
+	const integerConfig = (name: string): number => {
+		const value = npmConfig.get(name);
+		assert.ok(value, `.npmrc must declare ${name}`);
+		assert.match(value, /^\d+$/u, `${name} must be an integer, received ${value}`);
+		return Number(value);
+	};
+	const fetchTimeoutMs = integerConfig("fetch-timeout");
+	const fetchRetries = integerConfig("fetch-retries");
+	const retryMinTimeoutMs = integerConfig("fetch-retry-mintimeout");
+	const retryMaxTimeoutMs = integerConfig("fetch-retry-maxtimeout");
+	assert.ok(fetchRetries >= 1, "a transient registry stall must receive at least one retry");
+	assert.ok(retryMinTimeoutMs > 0, "registry retries need a positive backoff");
+	assert.ok(retryMinTimeoutMs <= retryMaxTimeoutMs, "minimum retry backoff must not exceed its maximum");
+
+	const workflow = parseYaml(await readText(testPath)) as Workflow;
+	const jobBudgetsMinutes = Object.values(workflow.jobs ?? {}).flatMap((job) => {
+		if (!job.steps?.some((step) => /\bnpm ci\b/u.test(step.run ?? ""))) return [];
+		const directBudget = job["timeout-minutes"];
+		const direct = typeof directBudget === "number" ? [directBudget] : [];
+		const matrix = (job.strategy?.matrix?.include ?? []).flatMap((entry) => {
+			const budget = entry.timeout_minutes;
+			return typeof budget === "number" ? [budget] : [];
+		});
+		return [...direct, ...matrix];
+	});
+	assert.ok(jobBudgetsMinutes.length > 0, "test.yml must declare npm-installing job timeout budgets");
+	const smallestJobBudgetMs = Math.min(...jobBudgetsMinutes) * 60_000;
+	const stalledRequestBudgetMs = fetchTimeoutMs * (fetchRetries + 1) + retryMaxTimeoutMs * fetchRetries;
+	assert.ok(
+		stalledRequestBudgetMs < smallestJobBudgetMs,
+		`one stalled npm request can consume ${stalledRequestBudgetMs}ms, not below the smallest npm-installing CI job cap (${smallestJobBudgetMs}ms)`,
+	);
+});
+
+test("global setups isolate Herdr and provide artifacts and native bindings to every project", async () => {
 	const config = (await import("../../vitest.config.js")) as {
 		default: {
 			test?: {
@@ -85,6 +154,7 @@ test("global setups provide artifacts and native bindings to every project", asy
 		};
 	};
 	const projects = config.default.test?.projects ?? [];
+	const herdrSetup = "./test/global-setup-herdr-isolation.ts";
 	const artifactSetup = "./test/global-setup-workflow-artifacts.ts";
 	const nativeSetup = "./test/global-setup-natives.ts";
 	for (const name of ["unit", "integration", "ci"]) {
@@ -92,8 +162,8 @@ test("global setups provide artifacts and native bindings to every project", asy
 		assert.ok(project, `missing vitest project: ${name}`);
 		assert.deepEqual(
 			project.test?.globalSetup,
-			[artifactSetup, nativeSetup],
-			`${name} must keep the artifact and native global setups`,
+			[herdrSetup, artifactSetup, nativeSetup],
+			`${name} must isolate inherited Herdr credentials before artifact and native setup`,
 		);
 	}
 });
@@ -132,6 +202,14 @@ test("workspace selectors precede the run verb so Bun cannot rewrite them", asyn
 	}
 });
 
+test("root build emits the packed Atomic package after its prerequisites", async () => {
+	const manifest = (await readJson(join(root, "package.json"))) as { scripts: Record<string, string> };
+	assert.equal(
+		manifest.scripts.build,
+		"npm --workspace=@bastani/pi-ai run build && node scripts/alias-pi-ai.mjs && npm --workspace=@bastani/atomic-natives run build && npm --workspace=@bastani/atomic run build",
+	);
+});
+
 test("typecheck aliases the local pi-ai build before compiling dependents", async () => {
 	const manifest = (await readJson(join(root, "package.json"))) as { scripts: Record<string, string> };
 	assert.equal(
@@ -149,10 +227,10 @@ test("typecheck aliases the local pi-ai build before compiling dependents", asyn
  * became `it.skip` and eleven more kept their names, kept passing, and executed
  * no assertions behind `if (!sqlite) return`. Neither shows up in a pass/fail
  * count or a test-name diff, so the guard is structural: the loader must use
- * `node:sqlite`, which Node >= 22.13 and Bun >= 1.4.0 (this repository's
- * floor) both ship — the `bun:sqlite` fallback is deleted and must not come
- * back — and no test may reintroduce a soft guard that turns an unavailable
- * module into a green no-op.
+ * `node:sqlite`, which Node >= 22.13 and Bun >= 1.4.2 (this repository's
+ * floor) both ship — the `bun:sqlite` fallback was deleted at the earlier
+ * 1.4.0 floor and must not come back — and no test may reintroduce a soft
+ * guard that turns an unavailable module into a green no-op.
  */
 test("SQLite selectors resolve on either runtime and their tests cannot silently empty", async () => {
 	const selectors = await readText(join(root, "packages/coding-agent/src/core/tools/resource-selectors.ts"));
@@ -355,6 +433,7 @@ interface MuslSmokeProbe {
 	archive: string;
 	argsPath: string;
 	bodyPath: string;
+	postgresBodyPath: string;
 	root: string;
 }
 
@@ -364,7 +443,7 @@ function createMuslSmokeProbe(): MuslSmokeProbe {
 	const atomicRoot = join(payloadRoot, "atomic");
 	for (const directory of [
 		join(atomicRoot, "builtin", "workflows"),
-		join(atomicRoot, "node_modules", "@bastani", "atomic-natives"),
+		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "postgres-runtime", "bin"),
 		join(atomicRoot, "lib"),
 	]) {
 		makeDirectorySync(directory, { recursive: true });
@@ -375,6 +454,11 @@ function createMuslSmokeProbe(): MuslSmokeProbe {
 		join(atomicRoot, "package.json"),
 		join(atomicRoot, "builtin", "workflows", "package.json"),
 		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "package.json"),
+		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "postgres-runtime", "bin", "initdb"),
+		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "postgres-runtime", "bin", "pg_ctl"),
+		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "postgres-runtime", "POSTGRESQL-LICENSE"),
+		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "postgres-runtime", "ZONKY-APACHE-2.0-LICENSE"),
+		join(atomicRoot, "node_modules", "@bastani", "atomic-natives", "postgres-runtime", "runtime-provenance.json"),
 		join(atomicRoot, "lib", "libgcc_s.so.1"),
 		join(atomicRoot, "lib", "libstdc++.so.6"),
 	]) {
@@ -382,32 +466,43 @@ function createMuslSmokeProbe(): MuslSmokeProbe {
 	}
 
 	const archive = join(probeRoot, "archive.tar.gz");
-	const archiveResult = spawnSyncCollect(["tar", "-czf", archive, "-C", payloadRoot, "atomic"]);
+	// GNU tar reads drive-qualified archive names as host:path; keep -f relative.
+	const archiveResult = spawnSyncCollect(["tar", "-czf", "archive.tar.gz", "-C", payloadRoot, "atomic"], {
+		cwd: probeRoot,
+	});
 	assert.equal(archiveResult.exitCode, 0, archiveResult.stderr.toString());
 
 	const stubDirectory = join(probeRoot, "stub");
 	makeDirectorySync(stubDirectory, { recursive: true });
 	const argsPath = join(probeRoot, "docker-args.txt");
 	const bodyPath = join(probeRoot, "smoke-body.sh");
+	const postgresBodyPath = join(probeRoot, "postgres-smoke-body.sh");
 	const stubPath = join(stubDirectory, "docker");
 	writeTextSync(
 		stubPath,
 		`#!/bin/sh
 : "\${ATOMIC_MUSL_DOCKER_ARGS:?}"
 : "\${ATOMIC_MUSL_DOCKER_BODY:?}"
-printf '%s\\n' "$@" > "$ATOMIC_MUSL_DOCKER_ARGS"
+: "\${ATOMIC_MUSL_POSTGRES_BODY:?}"
 mount=
+last=
 for arg do
+    last=$arg
     case "$arg" in
         *:/smoke:ro) mount=\${arg%:/smoke:ro} ;;
     esac
 done
 [ -n "$mount" ]
-cat "$mount/smoke.sh" > "$ATOMIC_MUSL_DOCKER_BODY"
+if [ "$last" = /smoke/smoke.sh ]; then
+    printf '%s\n' "$@" > "$ATOMIC_MUSL_DOCKER_ARGS"
+    cat "$mount/smoke.sh" > "$ATOMIC_MUSL_DOCKER_BODY"
+else
+    cat "$mount/postgres-smoke.sh" > "$ATOMIC_MUSL_POSTGRES_BODY"
+fi
 `,
 	);
 	chmodSync(stubPath, 0o755);
-	return { archive, argsPath, bodyPath, root: probeRoot };
+	return { archive, argsPath, bodyPath, postgresBodyPath, root: probeRoot };
 }
 
 function removeMuslSmokeProbe(probe: MuslSmokeProbe): void {
@@ -432,14 +527,20 @@ test("musl smoke forwards a complete staged shell script through stub docker", (
 	const probe = createMuslSmokeProbe();
 	try {
 		const result = spawnSyncCollect(
-			["bash", join(root, "scripts/test-musl-release-archive.sh"), probe.archive, "linux-x64-musl"],
+			[
+				"bash",
+				join(root, "scripts/test-musl-release-archive.sh"),
+				relative(probe.root, probe.archive),
+				"linux-x64-musl",
+			],
 			{
-				cwd: root,
+				cwd: probe.root,
 				env: {
 					...process.env,
 					PATH: `${join(probe.root, "stub")}${delimiter}${process.env.PATH ?? ""}`,
 					ATOMIC_MUSL_DOCKER_ARGS: probe.argsPath,
 					ATOMIC_MUSL_DOCKER_BODY: probe.bodyPath,
+					ATOMIC_MUSL_POSTGRES_BODY: probe.postgresBodyPath,
 				},
 			},
 		);
@@ -452,6 +553,11 @@ test("musl smoke forwards a complete staged shell script through stub docker", (
 		assert.match(smoke, /output=\$\(printf '' \| "\$atomic" --no-session 2>&1\)/u);
 		assert.match(smoke, /if echo "\$output" \| grep -q 'Failed to load extension'; then exit 1; fi/u);
 		assert.match(smoke, /No models available\|No model selected\|No API key found/u);
+		const postgresSmoke = readTextSync(probe.postgresBodyPath).toString("utf8");
+		assert.match(postgresSmoke, /bin\/initdb/u);
+		assert.match(postgresSmoke, /bin\/pg_ctl/u);
+		assert.match(postgresSmoke, /nc -w 3 127\.0\.0\.1 55439/u);
+		assert.match(postgresSmoke, /embedded PostgreSQL initdb\/start\/connect\/shutdown succeeded/u);
 	} finally {
 		removeMuslSmokeProbe(probe);
 	}
@@ -482,6 +588,26 @@ test("Alpine smoke covers both musl archives on stock Alpine without runtime pac
 	assert.match(nativeLoad, /require\("\/smoke\/atomic\/node_modules\/@bastani\/atomic-natives"\)/u);
 	assert.match(nativeLoad, /\["glob", "grep"\]/u);
 	assert.match(nativeLoad, /typeof binding\[name\] !== "function"/u);
+});
+
+test("release packaging stages PostgreSQL in all eight native leaves and validates packed payloads", async () => {
+	const workflow = await readText(publishPath);
+	const build = jobBlock(workflow, "build", "stage-github-release");
+	for (const command of [
+		"linux-x64 packages/natives/npm/linux-x64-gnu",
+		"linux-arm64 packages/natives/npm/linux-arm64-gnu",
+		"darwin-x64 packages/natives/npm/darwin-x64",
+		"darwin-arm64 packages/natives/npm/darwin-arm64",
+		"windows-x64 packages/natives/npm/win32-x64-msvc",
+		"linux-x64-musl packages/natives/npm/linux-x64-musl",
+		"linux-arm64-musl packages/natives/npm/linux-arm64-musl",
+		"windows-arm64 packages/natives/npm/win32-arm64-msvc",
+	]) {
+		assert.match(build, new RegExp(`node scripts/stage-postgres-runtime\\.mjs ${command}`, "u"));
+	}
+	assert.match(build, /@bastani\/atomic-natives-\*/u);
+	assert.match(build, /package\/postgres-runtime\/POSTGRESQL-LICENSE/u);
+	assert.match(build, /stage-postgres-runtime\.mjs.*--validate/u);
 });
 
 test("musl archive build bundles pinned C++ runtimes and patches payload-local search paths", async () => {
@@ -516,7 +642,7 @@ test("release build retains Atomic native, smoke, shrinkwrap, metadata, and asse
 	assert.match(workflow, /native optionalDependencies must be the eight exact-version platform packages/u);
 	assert.match(workflow, /test .* = 11/u);
 	assert.match(workflow, /Build Linux musl archive[\s\S]*--platform "\$\{\{ matrix\.platform \}\}"/u);
-	assert.match(workflow, /Install musl archive tooling[\s\S]*patchelf/u);
+	assert.match(workflow, /Verify installed musl archive tooling[\s\S]*patchelf/u);
 	assert.doesNotMatch(
 		workflow,
 		/Release-base-ref|Release-base-sha|RELEASE_BASE_REFS|deterministic release tree|create-event binding/iu,
@@ -587,7 +713,7 @@ test("native-artifacts bounds every dependency acquisition step", async () => {
 	};
 	assert.equal(budget("tool: cargo-zigbuild@"), 3);
 	assert.equal(budget("tool: cargo-xwin@"), 3);
-	assert.equal(budget("apt-get install"), 5);
+	assert.equal(budget("Select installed Windows cross-compile tooling"), 1);
 	assert.equal(budget("cargo-xwin xwin cache xwin"), 8);
 
 	// The rustup fetch that killed both 0.9.16-alpha.5 publish runs overran this
@@ -679,7 +805,7 @@ test("sticky-disk checkout stays on Blacksmith Linux runners", async () => {
 	assert.doesNotMatch(jobBlock(publish, "windows-binary-smoke", "alpine-binary-smoke"), /useblacksmith/u);
 	// Every cross-platform job in test.yml now checks out for itself, so each one
 	// must keep the Linux/non-Linux checkout pair.
-	const crossPlatformJobs = ["suites", "agent-suite", "release-archive"] as const;
+	const crossPlatformJobs = ["unit-tests", "integration-tests", "agent-suite", "release-archive"] as const;
 	const testJobs = new Map(jobBlocks(testWorkflow));
 	for (const block of [
 		jobBlock(publish, "native-artifacts", "linux-binary-smoke"),
@@ -718,7 +844,7 @@ test("the shipped build toolchain and Bun do not float", async () => {
 			([, value]) => value as string,
 		),
 	);
-	assert.deepEqual([...bunVersions], ["1.4.0"], "test.yml and publish.yml must exercise one pinned Bun");
+	assert.deepEqual([...bunVersions], ["1.4.2"], "test.yml and publish.yml must exercise one pinned Bun");
 });
 
 test("each native leg declares its own measured job and compile budget", async () => {
@@ -799,8 +925,15 @@ interface WorkflowMatrix {
 	[key: string]: string[] | MatrixEntry[] | undefined;
 }
 
+interface WorkflowJob {
+	"runs-on"?: string | string[];
+	"timeout-minutes"?: number | string;
+	strategy?: { matrix?: WorkflowMatrix };
+	steps?: { run?: string }[];
+}
+
 interface Workflow {
-	jobs?: Record<string, { "runs-on"?: string | string[]; strategy?: { matrix?: WorkflowMatrix } }>;
+	jobs?: Record<string, WorkflowJob>;
 }
 
 /**
@@ -892,4 +1025,17 @@ test("CI runs every test suite, because no hook gates a push", async () => {
 			`.github/workflows/test.yml never runs \`npm run ${script}\`; with no push gate, a suite CI skips is a suite nothing runs`,
 		);
 	}
+});
+
+test("existing hardware jobs execute PostgreSQL SQL persistence gates without changing the platform matrix", async () => {
+	const workflow = await readText(publishPath);
+	for (const job of ["native-artifacts", "linux-binary-smoke", "windows-binary-smoke"]) {
+		assert.match(jobBlock(workflow, job), /smoke-postgres-runtime\.mjs/u);
+	}
+	const alpine = await readText(join(root, "scripts/test-musl-release-archive.sh"));
+	assert.match(alpine, /initdb.*-U postgres/u);
+	assert.match(alpine, /CREATE TABLE atomic_durability_probe/u);
+	assert.match(alpine, /INSERT INTO atomic_durability_probe/u);
+	assert.match(alpine, /SELECT value FROM atomic_durability_probe/u);
+	assert.match(alpine, /persisted-row/u);
 });

@@ -8,7 +8,6 @@ import type {
 } from "../../shared/types.js";
 import type { ConcurrencyLimiter } from "../shared/concurrency.js";
 import { raceAbort } from "./executor-abort.js";
-import { hasExplicitFastModeCandidate } from "./executor-direct-helpers.js";
 import {
 	askReadinessViaStageBroker,
 	RESUME_CONTINUATION_PROMPT,
@@ -53,21 +52,20 @@ export function createTrackedStageCaller(input: {
 	const { runtime } = input;
 	const readinessGateEnabled =
 		runtime.opts.confirmStageReadiness !== undefined || runtime.opts.usePromptNodesForUi === true;
-	const confirmReadiness = async (): Promise<ReadinessDecision> => {
-		try {
-			if (runtime.opts.confirmStageReadiness !== undefined) {
-				const ready = await runtime.opts.confirmStageReadiness({
+	const confirmReadiness = async (signal: AbortSignal): Promise<ReadinessDecision> => {
+		if (runtime.opts.confirmStageReadiness !== undefined) {
+			const ready = await raceAbort(
+				runtime.opts.confirmStageReadiness({
 					runId: runtime.runId,
 					stageId: runtime.stageId,
 					stageName: runtime.name,
-					signal: runtime.signal,
-				});
-				return ready ? { action: "advance" } : { action: "stay" };
-			}
-			return await askReadinessViaStageBroker(runtime.runId, runtime.stageId, runtime.signal);
-		} catch {
-			return { action: "advance" };
+					signal,
+				}),
+				signal,
+			);
+			return ready ? { action: "advance" } : { action: "stay" };
 		}
+		return await askReadinessViaStageBroker(runtime.runId, runtime.stageId, signal);
 	};
 
 	const suppressReadinessForCurrentTurn = (): void => {
@@ -116,7 +114,7 @@ export function createTrackedStageCaller(input: {
 			if (suppressQueuedContinuation) runtime.state.suppressQueuedUserMessageContinuation = true;
 			try {
 				result = (await runtime.raceStageSessionHeartbeat(
-					raceAbort(runtime.innerCtx.prompt(RESUME_CONTINUATION_PROMPT), runtime.signal),
+					raceAbort(runtime.innerCtx.__continuePrompt(RESUME_CONTINUATION_PROMPT), runtime.signal),
 				)) as T;
 			} finally {
 				if (suppressQueuedContinuation) runtime.state.suppressQueuedUserMessageContinuation = false;
@@ -189,16 +187,7 @@ export function createTrackedStageCaller(input: {
 				const hasNoExplicitModelConfig =
 					input.options?.model === undefined && input.options?.fallbackModels === undefined;
 				const promptAdapterHandlesInitialPrompt = input.adapters.prompt !== undefined;
-				if (
-					callOptions.eagerSession &&
-					!promptAdapterHandlesInitialPrompt &&
-					(hasNoExplicitModelConfig ||
-						(await hasExplicitFastModeCandidate({
-							model: input.options?.model,
-							fallbackModels: input.options?.fallbackModels,
-							models: runtime.opts.models,
-						})))
-				) {
+				if (callOptions.eagerSession && !promptAdapterHandlesInitialPrompt && hasNoExplicitModelConfig) {
 					try {
 						await runtime.innerCtx.__ensureSession();
 					} catch (err) {
@@ -257,14 +246,41 @@ export function createTrackedStageCaller(input: {
 					});
 					try {
 						while (runtime.state.askUserQuestionObservedThisTurn || repeatReadinessAfterChatTurn) {
-							const decision = await confirmReadiness();
+							runtime.signal.throwIfAborted();
+							if (runtime.stageSnapshot.status === "paused" || runtime.stageSnapshot.status === "blocked") {
+								await runtime.scheduler.waitForStageRelease(runtime.stageId, runtime.releaseLiveHandle);
+								continue;
+							}
+							const controller = new AbortController();
+							runtime.state.readinessController = controller;
+							let decision: ReadinessDecision;
+							try {
+								decision = await confirmReadiness(AbortSignal.any([runtime.signal, controller.signal]));
+								// An answer can win its promise race while pause still wins admission.
+								if (decision.action === "advance" || decision.message !== undefined) {
+									await runtime.scheduler.waitForStageRelease(runtime.stageId, runtime.releaseLiveHandle);
+								}
+								runtime.signal.throwIfAborted();
+								if (controller.signal.aborted) {
+									await runtime.scheduler.waitForStageRelease(runtime.stageId, runtime.releaseLiveHandle);
+									continue;
+								}
+							} catch (error) {
+								runtime.signal.throwIfAborted();
+								if (controller.signal.aborted) {
+									await runtime.scheduler.waitForStageRelease(runtime.stageId, runtime.releaseLiveHandle);
+									continue;
+								}
+								throw error;
+							}
 							if (decision.action === "advance") break;
+							delete runtime.state.readinessController;
 							if (runtime.signal.aborted) break;
 							runtime.state.askUserQuestionObservedThisTurn = false;
 							runtime.state.chatAnswerObservedThisTurn = false;
 							if (decision.message !== undefined) {
 								result = (await runtime.raceStageSessionHeartbeat(
-									raceAbort(runtime.innerCtx.prompt(decision.message), runtime.signal),
+									raceAbort(runtime.innerCtx.__continuePrompt(decision.message), runtime.signal),
 								)) as T;
 								if (runtime.budget.enabled && typeof result === "string") stageResultBeforeBudget = result;
 							} else {
@@ -311,7 +327,8 @@ export function createTrackedStageCaller(input: {
 			if (afterBudget.kind === "wrap_up") await runtime.budget.deliverWrapUp(runtime.name);
 			if (afterBudget.kind === "exhausted" && runtime.budget.enabled)
 				await runtime.budget.stopAtBoundaryAsync(runtime.name);
-			await runtime.innerCtx.__closeGeneration();
+			const finalizedArtifact = await runtime.innerCtx.__closeGeneration();
+			if (typeof result === "string" && finalizedArtifact !== undefined) result = finalizedArtifact as T;
 			await runtime.captureStageSessionMeta({ awaitDurable: true });
 			if (
 				trackStageLifecycle &&
@@ -416,10 +433,19 @@ export function createTrackedStageCaller(input: {
 					const failure = runtime.classifyExecutorFailure(durableCheckpointError.error);
 					applyTerminalStageState = () => applyFailureToStage(runtime.stageSnapshot, failure);
 				}
-				if (!runtime.state.stageFinalized) applyTerminalStageState?.();
-				// `finalizeStageSnapshot` calls the version-bumping `recordStageEnd`
-				// before its first yield, so the live write cannot outpace the cache.
+				// Keep readiness ownership through checkpointing: a consumed answer must not
+				// let finalization overwrite a pause selected while the checkpoint awaited.
 				try {
+					if (terminalStateIsSuccess && runtime.state.readinessController !== undefined) {
+						let pauseVersion: number | undefined;
+						do {
+							pauseVersion = runtime.state.readinessPauseVersion;
+							await runtime.scheduler.waitForStageRelease(runtime.stageId, runtime.releaseLiveHandle);
+						} while (pauseVersion !== runtime.state.readinessPauseVersion);
+						runtime.signal.throwIfAborted();
+					}
+					if (!runtime.state.stageFinalized) applyTerminalStageState?.();
+					// recordStageEnd publishes synchronously before its durable write yields.
 					await runtime.finalizeStageSnapshot();
 				} catch (err) {
 					finalizationError ??= { thrown: true, error: err };
@@ -444,6 +470,8 @@ export function createTrackedStageCaller(input: {
 			}
 			input.limiter.release();
 			if (finalizationError !== undefined) throwFinalizationError(finalizationError.error);
+			delete runtime.state.readinessController;
+			if (terminalStateIsSuccess && readinessGateEnabled) runtime.signal.throwIfAborted();
 		}
 	};
 }

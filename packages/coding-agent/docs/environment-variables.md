@@ -13,7 +13,7 @@ Atomic accepts environment variables for configuration, provider credentials, an
 | `ATOMIC_SKIP_VERSION_CHECK` | `PI_SKIP_VERSION_CHECK` | Skip automatic startup version checks; explicit self-update still checks |
 | `ATOMIC_TELEMETRY` | `PI_TELEMETRY` | Enable/disable install/update telemetry |
 | `ATOMIC_REDUCED_MOTION` | `PI_REDUCED_MOTION` | Use static reduced-motion presentation |
-| `ATOMIC_EXPERIMENTAL` | `PI_EXPERIMENTAL` | Set to `1` to enable experimental features: built-in tool definitions request strict JSON-schema constrained sampling (`prefer`), and the footer shows an `xp` badge |
+| `ATOMIC_EXPERIMENTAL` | `PI_EXPERIMENTAL` | Set to `1` to enable experimental features and preferred strict JSON-schema constrained sampling for additional built-in tools; `read`, `edit`, `write`, `bash`, and PowerShell already prefer strict sampling by default. The footer shows an `xp` badge |
 
 `PI_CACHE_RETENTION=long` is a provider/upstream prompt-cache option and intentionally has no Atomic-prefixed alias. `VISUAL` and `EDITOR` select the Ctrl+G external editor when `externalEditor` is unset.
 
@@ -43,4 +43,4 @@ Every built-in, factory-created, direct, workflow-stage, and isolated bash or Po
 
 Atomic clears these ten reserved names before overlaying the current snapshot, preventing stale metadata from another session or workflow stage. Unrelated inherited/caller variables remain intact. The snapshot is taken when execution begins, so a resumed session or later model change is reflected. SDK `createBashTool()` and `createPowerShellTool()` expose it by default; set `exposeSessionEnvironment: false` to opt out.
 
-See [Using Atomic](/usage#environment-variables) and [RPC direct bash](/rpc#bash) for execution and streaming behavior.
+See [Using Atomic](/reference/cli#environment-variables) and [RPC direct bash](/rpc/protocol#bash) for execution and streaming behavior.

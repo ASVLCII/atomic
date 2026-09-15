@@ -26,6 +26,7 @@ const PROVIDERS: readonly ProviderCase[] = [
 			"deepseek-ai/DeepSeek-V4-Flash-0731",
 			"deepseek-ai/DeepSeek-V4-Pro",
 			"deepseek-ai/DeepSeek-V4-Pro-0813",
+			"deepseek-ai/DeepSeek-V4.1-Flash",
 			"moonshotai/Kimi-K2.5",
 			"moonshotai/Kimi-K2.6",
 			"moonshotai/Kimi-K2.7-Code",
@@ -41,6 +42,7 @@ const PROVIDERS: readonly ProviderCase[] = [
 			"zai-org/GLM-5.2",
 			"zai-org/GLM-5.2-Fast",
 			"zai-org/GLM-5.3",
+			"zai-org/GLM-5.3-Fast",
 			"zai-org/GLM-5.3-Flash",
 		],
 		thinkingLevels: ["low", "high", "max"],
@@ -57,9 +59,10 @@ const PROVIDERS: readonly ProviderCase[] = [
 			"qwen3.6-flash",
 			"qwen3.7-max",
 			"qwen3.7-plus",
+			"qwen3.8-flash",
 			"qwen3.8-max",
 		],
-		thinkingLevels: ["off", "low", "medium", "xhigh"],
+		thinkingLevels: ["low", "medium", "xhigh"],
 	},
 ];
 

@@ -338,8 +338,9 @@ export interface SimpleStreamOptions extends StreamOptions {
 //
 // Contract:
 // - Must return an AssistantMessageEventStream.
-// - Once invoked, request/model/runtime failures should be encoded in the
-//   returned stream, not thrown.
+// - Direct streamSimple() calls may throw synchronously when request auth is
+//   missing. Once a stream is returned, request/model/runtime failures should
+//   be encoded in the stream, not thrown.
 // - Error termination must produce an AssistantMessage with stopReason
 //   "error" or "aborted" and errorMessage, emitted via the stream protocol.
 export type StreamFunction<TApi extends Api = Api, TOptions extends StreamOptions = StreamOptions> = (
@@ -496,6 +497,8 @@ export interface AssistantMessage {
 	model: string;
 	responseModel?: string; // Concrete `chunk.model` when different from the requested `model` (e.g. OpenRouter `auto` -> `anthropic/...`)
 	responseId?: string; // Provider-specific response/message identifier when the upstream API exposes one
+	/** Exact provider-native effort level used for this response. Absent for legacy or unmanaged responses. */
+	providerThinkingLevel?: string;
 	diagnostics?: AssistantMessageDiagnostic[]; // Redacted provider/runtime diagnostics for failures and recoveries.
 	usage: Usage;
 	stopReason: StopReason;
@@ -591,10 +594,14 @@ export interface Context {
 /**
  * Event protocol for AssistantMessageEventStream.
  *
- * Streams should emit `start` before partial updates, then terminate with either:
- * - `done` carrying the final successful AssistantMessage, or
- * - `error` carrying the final AssistantMessage with stopReason "error" or "aborted"
- *   and errorMessage.
+ * Successful streams emit `start` before partial updates and terminate with
+ * `done`. A stream may terminate directly with `error` when request setup fails
+ * before generation starts; after `start`, failures also terminate with `error`.
+ * Direct `streamSimple()` calls throw synchronously when request auth is missing.
+ * Updates and `done` must never appear before `start`.
+ *
+ * Tool-call arguments at `toolcall_start` are provider-specific;
+ * `toolcall_delta` carries subsequent JSON updates.
  */
 export type AssistantMessageEvent =
 	| { type: "start"; partial: AssistantMessage }
@@ -696,7 +703,7 @@ export interface OpenAICompletionsCompat {
 	supportsStrictMode?: boolean;
 	/** Cache control convention for prompt caching. "anthropic" applies Anthropic-style `cache_control` markers to the system prompt, last tool definition, and last user, assistant, or tool-result text content. */
 	cacheControlFormat?: "anthropic";
-	/** Whether to send session-affinity data from `options.sessionId`. Default: false. */
+	/** Whether to send session-affinity data from `options.sessionId`. Default: true for OpenRouter endpoints, false otherwise. */
 	sendSessionAffinityHeaders?: boolean;
 	/** Provider-specific deferred tool serialization mode. */
 	deferredToolsMode?: "kimi";
@@ -704,6 +711,13 @@ export interface OpenAICompletionsCompat {
 	sessionAffinityFormat?: SessionAffinityFormat;
 	/** Whether the provider supports long prompt cache retention (`prompt_cache_retention: "24h"` or Anthropic-style `cache_control.ttl: "1h"`, depending on format). Default: true. */
 	supportsLongCacheRetention?: boolean;
+	/**
+	 * vLLM scheduler priority sent as the top-level `priority` request field (lower values are
+	 * handled earlier; server default 0). Only meaningful when vLLM runs with
+	 * `--scheduling-policy priority`; useful for keeping background/batch work from stalling
+	 * interactive sessions. Off by default; not set on the generated catalog.
+	 */
+	vllmPriority?: number;
 }
 
 /** Compatibility settings for OpenAI Responses APIs. */
@@ -712,7 +726,7 @@ export interface OpenAIResponsesCompat {
 	supportsDeveloperRole?: boolean;
 	/** Session-affinity header format: `openai` sends `session_id` and `x-client-request-id`; `openai-nosession` sends `x-client-request-id`; `openrouter` sends `x-session-id`. Does not affect the `prompt_cache_key` body param, which is governed by cache retention. Default: auto-detected. */
 	sessionAffinityFormat?: SessionAffinityFormat;
-	/** Whether the provider supports `prompt_cache_retention: "24h"`. Default: true. */
+	/** Whether the provider supports long prompt cache retention. This uses `prompt_cache_options.ttl: "30m"` on GPT-5.6+ and `prompt_cache_retention: "24h"` on earlier models. Default: true. */
 	supportsLongCacheRetention?: boolean;
 	/** Whether the provider supports strict JSON-schema function tools. Defaults are API-specific; generated OpenAI models enable it explicitly. */
 	supportsStrictMode?: boolean;
@@ -722,7 +736,7 @@ export interface OpenAIResponsesCompat {
 	supportsAdditionalTools?: boolean;
 	/** Whether the model supports client-executed tool search for deferred tools. Default: false. */
 	supportsToolSearch?: boolean;
-	/** Whether the model accepts `prompt_cache_options` (OpenAI GPT-5.6+ explicit prompt caching). Older OpenAI models reject the parameter. Default: false. */
+	/** Whether the model accepts `prompt_cache_options` (OpenAI GPT-5.6+ prompt caching). Older OpenAI models reject the parameter. Default: false. */
 	supportsExplicitPromptCacheMode?: boolean;
 	/** Whether the provider accepts the `max_output_tokens` parameter. Some Codex-protocol gateways reject it. Default: true. */
 	supportsMaxOutputTokens?: boolean;
@@ -741,13 +755,15 @@ export interface AnthropicMessagesCompat {
 	/** Whether the provider supports Anthropic long cache retention (`cache_control.ttl: "1h"`). Default: true. */
 	supportsLongCacheRetention?: boolean;
 	/**
-	 * Whether to send the `x-session-affinity` header from `options.sessionId`
+	 * Whether to send a session-affinity header from `options.sessionId`
 	 * when caching is enabled. Required for providers like Fireworks that use
 	 * session affinity for prompt cache routing (requests to the same replica
 	 * maximize cache hits).
-	 * Default: false.
+	 * Default: true for OpenRouter endpoints, false otherwise.
 	 */
 	sendSessionAffinityHeaders?: boolean;
+	/** Session-affinity format. `"openrouter"` sends `x-session-id`; defaults to that format for OpenRouter endpoints and `x-session-affinity` elsewhere. */
+	sessionAffinityFormat?: "openrouter";
 	/**
 	 * Whether the provider supports Anthropic-style `cache_control` markers on
 	 * tool definitions. When false, `cache_control` is omitted from tool params.
@@ -776,6 +792,8 @@ export interface AnthropicMessagesCompat {
 	allowEmptySignature?: boolean;
 	/** Whether the provider supports Anthropic strict tool schemas. Default: false; generated Anthropic models enable it explicitly. */
 	supportsStrictTools?: boolean;
+	/** Whether the exact model transport supports effort-only system messages and thinking binding controls. Default: false. */
+	supportsMidConvoEffort?: boolean;
 	/**
 	 * Models Anthropic accepts in `fallbacks` for server-side refusal fallback,
 	 * with local pricing metadata for returned fallback responses. When absent or
@@ -949,6 +967,22 @@ export interface ModelCost extends ModelCostRates {
 	tiers?: ModelCostTier[];
 }
 
+/**
+ * Explicit routing metadata that marks a model as the fast-inference variant of another model.
+ *
+ * Presence of this field — never a `-fast` name suffix — is what gives a model fast semantics.
+ * A provider, `models.json` custom model, or extension may own an exact `<base>-fast` ID without
+ * this metadata, in which case it is an ordinary model and routes exactly as it is declared.
+ */
+export interface ModelFastRoute {
+	/** Canonical ID of the normal-speed model this variant pairs with, in the same provider. */
+	baseModelId: string;
+	/** Model ID to send upstream. OpenAI-style routing keeps the base ID; a provider with real fast siblings sends its own ID. */
+	upstreamModelId: string;
+	/** Service tier to send with the request. Set only for providers that route fast traffic through an OpenAI-style tier. */
+	serviceTier?: "priority";
+}
+
 // Model interface for the unified model system
 export interface Model<TApi extends Api> {
 	id: string;
@@ -974,6 +1008,11 @@ export interface Model<TApi extends Api> {
 	/** Default sampling parameters for this model. See {@link StreamOptions.samplingParams}; per-request keys override these. */
 	samplingParams?: Record<string, unknown>;
 	headers?: Record<string, string>;
+	/**
+	 * Marks this model as the fast-inference variant of {@link ModelFastRoute.baseModelId} and carries the
+	 * upstream routing it needs. Absent on every normal model.
+	 */
+	fastRoute?: ModelFastRoute;
 	/** Compatibility overrides for OpenAI-compatible APIs. If not set, auto-detected from baseUrl. */
 	compat?: TApi extends "openai-completions"
 		? OpenAICompletionsCompat

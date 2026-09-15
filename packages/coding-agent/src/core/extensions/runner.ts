@@ -129,6 +129,10 @@ export class ExtensionRunner {
 	private modelRegistry: ModelRegistry;
 	private orchestrationContext: OrchestrationContext | undefined;
 	private subagentPolicy: SubagentChildPolicy | undefined;
+	private taskHostBinding: (() => import("../tasks/agent-adapter.js").AgentTaskHost) | undefined;
+	bindTaskHost(binding: () => import("../tasks/agent-adapter.js").AgentTaskHost): void {
+		this.taskHostBinding = binding;
+	}
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<Api> | undefined = () => undefined;
 	private getScopedModels: () => readonly ScopedModel[] = () => [];
@@ -152,8 +156,11 @@ export class ExtensionRunner {
 	private shortcutDiagnostics: ResourceDiagnostic[] = [];
 	private commandDiagnostics: ResourceDiagnostic[] = [];
 	private staleMessage: string | undefined;
+	private readonly contextOwner = {};
 	private uiPromptBinding = 0;
-	private activeUIPrompt: { depth: number; kind: UIPromptKind; title: string | undefined } | undefined;
+	private activeUIPrompt:
+		| { depth: number; reason: "ui_prompt" | "project_trust"; kind: UIPromptKind; title: string | undefined }
+		| undefined;
 
 	constructor(
 		extensions: Extension[],
@@ -166,6 +173,7 @@ export class ExtensionRunner {
 	) {
 		this.extensions = extensions;
 		this.runtime = runtime;
+		this.runtime.workflowActivityHub.bindDispatcher((event, isCurrent) => this.emit(event, isCurrent));
 		this.uiContext = noOpUIContext;
 		this.cwd = cwd;
 		this.sessionManager = sessionManager;
@@ -296,8 +304,20 @@ export class ExtensionRunner {
 			editor: (title, prefill, opts) =>
 				this.withUIPrompt(binding, "editor", title, () => ui.editor(title, prefill, opts)),
 			custom: (factory, options) =>
-				this.withUIPrompt(binding, "custom", undefined, () => ui.custom(factory, options)),
+				options?.purpose === "navigation"
+					? ui.custom(factory, options)
+					: this.withUIPrompt(binding, "custom", undefined, () => ui.custom(factory, options)),
 		};
+	}
+
+	/** Track a host-owned trust dialog using the current session's prompt lifecycle. */
+	withProjectTrustPrompt<T>(kind: UIPromptKind, title: string, run: () => Promise<T>): Promise<T> {
+		return this.withUIPrompt(this.uiPromptBinding, kind, title, run, "project_trust");
+	}
+
+	/** Begin a host-owned trust span whose end arrives as a separate control frame. */
+	beginProjectTrustPrompt(kind: UIPromptKind, title: string): () => void {
+		return this.beginUIPrompt(kind, title, "project_trust");
 	}
 
 	private withUIPrompt<T>(
@@ -305,32 +325,10 @@ export class ExtensionRunner {
 		kind: UIPromptKind,
 		title: string | undefined,
 		run: () => Promise<T>,
+		reason: "ui_prompt" | "project_trust" = "ui_prompt",
 	): Promise<T> {
 		if (binding !== this.uiPromptBinding) return run();
-
-		let prompt = this.activeUIPrompt;
-		if (!prompt) {
-			prompt = { depth: 0, kind, title };
-			this.activeUIPrompt = prompt;
-			this.emitUIPromptEvent({
-				type: "ui_prompt_start",
-				reason: "ui_prompt",
-				kind,
-				...(title === undefined ? {} : { title }),
-			});
-		}
-		prompt.depth += 1;
-
-		let finished = false;
-		const finish = () => {
-			if (finished) return;
-			finished = true;
-			if (this.activeUIPrompt !== prompt) return;
-
-			prompt.depth -= 1;
-			if (prompt.depth === 0) this.endActiveUIPrompt(prompt);
-		};
-
+		const finish = this.beginUIPrompt(kind, title, reason);
 		try {
 			return run().finally(finish);
 		} catch (error) {
@@ -339,22 +337,72 @@ export class ExtensionRunner {
 		}
 	}
 
+	private beginUIPrompt(
+		kind: UIPromptKind,
+		title: string | undefined,
+		reason: "ui_prompt" | "project_trust",
+	): () => void {
+		let prompt = this.activeUIPrompt;
+		if (!prompt) {
+			prompt = { depth: 0, reason, kind, title };
+			this.activeUIPrompt = prompt;
+			this.emitUIPromptEvent({
+				type: "ui_prompt_start",
+				reason,
+				kind,
+				...(title === undefined ? {} : { title }),
+			});
+		}
+		prompt.depth += 1;
+
+		let finished = false;
+		return () => {
+			if (finished) return;
+			finished = true;
+			if (this.activeUIPrompt !== prompt) return;
+
+			prompt.depth -= 1;
+			if (prompt.depth === 0) this.endActiveUIPrompt(prompt);
+		};
+	}
+
 	private endActiveUIPrompt(prompt = this.activeUIPrompt): void {
 		if (!prompt || this.activeUIPrompt !== prompt) return;
 		this.activeUIPrompt = undefined;
 		prompt.depth = 0;
 		this.emitUIPromptEvent({
 			type: "ui_prompt_end",
-			reason: "ui_prompt",
+			reason: prompt.reason,
 			kind: prompt.kind,
 			...(prompt.title === undefined ? {} : { title: prompt.title }),
 		});
 	}
 
+	private readonly pendingUIPromptNotifications = new Set<Promise<void>>();
+
 	private emitUIPromptEvent(event: Extract<RunnerEmitEvent, { type: "ui_prompt_start" | "ui_prompt_end" }>): void {
-		queueMicrotask(() => {
-			void this.emit(event);
+		const delivery = Promise.resolve().then(async () => {
+			await this.emit(event);
 		});
+		this.pendingUIPromptNotifications.add(delivery);
+		void delivery.finally(() => this.pendingUIPromptNotifications.delete(delivery)).catch(() => {});
+	}
+
+	/** Settle only the deliveries pending at this boundary, without delaying prompt UI. */
+	async flushUIPromptNotifications(timeoutMs: number): Promise<{ timedOut: boolean }> {
+		const pending = [...this.pendingUIPromptNotifications];
+		if (pending.length === 0) return { timedOut: false };
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			return await Promise.race([
+				Promise.allSettled(pending).then(() => ({ timedOut: false })),
+				new Promise<{ timedOut: boolean }>((resolve) => {
+					timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	getUIContext(): ExtensionUIContext {
@@ -470,16 +518,19 @@ export class ExtensionRunner {
 	}
 
 	createContext(): ExtensionContext {
-		return createExtensionContext(this.createContextSource());
+		return createExtensionContext(this.createContextSource(), this.contextOwner);
 	}
 
 	createCommandContext(): ExtensionCommandContext {
-		return createExtensionCommandContext(this.createContextSource());
+		return createExtensionCommandContext(this.createContextSource(), this.contextOwner);
 	}
 
 	private createContextSource(): ExtensionCommandContextSource {
 		return {
 			assertActive: () => this.assertActive(),
+			getExtensionPaths: () => this.getExtensionPaths(),
+			observeWorkflowActivity: (observer) => this.runtime.workflowActivityHub.observeWorkflowActivity(observer),
+			...(this.taskHostBinding ? { getAgentTaskHost: this.taskHostBinding } : {}),
 			getUIContext: () => this.uiContext,
 			getMode: () => this.mode,
 			hasUI: () => this.hasUI(),
@@ -511,9 +562,28 @@ export class ExtensionRunner {
 		};
 	}
 
-	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
+	/** Keep startup reporters bound while adding the now-authorized extension set. */
+	attachStartupExtensions(extensions: Extension[]): () => Promise<void> {
+		const newcomers = extensions.filter((extension) => !this.extensions.includes(extension));
+		this.extensions = [...this.extensions, ...newcomers];
+		return async () => {
+			await runResourceRegistrationBatch(this.runtime, () =>
+				runGenericHandlers(
+					this.extensions.filter((extension) => newcomers.includes(extension)),
+					this.createContext(),
+					{ type: "session_start", reason: "startup" },
+					(error) => this.emitError(error),
+				),
+			);
+		};
+	}
+
+	async emit<TEvent extends RunnerEmitEvent>(
+		event: TEvent,
+		isCurrent?: () => boolean,
+	): Promise<RunnerEmitResult<TEvent>> {
 		return runResourceRegistrationBatch(this.runtime, () =>
-			runGenericHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+			runGenericHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error), isCurrent),
 		);
 	}
 

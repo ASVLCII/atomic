@@ -207,8 +207,47 @@ describe("pending workflow stage delivery lifecycle", () => {
 			dispose = registerPendingStageIntercomBridge({}, activeStore);
 			await new Promise((resolve) => setImmediate(resolve));
 			assert.equal(warnings.length, 1);
-			assert.equal(warnings[0]?.[0], "atomic-workflows: pending stage delivery sweep failed");
-			assert.equal((warnings[0]?.[1] as Error | undefined)?.name, "DbosNotReadyError");
+			assert.match(String(warnings[0]?.[0]), /atomic-workflows: pending stage delivery sweep failed: /);
+			assert.equal(activeStore.runs()[0]?.pendingStageMessages?.[0]?.status, "queued");
+		} finally {
+			dispose();
+			console.warn = originalWarn;
+		}
+	});
+
+	test("ignores unrelated orphan runs when settling eligible messages", async () => {
+		const { activeStore, runId } = await lifecycleFixture("completed");
+		activeStore.recordRunStart({
+			id: testRunId("unrelated-orphan-with-no-pending-messages"),
+			name: "orphan",
+			inputs: {},
+			status: "completed",
+			stages: [],
+			startedAt: 0,
+			parentRunId: testRunId("missing-parent"),
+			parentStageId: "missing-boundary",
+		});
+		assert.equal(await settleUndeliverablePendingStageMessages(activeStore, async () => true), 1);
+		const entry = activeStore.runs().find((run) => run.id === runId)?.pendingStageMessages?.[0];
+		assert.equal(entry?.status, "undeliverable");
+		assert.equal(typeof entry?.undeliverableNotifiedAt, "string");
+	});
+
+	test("deduplicates repeated sweep failures without discarding pending work", async () => {
+		const { activeStore, runId } = await lifecycleFixture("completed");
+		setDurableBackend(undefined);
+		resetDbosLifecycleForTests();
+		const warnings: string[] = [];
+		const originalWarn = console.warn;
+		console.warn = (message: string) => {
+			warnings.push(message);
+		};
+		const dispose = registerPendingStageIntercomBridge({}, activeStore);
+		try {
+			await new Promise((resolve) => setImmediate(resolve));
+			activeStore.recordRunEnd(runId, "failed");
+			await new Promise((resolve) => setImmediate(resolve));
+			assert.equal(warnings.length, 1);
 			assert.equal(activeStore.runs()[0]?.pendingStageMessages?.[0]?.status, "queued");
 		} finally {
 			dispose();
@@ -655,14 +694,14 @@ test("a crash after sender-visible failure notification reloads to exactly one n
 			deliveredMessages,
 			(socket, brokerMessage) => {
 				writes.push({ socket, message: brokerMessage });
-				if (socket !== senderSocket || brokerMessage.type !== "message") return;
+				if (socket !== senderSocket || brokerMessage.type !== "message") return true;
 				wireNotifications++;
 				const admission = recipientAdmission.admit(brokerMessage.from, brokerMessage.message);
 				if (admission.kind === "pending") {
 					recipientCompletions.push(admission.completion);
-					return;
+					return true;
 				}
-				if (admission.kind === "duplicate") return;
+				if (admission.kind === "duplicate") return true;
 				recipientCompletions.push(
 					Promise.resolve().then(() => {
 						senderVisibleNotifications++;
@@ -679,6 +718,7 @@ test("a crash after sender-visible failure notification reloads to exactly one n
 						recipientAdmission.commit(admission.reservation);
 					}),
 				);
+				return true;
 			},
 		);
 		await Promise.all(recipientCompletions);

@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AssistantMessage } from "@bastani/pi-ai/compat";
-import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
+import { getThemeByName, theme } from "../modes/interactive/theme/theme.js";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import type { SessionStats } from "./agent-session-types.ts";
 import { calculateContextTokens, estimateContextTokens } from "./compaction/index.ts";
 import type { ToolHtmlRenderer } from "./export-html/index.ts";
-import type { ContextUsage, ReplacedSessionContext } from "./extensions/index.ts";
+import type { ContextUsage, ReplacedSessionContext } from "./extensions/index.js";
 import { CURRENT_SESSION_VERSION, getLatestCompactionBoundaryEntry, type SessionHeader } from "./session-manager.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 

@@ -1,5 +1,9 @@
 export interface SessionInfo {
   id: string;
+  /** Host-declared connection purpose; omitted by legacy agent clients. Immutable after registration. */
+  readonly recipientPurpose?: "agent" | "control";
+  /** Host-owned execution capability, independent of idle/thinking presence. */
+  replyCapability?: "live" | "terminal";
   name?: string;
   cwd: string;
   model: string;
@@ -25,10 +29,33 @@ export interface WorkflowStageRosterEntry {
 	readonly sessionId?: string;
 }
 
+/** Internal run-tree edge used to resolve known recipients before dispatching to the owner. */
+export interface WorkflowRunParentAnnouncement {
+	readonly runId: string;
+	/** Boundary spellings that resolve uniquely to this child, with stage-ID precedence applied by the host. */
+	readonly stageKeys: readonly string[];
+}
+
+export interface WorkflowPossibleStageAnnouncement {
+	/** Canonical depth-faithful path target, e.g. `workflow:<rootRunId>/orchestrator-*`. */
+	readonly target: string;
+	/** Current number of queued sticky entries matching this target. */
+	readonly queuedCount: number;
+}
+
+export interface WorkflowFutureStageRosterEntry {
+	readonly kind: "workflow-future-stage";
+	readonly runId: string;
+	readonly target: string;
+	readonly queuedCount: number;
+	readonly group: string;
+}
+
 export interface SessionDirectory {
 	readonly sessions: SessionInfo[];
-	readonly workflowStages: WorkflowStageRosterEntry[];
-}
+ 	readonly workflowStages: WorkflowStageRosterEntry[];
+	readonly workflowFutureStages: WorkflowFutureStageRosterEntry[];
+ }
 
 export interface WorkflowStageRosterAnnouncement {
 	readonly stageId: string;
@@ -36,6 +63,8 @@ export interface WorkflowStageRosterAnnouncement {
 	readonly target: string;
 	readonly lifecycle: "pending" | "running";
 	readonly routeEligible: boolean;
+	/** Host-declared node purpose, independent of legacy pending-route eligibility. */
+	readonly recipientPurpose?: "agent" | "control";
 	/** Actual stage group after workflow invocation ownership resolution. */
 	readonly group: string;
 }
@@ -52,7 +81,7 @@ export interface Message {
   timestamp: number;
   replyTo?: string;
   expectsReply?: boolean;
-  /** Actionable remote failure for a correlated ask reply. */
+  /** Correlated delivery refusal: settles a waiting ask, otherwise surfaces as send feedback. */
   replyError?: string;
   source?: {
     subagentRunId: string;
@@ -84,6 +113,8 @@ export type ClientMessage =
 			session: Omit<SessionInfo, "id">;
 			/** Internal host-owned identity retained across broker reconnects. */
 			returnAddress?: string;
+			/** Immutable session origin; separate from mutable group memberships. Legacy clients use session.group. */
+			registrationGroup?: string;
 			supervisor?: SupervisorRegistration;
 			supervisorOwnerToken?: string;
 	  }
@@ -93,7 +124,7 @@ export type ClientMessage =
 	| { type: "join_group"; requestId: string; group: string }
 	| { type: "leave_group"; requestId: string; group?: string }
   | { type: "authorize_supervisor"; requestId: string; childName: string; capability?: string }
-  | { type: "send" | "supervisor_send"; to: string; message: Message; attemptId?: string }
+  | { type: "send" | "supervisor_send"; to: string; logicalTarget?: string; requirePendingReply?: true; expectedRecipientId?: string; resolveReplyTarget?: true; message: Message; attemptId?: string }
 	| {
 			type: "send_pending_stage_notification";
 			runId: string;
@@ -105,7 +136,7 @@ export type ClientMessage =
 			attemptId?: string;
 	  }
 	| { type: "pending_stage_notification_result"; requestId: string; delivered: boolean }
-  | { type: "register_pending_stage_route"; runId: string; group: string; capability: string; stages?: WorkflowStageRosterAnnouncement[] }
+ | { type: "register_pending_stage_route"; runId: string; group: string; capability: string; stages?: WorkflowStageRosterAnnouncement[]; possibleStages?: WorkflowPossibleStageAnnouncement[]; parent?: WorkflowRunParentAnnouncement }
   | {
       type: "register_live_workflow_stage_route";
       requestId: string;
@@ -118,6 +149,7 @@ export type ClientMessage =
 		requestId: string;
 		outcome: "queued" | "delivered" | "forward" | "refused";
 		position?: number;
+		target?: string;
 		reason?: string;
 		reasonCode?: "message_id_conflict";
 	  }
@@ -125,6 +157,7 @@ export type ClientMessage =
       type: "presence";
       name?: string;
       status?: string;
+      replyCapability?: SessionInfo["replyCapability"];
       model?: string;
       groups?: string[];
       /** Legacy single-group membership; accepted alongside `groups` for compatibility. */
@@ -135,7 +168,8 @@ export type ClientMessage =
 export type BrokerMessage =
   | { type: "registered"; sessionId: string; supervisorSessionId?: string }
   | { type: "registration_failed"; reason: string }
-  | { type: "sessions"; requestId: string; sessions: SessionInfo[]; workflowStages?: WorkflowStageRosterEntry[] }
+  | { type: "question_target"; messageId: string; attemptId: string; sessionId: string }
+ | { type: "sessions"; requestId: string; sessions: SessionInfo[]; workflowStages?: WorkflowStageRosterEntry[]; workflowFutureStages?: WorkflowFutureStageRosterEntry[] }
 	| { type: "groups"; requestId: string; groups: GroupSummary[] }
 	| { type: "membership_ack"; requestId: string; groups: string[] }
   | { type: "supervisor_authorized"; requestId: string; capability: string; supervisorSessionId: string; childName: string }
@@ -148,7 +182,7 @@ export type BrokerMessage =
 			senderRegistrationName?: string;
 			senderReturnAddress?: string;
 			runId: string;
-			stageKey: string;
+			target: string;
 			message: Message;
 			live?: boolean;
 	  }
@@ -161,5 +195,5 @@ export type BrokerMessage =
   | { type: "presence_failed"; requestId: string; reason: string }
   | { type: "error"; error: string }
   | { type: "delivered"; messageId: string; attemptId?: string }
-  | { type: "queued"; messageId: string; attemptId?: string; runId: string; stageKey: string; position: number }
-	| { type: "delivery_failed"; messageId: string; reason: string; reasonCode?: "message_id_conflict"; attemptId?: string };
+	| { type: "queued"; messageId: string; attemptId?: string; target: string; position: number }
+	| { type: "delivery_failed"; messageId: string; reason: string; reasonCode?: "message_id_conflict" | "session_not_found"; attemptId?: string };

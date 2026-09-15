@@ -226,7 +226,7 @@ test("parallel replay uses fail-fast scope parents instead of flattening fanout"
 function cpStageId(name: string): string {
 	return `checkpoint-only:${name}`;
 }
-test("cached replay hydrates persisted stage timing, result, session, and model metadata", () => {
+test("cached replay hydrates persisted stage timing, result, session, and model + thinking metadata", () => {
 	const store = createStore();
 	store.recordRunStart({
 		id: WORKFLOW_ID,
@@ -260,7 +260,7 @@ test("cached replay hydrates persisted stage timing, result, session, and model 
 		sessionId: "sid",
 		sessionFile: "/tmp/session.jsonl",
 		model: "gpt-test",
-		fastMode: true,
+		thinkingLevel: "high",
 		attemptedModels: ["gpt-test"],
 		modelAttempts: [{ model: "gpt-test", success: true, usage }],
 	};
@@ -274,7 +274,7 @@ test("cached replay hydrates persisted stage timing, result, session, and model 
 	assert.equal(stage.sessionId, "sid");
 	assert.equal(stage.sessionFile, "/tmp/session.jsonl");
 	assert.equal(stage.model, "gpt-test");
-	assert.equal(stage.fastMode, true);
+	assert.equal(stage.thinkingLevel, "high");
 	assert.deepEqual(stage.attemptedModels, ["gpt-test"]);
 	assert.equal(stage.modelAttempts?.[0]?.success, true);
 	assert.deepEqual(stage.modelAttempts?.[0]?.usage, usage);

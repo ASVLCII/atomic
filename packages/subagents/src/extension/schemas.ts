@@ -113,6 +113,23 @@ const ControlOverrides = Type.Object({
 
 export const SubagentParams = Type.Object(
 	{
+		// `enum` instead of `Type.Literal`: providers reject the `const` keyword Literal emits (see the
+		// upstream-sync "omits provider-rejected schema keywords" test).
+		wait: Type.Optional(
+			Type.Object(
+				{
+					kind: Type.String({
+						enum: ["background", "foreground"],
+						description: "Wait policy kind. 'background' yields immediately; 'foreground' waits up to budgetMs.",
+					}),
+					budgetMs: Type.Optional(
+						Type.Number({ description: "Foreground wait budget in milliseconds (kind='foreground' only)." }),
+					),
+				},
+				{ additionalProperties: false },
+			),
+		),
+		budgetMs: Type.Optional(Type.Number({ description: "Foreground wait budget in milliseconds." })),
 		agent: Type.Optional(
 			Type.String({ description: "Agent name (SINGLE mode) or target for management get/update/delete" }),
 		),
@@ -124,11 +141,10 @@ export const SubagentParams = Type.Object(
 				description: "Management/control action. Omit for execution mode.",
 			}),
 		),
-		id: Type.Optional(Type.String({ description: "Run id or prefix for action='status' or action='interrupt'." })),
+		id: Type.Optional(Type.String({ description: "Run id or prefix for action='status' or action='kill'." })),
 		runId: Type.Optional(
 			Type.String({
-				description:
-					"Target run ID for action='interrupt'. Defaults to the most recently active controllable run. Prefer id for new calls.",
+				description: "Target run ID for action='kill'. Prefer id for new calls.",
 			}),
 		),
 		config: Type.Optional(
@@ -147,7 +163,7 @@ export const SubagentParams = Type.Object(
 			Type.Integer({
 				minimum: 1,
 				description:
-					"Top-level PARALLEL mode only: max concurrent tasks. Defaults to config.parallel.concurrency or 4.",
+					"Top-level PARALLEL mode only: max concurrent tasks. Defaults to config.parallel.concurrency or 3.",
 			}),
 		),
 		group: Type.Optional(GroupSchema),

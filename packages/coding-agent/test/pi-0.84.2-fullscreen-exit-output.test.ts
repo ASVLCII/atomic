@@ -107,6 +107,7 @@ type StopInteractiveTuiThis = {
 	renderer: TuiAltScreen;
 	ui: TuiAltScreen;
 	documentContainer: Container;
+	disposeMarkitDiagnosticSink: ReturnType<typeof vi.fn>;
 };
 type StopMode = {
 	stopInteractiveTui(this: StopInteractiveTuiThis, fullscreenExitOutput: FullscreenExitOutput): void;
@@ -136,7 +137,7 @@ function createExitFixture(): { fixture: StopInteractiveTuiThis; exitWrites: () 
 	renderer.renderNow();
 	const writesBeforeExit = terminal.writes.length;
 	return {
-		fixture: { renderer, ui: renderer, documentContainer },
+		fixture: { renderer, ui: renderer, documentContainer, disposeMarkitDiagnosticSink: vi.fn() },
 		exitWrites: () => terminal.writes.slice(writesBeforeExit).join(""),
 	};
 }
@@ -145,6 +146,7 @@ test('exiting with "transcript" paints the whole transcript onto the main screen
 	const { fixture, exitWrites } = createExitFixture();
 
 	stopInteractiveTui.call(fixture, "transcript");
+	expect(fixture.disposeMarkitDiagnosticSink).toHaveBeenCalledOnce();
 
 	const writes = exitWrites();
 	expect(writes).toContain(EXIT_ALT_SCREEN);
@@ -160,6 +162,7 @@ test('exiting with "resume-hint" preserves the prior screen instead of painting'
 	const { fixture, exitWrites } = createExitFixture();
 
 	stopInteractiveTui.call(fixture, "resume-hint");
+	expect(fixture.disposeMarkitDiagnosticSink).toHaveBeenCalledOnce();
 
 	const writes = exitWrites();
 	expect(writes).toContain(EXIT_ALT_SCREEN);
@@ -172,7 +175,10 @@ type StopThis = {
 	disposeActiveSelector: () => void;
 	disposeInteractiveEngineHost: () => void;
 	settingsManager: { getShowTerminalProgress: () => boolean; getFullscreenExitOutput: () => FullscreenExitOutput };
-	loadingAnimation: undefined;
+	loadingAnimation: { stop(): void } | undefined;
+	workingIndicatorEmbedded: boolean;
+	setEditorWorkingStatusIndicator: (indicator: undefined) => boolean;
+	statusContainer: Container;
 	themeController: { disableAutoSync: () => void };
 	clearExtensionTerminalInputListeners: () => void;
 	footer: { dispose: () => void };
@@ -192,6 +198,9 @@ function createStopThis(exitOutput: FullscreenExitOutput): StopThis {
 			getFullscreenExitOutput: () => exitOutput,
 		},
 		loadingAnimation: undefined,
+		workingIndicatorEmbedded: false,
+		setEditorWorkingStatusIndicator: () => false,
+		statusContainer: new Container(),
 		themeController: { disableAutoSync: () => {} },
 		clearExtensionTerminalInputListeners: () => {},
 		footer: { dispose: () => {} },

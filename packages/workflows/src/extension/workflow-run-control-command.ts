@@ -1,9 +1,12 @@
+import type { DurableWorkflowBackend } from "../durable/backend.js";
+import { DbosNotReadyError } from "../durable/dbos-lifecycle.js";
 import { getDurableBackend } from "../durable/factory.js";
 import { isWorkflowRunResumable } from "../durable/resume-eligibility.js";
 import type { ResumableWorkflowEntry } from "../durable/types.js";
+import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { hasPendingDurableResumeTransition } from "../runs/background/durable-resume-transition.js";
 import { quitAllRuns, quitRun } from "../runs/background/quit.js";
-import { interruptAllRuns, interruptRun, pauseRun, resumeRun } from "../runs/background/status.js";
+import { pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
 import { workflowHasPausedStages, workflowHasPausedState } from "../runs/background/workflow-lifecycle-aggregate.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import { store } from "../shared/store.js";
@@ -35,7 +38,7 @@ import { overlaySurfaceFromContext, resolveRunId, resolveStageTarget } from "./w
 export type { WorkflowRunControlDeps } from "./workflow-durable-resume-command.js";
 
 export async function handleRunControlCommand(
-	action: "connect" | "interrupt" | "quit" | "attach" | "pause" | "resume",
+	action: "connect" | "quit" | "attach" | "pause" | "resume",
 	rest: string[],
 	ctx: PiCommandContext,
 	reporter: WorkflowCommandReporter,
@@ -99,8 +102,8 @@ export async function handleRunControlCommand(
 		return true;
 	}
 
-	if (action === "interrupt" || action === "quit") {
-		const { tokens, yes } = action === "interrupt" ? stripYesFlag(rest) : { tokens: rest, yes: false };
+	if (action === "pause" || action === "quit") {
+		const { tokens, yes } = action === "pause" ? stripYesFlag(rest) : { tokens: rest, yes: false };
 		const unsupportedTarget =
 			action === "quit" ? tokens.find((token) => token === "-y" || token === "--yes") : undefined;
 		let target =
@@ -121,15 +124,15 @@ export async function handleRunControlCommand(
 				fail(`No in-flight runs to ${action}.`);
 				return true;
 			}
-			if (action === "interrupt" && !yes && confirmationPrompt) {
-				const title = `Interrupt all ${inFlight.length} in-flight workflow runs?`;
+			if (action === "pause" && !yes && confirmationPrompt) {
+				const title = `Pause all ${inFlight.length} in-flight workflow runs?`;
 				const body = `Pauses: ${inFlight.map((run) => `${run.name} (${run.id})`).join(", ")}`;
 				if (!(await confirmationPrompt(title, body))) {
 					print("Cancelled.");
 					return true;
 				}
 			}
-			const results = action === "quit" ? await quitAllRuns({ actor: "user" }) : await interruptAllRuns();
+			const results = action === "quit" ? await quitAllRuns({ actor: "user" }) : await pauseAllRuns();
 			const successes = results.filter((result) => result.ok);
 			const changed = successes.length;
 			const failures = results.filter((result) => !result.ok);
@@ -137,7 +140,7 @@ export async function handleRunControlCommand(
 				const outcomes = results
 					.map((result) =>
 						result.ok
-							? `${result.runId}: quit`
+							? (result.message ?? `${result.runId}: quit`)
 							: `${result.runId}: ${result.reason}${"message" in result ? ` (${result.message})` : ""}`,
 					)
 					.join(", ");
@@ -146,9 +149,11 @@ export async function handleRunControlCommand(
 				else fail(message);
 			} else if (changed > 0) {
 				print(
-					action === "quit"
-						? `Quit ${changed} run(s); resume with /workflow resume.`
-						: `Interrupted ${changed} run(s).`,
+					successes.some((result) => result.message !== undefined)
+						? successes.map((result) => result.message ?? `Run ${result.runId} stopped.`).join("\n")
+						: action === "quit"
+							? `Quit ${changed} run(s); resume with /workflow resume.`
+							: `Paused ${changed} run(s).`,
 				);
 			} else {
 				fail(`No in-flight runs to ${action}.`);
@@ -172,7 +177,8 @@ export async function handleRunControlCommand(
 			}
 			try {
 				const result = await quitRun(resolved.runId, { actor: "user" });
-				if (result.ok) print(`Run ${result.runId} quit and can be resumed with /workflow resume.`);
+				if (result.ok)
+					print(result.message ?? `Run ${result.runId} quit and can be resumed with /workflow resume.`);
 				else if (result.reason === "already_ended") print(`Run ${result.runId} already ended.`);
 				else if (result.reason === "no_active_stages") {
 					fail(`No controllable stages on run ${result.runId}; the run remains active.`);
@@ -184,7 +190,7 @@ export async function handleRunControlCommand(
 		}
 		if (!yes && run && run.endedAt === undefined && confirmationPrompt) {
 			const confirmed = await confirmationPrompt(
-				`Interrupt workflow run ${run.name} (${run.id})?`,
+				`Pause workflow run ${run.name} (${run.id})?`,
 				"Pauses live work so it can be resumed later.",
 			);
 			if (!confirmed) {
@@ -193,8 +199,8 @@ export async function handleRunControlCommand(
 			}
 		}
 		try {
-			const result = await interruptRun(resolved.runId);
-			if (result.ok) print(`Run ${result.runId} interrupted and can be resumed.`);
+			const result = await pauseRun(resolved.runId);
+			if (result.ok) print(result.message ?? `Run ${result.runId} paused and can be resumed.`);
 			else
 				fail(
 					result.reason === "not_found"
@@ -203,14 +209,14 @@ export async function handleRunControlCommand(
 							? `Run already ended: ${target}`
 							: result.reason === "stage_not_found"
 								? `Stage not found for run ${resolved.runId}.`
-								: `No active stages to interrupt on run ${resolved.runId}.`,
+								: `No active stages to pause on run ${resolved.runId}.`,
 				);
 		} catch (error) {
-			fail(`Failed to interrupt run ${resolved.runId}: ${error instanceof Error ? error.message : String(error)}`);
+			fail(`Failed to pause run ${resolved.runId}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 		return true;
 	}
-	if (action === "attach" || action === "pause" || action === "resume") {
+	if (action === "attach" || action === "resume") {
 		const target = rest[0];
 		const stageTarget = rest[1];
 		const message = action === "resume" ? rest.slice(2).join(" ").trim() || undefined : undefined;
@@ -218,14 +224,7 @@ export async function handleRunControlCommand(
 		if (!target) {
 			const ui = ctx.ui;
 			if (!canOpenPicker(ui)) {
-				if (action === "pause") {
-					const active = topLevelWorkflowRuns(store.runs()).filter((r) => r.endedAt === undefined);
-					fail(
-						active.length === 0
-							? "No active runs to pause."
-							: `Picker requires an interactive UI surface. Active runs:\n${active.map((r) => `  ${r.id}  ${r.name}`).join("\n")}\n\nUsage: /workflow pause <runId> [stageId]`,
-					);
-				} else if (action === "attach") {
+				if (action === "attach") {
 					fail(
 						`${renderSessionList(store.runs(), { theme, includeAll: true })}\n\nPicker requires an interactive UI surface. Pass a runId: /workflow attach <id> [stageId]`,
 					);
@@ -298,6 +297,8 @@ export async function handleRunControlCommand(
 							}
 							if (result.ok && result.mode === "partial") {
 								fail(result.message ?? `Partially resumed ${result.runId}.`);
+							} else if (result.ok && result.mode === "not_resumable") {
+								fail(result.message ?? `Workflow ${result.runId} is not resumable.`);
 							} else {
 								if (result.ok && policy.allowInputPicker)
 									deps.overlay.open(result.runId, overlaySurfaceFromContext(ctx));
@@ -318,7 +319,21 @@ export async function handleRunControlCommand(
 			if (picked.kind !== (action === "attach" ? "connect" : action)) return true;
 			runId = picked.runId;
 		} else if (action === "resume") {
-			const backend = getDurableBackend();
+			let backend: DurableWorkflowBackend;
+			try {
+				try {
+					backend = getDurableBackend();
+				} catch (error) {
+					if (!(error instanceof DbosNotReadyError)) throw error;
+					// Fresh CLI sessions have no backend until a durable operation prepares it.
+					await ensureWorkflowResourcesVisible();
+					await deps.runtimeForContext(ctx).prepareDurableResumable(target);
+					backend = getDurableBackend();
+				}
+			} catch (error) {
+				fail(`Failed to resolve workflow resume target: ${error instanceof Error ? error.message : String(error)}`);
+				return true;
+			}
 			const localResolution = resolveRunId(target);
 			const localBeforePreparation =
 				localResolution.kind === "exact" ? store.runs().find((run) => run.id === localResolution.runId) : undefined;
@@ -361,7 +376,8 @@ export async function handleRunControlCommand(
 				exactBeforePreparation.parentRunId === undefined &&
 				exactHasPausedState &&
 				shadow === "not_shadow" &&
-				backend.isWorkflowLoadable(exactBeforePreparation.id)
+				(toolControlRegistry.runControl(exactBeforePreparation.id) !== undefined ||
+					backend.isWorkflowLoadable(exactBeforePreparation.id))
 			) {
 				// Exact top-level live state is authoritative. Avoid scanning the
 				// potentially large completed catalog while preserving the established
@@ -445,32 +461,6 @@ export async function handleRunControlCommand(
 		}
 		const stageId = resolvedStage.stageId;
 		const stageRunId = resolvedStage.runId ?? runId;
-		if (action === "pause") {
-			try {
-				const result = await pauseRun(stageRunId, { stageId, actor: "user" });
-				if (!result.ok) {
-					fail(
-						result.reason === "not_found"
-							? `Run not found: ${stageRunId}`
-							: result.reason === "already_ended"
-								? `Run ${stageRunId} already ended.`
-								: result.reason === "no_active_stages"
-									? `No pausable stages on run ${stageRunId}.`
-									: `Stage not found: ${stageTarget ?? "(unknown)"}`,
-					);
-					return true;
-				}
-				if (policy.allowInputPicker) deps.overlay.open(runId, overlaySurfaceFromContext(ctx), stageId, stageRunId);
-				print(
-					result.paused.length === 0
-						? `No stages were paused on run ${stageRunId}.`
-						: `Paused ${result.paused.length} stage(s) on run ${stageRunId}: ${result.paused.map((stage) => stage.name).join(", ")}`,
-				);
-			} catch (error) {
-				fail(`Failed to pause run ${stageRunId}: ${error instanceof Error ? error.message : String(error)}`);
-			}
-			return true;
-		}
 		const run = store.runs().find((r) => r.id === stageRunId);
 		const hadPausedRunState = run?.status === "paused";
 		const hadPausedStageState = run !== undefined && workflowHasPausedStages(store, stageRunId);
@@ -524,6 +514,10 @@ export async function handleRunControlCommand(
 		}
 		if (!result.ok) {
 			fail(`Run not found: ${stageRunId}`);
+			return true;
+		}
+		if (result.mode === "not_resumable") {
+			fail(result.message ?? `Workflow ${result.runId} is not resumable.`);
 			return true;
 		}
 		if (result.mode === "partial") {

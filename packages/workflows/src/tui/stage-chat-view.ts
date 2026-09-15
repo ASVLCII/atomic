@@ -112,6 +112,17 @@ export class StageChatView implements Component, Focusable {
 
 	render(width: number): string[] {
 		const ctx = this._ctx();
+		if (this.chatHost.hasTaskInspector) {
+			const taskWidth = Math.max(1, width);
+			const rows = viewLineCount(ctx);
+			const footer = this.chatHost.taskInspectorFullscreen ? [] : this.chatHost.renderFooter(taskWidth);
+			const visibleFooter = footer.slice(0, Math.max(0, rows - 1));
+			return fitStageChatFrame(
+				[...this.chatHost.renderBody(taskWidth, rows - visibleFooter.length), ...visibleFooter],
+				rows,
+				blankLine(taskWidth),
+			);
+		}
 		const w = Math.max(40, width);
 		const stage = currentStage(ctx);
 		const blocked = isBlocked(ctx);
@@ -130,9 +141,10 @@ export class StageChatView implements Component, Focusable {
 		const workingLines = chatChromeHidden ? [] : this.chatHost.renderWorkingStatus(w);
 		const usageLines = chatChromeHidden ? [] : this.chatHost.renderUsage(w);
 		const editorLines = chatChromeHidden ? [] : this.chatHost.renderEditor(w);
-		const footerLines =
-			customUiActive || promptActive
-				? []
+		const footerLines = customUiActive
+			? []
+			: promptActive
+				? this.chatHost.renderTaskFooter(w)
 				: readOnlyArchive
 					? renderReadOnlyArchiveFooter(ctx, w)
 					: renderFooterWithOrchestratorReturnHint(ctx, w, this.chatHost.renderFooter(w));
@@ -287,6 +299,14 @@ export class StageChatView implements Component, Focusable {
 		return this.chatHost.entries().flatMap((entry) => transcriptDebugEntries(entry));
 	}
 
+	get _taskDiagnostics(): { taskIds: string[]; emptyCompletionComponents: number } {
+		return {
+			taskIds: this.chatHost.entries().flatMap((entry) => (entry.kind === "task" ? [entry.task.ref.taskId] : [])),
+			emptyCompletionComponents: this.chatHost
+				.entries()
+				.filter((entry) => entry.kind === "custom" && entry.message.customType === "task-completion").length,
+		};
+	}
 	get _statusMessage(): string {
 		return this.chatHost.statusText();
 	}

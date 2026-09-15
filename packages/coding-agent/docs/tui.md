@@ -1,3 +1,8 @@
+---
+title: "TUI components"
+description: "Build custom terminal UI for extensions."
+---
+
 > Atomic can create TUI components. Ask it to build one for your use case.
 
 # TUI Components
@@ -6,87 +11,21 @@ Extensions and custom tools can render custom TUI components for interactive use
 
 **Source:** TUI components are provided by Atomic's installed `@earendil-works/pi-tui` runtime dependency (`node_modules/@earendil-works/pi-tui/dist/`).
 
+## On this page and its reference
+
+This page covers writing your first component and the common interaction patterns. The component and focusable interfaces, host terminal modes, the host-native session picker and input form, keyboard input, line width, invalidation, debug logging, and performance contracts live in the [TUI API reference](/tui/reference).
+
 ## Component Interface
 
-All components implement:
-
-```typescript
-interface Component {
-  render(width: number): string[];
-  handleInput?(data: string): boolean | void;
-  wantsKeyRelease?: boolean;
-  invalidate(): void;
-}
-```
-
-| Method | Description |
-|--------|-------------|
-| `render(width)` | Return array of strings (one per line). Each line **must not exceed `width`**. |
-| `handleInput?(data)` | Receive keyboard input when the component has focus. A focused overlay also receives mouse input before the fullscreen viewport. Return `true` when it consumes input; return `false`, `undefined`, or `void` when a matching fullscreen viewport key or overlay mouse event should fall through to viewport handling. Non-overlay focused components leave mouse input with pi-tui so transcript scrolling, scrollbar interaction, and drag selection remain available. |
-| `wantsKeyRelease?` | If true, component receives key release events (Kitty protocol). Default: false. |
-| `invalidate()` | Clear cached render state. Called on theme changes. |
-
-The installed pi-tui type still permits handlers that return `void`; Atomic treats a missing or `undefined` result as unhandled only for a matching fullscreen viewport key or a mouse event deferred to a focused overlay. Components that mutate state for such an input must return `true` so the viewport does not apply it a second time.
-
-Omitting `handleInput` altogether is the same answer as declining: a focused overlay with no handler still lets fullscreen viewport keys and mouse wheel reports reach the transcript, so a notice or progress panel does not freeze scrolling behind it. An asynchronous handler is judged when it settles — only a promise that resolves `true` consumes the input, while `false`, `undefined`, and a rejection all fall through to the viewport. Input that moved focus while such a promise was pending is left to whatever holds focus when it settles.
-
-The TUI appends a full SGR reset and OSC 8 reset at the end of each rendered line. Styles do not carry across lines. If you emit multi-line text with styling, reapply styles per line or use `wrapTextWithAnsi()` so styles are preserved for each wrapped line.
+Moved to [TUI API reference](/tui/reference#component-interface).
 
 ## Focusable Interface (IME Support)
 
-Components that display a text cursor and need IME (Input Method Editor) support should implement the `Focusable` interface:
-
-```typescript
-import { CURSOR_MARKER, type Component, type Focusable } from "@earendil-works/pi-tui";
-
-class MyInput implements Component, Focusable {
-  focused: boolean = false;  // Set by TUI when focus changes
-  
-  render(width: number): string[] {
-    const marker = this.focused ? CURSOR_MARKER : "";
-    // Emit marker right before the fake cursor
-    return [`> ${beforeCursor}${marker}\x1b[7m${atCursor}\x1b[27m${afterCursor}`];
-  }
-}
-```
-
-When a `Focusable` component has focus, TUI:
-1. Sets `focused = true` on the component
-2. Scans rendered output for `CURSOR_MARKER` (a zero-width APC escape sequence)
-3. Positions the hardware terminal cursor at that location
-4. Shows the hardware cursor only when `showHardwareCursor` is enabled
-
-The cursor remains hidden by default. This keeps the fake cursor rendering, while still positioning the hardware cursor for terminals that track IME candidate windows with hidden cursors. Some terminals require a visible hardware cursor for IME positioning; enable it with `showHardwareCursor`, `setShowHardwareCursor(true)`, or `ATOMIC_HARDWARE_CURSOR=1`. The `Editor` and `Input` built-in components already implement this interface.
+Moved to [TUI API reference](/tui/reference#focusable-interface-ime-support).
 
 ### Container Components with Embedded Inputs
 
-When a container component (dialog, selector, etc.) contains an `Input` or `Editor` child, the container must implement `Focusable` and propagate the focus state to the child. Otherwise, the hardware cursor won't be positioned correctly for IME input.
-
-```typescript
-import { Container, type Focusable, Input } from "@earendil-works/pi-tui";
-
-class SearchDialog extends Container implements Focusable {
-  private searchInput: Input;
-
-  // Focusable implementation - propagate to child input for IME cursor positioning
-  private _focused = false;
-  get focused(): boolean {
-    return this._focused;
-  }
-  set focused(value: boolean) {
-    this._focused = value;
-    this.searchInput.focused = value;
-  }
-
-  constructor() {
-    super();
-    this.searchInput = new Input();
-    this.addChild(this.searchInput);
-  }
-}
-```
-
-Without this propagation, typing with an IME (Chinese, Japanese, Korean, etc.) will show the candidate window in the wrong position on screen.
+Moved to [TUI API reference](/tui/reference#container-components-with-embedded-inputs).
 
 ## Using Components
 
@@ -101,65 +40,29 @@ pi.on("session_start", async (_event, ctx) => {
 });
 ```
 
-Pass `{ signal }` to `ctx.ui.custom()` when the UI belongs to an abortable operation. If the signal aborts, Atomic dismisses the custom UI and rejects the returned promise with the signal reason. For overlays, use `options.onHandle` to receive an overlay handle for programmatic visibility control.
+Pass `{ signal }` to `ctx.ui.custom()` when the UI belongs to an abortable operation. Aborting a mounted custom UI dismisses it and releases its input ownership. In-process mode rejects the returned promise with the signal reason; isolated mode resolves it with `undefined`, like host-side cancellation. For overlays, use `options.onHandle` to receive an overlay handle for programmatic visibility control.
+
+For inspection or navigation, pass `{ purpose: "navigation" }`. Atomic then mounts the component without emitting `ui_prompt_start` / `ui_prompt_end`, so a persistent viewer does not falsely mark Herdr as blocked. The default is `"prompt"`; keep it for approvals and required user decisions. Separate prompts opened while a navigation view is mounted still emit their own lifecycle events.
+
+Navigation still owns keyboard focus. In `getHostCustomUiState()` and its change listener, `blockingInlineCustomUiActive` counts all inline mounts. When navigation is present, `blockingInlineCustomUiNeedsInput` distinguishes real pending prompts from navigation-only mounts; when omitted, use `blockingInlineCustomUiActive`. This distinction is preserved across the isolated-engine bridge.
+
+Main-chat inline custom UIs share the editor slot. Completing or canceling an older mount leaves the current one visible; closing the current mount restores the most recently mounted UI that is still pending, including task navigation or an approval. The main editor returns only after the last inline owner closes. A foreground workflow graph keeps focus until you hide or close it, then the surviving inline UI is visible and receives input.
+
+Reserving bottom prompts (`reserveTranscriptRows`, including `ask_user_question`) also wait out of view while inline navigation or an overlay's `deferInlineCustomUiFocus` owns input. Leaving navigation restores the same pending prompt, not a new questionnaire. Escape belongs exclusively to the active navigation view until then; once the questionnaire returns, its ordinary Escape cancellation applies.
 
 In Atomic's default interactive mode, the component instance remains in the isolated engine child. The terminal host caches rendered lines and forwards input asynchronously, so `render()` and `handleInput()` must not depend on direct access to host process objects. For a matching fullscreen viewport key, or for mouse input while a workflow overlay has focus, the host waits for the child's boolean input reply: `true` keeps the input local, while `false` lets the host transcript process it. Left-button selection events are also mirrored to pi-tui when an overlay handles them, so drag and multi-click selection stays available over fullscreen workflow overlays. Mouse input remains with pi-tui when a non-overlay component has focus, preserving transcript scrolling, scrollbar interaction, and drag selection. A stalled reply has a bounded fallback. The remote bridge preserves pi-tui's key-release contract: release events are filtered unless the child component sets `wantsKeyRelease = true`, matching a directly mounted component. Return values passed to `done()` must be JSON-safe.
 
 ### Host terminal modes from an isolated component
 
-Because the component runs in the engine child — whose stdout is the JSONL transport, not a TTY — writing raw terminal escape sequences to `process.stdout` from `render()`/`handleInput()` is a no-op and never reaches the real host terminal. For the host autowrap mode an overlay may need, the factory `tui.terminal` exposes a typed, allowlisted setter that the host applies to the real TTY over the engine protocol:
-
-```typescript
-await ctx.ui.custom((tui, theme, keybindings, done) => {
-  tui.terminal.setAutowrap?.(false); // disable autowrap (DECAWM) — Windows terminals only
-  return new MyOverlay({ onClose: done });
-}, { overlay: true });
-```
-
-This is the only terminal control exposed; arbitrary child bytes are never forwarded to the terminal. The host resets the mode when a component hides, closes, is disposed, or when the engine child crashes or restarts. In fullscreen, pi-tui owns its baseline mouse and autowrap modes; non-isolated overlay fallbacks do not disable that baseline. On regular non-isolated hosts and test seams the setter is absent, and callers may fall back to writing escape sequences to their own `process.stdout`.
+Moved to [TUI API reference](/tui/reference#host-terminal-modes-from-an-isolated-component).
 
 ### Host-native session picker
 
-Remote-rendered components pay one host⇄child round trip per keypress under engine isolation. For session-style list pickers, the `ctx.ui.hostSessionPicker(request)` capability avoids that entirely: the terminal host mounts the real built-in `SessionSelectorComponent` and feeds it JSON-safe rows, so arrow-key navigation and search stay host-local and survive extension event-loop stalls. Only semantic events cross the host⇄extension boundary: the extension pushes row `update`s and `error`s (and may `close()` the picker); the host reports selection, cancel, and confirmed Ctrl+D deletes.
-
-Every interactive host implements the same API — non-isolated mode mounts the selector directly in-process (no IPC at all), isolated mode routes it over the engine session-picker protocol channel — so callers never branch on the mode. The member is absent only on non-interactive surfaces (headless RPC, print); fail with an actionable error there instead of degrading to a hand-rolled picker.
-
-```typescript
-const picker = ctx.ui.hostSessionPicker?.({
-  sessions: rows, // HostSessionPickerRow[]: SessionInfo with createdAt/modifiedAt epoch millis
-  showRenameHint: false,
-  onDelete: async (path) => {
-    // Deletion is extension-owned: the host keeps the row until you reply.
-    const outcome = await remove(path);
-    if (outcome.ok) picker!.update(rowsWithout(path));
-    else picker!.error(outcome.message);
-  },
-});
-if (!picker) throw new Error("This command requires an interactive session picker");
-picker.update(await loadMoreRows()); // merge late rows into the open picker
-const path = await picker.result;    // selected row's path, or undefined on cancel
-```
-
-The bundled workflows extension's `/workflow resume` picker is built exclusively on this channel.
+Moved to [TUI API reference](/tui/reference#host-native-session-picker).
 
 ### Host-native input form
 
-Use `ctx.ui.hostInputForm(request)` for structured inline forms whose keyboard handling must remain responsive under interactive-engine isolation. The terminal host mounts and focuses the real form in the bottom editor slot (`overlay: false`); Tab/Shift+Tab, arrows, text editing, configured keybindings, Enter, Escape, and Ctrl+C are handled entirely in the host process. In isolated mode only the JSON-safe open request and the final submit/cancel event cross the engine boundary. Non-isolated mode mounts the same component directly.
-
-```typescript
-const values = await ctx.ui.hostInputForm?.({
-  title: "Release",
-  fields: [
-    { name: "version", type: "string", required: true, initialValue: "" },
-    { name: "channel", type: "select", choices: ["stable", "beta"], initialValue: "stable" },
-  ],
-});
-if (values === undefined) return; // Escape, Ctrl+C, teardown, or close
-```
-
-Field types are `string`, `text`, `number`, `integer`, `boolean`, and `select`. Initial and returned values are raw strings; the caller owns domain coercion. Every current interactive Atomic host exposes the optional capability, while headless RPC and print surfaces omit it. Keep a legacy fallback only when compatibility with older hosts is required.
-
-The bundled `/workflow <name>` input picker uses this channel and retains its older custom-editor/`ctx.ui.custom()` paths only as compatibility fallbacks.
+Moved to [TUI API reference](/tui/reference#host-native-input-form).
 
 ## Overlays
 
@@ -325,52 +228,11 @@ const image = new Image(
 
 ## Keyboard Input
 
-Use `matchesKey()` for key detection:
-
-```typescript
-import { matchesKey, Key } from "@earendil-works/pi-tui";
-
-handleInput(data: string): boolean {
-  if (matchesKey(data, Key.up)) {
-    this.selectedIndex--;
-    return true;
-  } else if (matchesKey(data, Key.enter)) {
-    this.onSelect?.(this.selectedIndex);
-    return true;
-  } else if (matchesKey(data, Key.escape)) {
-    this.onCancel?.();
-    return true;
-  } else if (matchesKey(data, Key.ctrl("c"))) {
-    // CTRL+C
-    return true;
-  }
-  return false;
-}
-```
-
-**Key identifiers** (use `Key.*` for autocomplete, or string literals):
-- Basic keys: `Key.enter`, `Key.escape`, `Key.tab`, `Key.space`, `Key.backspace`, `Key.delete`, `Key.home`, `Key.end`
-- Arrow keys: `Key.up`, `Key.down`, `Key.left`, `Key.right`
-- With modifiers: `Key.ctrl("c")`, `Key.shift("tab")`, `Key.alt("left")`, `Key.ctrlShift("p")`
-- String format also works: `"enter"`, `"ctrl+c"`, `"shift+tab"`, `"ctrl+shift+p"`
+Moved to [TUI API reference](/tui/reference#keyboard-input).
 
 ## Line Width
 
-**Critical:** Each line from `render()` must not exceed the `width` parameter.
-
-```typescript
-import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
-
-render(width: number): string[] {
-  // Truncate long lines
-  return [truncateToWidth(this.text, width)];
-}
-```
-
-Utilities:
-- `visibleWidth(str)` - Get display width (ignores ANSI codes)
-- `truncateToWidth(str, width, ellipsis?)` - Truncate with optional ellipsis
-- `wrapTextWithAnsi(str, width)` - Word wrap preserving ANSI codes
+Moved to [TUI API reference](/tui/reference#line-width).
 
 ## Creating Custom Components
 
@@ -514,146 +376,31 @@ interface MyTheme {
 
 ## Debug logging
 
-Set `PI_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout. The
-variable is read by the vendored `@earendil-works/pi-tui` terminal, so it keeps
-its upstream name; a directory path writes one `tui-<timestamp>-<pid>.log` file
-per process.
-
-```bash
-PI_TUI_WRITE_LOG=/tmp/tui-ansi.log atomic
-```
-
-Atomic vendors TUI components through the installed `@earendil-works/pi-tui` dependency.
+Moved to [TUI API reference](/tui/reference#debug-logging).
 
 ## Performance
 
-Cache rendered output when possible:
-
-```typescript
-class CachedComponent {
-  private cachedWidth?: number;
-  private cachedLines?: string[];
-
-  render(width: number): string[] {
-    if (this.cachedLines && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-    // ... compute lines ...
-    this.cachedWidth = width;
-    this.cachedLines = lines;
-    return lines;
-  }
-
-  invalidate(): void {
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
-}
-```
-
-Call `invalidate()` when state changes, then `ctx.ui.requestRender()` from the extension context or `tui.requestRender()` from a `ctx.ui.custom()` factory to trigger re-render.
+Moved to [TUI API reference](/tui/reference#performance).
 
 ## Invalidation and Theme Changes
 
-When the theme changes, the TUI calls `invalidate()` on all components to clear their caches. Components must properly implement `invalidate()` to ensure theme changes take effect.
+Moved to [TUI API reference](/tui/reference#invalidation-and-theme-changes).
 
 ### The Problem
 
-If a component pre-bakes theme colors into strings (via `theme.fg()`, `theme.bg()`, etc.) and caches them, the cached strings contain ANSI escape codes from the old theme. Simply clearing the render cache isn't enough if the component stores the themed content separately.
-
-**Wrong approach** (theme colors won't update):
-
-```typescript
-class BadComponent extends Container {
-  private content: Text;
-
-  constructor(message: string, theme: Theme) {
-    super();
-    // Pre-baked theme colors stored in Text component
-    this.content = new Text(theme.fg("accent", message), 1, 0);
-    this.addChild(this.content);
-  }
-  // No invalidate override - parent's invalidate only clears
-  // child render caches, not the pre-baked content
-}
-```
+Moved to [TUI API reference](/tui/reference#the-problem).
 
 ### The Solution
 
-Components that build content with theme colors must rebuild that content when `invalidate()` is called:
-
-```typescript
-class GoodComponent extends Container {
-  private message: string;
-  private content: Text;
-
-  constructor(message: string) {
-    super();
-    this.message = message;
-    this.content = new Text("", 1, 0);
-    this.addChild(this.content);
-    this.updateDisplay();
-  }
-
-  private updateDisplay(): void {
-    // Rebuild content with current theme
-    this.content.setText(theme.fg("accent", this.message));
-  }
-
-  override invalidate(): void {
-    super.invalidate();  // Clear child caches
-    this.updateDisplay(); // Rebuild with new theme
-  }
-}
-```
+Moved to [TUI API reference](/tui/reference#the-solution).
 
 ### Pattern: Rebuild on Invalidate
 
-For components with complex content:
-
-```typescript
-class ComplexComponent extends Container {
-  private data: SomeData;
-
-  constructor(data: SomeData) {
-    super();
-    this.data = data;
-    this.rebuild();
-  }
-
-  private rebuild(): void {
-    this.clear();  // Remove all children
-
-    // Build UI with current theme
-    this.addChild(new Text(theme.fg("accent", theme.bold("Title")), 1, 0));
-    this.addChild(new Spacer(1));
-
-    for (const item of this.data.items) {
-      const color = item.active ? "success" : "muted";
-      this.addChild(new Text(theme.fg(color, item.label), 1, 0));
-    }
-  }
-
-  override invalidate(): void {
-    super.invalidate();
-    this.rebuild();
-  }
-}
-```
+Moved to [TUI API reference](/tui/reference#pattern-rebuild-on-invalidate).
 
 ### When This Matters
 
-This pattern is needed when:
-
-1. **Pre-baking theme colors** - Using `theme.fg()` or `theme.bg()` to create styled strings stored in child components
-2. **Syntax highlighting** - Using `highlightCode()` which applies theme-based syntax colors
-3. **Complex layouts** - Building child component trees that embed theme colors
-
-This pattern is NOT needed when:
-
-1. **Using theme callbacks** - Passing functions like `(text) => theme.fg("accent", text)` that are called during render
-2. **Simple containers** - Just grouping other components without adding themed content
-3. **Stateless render** - Computing themed output fresh in every `render()` call (no caching)
+Moved to [TUI API reference](/tui/reference#when-this-matters).
 
 ## Common Patterns
 
@@ -842,7 +589,7 @@ ctx.ui.setWorkingIndicator({ frames: [] });
 ctx.ui.setWorkingIndicator();
 ```
 
-This affects the normal Working indicator from accepted prompt submission through response streaming. Working appears immediately during attachment and other pre-stream startup, then continues without a visible gap when the agent turn begins. A no-turn result, prompt failure, or turn completion removes it. An accepted manual retry clears stale status from the prior prompt before showing new pre-stream activity. Factual automatic retry and fallback status takes precedence while that transition is active; ordinary Working resumes only when a later Working lifecycle actually starts. With no extension override, Atomic renders the exact one-cell `∀` immediately before one of its 453 original randomized whimsical working verbs, selected once per turn. Every agent and SDK turn starts at regular weight with a fresh lifecycle-relative 88ms cadence, then follows a ten-frame, theme-aware dark → accent → bright/bold → accent → dark luminance ramp without changing glyph or geometry. Optional theme tone overrides control any desired phases exactly, including terminal palette indices 0–255; Atomic derives omitted tones from selected-surface, `accent`, and `text` roles. Dark, light, custom, and dynamically reloaded themes therefore retain their own palette. Under `NO_COLOR`, the same cadence remains visible through regular/bold weight without foreground-color escapes. Turn completion and terminal cleanup stop the timer cleanly. Restoring Atomic's default after an extension override also restarts at the dark regular phase; custom extension frames and intervals remain unchanged and render verbatim. `ATOMIC_REDUCED_MOTION=1` shows a static regular accent `∀` without an animation timer. The icon and longest message fit standard and 64-column widths. Factual status copy takes precedence. Compaction and retry loaders keep their plain built-in styling. During successful post-tool autocompaction, Atomic temporarily replaces the Working indicator with the compaction loader and restores it before the same stream continues; no additional user input is required.
+This affects the normal Working indicator from accepted prompt submission through response streaming. It appears in a standalone status row by default; custom editors may opt into placing it in their top border. Newlines and terminal control characters in extension-supplied messages or frames remain stored verbatim, and the standalone row preserves their ordinary multi-line rendering. Working appears immediately during attachment and other pre-stream startup, then continues without a visible gap when the agent turn begins. A no-turn result, prompt failure, or turn completion removes it. An accepted manual retry clears stale status from the prior prompt before showing new pre-stream activity. Factual automatic retry and fallback status takes precedence while that transition is active; ordinary Working resumes only when a later Working lifecycle actually starts. With no extension override, Atomic renders the exact one-cell `∀` immediately before one of its 453 original randomized whimsical working verbs, selected once per turn. Every agent and SDK turn starts at regular weight with a fresh lifecycle-relative 88ms cadence, then follows a ten-frame, theme-aware dark → accent → bright/bold → accent → dark luminance ramp without changing glyph or geometry. Optional theme tone overrides control any desired phases exactly, including terminal palette indices 0–255; Atomic derives omitted tones from selected-surface, `accent`, and `text` roles. Dark, light, custom, and dynamically reloaded themes therefore retain their own palette. Under `NO_COLOR`, the same cadence remains visible through regular/bold weight without foreground-color escapes. Turn completion and terminal cleanup stop the timer cleanly. Restoring Atomic's default after an extension override also restarts at the dark regular phase; custom extension frames and intervals remain unchanged and render verbatim. `ATOMIC_REDUCED_MOTION=1` shows a static regular accent `∀` without an animation timer. The icon and longest message fit standard and 64-column widths. Factual status copy takes precedence. Compaction and automatic retry loaders use the built-in `∀` indicator with their own status text, not extension-provided frames or whimsical messages. Rate-limit and summary retry countdowns honor the same theme, reduced-motion, and `NO_COLOR` behavior while continuing to update the remaining delay. During successful post-tool autocompaction, Atomic temporarily replaces the Working indicator with the compaction loader and restores it before the same stream continues; no additional user input is required.
 
 Post-tool autocompaction is more precisely delimited by its own event pair. Pi opens the follow-up turn while the compaction is still unmatched, so the compaction status — not a generic Working message — owns the status surface from `compaction_start` until `compaction_end`, and the interposed turn does not take it back early. The status paints as soon as the compaction starts rather than on the next animation frame, in the main chat and in an attached workflow-stage chat alike. Ordinary Working then resumes for the continuing stream on any successful mid-turn completion, including a compaction that found nothing to compact and therefore reports no result. A cancelled or failed compaction stops all activity instead. The main chat reports automatic cancellation; an attached workflow-stage chat clears the transient status because the abort event carries no error text. Failures retain their event-provided error text.
 
@@ -879,6 +626,40 @@ ctx.ui.setWidget("my-widget", undefined);
 Hosts may clear extension widgets during a UI reset. A reactive extension that needs to keep a long-lived widget registration can observe `ctx.ui.onWidgetRelease(key, listener)` when available.
 The listener runs after the host removes that key, so the extension can reset local mount state and re-register on its next refresh. Ordinary content changes should continue to update the existing component with `requestRender()` rather than repeatedly calling `setWidget()`.
 
+#### Scrollable widgets
+
+Opt in with `scroll: { maxHeight: 6 }` to give a widget its own fullscreen viewport. The host may allocate fewer rows when the editor or other widgets need space. Render the full content, not a pre-clipped slice. Wheel input over the widget scrolls only that widget, including at either end. A one-column scrollbar appears only while content overflows. Scrolling does not take editor focus or register keyboard shortcuts.
+
+For a cap that follows terminal resizing, use `scroll: { maxHeight: 10, maxHeightFraction: 1 / 3 }`. The fraction is applied to live terminal rows, rounded down with a one-row minimum, then limited by `maxHeight`. Actual allocation may still be zero when other dock content uses all available rows. Omitting the fraction retains the fixed cap. The same options work for isolated-engine widgets.
+
+```typescript
+import type { ScrollableWidgetComponent, WidgetScrollRequest } from "@bastani/atomic";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+
+let position: WidgetScrollRequest = { version: 0, scrollTop: 0 };
+let currentTop = 0;
+ctx.ui.setWidget("scrolling-items", () => ({
+  render: (width) => items.map((item) => truncateToWidth(item.label, width)),
+  invalidate() {},
+  getScrollRequest: () => position,
+  onScroll: (state) => {
+    // state reports scrollTop, viewportHeight and contentHeight in rendered rows.
+    currentTop = state.scrollTop;
+  },
+} satisfies ScrollableWidgetComponent), {
+  placement: "belowEditor",
+  scroll: { maxHeight: 6 },
+});
+
+// To intentionally reposition, increase version, then request a render.
+position = { version: position.version + 1, scrollTop: 10 };
+ctx.ui.requestRender();
+```
+
+`getScrollRequest` and `onScroll` are optional. Keep the request version unchanged during ordinary updates so they do not reset wheel scrolling. New positions are clamped to the actual viewport. Requests with older versions are ignored. Unmounting starts a fresh viewport. Keep item identity and insertion/deletion anchors in your extension; positions here count rendered rows.
+
+`installReactiveWidget` accepts the same `scroll`, `getScrollRequest`, and `onScroll` options. Existing widgets remain unscrolled unless they opt in. Factory widgets work in both in-process and isolated-engine sessions. Native wheel input requires the fullscreen renderer and a terminal that forwards mouse events; the guarded main-screen fallback does not provide a native viewport. No Option/Alt key setup is required for wheel input.
+
 **Examples:** [plan-mode/index.ts](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode/index.ts)
 
 ### Pattern 6: Custom Footer
@@ -900,6 +681,23 @@ ctx.ui.setFooter(undefined); // restore default
 ```
 
 `ctx.ui.getFooterDataProvider()` exposes the same read-only provider to embedded extension UIs. In isolated interactive mode Atomic maintains the provider inside the engine session, mirrors every `setStatus()` update into it, and uses the session cwd with the same cached Git-branch watcher, so synchronous renderers can read current status and branch data without an RPC round trip or per-render Git process.
+
+For a workflow-stage session with a different cwd, subscribe with that cwd to retain its branch watcher, and read the live branch during each render using the same raw cwd string:
+
+```typescript
+// stageCwd is fixed for this viewer's lifetime.
+ctx.ui.setFooter((tui, theme, footerData) => ({
+  invalidate() {},
+  render(width: number): string[] {
+    return [`${ctx.model?.id} (${footerData.getGitBranch(stageCwd) || "no git"})`];
+  },
+  dispose: footerData.onBranchChange(() => tui.requestRender(), stageCwd),
+}));
+```
+
+The returned unsubscribe function belongs to the viewer: call it on disposal or before replacing the viewer's cwd, then subscribe for the new cwd. Embedded UIs using `ctx.ui.getFooterDataProvider()` must likewise release their own subscription. Active viewers using the same raw cwd share the cached provider and watcher; the last unsubscribe releases that alternate-cwd resource. Do not call the parent provider's `dispose()` from an individual viewer.
+
+An unleased `getGitBranch(stageCwd)` lookup is transient: it does not retain an alternate-cwd cache or watcher, so an unscoped callback alone does not enable stage-branch updates. Scoped subscriptions retain resources, but notifications still reach the same branch-change listeners; they are not filtered by cwd. Omitting the cwd argument retains the provider's own cwd behavior shown in the default recipe above.
 
 Token stats available via `ctx.sessionManager.getBranch()` and `ctx.model`.
 
@@ -974,6 +772,7 @@ export default function (pi: ExtensionAPI) {
 
 - **Extend `CustomEditor`** (not base `Editor`) to get app keybindings (escape to abort, ctrl+d to exit, model switching, etc.)
 - **Call `super.handleInput(data)`** for keys you don't handle
+- **Working status**: editors keep the standalone working row by default. Pass `{ embedWorkingStatus: true }` as the fourth `CustomEditor` constructor argument to opt into the editor-border spinner.
 - **Factory pattern**: `setEditorComponent` receives a factory function that gets `tui`, `theme`, and `keybindings`
 - **Autocomplete limit**: custom editors installed through `setEditorComponent()` that expose `setAutocompleteMaxVisible()` inherit the active `autocompleteMaxVisible` setting
 - **Pass `undefined`** to restore the default editor: `ctx.ui.setEditorComponent(undefined)`

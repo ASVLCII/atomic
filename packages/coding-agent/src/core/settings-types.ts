@@ -1,12 +1,18 @@
 import type { Transport } from "@bastani/pi-ai/compat";
 import type { ScrollViewScrollbar } from "@earendil-works/pi-tui";
 
+export interface CompactionModelOverride {
+	reserveTokens?: number;
+	preserve_recent?: number;
+}
+
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	compression_ratio?: number; // default: 0.5 (fraction of compactable context to keep)
 	preserve_recent?: number; // default: 2 (recent context-eligible messages to keep)
 	query?: string; // default: auto-detected from session context
+	modelOverrides?: Record<string, CompactionModelOverride>; // exact "provider/modelId" keys
 }
 
 export interface BranchSummarySettings {
@@ -28,6 +34,7 @@ export interface RetrySettings {
 	enabled?: boolean; // default: true
 	maxRetries?: number; // default: 3
 	baseDelayMs?: number; // default: 2000 (exponential backoff: 2s, 4s, 8s)
+	maxAgentDelayMs?: number; // default: 60000
 	provider?: ProviderRetrySettings;
 }
 
@@ -67,11 +74,6 @@ export interface MarkdownSettings {
 
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
-}
-
-export interface CodexFastModeSettings {
-	chat?: boolean; // default: false
-	workflow?: boolean; // default: false
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -118,7 +120,7 @@ export interface Settings {
 	theme?: string;
 	enableAnalytics?: boolean; // storage only; no analytics transmission is performed
 	trackingId?: string; // stable UUID generated on first analytics opt-in
-	showCacheMissNotices?: boolean; // default: false
+	showCacheMissNotices?: boolean; // default: false - show cache costs and provider recovery diagnostics
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
 	sessionSummary?: SessionSummarySettings;
@@ -142,6 +144,7 @@ export interface Settings {
 	workflows?: string[]; // Array of local workflow file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	terminal?: TerminalSettings;
+	herdr?: { enabled?: boolean }; // default: true, only inside an interactive Herdr pane
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
 	defaultTools?: string[]; // Initial built-in tool selection; extension and SDK custom tools stay enabled
@@ -157,7 +160,6 @@ export interface Settings {
 	fullscreenCopyOnSelect?: boolean; // default: true
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
-	codexFastMode?: CodexFastModeSettings; // OpenAI priority service tier toggles for chat/workflow
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY; global setting only
 	httpIdleTimeoutMs?: number | string; // HTTP idle timeout; 0 or "disabled" disables it
@@ -175,6 +177,14 @@ export type SettingsFieldOrigin = "primary" | "legacy";
 
 export interface SettingsStorage {
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
+	/**
+	 * Optional write-specific lock whose callback receives the current primary
+	 * document rather than a layered effective view. Storage implementations
+	 * without a distinct primary document can omit this method; layered storage
+	 * implementations must provide it to keep fallback fields out of the primary
+	 * document.
+	 */
+	withPrimaryWriteLock?(scope: SettingsScope, fn: (currentPrimary: string | undefined) => string | undefined): void;
 	getFieldOrigin?(scope: SettingsScope, field: keyof Settings): SettingsFieldOrigin | undefined;
 }
 

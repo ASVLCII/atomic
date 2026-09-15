@@ -1,5 +1,6 @@
 import type { DurableWorkflowBackend } from "../../durable/backend.js";
 import { getDurableBackend } from "../../durable/factory.js";
+import { isDurableWorkflowResumable } from "../../durable/resume-eligibility.js";
 import { recordRunTimingCheckpoint } from "../../durable/run-timing.js";
 import { TASK_RESULT_CHECKPOINT_CONTROL_PREFIX } from "../../durable/stage-primitive.js";
 import {
@@ -19,6 +20,7 @@ import { WorkflowGracefulQuitError } from "../../engine/workflow-tool-abort.js";
 import { expandWorkflowGraph } from "../../shared/expanded-workflow-graph.js";
 import { topLevelWorkflowRuns } from "../../shared/run-visibility.js";
 import { store as defaultStore } from "../../shared/store.js";
+import { workflowObservationRuntime } from "../../shared/store-factory.js";
 import { readGraphStoreSnapshot } from "../../shared/store-observation.js";
 import type { Store } from "../../shared/store-public-types.js";
 import type { RunSnapshot, StageSnapshot, WorkflowActor } from "../../shared/store-types.js";
@@ -40,6 +42,8 @@ export type QuitRunResult =
 			readonly cancelledTools: readonly WorkflowCancelledToolNode[];
 			/** Aborted nodes whose callback ignored its signal within the bounded wait. */
 			readonly abandonedTools: readonly WorkflowToolNodeIdentity[];
+			/** Runtime suspension caveat when no node could acknowledge control. */
+			readonly message?: string;
 	  }
 	| {
 			readonly ok: false;
@@ -91,16 +95,24 @@ type QuitAllRunResult =
  * control actions sees one quit rather than a pause followed by a quit — and
  * still sees nothing at all when a quit never publishes.
  */
-export async function quitRun(
+export function quitRun(runId: string, opts?: Parameters<typeof quitRunWithAction>[1]): Promise<QuitRunResult> {
+	return quitRunWithAction(runId, opts, "quit");
+}
+
+/** Preserve the requested control action when pause uses graceful suspension. */
+export async function quitRunWithAction(
 	runId: string,
-	opts?: {
-		store?: Store;
-		stageControlRegistry?: StageControlRegistry;
-		toolControlRegistry?: ToolControlRegistry;
-		jobs?: JobTracker;
-		/** Who requested this quit. Omitted for internal callers. */
-		actor?: WorkflowActor;
-	},
+	opts:
+		| {
+				store?: Store;
+				stageControlRegistry?: StageControlRegistry;
+				toolControlRegistry?: ToolControlRegistry;
+				jobs?: JobTracker;
+				/** Who requested this quit. Omitted for internal callers. */
+				actor?: WorkflowActor;
+		  }
+		| undefined,
+	action: "quit" | "pause",
 ): Promise<QuitRunResult> {
 	const activeStore = opts?.store ?? defaultStore;
 	const registry = opts?.stageControlRegistry ?? defaultStageControlRegistry;
@@ -109,6 +121,7 @@ export async function quitRun(
 	const run = activeStore.runs().find((candidate) => candidate.id === runId);
 	if (!run) return { ok: false, runId, reason: "not_found" };
 	if (run.endedAt !== undefined) return { ok: false, runId, reason: "already_ended" };
+	workflowObservationRuntime(activeStore).control(runId, action, opts?.actor);
 	const aggregateRootRunId = aggregateWorkflowRootRunId(activeStore, runId);
 	if (aggregateRootRunId !== runId) {
 		const hasTaskTail = expandedControlRunIds(activeStore, runId).some((controlRunId) =>
@@ -116,7 +129,7 @@ export async function quitRun(
 				.active(controlRunId)
 				.some((handle) => handle.nodeId.startsWith(TASK_RESULT_CHECKPOINT_CONTROL_PREFIX)),
 		);
-		if (hasTaskTail) return await quitRun(aggregateRootRunId, opts);
+		if (hasTaskTail) return await quitRunWithAction(aggregateRootRunId, opts, action);
 	}
 	const graph = expandWorkflowGraph(readGraphStoreSnapshot(activeStore), runId);
 	const handles = controllableHandles(activeStore, registry, runId);
@@ -129,10 +142,13 @@ export async function quitRun(
 	const hasLiveToolWork =
 		controllableToolHandles(activeStore, toolControls, runId).length > 0 ||
 		admissionBoundaries.some((boundary) => boundary.hasPendingAdmissions);
-	// Nothing controllable: leave admission open so an ordinary between-stages run
-	// keeps working exactly as before.
-	if (handles.length === 0 && !hasLiveToolWork && promptStages.length === 0 && !hasPausedState) {
-		return { ok: false, runId, reason: "no_active_stages" };
+	// When no node can acknowledge control, the executor owns the await itself.
+	// Abort synchronously before yielding so no later ctx.* call can slip in.
+	let runtimeQuit: Promise<void> | undefined;
+	if (handles.length === 0 && !hasLiveToolWork && promptStages.length === 0) {
+		const runtimeControl = toolControls.runControl(runId);
+		if (runtimeControl !== undefined) runtimeQuit = runtimeControl.quit();
+		else if (!hasPausedState) return { ok: false, runId, reason: "no_active_stages" };
 	}
 
 	const paused: StageSnapshot[] = [];
@@ -173,6 +189,7 @@ export async function quitRun(
 	// acknowledged is included, and none can start afterwards — not even while
 	// `markDurableQuit()` awaits the backend.
 	await closeToolAdmission(admissionBoundaries, runId);
+	await runtimeQuit;
 	const toolHandles = controllableToolHandles(activeStore, toolControls, runId);
 	const abandonedTools = await abortInFlightTools(activeStore, toolHandles);
 	const cancelledTools = collectCancelledToolNodes(activeStore, toolHandles);
@@ -185,7 +202,7 @@ export async function quitRun(
 	// A quit that aborted a call is committed: each of those callbacks observed a
 	// whole-run quit, so its executor suspends without writing any terminal
 	// record, and only the publication below can report that the run stopped.
-	const suspendedByAbort = toolHandles.length > 0;
+	const suspendedByAbort = toolHandles.length > 0 || runtimeQuit !== undefined;
 	const publish = (resumable: boolean): void => {
 		publishLocalQuit(activeStore, runId, pausedRunIds, resumable, opts?.actor);
 		// An abandoned callback keeps its executor alive, but that executor is no
@@ -195,9 +212,18 @@ export async function quitRun(
 		// settle on their own and unregister themselves.
 		if (abandonedTools.length > 0) jobs.detach(runId, jobs.get(runId));
 	};
+	const needsProgressCheck = runtimeQuit !== undefined || (current.resumable === false && graph.nodes.length === 0);
+	const durableHandle = needsProgressCheck ? discoverDurableQuitBackend(runId)?.getWorkflow(runId) : undefined;
+	const resumable =
+		!needsProgressCheck ||
+		(durableHandle !== undefined &&
+			isDurableWorkflowResumable({ ...durableHandle, status: "paused", resumable: true }));
+	// The executor has relinquished ownership. Report that local stop even if
+	// the non-cancellable durable write stalls; only its completion permits resume.
+	if (runtimeQuit !== undefined) publishLocalQuit(activeStore, runId, pausedRunIds, false);
 	let durableTransition: DurableQuitOutcome;
 	try {
-		durableTransition = await markDurableQuit(runId, current);
+		durableTransition = await markDurableQuit(runId, current, resumable);
 	} catch (error) {
 		if (!suspendedByAbort) throw error;
 		publish(false);
@@ -207,8 +233,12 @@ export async function quitRun(
 		if (suspendedByAbort) publish(false);
 		return { ok: false, runId, reason: "already_ended" };
 	}
-	publish(true);
-	return { ok: true, runId, paused, cancelledTools, abandonedTools };
+	publish(resumable);
+	const message =
+		runtimeQuit !== undefined || !resumable
+			? `Run ${runId} quit. ${runtimeQuit === undefined ? "" : "No further workflow steps will be admitted; untracked initialization or workflow code may still finish. "}${resumable ? "Resume with /workflow resume." : "No durable progress was recorded; this run cannot be resumed."}`
+			: undefined;
+	return { ok: true, runId, paused, cancelledTools, abandonedTools, ...(message === undefined ? {} : { message }) };
 }
 
 /**
@@ -354,7 +384,7 @@ function controllableHandles(
 
 type DurableQuitOutcome = "transitioned" | "not_needed" | "refused";
 
-async function markDurableQuit(runId: string, run: RunSnapshot): Promise<DurableQuitOutcome> {
+async function markDurableQuit(runId: string, run: RunSnapshot, resumable = true): Promise<DurableQuitOutcome> {
 	const backend = discoverDurableQuitBackend(runId);
 	if (backend === undefined) return "not_needed";
 	// The workflow is durably tracked, so a failure to persist the paused
@@ -368,7 +398,7 @@ async function markDurableQuit(runId: string, run: RunSnapshot): Promise<Durable
 		["running", "paused"],
 		"paused",
 		undefined,
-		true,
+		resumable,
 	);
 	if (!transitioned) return "refused";
 	// Persist the exact accumulated run elapsed at quit time so a later durable

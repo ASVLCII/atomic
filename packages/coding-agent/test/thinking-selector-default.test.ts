@@ -1,7 +1,7 @@
 import { type Api, clampThinkingLevel, type Model } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import { beforeAll, expect, test } from "vitest";
+import { beforeAll, expect, test, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { ThinkingSelectorComponent } from "../src/modes/interactive/components/thinking-selector.ts";
 import {
@@ -62,13 +62,11 @@ test("selector badges the clamped default rather than leaving no item marked", (
 		available,
 		() => {},
 		() => {},
-		() => {},
 		rawDefault,
 	);
 	const clamped = new ThinkingSelectorComponent(
 		"off",
 		available,
-		() => {},
 		() => {},
 		() => {},
 		resolveThinkingSelectorDefault(rawDefault, available, model),
@@ -138,4 +136,15 @@ test("keeps the current thinking level marked while browsing", () => {
 	selector.handleInput("\x1b[B");
 	expect(getLevelRow("medium")?.startsWith("  ✓ medium")).toBe(true);
 	expect(getLevelRow("high")?.startsWith("→   high")).toBe(true);
+});
+
+test("has no save-default shortcut or hint", () => {
+	setKeybindings(new KeybindingsManager());
+	const select = vi.fn();
+	const selector = new ThinkingSelectorComponent("medium", ["medium", "high"], select, () => {});
+	expect(stripAnsi(selector.render(120).join("\n"))).not.toContain("set as default");
+	selector.handleInput("\x13");
+	expect(select).not.toHaveBeenCalled();
+	selector.handleInput("\r");
+	expect(select).toHaveBeenCalledWith("medium");
 });

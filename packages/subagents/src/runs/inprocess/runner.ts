@@ -1,16 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
+	applyAssistantMessageDelta,
+	beginStreamingAssistantMessage,
 	type CreateAgentSessionOptions,
 	createAgentSession,
 	DefaultResourceLoader,
 	getAgentDir,
 	getBuiltinPackagePaths,
 	type PackageSource,
-	readStoredCredential,
 	SessionManager,
 	type SessionStats,
 	SettingsManager,
@@ -24,7 +26,8 @@ import {
 	type TerminationCause as NativeTerminationCause,
 	SubagentControl,
 } from "@bastani/atomic-natives";
-import type { Api, Model } from "@bastani/pi-ai/compat";
+import { type Api, type AssistantMessage, clampThinkingLevel, type Model } from "@bastani/pi-ai/compat";
+import type { Cleanup } from "../../../../coding-agent/src/core/tasks/contracts.js";
 import type { AgentConfig } from "../../agents/agent-types.js";
 import {
 	buildSkillInjection,
@@ -32,11 +35,6 @@ import {
 	resolveSkillsFromCatalog,
 } from "../../agents/skills.js";
 import { ensureArtifactsDir, writeArtifact, writeMetadata } from "../../shared/artifacts.js";
-import {
-	getSubagentCodexFastModeSettings,
-	resolveSubagentCodexFastModeScope,
-	resolveSubagentModelFastMode,
-} from "../../shared/fast-mode.js";
 import { DEFAULT_MAX_JSONL_BYTES } from "../../shared/jsonl-writer.js";
 import { resolveEffectiveThinking } from "../../shared/model-info.js";
 import {
@@ -44,6 +42,7 @@ import {
 	type ArtifactPaths,
 	DEFAULT_MAX_OUTPUT,
 	type MaxOutputConfig,
+	type TaskExecutionHooks,
 	truncateOutput,
 } from "../../shared/types.js";
 import {
@@ -54,10 +53,10 @@ import {
 import { type ChildModePolicy, resolveChildModePolicy } from "./child-policy.js";
 import { createInProcessChildPromptBehavior, createInProcessChildSystemPromptTransform } from "./prompt-behavior.js";
 
-export type ChildStatus = NativeAgentStatus;
+export type ChildStatus = NativeAgentStatus | "killed";
 export type ContinuationReason = "intercom-coordination";
 export type TerminationCauseName = NativeTerminationCause;
-export type TerminalStatus = "ok" | "error" | "skipped" | "interrupted" | "continued";
+export type TerminalStatus = "ok" | "error" | "skipped" | "interrupted" | "killed" | "continued";
 
 export interface ParentContext {
 	readonly path: string;
@@ -85,12 +84,16 @@ export interface TestSessionOptions {
 	readonly sessionThinkingLevel?: string;
 	/** Test-only session events emitted in order after the initial agent_start event. */
 	readonly events?: readonly AgentSessionEvent[];
+	/** Deterministic events before the held prompt gate, for continuity scenarios. */
+	readonly beforeGateEvents?: readonly AgentSessionEvent[];
 	/** Seed an earlier assistant message so abort recovery can find real text. */
 	readonly seededAssistantText?: string;
 	/** After abort, append a thinking-only aborted message with no text. */
 	readonly thinkingOnlyOnAbort?: boolean;
 	/** Emit the fallback event before the prompt gate so abort can preserve live fallback metadata. */
 	readonly fallbackBeforeGate?: boolean;
+	/** Test-only disposal barrier/failure injection. */
+	readonly dispose?: () => void | Promise<void>;
 }
 
 export interface ChildSpec {
@@ -169,16 +172,6 @@ function initialThinkingForAttempt(
 ): string | undefined {
 	return resolveEffectiveThinking(model, configuredThinking) ?? configuredThinking;
 }
-function defaultFastModeForChild(
-	cwd: string,
-	context: ParentContext["orchestrationContext"],
-	resolvedModel?: Model<Api>,
-): (model?: string) => boolean {
-	const settings = getSubagentCodexFastModeSettings(cwd);
-	const scope = resolveSubagentCodexFastModeScope(context);
-	const copilotCredential = readStoredCredential("github-copilot");
-	return (model) => resolveSubagentModelFastMode({ model, resolvedModel, cwd, settings, scope, copilotCredential });
-}
 
 export interface AttemptSignals {
 	readonly abort: AbortSignal;
@@ -216,7 +209,7 @@ export type AttemptOutcome = (
 			readonly attemptedModels?: readonly string[];
 	  }
 	| {
-			readonly status: "interrupted";
+			readonly status: "interrupted" | "killed";
 			readonly cause?: string;
 			readonly stats: AttemptStats;
 			readonly path: string;
@@ -247,7 +240,6 @@ export interface ResultEnvelope {
 	readonly envelope: string;
 	readonly model?: string;
 	readonly thinking?: string;
-	readonly fastMode?: boolean;
 	readonly modelAttempts?: readonly {
 		readonly model: string;
 		readonly status: TerminalStatus;
@@ -295,9 +287,16 @@ const CAPACITY_RETRY_MAX_DELAY_MS = 100;
 
 type CapacityWaitResult = "retry" | "abort" | "interrupt";
 
-function waitForExecutionCapacity(delayMs: number, signals: AttemptSignals): Promise<CapacityWaitResult> {
-	if (signals.interrupt.aborted) return Promise.resolve("interrupt");
-	if (signals.abort.aborted) return Promise.resolve("abort");
+function waitForExecutionCapacity(
+	delayMs: number,
+	signals: AttemptSignals,
+	onSettled: (result: CapacityWaitResult) => void,
+): Promise<CapacityWaitResult> {
+	if (signals.interrupt.aborted || signals.abort.aborted) {
+		const result = signals.interrupt.aborted ? "interrupt" : "abort";
+		onSettled(result);
+		return Promise.resolve(result);
+	}
 	return new Promise((resolveWait) => {
 		let settled = false;
 		let timer: ReturnType<typeof setTimeout>;
@@ -307,6 +306,7 @@ function waitForExecutionCapacity(delayMs: number, signals: AttemptSignals): Pro
 			clearTimeout(timer);
 			signals.abort.removeEventListener("abort", onAbort);
 			signals.interrupt.removeEventListener("abort", onInterrupt);
+			onSettled(result);
 			resolveWait(result);
 		};
 		const onAbort = () => settle("abort");
@@ -473,6 +473,7 @@ function createTestSession(sessionManager: SessionManager, spec: ChildSpec): Age
 				appendAssistant([{ type: "text", text: lastAssistantText }], "stop");
 			}
 			if (testOptions.fallbackBeforeGate) emitFallback();
+			for (const event of testOptions.beforeGateEvents ?? []) for (const listener of listeners) listener(event);
 			if (testOptions.promptGate) {
 				const gateResult = await Promise.race([
 					testOptions.promptGate.then(() => "released" as const),
@@ -519,12 +520,12 @@ function createTestSession(sessionManager: SessionManager, spec: ChildSpec): Age
 			tokens: zeroTokens,
 			cost: 0,
 		}),
-		dispose: () => {},
+		dispose: testOptions.dispose ?? (() => {}),
 	} as unknown as AgentSession;
 }
 
 function nativeStatus(value: ChildStatus): NativeAgentStatus {
-	return value;
+	return value === "killed" ? "interrupted" : value;
 }
 
 function nativeCause(value: TerminationCauseName): NativeTerminationCause {
@@ -728,7 +729,6 @@ export class AdmittedChild {
 export interface ChildRuntimeMetadata {
 	model?: string;
 	thinking?: string;
-	fastMode?: boolean;
 }
 
 export interface RunningAttempt {
@@ -738,15 +738,10 @@ export interface RunningAttempt {
 	readonly startedAt: number;
 	currentModel?: string;
 	currentThinking?: string;
-	currentFastMode?: boolean;
 	status: "running" | ChildStatus;
 	promise: Promise<AttemptOutcome>;
 	terminate?: (cause: TerminationCauseName) => Promise<void>;
 	attemptToken?: number;
-}
-
-export interface StartAttemptOptions {
-	readonly fastModeForModel?: (model: string | undefined) => boolean;
 }
 
 export class SubagentControlRuntime {
@@ -758,6 +753,7 @@ export class SubagentControlRuntime {
 	private readonly attemptTerminators = new Map<string, (cause: TerminationCauseName) => Promise<void>>();
 	private readonly delivered = new Set<string>();
 	private readonly deliveredEnvelopes = new Map<string, ResultEnvelope>();
+	private readonly killedChildren = new Set<string>();
 	private nextAttemptId = 1;
 
 	constructor(parent: ParentContext, sessionRoot?: string) {
@@ -819,31 +815,55 @@ export class SubagentControlRuntime {
 		admitted: AdmittedChild,
 		candidate: ModelCandidate,
 		signals: AttemptSignals,
-		onModelChange: ((model: string | undefined, thinking?: string, fastMode?: boolean) => void) | undefined,
-		fastModeForModel: (model: string | undefined) => boolean,
+		onModelChange: ((model: string | undefined, thinking?: string) => void) | undefined,
+		taskHooks?: Pick<TaskExecutionHooks, "reportActivity" | "bindTranscript">,
+		onCleanup?: (cleanup: Promise<Cleanup>) => void,
 	): Promise<AttemptOutcome> {
 		const candidateModelId = modelIdForCandidate(candidate, admitted.policy.model);
 		const configuredThinking = candidate.thinkingLevel ?? admitted.policy.thinkingLevel;
 		let effectiveModelId = candidateModelId;
 		let effectiveThinking = initialThinkingForAttempt(candidateModelId, configuredThinking);
 		let attemptedModels: string[] = candidateModelId ? [candidateModelId] : [];
+		// Background receipts can precede capacity acquisition and session loading. Publish
+		// only the concrete selection handed to createAgentSession, not a requested ID
+		// or an arbitrary parent model. Session and fallback reports remain authoritative.
+		const selectedModel = candidate.model ?? admitted.policy.model;
+		if (selectedModel)
+			taskHooks?.reportActivity({
+				reportId: `${randomUUID()}:admission-model`,
+				change: {
+					kind: "model",
+					model: `${selectedModel.provider}/${selectedModel.id}`,
+					thinking:
+						configuredThinking === undefined ? undefined : clampThinkingLevel(selectedModel, configuredThinking),
+				},
+			});
 		let guard: NativeExecutionGuardResult;
 		let retryDelayMs = CAPACITY_RETRY_INITIAL_DELAY_MS;
 		for (;;) {
 			guard = this.native.beginChildAttempt(admitted.identity.path);
 			if (guard.token || guard.refusal?.kind !== "capacityExhausted") break;
-			const waitResult = await waitForExecutionCapacity(retryDelayMs, signals);
+			let killed = false;
+			const waitResult = await waitForExecutionCapacity(retryDelayMs, signals, (result) => {
+				// Snapshot at signal delivery, before a later kill or parent abort can change classification.
+				killed =
+					this.killedChildren.has(admitted.identity.path) ||
+					(result === PARENT_CANCEL_CAUSE && !!taskHooks && signals.abort.reason === "user");
+			});
 			if (waitResult !== "retry") {
 				const stats = { ...EMPTY_STATS, sessionId: admitted.identity.path };
 				if (waitResult === "interrupt" || waitResult === PARENT_CANCEL_CAUSE) {
+					if (killed) this.killedChildren.add(admitted.identity.path);
+					else this.killedChildren.delete(admitted.identity.path);
 					this.native.publishChildStatus(admitted.identity.path, nativeStatus("interrupted"));
 					return {
-						status: "interrupted",
-						...(waitResult === PARENT_CANCEL_CAUSE ? { cause: PARENT_CANCEL_CAUSE } : {}),
+						status: killed ? "killed" : "interrupted",
+						...(waitResult === PARENT_CANCEL_CAUSE && !killed ? { cause: PARENT_CANCEL_CAUSE } : {}),
 						stats,
 						path: admitted.identity.path,
-						envelope:
-							waitResult === PARENT_CANCEL_CAUSE
+						envelope: killed
+							? "Killed. This child cannot be resumed."
+							: waitResult === PARENT_CANCEL_CAUSE
 								? cancelledEnvelope(undefined, admitted.spec, stats)
 								: INTERRUPTED_ENVELOPE,
 						...(effectiveModelId === undefined ? {} : { model: effectiveModelId }),
@@ -880,13 +900,22 @@ export class SubagentControlRuntime {
 		const token = guard.token;
 		this.attemptTokens.set(admitted.identity.path, token);
 		let session: AgentSession | undefined;
+		const executionEnded = new AbortController();
 		let activeSessionManager: SessionManager | undefined;
 		let termination: TerminationCauseName | undefined;
 		let terminating: Promise<void> | undefined;
+		let terminationWasKill = false;
 		let unsubscribe: (() => void) | undefined;
 		let skillReport: AttemptSkillReport = {};
 		const terminate = async (cause: TerminationCauseName): Promise<void> => {
-			if (terminating) return terminating;
+			if (terminating) {
+				if (!terminationWasKill) this.killedChildren.delete(admitted.identity.path);
+				return terminating;
+			}
+			if (taskHooks && cause === "abort" && signals.abort.reason === "user")
+				this.killedChildren.add(admitted.identity.path);
+			// Preserve the first termination's classification across late kill requests.
+			terminationWasKill = this.killedChildren.has(admitted.identity.path);
 			termination = cause;
 			terminating = (async () => {
 				try {
@@ -920,6 +949,7 @@ export class SubagentControlRuntime {
 						workflow ? { internal: true, workflow } : { internal: true },
 					);
 			activeSessionManager = sessionManager;
+			taskHooks?.bindTranscript?.(sessionManager);
 			if (workflow) sessionManager.markSessionInternal(workflow);
 			let created: { session: AgentSession };
 			if (admitted.spec.testSession) {
@@ -971,7 +1001,7 @@ export class SubagentControlRuntime {
 							sessionManager,
 							settingsManager,
 							orchestrationContext: admitted.spec.parent?.orchestrationContext,
-							subagentPolicy: admitted.policy,
+							subagentPolicy: { ...admitted.policy, executionEnded: executionEnded.signal },
 							systemPromptTransform,
 							initialContextTransform: promptBehavior.initialContextTransform,
 						})
@@ -980,19 +1010,27 @@ export class SubagentControlRuntime {
 				await created.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
 			}
 			session = created.session;
+			const transcriptSession = session;
+			// Snapshot at the public session-event boundary, never ahead of its queued events.
+			let observedStreamingMessage: AssistantMessage | undefined;
+			taskHooks?.bindTranscript?.({
+				getSessionId: () => sessionManager.getSessionId(),
+				getEntries: () => sessionManager.getEntries(),
+				subscribe: (listener) => transcriptSession.subscribe(listener),
+				getStreamingMessage: () => observedStreamingMessage,
+			});
 			const initialModelId = modelIdForSession(session) ?? candidateModelId;
 			effectiveModelId = initialModelId;
 			effectiveThinking =
 				thinkingLevelForSession(session) ?? initialThinkingForAttempt(candidateModelId, configuredThinking);
 			attemptedModels = initialModelId ? [initialModelId] : [];
-			onModelChange?.(effectiveModelId, effectiveThinking, fastModeForModel(effectiveModelId));
+			onModelChange?.(effectiveModelId, effectiveThinking);
 			const progressState: AgentProgress = {
 				index: 0,
 				agent: admitted.spec.agent.name,
 				status: "running",
 				...(initialModelId === undefined ? {} : { model: initialModelId }),
 				...(effectiveThinking === undefined ? {} : { thinking: effectiveThinking }),
-				fastMode: fastModeForModel(initialModelId),
 				task: admitted.spec.task,
 				recentTools: [],
 				recentOutput: [],
@@ -1002,20 +1040,49 @@ export class SubagentControlRuntime {
 				lastActivityAt: Date.now(),
 			};
 			const attemptStartedAt = Date.now();
+			const activityPrefix = randomUUID();
 			let lastProgressEmit = 0;
 			const emitProgress = (force: boolean) => {
 				const onProgress = admitted.spec.onProgress;
-				if (!onProgress) return;
+				if (!onProgress && !taskHooks) return;
 				const now = Date.now();
 				if (!force && now - lastProgressEmit < 400) return;
 				lastProgressEmit = now;
 				progressState.durationMs = now - attemptStartedAt;
 				progressState.lastActivityAt = now;
-				onProgress({ ...progressState, recentTools: [...progressState.recentTools] });
+				taskHooks?.reportActivity({
+					reportId: `${activityPrefix}:metrics-${++activitySequence}`,
+					change: {
+						kind: "metrics",
+						elapsedMs: progressState.durationMs,
+						toolCount: progressState.toolCount,
+						tokenCount: progressState.tokens,
+					},
+				});
+				onProgress?.({ ...progressState, recentTools: [...progressState.recentTools] });
 			};
+			let activitySequence = 0;
+			const reportModel = () =>
+				taskHooks?.reportActivity({
+					reportId: `${activityPrefix}:model-${++activitySequence}`,
+					change: { kind: "model", model: effectiveModelId, thinking: effectiveThinking },
+				});
+			reportModel();
 			unsubscribe = session.subscribe((event) => {
 				writeEvent(admitted.spec.artifactJsonlPath, event);
+				if (event.type === "message_start" && event.message.role === "assistant")
+					observedStreamingMessage = beginStreamingAssistantMessage(event.message);
+				else if (event.type === "message_update" && observedStreamingMessage)
+					applyAssistantMessageDelta(observedStreamingMessage, event.assistantMessageEvent);
+				else if (event.type === "message_end" && event.message.role === "assistant")
+					observedStreamingMessage = undefined;
 				const emission = progressEmissionFor(event.type);
+				if (event.type === "tool_execution_start") {
+					taskHooks?.reportActivity({
+						reportId: `${activityPrefix}:tool-${++activitySequence}`,
+						change: { kind: "action", tool: event.toolName, text: safeArgsPreview(event.args) },
+					});
+				}
 				if (event.type === "agent_start") {
 					this.native.publishChildStatus(admitted.identity.path, nativeStatus("running"));
 				} else if (event.type === "tool_execution_start") {
@@ -1049,13 +1116,14 @@ export class SubagentControlRuntime {
 					if (!attemptedModels.includes(event.to)) attemptedModels.push(event.to);
 					effectiveModelId = event.to;
 					progressState.model = event.to;
-					progressState.fastMode = fastModeForModel(event.to);
-					onModelChange?.(effectiveModelId, effectiveThinking, progressState.fastMode);
+					onModelChange?.(effectiveModelId, effectiveThinking);
+					reportModel();
+					emitProgress(true);
 				} else if (event.type === "thinking_level_changed") {
 					effectiveThinking = event.level;
 					progressState.thinking = effectiveThinking;
-					const fastMode = fastModeForModel(effectiveModelId);
-					onModelChange?.(effectiveModelId, effectiveThinking, fastMode);
+					onModelChange?.(effectiveModelId, effectiveThinking);
+					reportModel();
 					emitProgress(true);
 				}
 			});
@@ -1090,11 +1158,15 @@ export class SubagentControlRuntime {
 				};
 			if (status === "interrupted")
 				return {
-					status,
-					...(termination === PARENT_CANCEL_CAUSE ? { cause: PARENT_CANCEL_CAUSE } : {}),
+					status: this.killedChildren.has(admitted.identity.path) ? "killed" : status,
+					...(termination === PARENT_CANCEL_CAUSE && !this.killedChildren.has(admitted.identity.path)
+						? { cause: PARENT_CANCEL_CAUSE }
+						: {}),
 					stats,
 					path: admitted.identity.path,
-					envelope,
+					envelope: this.killedChildren.has(admitted.identity.path)
+						? "Killed. This child cannot be resumed."
+						: envelope,
 					sessionFile,
 					...(effectiveModelId === undefined ? {} : { model: effectiveModelId }),
 					...(effectiveThinking === undefined ? {} : { thinking: effectiveThinking }),
@@ -1125,14 +1197,18 @@ export class SubagentControlRuntime {
 			}
 			if (status === "interrupted")
 				return {
-					status,
-					...(termination === PARENT_CANCEL_CAUSE ? { cause: PARENT_CANCEL_CAUSE } : {}),
+					status: this.killedChildren.has(admitted.identity.path) ? "killed" : status,
+					...(termination === PARENT_CANCEL_CAUSE && !this.killedChildren.has(admitted.identity.path)
+						? { cause: PARENT_CANCEL_CAUSE }
+						: {}),
 					stats,
 					path: admitted.identity.path,
 					envelope:
-						termination === PARENT_CANCEL_CAUSE
+						termination === PARENT_CANCEL_CAUSE && !this.killedChildren.has(admitted.identity.path)
 							? cancelledEnvelope(session, admitted.spec, stats)
-							: INTERRUPTED_ENVELOPE,
+							: this.killedChildren.has(admitted.identity.path)
+								? "Killed. This child cannot be resumed."
+								: INTERRUPTED_ENVELOPE,
 					sessionFile: session?.sessionFile,
 					...(effectiveModelId === undefined ? {} : { model: effectiveModelId }),
 					...(effectiveThinking === undefined ? {} : { thinking: effectiveThinking }),
@@ -1152,6 +1228,8 @@ export class SubagentControlRuntime {
 				...skillReport,
 			};
 		} finally {
+			// End reply capability before asynchronous cleanup or extension invalidation.
+			executionEnded.abort();
 			signals.abort.removeEventListener("abort", abortListener);
 			signals.interrupt.removeEventListener("abort", interruptListener);
 			try {
@@ -1164,10 +1242,32 @@ export class SubagentControlRuntime {
 			} catch {
 				// Persistence teardown must not replace the attempt result.
 			}
-			try {
-				session?.dispose();
-			} catch {
-				// Session teardown must not replace the attempt result.
+			if (onCleanup) {
+				onCleanup(
+					(async (): Promise<Cleanup> => {
+						try {
+							await session?.dispose();
+							return { kind: "reaped" };
+						} catch (error) {
+							return {
+								kind: "failed",
+								resources: [
+									{
+										resource: "agent-session",
+										code: "CleanupFailed",
+										message: error instanceof Error ? error.message : String(error),
+									},
+								],
+							};
+						}
+					})(),
+				);
+			} else {
+				try {
+					session?.dispose();
+				} catch {
+					// Session teardown must not replace the attempt result.
+				}
 			}
 			if (this.attemptTokens.get(admitted.identity.path) === token)
 				this.attemptTokens.delete(admitted.identity.path);
@@ -1180,16 +1280,13 @@ export class SubagentControlRuntime {
 		admitted: AdmittedChild,
 		candidate: ModelCandidate,
 		signals: AttemptSignals,
-		options: StartAttemptOptions = {},
+		taskHooks?: TaskExecutionHooks,
 	): RunningAttempt {
 		const initialModel = modelIdForCandidate(candidate, admitted.policy.model);
 		const initialThinking = initialThinkingForAttempt(
 			initialModel,
 			candidate.thinkingLevel ?? admitted.policy.thinkingLevel,
 		);
-		const fastModeForModel =
-			options.fastModeForModel ??
-			defaultFastModeForChild(admitted.policy.cwd, admitted.spec.parent?.orchestrationContext, candidate.model);
 		const running: RunningAttempt = {
 			id: this.nextAttemptId++,
 			child: admitted,
@@ -1198,7 +1295,6 @@ export class SubagentControlRuntime {
 			startedAt: Date.now(),
 			...(initialModel === undefined ? {} : { currentModel: initialModel }),
 			currentThinking: initialThinking,
-			currentFastMode: fastModeForModel(initialModel),
 			promise: Promise.resolve({
 				status: "error",
 				cause: "uninitialized",
@@ -1207,16 +1303,21 @@ export class SubagentControlRuntime {
 				envelope: "uninitialized",
 			}),
 		};
+		let cleanup: Promise<Cleanup> = Promise.resolve({ kind: "reaped" });
 		running.promise = this.runChildAttempt(
 			admitted,
 			candidate,
 			signals,
-			(model, thinking, fastMode) => {
+			(model, thinking) => {
 				running.currentModel = model;
 				running.currentThinking = thinking;
-				running.currentFastMode = fastMode;
 			},
-			fastModeForModel,
+			taskHooks,
+			taskHooks
+				? (result) => {
+						cleanup = result;
+					}
+				: undefined,
 		).then((result) => {
 			running.status = result.status;
 			this.runningAttempts.delete(running.id);
@@ -1225,6 +1326,13 @@ export class SubagentControlRuntime {
 		running.terminate = (cause) => this.terminateRunningAttempt(running, cause);
 		running.promise.catch(() => undefined);
 		this.runningAttempts.set(running.id, running);
+		taskHooks?.onExecution({
+			result: running.promise,
+			cleanup: running.promise.then(
+				() => cleanup,
+				() => cleanup,
+			),
+		});
 		return running;
 	}
 
@@ -1245,11 +1353,10 @@ export class SubagentControlRuntime {
 		if (!running) return undefined;
 		const model = running.currentModel;
 		const thinking = running.currentThinking;
-		if (model === undefined && thinking === undefined && running.currentFastMode === undefined) return undefined;
+		if (model === undefined && thinking === undefined) return undefined;
 		return {
 			...(model === undefined ? {} : { model }),
 			...(thinking === undefined ? {} : { thinking }),
-			...(running.currentFastMode === undefined ? {} : { fastMode: running.currentFastMode }),
 		};
 	}
 
@@ -1283,27 +1390,34 @@ export class SubagentControlRuntime {
 	getDeliveredResult(pathValue: string): ResultEnvelope | undefined {
 		return this.deliveredEnvelopes.get(pathValue);
 	}
-	findChild(pathValue: string): ChildIdentity | undefined {
-		return this.native.listChildren().find((child) => child.path === pathValue);
+	findChild(pathValue: string): (Omit<ChildIdentity, "status"> & { status: ChildStatus }) | undefined {
+		return this.listChildren().find((child) => child.path === pathValue);
 	}
 
-	listChildren(): readonly ChildIdentity[] {
-		return this.native.listChildren();
+	listChildren(): readonly (Omit<ChildIdentity, "status"> & { status: ChildStatus })[] {
+		return this.native.listChildren().map((child) => ({
+			...child,
+			status: child.status === "interrupted" && this.killedChildren.has(child.path) ? "killed" : child.status,
+		}));
 	}
 
-	async interruptChild(pathValue: string): Promise<boolean> {
+	async killChild(pathValue: string): Promise<boolean> {
 		const running = [...this.runningAttempts.values()].find(
 			(attempt) =>
 				attempt.child.identity.path === pathValue &&
 				(attempt.status === "running" || attempt.status === "continued"),
 		);
 		if (!running) return false;
+		// Native interruption can be final before the JS attempt is retired. Do not relabel it.
+		if (this.findChild(pathValue)?.status !== "interrupted") this.killedChildren.add(pathValue);
 		await this.terminateChildAttempt(running, "interrupt");
 		return true;
 	}
 
 	subscribe(pathValue: string, callback: (status: ChildStatus) => void): void {
-		this.native.subscribeChildStatus(pathValue, callback);
+		this.native.subscribeChildStatus(pathValue, (status) =>
+			callback(status === "interrupted" && this.killedChildren.has(pathValue) ? "killed" : status),
+		);
 	}
 
 	private async terminateRunningAttempt(running: RunningAttempt, cause: TerminationCauseName): Promise<void> {
@@ -1343,13 +1457,7 @@ export function run_child_attempt(
 	candidate: ModelCandidate,
 	signals: AttemptSignals,
 ): Promise<AttemptOutcome> {
-	return control.runChildAttempt(
-		admitted,
-		candidate,
-		signals,
-		undefined,
-		defaultFastModeForChild(admitted.policy.cwd, admitted.spec.parent?.orchestrationContext, candidate.model),
-	);
+	return control.runChildAttempt(admitted, candidate, signals, undefined);
 }
 
 export function continue_detached(

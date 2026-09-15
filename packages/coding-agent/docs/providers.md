@@ -2,6 +2,10 @@
 
 Atomic supports subscription-based providers via OAuth and API-key providers via environment variables or the auth file. Built-in catalogs ship with Atomic; configured and native providers may refresh newer catalogs independently and cache them in `~/.atomic/agent/models-store.json` for offline use.
 
+## On this page and its reference
+
+This page is provider setup: subscriptions, API keys, cloud providers, and local llama.cpp. The exact contracts — provider stop reasons and credential resolution order — live in the [Provider reference](/providers/reference).
+
 ## Table of Contents
 
 - [Subscriptions](#subscriptions)
@@ -9,9 +13,9 @@ Atomic supports subscription-based providers via OAuth and API-key providers via
 - [API Keys](#api-keys)
 - [Auth File](#auth-file)
 - [Cloud Providers](#cloud-providers)
-- [llama.cpp](#llamacpp)
-- [Stop Reasons](#stop-reasons)
-- [Resolution Order](#resolution-order)
+- [llama.cpp](#llama-cpp)
+- [Stop Reasons](/providers/reference#stop-reasons)
+- [Resolution Order](/providers/reference#resolution-order)
 - [Custom Providers](#custom-providers)
 
 ## Subscriptions
@@ -49,16 +53,32 @@ Checks refresh expired OAuth credentials by default through the ordinary locked 
 
 If the Codex backend reports that an OAuth/auth token was invalidated or revoked, retry the request once in case the rejection is transient. If it persists, run `/logout` and select **OpenAI ChatGPT Plus/Pro**, then run `/login`, authenticate that subscription again, and retry the request. Atomic displays these recovery steps with the provider error; it does not automatically delete the stored credential or repeatedly retry a definitive authentication rejection.
 
-### Fast mode
+GPT-6-Astra is selectable as `openai-codex/gpt-6-astra`. Atomic also derives the canonical `openai-codex/gpt-6-astra-fast` choice. The fast choice sends upstream model `gpt-6-astra` with `service_tier: priority` and keeps the first-party Codex transport identity described below. Codex currently marks Astra as hidden in its bundled catalog, so access can depend on the account, rollout, and minimum client policy even though Atomic lists the model.
 
-Run `/fast` in interactive mode to configure fast mode separately for normal chat and workflow-stage sessions. Atomic supports two provider paths:
+Codex describes Astra Fast as "2x speed, increased usage." OpenAI prices Fast at twice the applicable API token rates. Pick the fast identity only when the latency reduction is worth the higher usage and price.
 
-- OpenAI `openai/*` and `openai-codex/*` models use the priority service tier. A resolved provider alias also qualifies when it uses the shared `openai-codex-responses` transport.
-- GitHub Copilot models qualify when the OAuth model catalog for the signed-in account advertises a fast variant. Atomic uses that variant only for the outgoing request, so it does not appear as a separate choice in `/model`. Copilot fast mode requires the account catalog metadata obtained through `/login`; a raw `COPILOT_GITHUB_TOKEN` does not provide that metadata.
+### Fast models
 
-Main-chat subagents use the chat setting; workflow stages, nested `ctx.workflow(...)` stages, and subagents launched by those stages use the workflow setting. Atomic checks each fallback, retry, compaction-planner, and branch-summary request against its effective model. An eligible fallback uses fast mode, while an unsupported model keeps its normal request behavior. The UI appends `fast` after the base model name in the chat footer, workflow stage model labels, and both main-chat and stage-launched subagent results. For an entitled Copilot child, that marker appears exactly when the outgoing request uses the account-advertised `<model-id>-fast` variant; OpenAI children instead use `service_tier: priority`. Fast mode does not apply to Azure OpenAI, OpenRouter, or generic OpenAI-compatible providers. Enable it deliberately for workflows because parallel fan-out can multiply provider usage.
+Fast inference is a model choice, not a mode. Where a provider supports it, Atomic adds a second selectable model whose canonical ID is the base model ID plus `-fast` — for example `openai-codex/gpt-5.6-sol-fast`. It appears in `/model`, in `atomic --list-models`, and in workflow model catalogs alongside its normal sibling, and it is persisted and restored by that exact ID. Select it anywhere you name a model, including with a thinking suffix: `openai-codex/gpt-5.6-sol-fast:medium`.
 
-For the shared ChatGPT Codex transport, Atomic sends the fast routing contract only after the final request payload contains `service_tier: priority`: `originator: codex_cli_rs` plus `x-codex-routing-hint: model=<effective-model>;tier=priority` on both HTTP/SSE and WebSocket transports. The same rule covers the stock provider, renamed providers, credential-resolved endpoints, and monitoring proxies that retain `api: "openai-codex-responses"`. WebSocket fallback, reconnect, and HTTP retry attempts reuse that identity; a final model or tier change drops a cached socket before reuse. Requests to the standard OpenAI API send only the tier. When fast mode is off, or a request hook changes the final tier away from `priority`, Atomic keeps the normal `originator: pi` identity and sends no routing hint.
+Two provider paths produce these variants:
+
+- Only first-party OpenAI `openai/*` and OpenAI Codex `openai-codex/*` models send the **base** upstream model ID plus the fixed `service_tier: priority`. A renamed provider, proxy, Azure OpenAI, OpenRouter, or generic OpenAI-compatible provider does not receive a synthetic fast variant.
+- GitHub Copilot exposes only the real fast sibling IDs the OAuth model catalog advertises for the signed-in account, and only when the corresponding base model exists in Atomic's Copilot catalog. It sends those suffixed IDs verbatim with no OpenAI service-tier field. Copilot fast models require the account catalog metadata obtained through `/login`; a raw `COPILOT_GITHUB_TOKEN` does not provide that metadata.
+
+The selection Atomic records stays the canonical `-fast` identity even when the outbound request carries the base upstream model ID, so sessions, usage rows, fallback attempts, workflow metadata, and subagent labels all keep normal and fast apart. There is no separate `fast` badge anywhere in the UI: the model ID already says it.
+
+A fast variant's route owns two request fields: the upstream model ID and the service tier. A `before_provider_request` hook may rewrite anything else, but replacing the payload with a non-object or changing either route-owned field is refused with an error naming the model and the remedy, because a model recorded, persisted, and billed as `-fast` must not go out as a different model or at an ordinary tier. Select the normal sibling instead when a request needs different routing. A model without a fast variant keeps unrestricted hook freedom, and an explicit per-request service tier still applies to it without granting fast-model identity.
+
+Atomic does not publish a fast variant for a model whose API is served by an extension's own stream function, including a natively registered provider: it cannot enforce the route through a transport it does not serialize. Such a provider keeps its normal models and its own transport untouched.
+
+Fast behavior comes from explicit route metadata attached when the variant is derived — never from the `-fast` suffix. If a provider, a `models.json` custom model, or an extension already defines that exact `-fast` ID, that model wins: it routes exactly as it is declared, Atomic suppresses the derived duplicate, and interactive startup and `--list-models` print a warning naming the model to rename or remove. Fast variants are not derived for Azure OpenAI, OpenRouter, or generic OpenAI-compatible providers.
+
+Provider-owned names that end in `-fast` remain ordinary exact IDs. The Vercel AI Gateway currently advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-fast`; Atomic preserves both live-catalog records and their long-context prices without attaching `fastRoute` to the suffixed ID. OpenRouter independently advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-pro`, also with request-wide long-context prices. If either live provider withdraws a record, the next generated catalog omits it rather than keeping a handwritten mirror.
+
+For first-party OpenAI Codex models on the shared ChatGPT Codex transport, explicit fast-route metadata — not the final payload tier, a caller flag, or the `-fast` suffix — selects the routing contract: `originator: codex_cli_rs` plus `x-codex-routing-hint: model=<base-upstream-model>;tier=priority` on both HTTP/SSE and WebSocket transports. Credential resolution preserves that identity when it resolves to the first-party ChatGPT endpoint; merely using `api: "openai-codex-responses"` under a renamed provider or proxy does not grant it. WebSocket fallback, reconnect, and HTTP retry attempts reuse the model route's identity, and switching between normal and fast model routes drops a cached socket before reuse. Requests to the standard OpenAI API send only the tier. On a normal model Atomic keeps the normal `originator: pi` identity and sends no routing hint, even if a standalone caller explicitly requests `serviceTier: priority`. The same contract covers standalone `modelRuntime.stream()`/`complete()`/`streamSimple()`/`completeSimple()` requests.
+
+Pick fast variants deliberately in workflows: parallel fan-out multiplies provider usage, and priority-tier requests are billed at a higher rate.
 
 ### Claude Pro/Max
 
@@ -76,6 +96,10 @@ Claude Opus 5 is available from the bundled/dynamic Anthropic and Amazon Bedrock
 - `COPILOT_GITHUB_TOKEN` is read as an API key when you prefer an environment variable over `/login`
 - Models come from the bundled `pi-ai` GitHub Copilot catalog; an OAuth credential narrows the list to the ids your account can actually use
 - If you get "model not supported", enable it in VS Code: Copilot Chat → model selector → select model → "Enable"
+
+Atomic includes a provisional `github-copilot/gpt-6-astra` entry routed through Copilot's Responses endpoint. Until Copilot publishes metadata, it uses Astra's known text/image capabilities, 272,000 default context, 128,000 output limit, and `low` through `max` reasoning. Zero catalog costs mean Copilot pricing is unknown, not free. Copilot metadata takes precedence when present, and the OAuth account catalog still controls availability. This entry does not guarantee that Copilot has enabled Astra for your account.
+
+`github-copilot/gpt-6-astra-fast` appears only when the OAuth account catalog advertises that exact fast ID. It sends `gpt-6-astra-fast` unchanged with no `service_tier`, unlike first-party OpenAI's priority route. A raw `COPILOT_GITHUB_TOKEN` cannot supply that fast entitlement.
 
 #### Endpoint routing for `COPILOT_GITHUB_TOKEN`
 
@@ -96,7 +120,9 @@ Business and enterprise tokens sent to the individual host return `421 Misdirect
 
 Run `/login xai`, then select **Use a subscription**. `XAI_API_KEY` remains available through **Use an API key**.
 
-Atomic defaults xAI sessions to `grok-4.6`. Built-in workflow and subagent fallback chains use `xai/grok-4.6:xhigh`, `github-copilot/grok-4.6:xhigh`, and `openrouter/x-ai/grok-4.6`; GitHub Copilot also exposes Grok 4.6 when the account's model policy enables it. Network-backed catalogs refresh and cache these newer entries independently of the bundled catalog snapshot.
+Atomic defaults xAI sessions to `grok-4.6`. Built-in workflow and subagent fallback chains use `xai/grok-4.6:xhigh`, `github-copilot/grok-4.6:xhigh`, and `openrouter/x-ai/grok-4.6:xhigh`; GitHub Copilot also exposes Grok 4.6 when the account's model policy enables it. Network-backed catalogs refresh and cache these newer entries independently of the bundled catalog snapshot.
+
+The `codebase-locator`, `codebase-pattern-finder`, and `codebase-research-locator` agents use GPT-5.6 Luna at `xhigh` and Grok fallbacks at `medium` instead. Goal and Ralph orchestration, Ralph research, and the debugger use GPT-6 Astra at `medium`; Ralph prompt refinement remains at `high`. Open Claude Design starts with Anthropic Fable 5.1 at `medium`, then GitHub Copilot Fable 5.1 and Codex, Copilot, and OpenAI Astra at `medium`.
 
 ### Radius
 
@@ -120,49 +146,49 @@ After a successful API-key or OAuth login, Atomic persists the credential and im
 
 On a remote or headless machine, paste the authorization code or final redirect URL into the login prompt when the provider offers manual entry. A completed exchange must either return to the editor or show an error; it does not require deleting `~/.atomic`. Existing OAuth credentials use the same `auth.json` schema after the pi-ai model-runtime migration and are loaded in place.
 
-Remote pi.dev catalogs persist their ETag and are revalidated with `If-None-Match`; an empty `304` keeps the cached models and counts as a successful check. Atomic renders the cached snapshot immediately, preserves each provider's last usable catalog on refresh failure, and prefers newer bundled data over stale remote overlays. See [Custom Models](/models#catalog-freshness-and-precedence).
+Remote pi.dev catalogs persist their ETag and are revalidated with `If-None-Match`; an empty `304` keeps the cached models and counts as a successful check. Atomic renders the cached snapshot immediately, preserves each provider's last usable catalog on refresh failure, and prefers newer bundled data over stale remote overlays. See [Custom Models](/models/reference#catalog-freshness-and-precedence).
 
-| Provider | Environment Variable | `auth.json` key |
-|----------|----------------------|------------------|
-| Anthropic | `ANTHROPIC_API_KEY` or bearer-only `ANTHROPIC_AUTH_TOKEN` | `anthropic` |
-| Ant Ling | `ANT_LING_API_KEY` | `ant-ling` |
-| Azure OpenAI Responses | `AZURE_OPENAI_API_KEY` | `azure-openai-responses` |
-| OpenAI | `OPENAI_API_KEY` | `openai` |
-| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek` |
-| NVIDIA NIM | `NVIDIA_API_KEY` | `nvidia` |
-| Google Gemini | `GEMINI_API_KEY` | `google` |
-| Google Vertex AI | `GOOGLE_CLOUD_API_KEY` | `google-vertex` |
-| Mistral | `MISTRAL_API_KEY` | `mistral` |
-| Groq | `GROQ_API_KEY` | `groq` |
-| Cerebras | `CEREBRAS_API_KEY` | `cerebras` |
-| Cloudflare AI Gateway | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`) | `cloudflare-ai-gateway` |
-| Cloudflare Workers AI | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`) | `cloudflare-workers-ai` |
-| xAI | `XAI_API_KEY` | `xai` |
-| OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
-| Vercel AI Gateway | `AI_GATEWAY_API_KEY` | `vercel-ai-gateway` |
-| ZAI | `ZAI_API_KEY` | `zai` |
-| ZAI Coding Plan (China) | `ZAI_CODING_CN_API_KEY` | `zai-coding-cn` |
-| OpenCode Zen | `OPENCODE_API_KEY` | `opencode` |
-| OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
-| Radius | `RADIUS_API_KEY` | `radius` |
-| Hugging Face | `HF_TOKEN` | `huggingface` |
-| Fireworks | `FIREWORKS_API_KEY` | `fireworks` |
-| Together AI | `TOGETHER_API_KEY` | `together` |
-| Baseten | `BASETEN_API_KEY` | `baseten` |
-| Kimi For Coding | `KIMI_API_KEY` | `kimi-coding` |
-| MiniMax | `MINIMAX_API_KEY` | `minimax` |
-| MiniMax (China) | `MINIMAX_CN_API_KEY` | `minimax-cn` |
-| Moonshot AI | `MOONSHOT_API_KEY` | `moonshotai` |
-| Moonshot AI (China) | `MOONSHOT_API_KEY` | `moonshotai-cn` |
-| Qwen Token Plan (existing catalog) | `QWEN_TOKEN_PLAN_API_KEY` | `qwen-token-plan` |
-| Qwen Token Plan (Individual) | `QWEN_TOKEN_PLAN_API_KEY` | `qwen-token-plan-individual` |
-| Qwen Token Plan (China) | `QWEN_TOKEN_PLAN_CN_API_KEY` | `qwen-token-plan-cn` |
-| Xiaomi MiMo | `XIAOMI_API_KEY` | `xiaomi` |
-| Xiaomi MiMo Token Plan (China) | `XIAOMI_TOKEN_PLAN_CN_API_KEY` | `xiaomi-token-plan-cn` |
-| Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` | `xiaomi-token-plan-ams` |
-| Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` | `xiaomi-token-plan-sgp` |
+| Provider                           | Environment Variable                                                      | `auth.json` key              |
+| ---------------------------------- | ------------------------------------------------------------------------- | ---------------------------- |
+| Anthropic                          | `ANTHROPIC_API_KEY` or bearer-only `ANTHROPIC_AUTH_TOKEN`                 | `anthropic`                  |
+| Ant Ling                           | `ANT_LING_API_KEY`                                                        | `ant-ling`                   |
+| Azure OpenAI Responses             | `AZURE_OPENAI_API_KEY`                                                    | `azure-openai-responses`     |
+| OpenAI                             | `OPENAI_API_KEY`                                                          | `openai`                     |
+| DeepSeek                           | `DEEPSEEK_API_KEY`                                                        | `deepseek`                   |
+| NVIDIA NIM                         | `NVIDIA_API_KEY`                                                          | `nvidia`                     |
+| Google Gemini                      | `GEMINI_API_KEY`                                                          | `google`                     |
+| Google Vertex AI                   | `GOOGLE_CLOUD_API_KEY`                                                    | `google-vertex`              |
+| Mistral                            | `MISTRAL_API_KEY`                                                         | `mistral`                    |
+| Groq                               | `GROQ_API_KEY`                                                            | `groq`                       |
+| Cerebras                           | `CEREBRAS_API_KEY`                                                        | `cerebras`                   |
+| Cloudflare AI Gateway              | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`) | `cloudflare-ai-gateway`      |
+| Cloudflare Workers AI              | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`)                          | `cloudflare-workers-ai`      |
+| xAI                                | `XAI_API_KEY`                                                             | `xai`                        |
+| OpenRouter                         | `OPENROUTER_API_KEY`                                                      | `openrouter`                 |
+| Vercel AI Gateway                  | `AI_GATEWAY_API_KEY`                                                      | `vercel-ai-gateway`          |
+| ZAI                                | `ZAI_API_KEY`                                                             | `zai`                        |
+| ZAI Coding Plan (China)            | `ZAI_CODING_CN_API_KEY`                                                   | `zai-coding-cn`              |
+| OpenCode Zen                       | `OPENCODE_API_KEY`                                                        | `opencode`                   |
+| OpenCode Go                        | `OPENCODE_API_KEY`                                                        | `opencode-go`                |
+| Radius                             | `RADIUS_API_KEY`                                                          | `radius`                     |
+| Hugging Face                       | `HF_TOKEN`                                                                | `huggingface`                |
+| Fireworks                          | `FIREWORKS_API_KEY`                                                       | `fireworks`                  |
+| Together AI                        | `TOGETHER_API_KEY`                                                        | `together`                   |
+| Baseten                            | `BASETEN_API_KEY`                                                         | `baseten`                    |
+| Kimi For Coding                    | `KIMI_API_KEY`                                                            | `kimi-coding`                |
+| MiniMax                            | `MINIMAX_API_KEY`                                                         | `minimax`                    |
+| MiniMax (China)                    | `MINIMAX_CN_API_KEY`                                                      | `minimax-cn`                 |
+| Moonshot AI                        | `MOONSHOT_API_KEY`                                                        | `moonshotai`                 |
+| Moonshot AI (China)                | `MOONSHOT_API_KEY`                                                        | `moonshotai-cn`              |
+| Qwen Token Plan (existing catalog) | `QWEN_TOKEN_PLAN_API_KEY`                                                 | `qwen-token-plan`            |
+| Qwen Token Plan (Individual)       | `QWEN_TOKEN_PLAN_API_KEY`                                                 | `qwen-token-plan-individual` |
+| Qwen Token Plan (China)            | `QWEN_TOKEN_PLAN_CN_API_KEY`                                              | `qwen-token-plan-cn`         |
+| Xiaomi MiMo                        | `XIAOMI_API_KEY`                                                          | `xiaomi`                     |
+| Xiaomi MiMo Token Plan (China)     | `XIAOMI_TOKEN_PLAN_CN_API_KEY`                                            | `xiaomi-token-plan-cn`       |
+| Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY`                                           | `xiaomi-token-plan-ams`      |
+| Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY`                                           | `xiaomi-token-plan-sgp`      |
 
-Z.AI and Z.AI Coding Plan (China) default to `glm-5.3` (`zai/glm-5.3` and `zai-coding-cn/glm-5.3`), and both direct providers also expose the multimodal `glm-5.3-flash`. Baseten defaults to its directly selectable `zai-org/GLM-5.3`; OpenRouter exposes `z-ai/glm-5.3`, and both mirrors expose the multimodal Flash variant (`zai-org/GLM-5.3-Flash` on Baseten and `z-ai/glm-5.3-flash` on OpenRouter). Every full and Flash entry supports `low`, `high`, and `max` reasoning, and built-in workflow and subagent chains include all four provider routes at `:high`. Use Baseten's `zai-org/GLM-5.2` when fully disabled reasoning is required. Qwen Token Plan Individual defaults to `qwen3.8-max` and uses the international `QWEN_TOKEN_PLAN_API_KEY` shared with the existing Qwen Token Plan provider.
+Z.AI and Z.AI Coding Plan (China) default to `glm-5.3` (`zai/glm-5.3` and `zai-coding-cn/glm-5.3`), and both direct providers also expose the multimodal `glm-5.3-flash`. Baseten defaults to its directly selectable `zai-org/GLM-5.3` and also exposes `zai-org/GLM-5.3-Fast` and the multimodal `zai-org/GLM-5.3-Flash`; OpenRouter exposes `z-ai/glm-5.3` and `z-ai/glm-5.3-flash`. The full and Flash entries support `low`, `high`, and `max` reasoning; Baseten's Fast entry also supports `off`. Built-in workflow and subagent chains include the Z.AI, Z.AI Coding Plan, Baseten, and OpenRouter routes at `:high`. Use Baseten's `zai-org/GLM-5.2` or `zai-org/GLM-5.3-Fast` when fully disabled reasoning is required. Qwen Token Plan Individual defaults to `qwen3.8-max` and uses the international `QWEN_TOKEN_PLAN_API_KEY` shared with the existing Qwen Token Plan provider. These catalogs follow their upstream providers, so use `--list-models` for the current entries.
 
 Reference for environment variables and `auth.json` keys: `findEnvKeys()` / `getEnvApiKey()` in the installed `@bastani/pi-ai` dependency (`node_modules/@bastani/pi-ai/dist/env-api-keys.d.ts`). The private provider map those functions use is in `node_modules/@bastani/pi-ai/dist/env-api-keys.js`; Atomic does not include a separate `packages/ai` source directory in this monorepo.
 
@@ -286,6 +312,16 @@ Also supports ECS task roles (`AWS_CONTAINER_CREDENTIALS_*`) and IRSA (`AWS_WEB_
 atomic --provider amazon-bedrock --model us.anthropic.claude-sonnet-4-20250514-v1:0
 ```
 
+GPT-6-Astra uses three exact Bedrock IDs:
+
+```text
+openai.gpt-6-astra
+global.openai.gpt-6-astra
+us.openai.gpt-6-astra
+```
+
+Select them under the single `amazon-bedrock` provider. Atomic passes the chosen ID unchanged to Bedrock Converse and sends the selected `low`, `medium`, `high`, `xhigh`, or `max` setting as the OpenAI `reasoning_effort` field. The unprefixed ID is Codex's direct/Mantle entry; `global.` and `us.` are Bedrock Runtime inference profiles. Bedrock does not advertise Astra Fast, so Atomic derives no fast sibling for these models. AWS's public region and pricing pages did not list Astra when this catalog entry was added. Availability can vary by account and region, and Atomic records zero catalog cost until AWS publishes an authoritative rate.
+
 Prompt caching is enabled automatically for Claude models whose ID contains a recognizable model name (base models and system-defined inference profiles). For application inference profiles (whose ARNs don't contain the model name), set `AWS_BEDROCK_FORCE_CACHE=1` to enable cache points:
 
 ```bash
@@ -321,12 +357,12 @@ Routes to OpenAI, Anthropic, and Workers AI through Cloudflare AI Gateway. Worke
 
 AI Gateway authentication uses `CLOUDFLARE_API_KEY` as `cf-aig-authorization`. Upstream authentication can be one of:
 
-| Mode | Request auth | Upstream auth |
-|------|--------------|---------------|
-| Workers AI | Cloudflare token only | Cloudflare-native |
-| Unified billing | Cloudflare token only | Cloudflare handles upstream auth and deducts credits |
-| Stored BYOK | Cloudflare token only | Cloudflare injects provider keys stored in the AI Gateway dashboard |
-| Inline BYOK | Cloudflare token plus upstream `Authorization` header | The request supplies the upstream provider key |
+| Mode            | Request auth                                          | Upstream auth                                                       |
+| --------------- | ----------------------------------------------------- | ------------------------------------------------------------------- |
+| Workers AI      | Cloudflare token only                                 | Cloudflare-native                                                   |
+| Unified billing | Cloudflare token only                                 | Cloudflare handles upstream auth and deducts credits                |
+| Stored BYOK     | Cloudflare token only                                 | Cloudflare injects provider keys stored in the AI Gateway dashboard |
+| Inline BYOK     | Cloudflare token plus upstream `Authorization` header | The request supplies the upstream provider key                      |
 
 For normal Atomic usage, prefer unified billing or stored BYOK. Inline BYOK requires configuring an additional upstream `Authorization` header for the Cloudflare AI Gateway provider, for example via a `models.json` provider/model override.
 
@@ -334,7 +370,7 @@ For normal Atomic usage, prefer unified billing or stored BYOK. Inline BYOK requ
 
 When Atomic's engine runs inside a Cloudflare Worker in the gateway's own account, requests can route through the [Workers AI binding](https://developers.cloudflare.com/ai-gateway/usage/workers-ai-binding/) (`env.AI`) instead of HTTPS. Binding calls are pre-authenticated in-account, so this path needs **no `CLOUDFLARE_API_KEY` at all**. Atomic re-exports the transport as `createGatewayBindingFetch` from `@bastani/atomic`.
 
-Declare the binding and the endpoint vars (the vars also satisfy the account/gateway resolution the gateway prefix needs):
+Declare the binding and gateway slug. The binding channel carries the account identity, so this route does not need an account ID:
 
 ```toml
 # wrangler.toml
@@ -342,7 +378,6 @@ Declare the binding and the endpoint vars (the vars also satisfy the account/gat
 binding = "AI"
 
 [vars]
-CLOUDFLARE_ACCOUNT_ID = "your-account-id"
 CLOUDFLARE_GATEWAY_ID = "your-gateway-slug"   # dash.cloudflare.com → AI → AI Gateway
 ```
 
@@ -362,13 +397,12 @@ import { streamSimple as anthropicStreamSimple } from "@bastani/pi-ai/api/anthro
 // so the snippet needs no `@cloudflare/workers-types` dependency.
 interface Env {
   AI: AiGatewayBinding;
-  CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_GATEWAY_ID: string;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const gatewayPrefix = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.CLOUDFLARE_GATEWAY_ID}`;
+    const bindingPrefix = `https://workers-binding.ai/ai-gateway/gateways/${env.CLOUDFLARE_GATEWAY_ID}`;
     const loader = new DefaultResourceLoader({
       cwd: "/workspace",
       agentDir: "/workspace/.atomic/agent",
@@ -378,25 +412,21 @@ export default {
           factory: (pi) => {
             pi.registerProvider("cloudflare-ai-gateway", {
               // Placeholder credential: it marks the provider configured and becomes
-              // `cf-aig-authorization: Bearer cloudflare-gateway-binding`, which the
-              // transport strips before the binding call. Never sent to the gateway.
+              // `cf-aig-authorization: Bearer cloudflare-gateway-binding`. On the plain
+              // binding fetch path, Cloudflare's gateway recognizes and strips it.
               apiKey: CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
               api: "anthropic-messages",
               streamSimple: (model, context, options) =>
                 anthropicStreamSimple(
                   {
                     ...model,
-                    baseUrl: (model.baseUrl ?? gatewayPrefix)
-                      .replaceAll("{CLOUDFLARE_ACCOUNT_ID}", env.CLOUDFLARE_ACCOUNT_ID)
-                      .replaceAll("{CLOUDFLARE_GATEWAY_ID}", env.CLOUDFLARE_GATEWAY_ID)
+                    baseUrl: `${bindingPrefix}/anthropic`
                   },
                   context,
                   {
                     ...options,
                     fetch: createGatewayBindingFetch({
-                      binding: env.AI,
-                      gateway: env.CLOUDFLARE_GATEWAY_ID,
-                      baseUrl: gatewayPrefix
+                      binding: env.AI
                     })
                   }
                 )
@@ -417,7 +447,7 @@ export default {
 };
 ```
 
-Every request under the gateway prefix becomes one `env.AI.gateway(id).run({ provider, endpoint, headers, query })` call in the provider's native wire format, so streaming behaves identically to the HTTPS route. The transport serves only its gateway-bound client: URLs outside the prefix, and in-prefix requests the universal endpoint cannot express (non-POST, non-JSON body), reject with a descriptive error rather than being forwarded. Repeat the same pattern with `@bastani/pi-ai/api/openai-completions` (or `openai-responses`) to cover the `/openai` and `/compat` passthrough models of the same provider.
+Current Workers AI bindings expose `fetch()`. `createGatewayBindingFetch` forwards each request untouched to `https://workers-binding.ai/ai-gateway/gateways/{gateway}/{provider}/...`. `baseUrl` and `gateway` options are ignored. Methods, headers (including the auth sentinel), query strings, non-JSON bodies, request streams, and response streams retain native fetch semantics; Cloudflare's gateway recognizes and strips the sentinel. Bindings that only expose `gateway(id).run(...)` are not supported. Repeat the same pattern with `@bastani/pi-ai/api/openai-completions` (or `openai-responses`), setting the model `baseUrl` to `${bindingPrefix}/openai` (or `${bindingPrefix}/compat`) for those provider routes.
 
 ### Cloudflare Workers AI
 
@@ -455,17 +485,8 @@ For router-mode discovery, load/unload management, and Hugging Face downloads wi
 
 ## Stop Reasons
 
-Every provider reports why it ended a turn. Atomic stores one of `stop`, `length`, `toolUse`, `error`, or `aborted`; the provider's own string (`end_turn`, `MAX_TOKENS`, `tool_calls`, and so on) is mapped onto it.
-
-A terminal reason the mapping does not recognise is now reported as a **provider error** naming the raw value, instead of being reported as an ordinary successful stop. The turn fails visibly rather than looking like a model that chose to stop early, which matters most for a truncation or safety stop a new provider version invents. Reasons that already mapped to a successful stop are unchanged, and a provider that stops on its own safety or refusal signal still surfaces the raw reason in the error text (for example `Provider stopped with: SAFETY`).
-
-While a response is still streaming the partial message carries the reason `pending`. It is replaced by the terminal reason before the message is finished, so `pending` is not a state a completed turn can be left in: a stream that ends while still `pending` is a provider error. See [Custom providers](/custom-provider) for what this requires of a provider you implement yourself.
+Moved to [Provider reference](/providers/reference#stop-reasons).
 
 ## Resolution Order
 
-When resolving credentials for a provider:
-
-1. CLI `--api-key` flag
-2. `auth.json` entry (API key or OAuth token)
-3. Environment variable
-4. Custom provider keys from `models.json`
+Moved to [Provider reference](/providers/reference#resolution-order).

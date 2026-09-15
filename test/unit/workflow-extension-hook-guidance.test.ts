@@ -5,7 +5,10 @@ import { moduleDir, readText } from "../helpers/runtime.js";
 
 const repositoryRoot = resolve(moduleDir(import.meta.url), "../..");
 const authoringGuidance = DEFAULT_PROMPT_GUIDANCE.join("\n");
-const workflowDocumentationPaths = ["packages/coding-agent/docs/workflows.md", "packages/workflows/README.md"];
+const workflowDocumentationPaths = [
+	"packages/coding-agent/docs/workflows/authoring.md",
+	"packages/workflows/README.md",
+];
 
 async function readRepositoryFile(path: string): Promise<string> {
 	return (await readText(resolve(repositoryRoot, path))).replaceAll("\r\n", "\n");
@@ -32,7 +35,7 @@ describe("workflow extension-hook authoring guidance", () => {
 			"package and document it with the workflow",
 			"extension-provided custom tools in stage `tools` allowlists",
 			"document hook-driven behavior so the workflow remains inspectable",
-			"packages/coding-agent/docs/extensions.md#events",
+			"packages/coding-agent/docs/extensions/events.md#events",
 		]) {
 			expect(authoringGuidance).toContain(phrase);
 		}

@@ -27,7 +27,7 @@ import type {
 	ToolExecutionUpdateEvent,
 	TurnEndEvent,
 	TurnStartEvent,
-} from "./extensions/index.ts";
+} from "./extensions/index.js";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./extensions/stale-context.ts";
 import type { StageAdmittedCustomMessage } from "./messages.ts";
 import { normalizeMessageContent } from "./messages.ts";
@@ -519,6 +519,13 @@ export function dispose(this: AgentSession): void {
 	// Summary work queued before its AbortController exists cannot be reached by
 	// abortSessionSummary(), so disposal is recorded as state that every checkpoint consults.
 	this._disposed = true;
+	void this.closeSessionTasks().catch((error) =>
+		this._extensionRunner.emitError({
+			extensionPath: "<runtime>",
+			event: "task_owner_close",
+			error: error instanceof Error ? error.message : String(error),
+		}),
+	);
 	// A background summary must never keep the process alive past shutdown.
 	this.abortSessionSummary();
 	// Fail closed while protected input remains queued, or flush a consumed

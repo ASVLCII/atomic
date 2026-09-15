@@ -37,6 +37,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		piAgentCore,
 		piTui,
 		piTuiLayout,
+		piTuiLayoutNode,
 		piAi,
 		piAiOauth,
 		piAiCloudflareGatewayBinding,
@@ -49,6 +50,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		import("@earendil-works/pi-agent-core"),
 		import("@earendil-works/pi-tui"),
 		import("@earendil-works/pi-tui/dist/layout.js"),
+		import("@earendil-works/pi-tui/dist/layout-node.js"),
 		// pi 0.80.2: the old global pi-ai API moved off the root entrypoint onto
 		// `/compat` (a strict superset). Extensions still use the root specifier.
 		import("@bastani/pi-ai/compat"),
@@ -71,6 +73,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		"@earendil-works/pi-agent-core": piAgentCore,
 		"@earendil-works/pi-tui": piTui,
 		"@earendil-works/pi-tui/dist/layout.js": piTuiLayout,
+		"@earendil-works/pi-tui/dist/layout-node.js": piTuiLayoutNode,
 		"@bastani/pi-ai": piAi,
 		"@bastani/pi-ai/compat": piAi,
 		"@bastani/pi-ai/oauth": piAiOauth,
@@ -82,6 +85,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		"proper-lockfile": properLockfile,
 		...(atomicNatives ? { "@bastani/atomic-natives": atomicNatives } : {}),
 		"@bastani/atomic": piCodingAgent,
+		"@earendil-works/pi-coding-agent": piCodingAgent,
 		"@mariozechner/pi-agent-core": piAgentCore,
 		"@mariozechner/pi-tui": piTui,
 		"@mariozechner/pi-tui/dist/layout.js": piTuiLayout,
@@ -94,7 +98,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 
 export const loaderHostModulesTestHooks = { loadOptionalAtomicNatives };
 
-/** Modules shared with extensions in Bun single-file builds. */
+/** Live host modules shared with single-file builds and transformed extension reloads. */
 export async function getVirtualModules(): Promise<Record<string, object>> {
 	if (virtualModules) return virtualModules;
 	virtualModulesPromise ??= loadVirtualModules().then(

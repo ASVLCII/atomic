@@ -107,6 +107,7 @@ export function _installAgentNextTurnRefresh(this: AgentSession): void {
 		const shouldStop = (await previousShouldStopAfterTurn?.(turn, signal)) ?? false;
 		this._stopAfterTurnBlockedContinuation = shouldStop;
 		await settleFallbackAfterTurn(this, turn, terminatingBatch);
+		if (this._subagentMessageAdmission) await this._subagentMessageAdmission.waitForPendingDeliveries();
 		return shouldStop;
 	};
 
@@ -144,7 +145,7 @@ export function _installAgentNextTurnRefresh(this: AgentSession): void {
 		};
 	};
 
-	// pi-agent-core 0.84.4 runs the stop hook before queue polling and invokes
+	// pi-agent-core 0.85.0 runs the stop hook before queue polling and invokes
 	// preparation only after that polling establishes that another turn will run.
 	this.agent.prepareNextTurnWithContext = prepareTurn;
 }

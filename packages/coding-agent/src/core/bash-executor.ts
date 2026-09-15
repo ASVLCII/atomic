@@ -9,9 +9,9 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { APP_NAME } from "../config.js";
-import { stripAnsi } from "../utils/ansi.ts";
+import { stripAnsi } from "../utils/ansi.js";
 import { sanitizeBinaryOutput } from "../utils/shell.ts";
-import type { BashOperations, BashOutputChannel } from "./tools/bash.ts";
+import type { BashOperations, BashOutputChannel } from "./tools/bash.js";
 import { PersistedOutputFile } from "./tools/persisted-output-file.ts";
 import { ensureSessionTempDir } from "./tools/session-temp-dir.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.ts";

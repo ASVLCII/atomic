@@ -1,20 +1,21 @@
 import { reviewDecisionSchema } from "./ralph-core.js";
 
-// Model chains are curated from Atomic's agentic-coding benchmark and the
-// July 2026 frontier refresh:
-// - Critical synthesis/review stages prefer fable-5:xhigh, then gpt-5.5 xhigh
-//   variants, openrouter fugu-ultra, long-context opus, and GLM fallbacks.
-// - Research remains on gpt-5.5:medium / fable-5:low for perf-per-dollar.
-// - Reviewer B keeps gpt-5.5:xhigh as an independent frontier family to
-//   decorrelate review errors from reviewer A.
+// September 2026 defaults: Astra high for prompt engineering, medium for research
+// and orchestration; Fable 5.1 high for reviewer A and Astra high for reviewer B.
+// Keep the role-specific fallback order, including Fable/Sol and Kimi/Sol.
 // - Dominated benchmark models stay out of the chains: claude-sonnet-5,
 //   claude-sonnet-4.6, gemini-3.1-pro, and gemini-3.5-flash.
 // - GLM-5.3 full and Flash entries expose low/high/max effort across the
 //   Baseten and OpenRouter mirrors, so every GLM fallback uses :high.
 
 export const promptEngineerModelConfig = {
-    model: "anthropic/claude-opus-5:high",
+    model: "openai-codex/gpt-6-astra:high",
     fallbackModels: [
+      "github-copilot/gpt-6-astra:high",
+      "openai/gpt-6-astra:high",
+      "anthropic/claude-fable-5-1:high",
+      "github-copilot/claude-fable-5-1:high",
+      "anthropic/claude-opus-5:high",
       "github-copilot/claude-opus-5:high",
       "anthropic/claude-fable-5:high",
       "github-copilot/claude-fable-5:high",
@@ -37,6 +38,8 @@ export const promptEngineerModelConfig = {
       "zai-coding-cn/glm-5.3-flash:high",
       "baseten/zai-org/GLM-5.3:high",
       "baseten/zai-org/GLM-5.3-Flash:high",
+      "openrouter/openai/gpt-6-astra:high",
+      "openrouter/anthropic/claude-fable-5-1:high",
       "openrouter/anthropic/claude-opus-5:high",
       "openrouter/anthropic/claude-fable-5:high",
       "openrouter/openai/gpt-5.6-sol:xhigh",
@@ -44,7 +47,7 @@ export const promptEngineerModelConfig = {
       "openrouter/sakana/fugu-ultra:high",
       "openrouter/openai/gpt-5.5:xhigh",
       "openrouter/anthropic/claude-opus-4-8:high",
-      "openrouter/x-ai/grok-4.6",
+      "openrouter/x-ai/grok-4.6:xhigh",
       "openrouter/z-ai/glm-5.3:high",
       "openrouter/z-ai/glm-5.3-flash:high",
     ],
@@ -52,14 +55,19 @@ export const promptEngineerModelConfig = {
 };
 
 export const researchModelConfig = {
-    model: "anthropic/claude-opus-5:high",
+    model: "openai-codex/gpt-6-astra:medium",
     fallbackModels: [
+      "github-copilot/gpt-6-astra:medium",
+      "openai/gpt-6-astra:medium",
+      "anthropic/claude-fable-5-1:medium",
+      "github-copilot/claude-fable-5-1:medium",
+      "anthropic/claude-opus-5:high",
       "github-copilot/claude-opus-5:high",
-      "openai-codex/gpt-5.6-sol:xhigh",
-      "github-copilot/gpt-5.6-sol:xhigh",
-      "openai/gpt-5.6-sol:xhigh",
-      "anthropic/claude-fable-5:high",
-      "github-copilot/claude-fable-5:high",
+      "anthropic/claude-fable-5:medium",
+      "github-copilot/claude-fable-5:medium",
+      "openai-codex/gpt-5.6-sol:high",
+      "github-copilot/gpt-5.6-sol:high",
+      "openai/gpt-5.6-sol:high",
       "kimi-coding/k3:max",
       "moonshotai/kimi-k3:max",
       "moonshotai-cn/kimi-k3:max",
@@ -76,14 +84,16 @@ export const researchModelConfig = {
       "zai-coding-cn/glm-5.3-flash:high",
       "baseten/zai-org/GLM-5.3:high",
       "baseten/zai-org/GLM-5.3-Flash:high",
+      "openrouter/openai/gpt-6-astra:medium",
+      "openrouter/anthropic/claude-fable-5-1:medium",
       "openrouter/anthropic/claude-opus-5:high",
-      "openrouter/openai/gpt-5.6-sol:xhigh",
-      "openrouter/anthropic/claude-fable-5:high",
+      "openrouter/anthropic/claude-fable-5:medium",
+      "openrouter/openai/gpt-5.6-sol:high",
       "openrouter/moonshotai/kimi-k3:max",
       "openrouter/sakana/fugu-ultra:high",
       "openrouter/openai/gpt-5.5:xhigh",
       "openrouter/anthropic/claude-opus-4-8:high",
-      "openrouter/x-ai/grok-4.6",
+      "openrouter/x-ai/grok-4.6:xhigh",
       "openrouter/z-ai/glm-5.3:high",
       "openrouter/z-ai/glm-5.3-flash:high",
     ],
@@ -91,14 +101,19 @@ export const researchModelConfig = {
 };
 
 export const orchestratorModelConfig = {
-    model: "anthropic/claude-opus-5:high",
+    model: "openai-codex/gpt-6-astra:medium",
     fallbackModels: [
+      "github-copilot/gpt-6-astra:medium",
+      "openai/gpt-6-astra:medium",
+      "anthropic/claude-fable-5-1:medium",
+      "github-copilot/claude-fable-5-1:medium",
+      "anthropic/claude-opus-5:high",
       "github-copilot/claude-opus-5:high",
-      "openai-codex/gpt-5.6-sol:xhigh",
-      "github-copilot/gpt-5.6-sol:xhigh",
-      "openai/gpt-5.6-sol:xhigh",
-      "anthropic/claude-fable-5:high",
-      "github-copilot/claude-fable-5:high",
+      "openai-codex/gpt-5.6-sol:high",
+      "github-copilot/gpt-5.6-sol:high",
+      "openai/gpt-5.6-sol:high",
+      "anthropic/claude-fable-5:medium",
+      "github-copilot/claude-fable-5:medium",
       "kimi-coding/k3:max",
       "moonshotai/kimi-k3:max",
       "moonshotai-cn/kimi-k3:max",
@@ -115,14 +130,16 @@ export const orchestratorModelConfig = {
       "zai-coding-cn/glm-5.3-flash:high",
       "baseten/zai-org/GLM-5.3:high",
       "baseten/zai-org/GLM-5.3-Flash:high",
+      "openrouter/openai/gpt-6-astra:medium",
+      "openrouter/anthropic/claude-fable-5-1:medium",
       "openrouter/anthropic/claude-opus-5:high",
-      "openrouter/openai/gpt-5.6-sol:xhigh",
-      "openrouter/anthropic/claude-fable-5:high",
+      "openrouter/openai/gpt-5.6-sol:high",
+      "openrouter/anthropic/claude-fable-5:medium",
       "openrouter/moonshotai/kimi-k3:max",
       "openrouter/sakana/fugu-ultra:high",
       "openrouter/openai/gpt-5.5:xhigh",
       "openrouter/anthropic/claude-opus-4-8:high",
-      "openrouter/x-ai/grok-4.6",
+      "openrouter/x-ai/grok-4.6:xhigh",
       "openrouter/z-ai/glm-5.3:high",
       "openrouter/z-ai/glm-5.3-flash:high",
     ],
@@ -130,17 +147,22 @@ export const orchestratorModelConfig = {
 };
 
 export const reviewerAModelConfig = {
-    model: "anthropic/claude-opus-5:high",
+    model: "anthropic/claude-fable-5-1:high",
     fallbackModels: [
+      "github-copilot/claude-fable-5-1:high",
+      "openai-codex/gpt-6-astra:high",
+      "github-copilot/gpt-6-astra:high",
+      "openai/gpt-6-astra:high",
+      "anthropic/claude-opus-5:high",
       "github-copilot/claude-opus-5:high",
       "anthropic/claude-fable-5:high",
       "github-copilot/claude-fable-5:high",
       "kimi-coding/k3:max",
       "moonshotai/kimi-k3:max",
       "moonshotai-cn/kimi-k3:max",
-      "openai-codex/gpt-5.6-sol:xhigh",
-      "github-copilot/gpt-5.6-sol:xhigh",
-      "openai/gpt-5.6-sol:xhigh",
+      "openai-codex/gpt-5.6-sol:high",
+      "github-copilot/gpt-5.6-sol:high",
+      "openai/gpt-5.6-sol:high",
       "openai-codex/gpt-5.5:xhigh",
       "github-copilot/gpt-5.5:xhigh",
       "openai/gpt-5.5:xhigh",
@@ -154,14 +176,16 @@ export const reviewerAModelConfig = {
       "zai-coding-cn/glm-5.3-flash:high",
       "baseten/zai-org/GLM-5.3:high",
       "baseten/zai-org/GLM-5.3-Flash:high",
+      "openrouter/anthropic/claude-fable-5-1:high",
+      "openrouter/openai/gpt-6-astra:high",
       "openrouter/anthropic/claude-opus-5:high",
       "openrouter/anthropic/claude-fable-5:high",
       "openrouter/moonshotai/kimi-k3:max",
-      "openrouter/openai/gpt-5.6-sol:xhigh",
+      "openrouter/openai/gpt-5.6-sol:high",
       "openrouter/sakana/fugu-ultra:high",
       "openrouter/openai/gpt-5.5:xhigh",
       "openrouter/anthropic/claude-opus-4-8:high",
-      "openrouter/x-ai/grok-4.6",
+      "openrouter/x-ai/grok-4.6:xhigh",
       "openrouter/z-ai/glm-5.3:high",
       "openrouter/z-ai/glm-5.3-flash:high",
     ],
@@ -170,14 +194,19 @@ export const reviewerAModelConfig = {
 };
 
 export const reviewerBModelConfig = {
-    model: "openai-codex/gpt-5.6-sol:xhigh",
+    model: "openai-codex/gpt-6-astra:high",
     fallbackModels: [
-      "github-copilot/gpt-5.6-sol:xhigh",
-      "openai/gpt-5.6-sol:xhigh",
+      "github-copilot/gpt-6-astra:high",
+      "openai/gpt-6-astra:high",
+      "anthropic/claude-fable-5-1:high",
+      "github-copilot/claude-fable-5-1:high",
       "anthropic/claude-opus-5:high",
       "github-copilot/claude-opus-5:high",
       "anthropic/claude-fable-5:high",
       "github-copilot/claude-fable-5:high",
+      "openai-codex/gpt-5.6-sol:high",
+      "github-copilot/gpt-5.6-sol:high",
+      "openai/gpt-5.6-sol:high",
       "kimi-coding/k3:max",
       "moonshotai/kimi-k3:max",
       "moonshotai-cn/kimi-k3:max",
@@ -194,14 +223,16 @@ export const reviewerBModelConfig = {
       "zai-coding-cn/glm-5.3-flash:high",
       "baseten/zai-org/GLM-5.3:high",
       "baseten/zai-org/GLM-5.3-Flash:high",
-      "openrouter/openai/gpt-5.6-sol:xhigh",
+      "openrouter/openai/gpt-6-astra:high",
+      "openrouter/anthropic/claude-fable-5-1:high",
       "openrouter/anthropic/claude-opus-5:high",
       "openrouter/anthropic/claude-fable-5:high",
+      "openrouter/openai/gpt-5.6-sol:high",
       "openrouter/moonshotai/kimi-k3:max",
-      "openrouter/openai/gpt-5.5:xhigh",
       "openrouter/sakana/fugu-ultra:high",
+      "openrouter/openai/gpt-5.5:xhigh",
       "openrouter/anthropic/claude-opus-4-8:high",
-      "openrouter/x-ai/grok-4.6",
+      "openrouter/x-ai/grok-4.6:xhigh",
       "openrouter/z-ai/glm-5.3:high",
       "openrouter/z-ai/glm-5.3-flash:high",
     ],

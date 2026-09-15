@@ -21,11 +21,16 @@
  *  - src/tui/chat-surface.ts renderRoundedBoxLines
  */
 
-import { pendingWorkflowStageStatuses } from "../shared/pending-stage-status.js";
+import { createWorkflowGraphExpander } from "../shared/expanded-workflow-graph.js";
+import {
+	pendingWorkflowStageStatuses,
+	type WorkflowBoundarySegmentsResolver,
+	workflowBoundarySegments,
+} from "../shared/pending-stage-status.js";
 import { effectiveRunStatus } from "../shared/returned-run-status.js";
 import { runIndicatorStatus } from "../shared/run-indicator-status.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
-import type { RunSnapshot, StoreSnapshot } from "../shared/store-types.js";
+import type { RunSnapshot, StageSnapshot, StoreSnapshot } from "../shared/store-types.js";
 import { elapsedRunMs } from "../shared/timing.js";
 import type { FlatBandBadge } from "./chat-surface.js";
 import { renderRoundedBoxLines } from "./chat-surface.js";
@@ -35,7 +40,8 @@ import { deriveGraphTheme } from "./graph-theme.js";
 import { renderRunIdentityRows } from "./run-identity-rows.js";
 import { statusColor, statusIcon } from "./status-helpers.js";
 import type { PiTheme } from "./store-widget-installer.js";
-import { visibleWidth } from "./text-helpers.js";
+import { truncateToWidth, visibleWidth } from "./text-helpers.js";
+import type { WorkflowWidgetRunRows } from "./widget-viewport.js";
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -191,14 +197,14 @@ function statusFg(run: RunSnapshot, theme: GraphTheme, allRuns: readonly RunSnap
 	}
 }
 
-function modeLabel(run: RunSnapshot): string {
-	return run.stages.length > 1 ? "chain" : "single";
+function modeLabel(stages: readonly StageSnapshot[]): string {
+	return stages.length > 1 ? "chain" : "single";
 }
 
-function progressLabel(run: RunSnapshot): string | undefined {
-	const total = run.stages.length;
+function progressLabel(stages: readonly StageSnapshot[]): string | undefined {
+	const total = stages.length;
 	if (total === 0) return undefined;
-	const done = run.stages.filter(
+	const done = stages.filter(
 		(s) => s.status === "completed" || s.status === "failed" || s.status === "skipped",
 	).length;
 	return `${done}/${total}`;
@@ -229,8 +235,12 @@ function activeToolLabel(run: RunSnapshot): string | undefined {
 }
 const MAX_PENDING_WIDGET_ITEMS = 2;
 
-function pendingStageLabel(run: RunSnapshot, width = Number.POSITIVE_INFINITY): string | undefined {
-	const stages = pendingWorkflowStageStatuses(run);
+function pendingStageLabel(
+	run: RunSnapshot,
+	width = Number.POSITIVE_INFINITY,
+	resolveBoundarySegments?: WorkflowBoundarySegmentsResolver,
+): string | undefined {
+	const stages = pendingWorkflowStageStatuses(run, undefined, resolveBoundarySegments);
 	if (stages.length === 0) return undefined;
 	const maxItems = Math.min(MAX_PENDING_WIDGET_ITEMS, stages.length);
 
@@ -256,14 +266,23 @@ function pendingStageLabel(run: RunSnapshot, width = Number.POSITIVE_INFINITY): 
 	return undefined;
 }
 
-function metaLine(run: RunSnapshot, now: number, width = Number.POSITIVE_INFINITY): string {
+function metaLine(
+	run: RunSnapshot,
+	expandGraph: ReturnType<typeof createWorkflowGraphExpander>,
+	now: number,
+	width = Number.POSITIVE_INFINITY,
+	resolveBoundarySegments?: WorkflowBoundarySegmentsResolver,
+): string {
 	if (run.endedAt !== undefined) {
 		return elapsedLabel(run, now);
 	}
-	if (isQuitRun(run)) return "quit · resumable via /workflow resume";
+	if (isQuitRun(run))
+		return run.resumable === false ? "quit · not resumable" : "quit · resumable via /workflow resume";
 	if (effectiveRunStatus(run) === "blocked") return "blocked · resumable via /workflow resume";
-	const prefix: string[] = [modeLabel(run)];
-	const prog = progressLabel(run);
+	// Match the graph's recursive stage projection, not the root's boundary placeholders.
+	const { stages } = expandGraph(run.id);
+	const prefix: string[] = [modeLabel(stages)];
+	const prog = progressLabel(stages);
 	if (prog) prefix.push(prog);
 	const suffix: string[] = [];
 	const tools = activeToolLabel(run);
@@ -275,7 +294,7 @@ function metaLine(run: RunSnapshot, now: number, width = Number.POSITIVE_INFINIT
 		0,
 		width - otherParts.reduce((total, part) => total + visibleWidth(part), 0) - otherParts.length * 3,
 	);
-	const pending = pendingStageLabel(run, pendingWidth);
+	const pending = pendingStageLabel(run, pendingWidth, resolveBoundarySegments);
 	return [...prefix, ...(pending === undefined ? [] : [pending]), ...suffix].join(" · ");
 }
 
@@ -338,8 +357,11 @@ function themedRunLines(
 	theme: GraphTheme,
 	allRuns: readonly RunSnapshot[],
 	width: number,
+	expandGraph: ReturnType<typeof createWorkflowGraphExpander>,
 ): string[] {
-	const meta = metaLine(run, now, runMetaWidth(run, width));
+	const resolveBoundarySegments: WorkflowBoundarySegmentsResolver = (runId) =>
+		workflowBoundarySegments(allRuns, runId);
+	const meta = metaLine(run, expandGraph, now, runMetaWidth(run, width), resolveBoundarySegments);
 	// Render the meta line in muted while running so the elapsed-time
 	// gradient stays readable; dim it once the run has terminated.
 	const metaColor = effectiveRunStatus(run) === "running" ? theme.textMuted : theme.dim;
@@ -354,11 +376,19 @@ function themedRunLines(
 	});
 }
 
-function plainRunLines(run: RunSnapshot, now: number, allRuns: readonly RunSnapshot[], width: number): string[] {
+function plainRunLines(
+	run: RunSnapshot,
+	now: number,
+	allRuns: readonly RunSnapshot[],
+	width: number,
+	expandGraph: ReturnType<typeof createWorkflowGraphExpander>,
+): string[] {
+	const resolveBoundarySegments: WorkflowBoundarySegmentsResolver = (runId) =>
+		workflowBoundarySegments(allRuns, runId);
 	return renderRunIdentityRows({
 		runId: run.id,
 		name: run.name,
-		meta: metaLine(run, now, runMetaWidth(run, width)),
+		meta: metaLine(run, expandGraph, now, runMetaWidth(run, width), resolveBoundarySegments),
 		glyph: statusGlyph(run, allRuns),
 	});
 }
@@ -395,6 +425,11 @@ function plainCollapsed(counts: RunCounts, activeTools: number): string {
 // Public entry points
 // ---------------------------------------------------------------------------
 
+/** Optional identity metadata, replaced on each render without altering its text. */
+export interface WorkflowWidgetRowLayout {
+	runs: WorkflowWidgetRunRows[];
+}
+
 /**
  * Build the widget lines for the current store snapshot.
  *
@@ -410,7 +445,9 @@ export function buildThemedWidgetLines(
 	piTheme: PiTheme | undefined,
 	width = 120,
 	now = Date.now(),
+	layout?: WorkflowWidgetRowLayout,
 ): string[] {
+	if (layout) layout.runs = [];
 	const display = selectDisplayRuns(snap, now);
 	if (display.length === 0) return [];
 
@@ -438,7 +475,13 @@ export function buildThemedWidgetLines(
 	// Collapsed single-line form for narrow terminals.
 	if (width < COLLAPSED_BREAKPOINT_COLS) {
 		return [
-			themed ? themedCollapsed(visibleCounts, activeTools, graphTheme) : plainCollapsed(visibleCounts, activeTools),
+			truncateToWidth(
+				themed
+					? themedCollapsed(visibleCounts, activeTools, graphTheme)
+					: plainCollapsed(visibleCounts, activeTools),
+				width,
+				"…",
+			),
 		];
 	}
 
@@ -449,13 +492,19 @@ export function buildThemedWidgetLines(
 	const badges = formatTitleBadges(badgeList, graphTheme, themed);
 	const title = `BACKGROUND  ${subtitle}${badges ? `  ${badges}` : ""}`;
 	const body: string[] = [];
+	const expandGraph = createWorkflowGraphExpander(snap);
 
 	for (let i = 0; i < display.length; i++) {
 		const run = display[i]!;
 		const runLines = themed
-			? themedRunLines(run, now, graphTheme, snap.runs, width)
-			: plainRunLines(run, now, snap.runs, width);
+			? themedRunLines(run, now, graphTheme, snap.runs, width, expandGraph)
+			: plainRunLines(run, now, snap.runs, width, expandGraph);
 		body.push(...runLines);
+		layout?.runs.push({
+			id: run.id,
+			start: body.length - runLines.length + 1,
+			end: body.length + (i === display.length - 1 ? 2 : 1),
+		});
 		if (i < display.length - 1) body.push("");
 	}
 

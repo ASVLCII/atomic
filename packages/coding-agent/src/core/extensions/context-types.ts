@@ -10,6 +10,7 @@ import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type { WorkflowStageAdmissionBoundary } from "../workflow-stage-admission.ts";
 import type { SendMessageOptions, SendMessagesOptions } from "./message-types.ts";
 import type { ExtensionUIContext } from "./ui-types.ts";
+import type { WorkflowActivityObserver, WorkflowActivitySubscription } from "./workflow-events.js";
 
 export interface ContextUsage {
 	/** Estimated context tokens, or null if unknown (e.g. right after compaction, before next LLM response). */
@@ -91,6 +92,18 @@ export interface WorkflowPendingStageDelivery {
 		deliver: (from: WorkflowPendingStageSender, message: WorkflowPendingStageMessage) => void | Promise<void>,
 	): Promise<void>;
 	ready(): Promise<void> | undefined;
+	/**
+	 * Terminal signal from a delivery owner that has run out of recovery: the
+	 * queued messages can no longer be drained, so the stage must fail at its own
+	 * lifecycle boundary rather than run without the instructions it was given.
+	 * Idempotent — the first reason wins, and `ready()` then settles with a
+	 * stage-scoped error instead of waiting for a delivery that will not come.
+	 *
+	 * Required, not optional: `ready()` has no timeout, so a delivery that cannot
+	 * be settled leaves its stage parked forever. Every implementer must be able
+	 * to answer that no delivery is coming.
+	 */
+	fail(reason: Error): void;
 }
 
 export interface WorkflowStageOrchestrationContext {
@@ -133,6 +146,14 @@ export interface SubagentChildPolicy {
 	readonly fanoutAuthorized: boolean;
 	readonly inheritProjectContext: boolean;
 	readonly inheritSkills: boolean;
+	/** Host-owned signal fired when this noninteractive execution ends, before disposal. */
+	readonly executionEnded?: AbortSignal;
+	/** SDK-owned inbound lifetime; closing drains admitted messages without reopening the task. */
+	readonly messageAdmission?: {
+		isOpen(): boolean;
+		/** Reserve the full producer operation, including retries, before child settlement. */
+		run(deliver: () => void | Promise<void>): Promise<void>;
+	};
 	/** Current admitted in-process nesting depth; absent for top-level sessions. */
 	readonly depth?: number;
 	/** Undefined preserves MCP configuration defaults; [] explicitly disables direct tools. */
@@ -151,6 +172,12 @@ export type OrchestrationContext = WorkflowStageOrchestrationContext;
 export type ExtensionMode = "tui" | "rpc" | "json" | "print";
 
 export interface ExtensionContext {
+	/** Observe the owning session's workflow activity, starting with an ordered snapshot. */
+	observeWorkflowActivity(observer: WorkflowActivityObserver): WorkflowActivitySubscription;
+	/** Paths of actually loaded extensions, when supplied by the host. */
+	getExtensionPaths?(): string[];
+	/** Internal actual-session binding; never populated from model arguments. */
+	getAgentTaskHost?(): import("../tasks/agent-adapter.js").AgentTaskHost;
 	/** Session-scoped orchestration policy for child runtimes such as workflow stages. */
 	readonly orchestrationContext?: OrchestrationContext;
 	/** Typed capability policy for an in-process subagent child, when this session is one. */

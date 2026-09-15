@@ -7,7 +7,13 @@ Atomic uses JSON settings files with project settings overriding global settings
 | `~/.atomic/agent/settings.json` | Global (all projects) |
 | `.atomic/settings.json` | Project (current directory) |
 
-Edit directly or use `/settings` for common options. To save startup model defaults interactively, use `/model` and press Ctrl+S on the desired model; to save the startup thinking level, use `/thinking` and press Ctrl+S. Atomic also reads legacy `~/.pi/agent/settings.json` and `.pi/settings.json` as compatibility fallbacks, with `.atomic` paths taking precedence.
+Edit directly or use `/settings` for common options. Choosing a model or thinking level with `/model`, `/thinking`, or their cycling shortcuts automatically saves it as the startup default. Thinking choices also update the active model's saved thinking level. `/scoped-models` saves cycle-list changes automatically. SDK calls, session restoration, and automatic fallbacks do not overwrite these defaults unless persistence is explicitly requested. Atomic also reads legacy `~/.pi/agent/settings.json` and `.pi/settings.json` as compatibility fallbacks, with `.atomic` paths taking precedence.
+
+Saving an Atomic setting applies only the changed fields to the corresponding `.atomic` file; it does not copy untouched fallback fields out of `.pi`. To intentionally override an inherited array such as `packages`, set it in `.atomic`, including an explicit empty array (`"packages": []`) when the inherited list should be disabled.
+
+## On this page and its guide
+
+This page is the exhaustive settings reference: every field, its default, and its constraints. If you are writing your first settings file or setting up a project-scoped override, start with the [Configure Atomic](/guides/configuration) guide.
 
 ## Keybindings
 
@@ -17,6 +23,8 @@ Edit directly or use `/settings` for common options. To save startup model defau
 
 On interactive startup, Atomic asks before trusting a project folder that contains trust-gated project inputs and has no saved decision for the folder or a parent folder in `~/.atomic/agent/trust.json`. Trusting a project allows Atomic to load project-local `.atomic/settings.json` and `.atomic` resources, legacy `.pi/settings.json` and `.pi` resources, project-local context files, install missing project packages, and execute project extensions.
 
+Before a startup trust dialog opens, Atomic binds permitted user/global and explicitly authorized CLI extensions to a trust-safe session. Their existing `ui_prompt_start` / `ui_prompt_end` handlers can observe the wait with a live session context. Project resources and borrowed project-local code remain blocked until authorized. Approval finishes startup in the same session without reloading those reporters; isolated interactive sessions ask through the engine's RPC-backed host UI. This requires no model request.
+
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore trust-gated project inputs, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.atomic/agent/settings.json`, or change it with `/settings`.
@@ -25,23 +33,31 @@ If no extension or saved decision applies, `defaultProjectTrust` controls the fa
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.atomic/agent/trust.json` only; the current session is not reloaded, so restart Atomic for changes to take effect.
 
-If a bare directory starts without trust-gated inputs, Atomic may run the interactive session as implicitly trusted. Inert state directories such as `.atomic/todos/` and `.atomic/sessions/` do not require trust and do not disable deferred resource startup. On the normal interactive TTY fast path, Atomic paints the shell and makes the input editor responsive before scanning bundled extension packages, skills, prompts, themes, context files, and system-prompt files. After the input handler is ready, Atomic starts extension/resource loading in the background. If the first submitted prompt arrives before that loading settles, Atomic keeps the prompt spinner visible and waits at the readiness gate before calling the model so extension tools, prompt templates, skills, resources, and extension-registered provider updates are available on that first turn. Deferred loading uses async discovery and cooperative yields around resource-loading work, so visible typing, Enter, Ctrl+C, rendering, and the normal prompt spinner remain responsive while the background work finishes. Startup does not show a resource-loading spinner before the user submits a prompt. Explicit provider/model selection, explicit resource flags, system-prompt inputs, metadata commands, non-TTY modes, and unresolved project-trust prompts stay on the synchronous path because those operations need complete resources before the session is created. When resources finish loading, Atomic shows the normal resources disclosure so newly added skills, prompts, themes, and extensions are visible. If trust-requiring config appears later, Atomic prompts again on the next launch until you explicitly save a persistent trust decision; the only automatic persistence of implicit startup trust is the existing `/reload` flow after reload discovers trust-requiring resources in an already-trusted session.
+If a bare directory starts without trust-gated inputs, Atomic may run the interactive session as implicitly trusted. Inert state directories such as `.atomic/todos/` and `.atomic/sessions/` do not require trust and do not disable deferred resource startup. On the normal interactive TTY fast path, Atomic paints the shell and makes the input editor responsive before scanning bundled extension packages, skills, prompts, themes, context files, and system-prompt files. After the input handler is ready, Atomic starts extension/resource loading in the background. If the first submitted prompt arrives before that loading settles, Atomic keeps the prompt spinner visible and waits at the readiness gate before calling the model so extension tools, prompt templates, skills, resources, and extension-registered provider updates are available on that first turn. Deferred loading uses async discovery and cooperative yields around resource-loading work, so visible typing, Enter, Ctrl+C, rendering, and the normal prompt spinner remain responsive while the background work finishes. Startup does not show a resource-loading spinner before the user submits a prompt. Explicit provider/model selection, explicit resource flags, system-prompt inputs, metadata commands, and non-TTY modes normally use eager resource loading; interactive trust authorization instead uses the trust-safe session described above before completing approved resources and model selection. When resources finish loading, Atomic shows the normal resources disclosure so newly added skills, prompts, themes, and extensions are visible. If trust-requiring config appears later, Atomic prompts again on the next launch until you explicitly save a persistent trust decision; the only automatic persistence of implicit startup trust is the existing `/reload` flow after reload discovers trust-requiring resources in an already-trusted session.
 
 Settings and trust JSON files may start with a UTF-8 BOM, as commonly written by older Windows tools; Atomic strips that leading marker before parsing.
 
 ## All Settings
 
+### Herdr
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `herdr.enabled` | boolean | `true` | Enable the built-in reporter in an eligible Herdr pane. Set to `false`, then reload or restart to opt out. Requires `mode: "tui"`, a UI, and the Herdr environment variables. Child sessions and other modes never claim. |
+
+See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herdr 0.8.2 limitations.
+
 ### Model & Thinking
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `defaultProvider` | string | - | Startup provider (e.g., `"anthropic"`, `"openai"`; saved with Ctrl+S in `/model`, or edited manually) |
-| `defaultModel` | string | - | Startup model ID (saved with Ctrl+S in `/model`, or edited manually) |
-| `defaultThinkingLevel` | string | - | Startup thinking level (saved with Ctrl+S in `/thinking`, or edited manually): `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`; the active model must support the selected level |
-| `modelThinkingLevels` | object | - | Per-model startup thinking levels keyed by `"provider/modelId"`; configure from `/settings` → Default thinking level per model, or edit manually |
+| `defaultProvider` | string | - | Startup provider, saved automatically when you switch models interactively |
+| `defaultModel` | string | - | Startup model ID, saved automatically when you switch models interactively |
+| `defaultThinkingLevel` | string | - | Startup thinking level, saved automatically on interactive model/thinking changes: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`; clamped to the active model's supported levels |
+| `modelThinkingLevels` | object | - | Per-model startup thinking levels keyed by `"provider/modelId"`; updated automatically on interactive model/thinking changes, or configured from `/settings` → Default thinking level per model |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in output |
 | `thinkingBudgets` | object | - | Custom token budgets per thinking level. Anthropic, Google, and Bedrock use these natively. OpenAI-compatible models use them when `compat.thinkingTokenBudgetField` (or `supportsThinkingTokenBudget`) is set. |
-| `showCacheMissNotices` | boolean | `false` | Show transcript notices for significant prompt-cache misses and billed compaction or branch-summary usage |
+| `showCacheMissNotices` | boolean | `false` | Show transcript notices for significant prompt-cache misses, billed compaction or branch-summary usage, and provider recovery diagnostics such as dropped Anthropic thinking blocks, including when a persisted transcript is resumed |
 | `fallbackModels` | string[] | - | Ordered fallback models, written as `"provider/model"` with optional model-supported reasoning suffixes such as `:high`, `:xhigh`, or `:max`. Used by main-chat turns and, since compaction fallback rungs, borrowed for compaction planner requests |
 
 `defaultProvider` and `defaultModel` form one exact saved selection when both are present. Atomic waits for built-in, configured, and extension provider registration before classifying that provider. If it remains unsupported, Atomic does not silently switch providers: interactive mode stays live with a generic configuration warning; print and JSON modes write the warning to stderr and exit nonzero before prompting (with JSON stdout remaining JSONL-clean); and RPC rejects `prompt` until a successful explicit `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle does not clear the condition. If the provider is supported but its saved model is unknown or lacks configured authentication, normal automatic selection of an available authenticated model remains enabled; the same is true when either field is omitted. Valid extension-provider defaults can resolve after deferred extension loading. Update an unsupported pair or choose a model with `/model`.
@@ -89,25 +105,22 @@ Fallback attempts are visible as model changes in the session transcript and as 
 
 `enabledModels` is separate: it only controls the interactive Ctrl+P model cycle list and is not used as an implicit fallback chain.
 
-### Fast mode
+### Fast models
 
-Use `/fast` in interactive mode to edit these settings. Atomic applies fast mode to supported `openai/*` and `openai-codex/*` providers, provider aliases that use the shared `openai-codex-responses` transport, and GitHub Copilot models whose OAuth account catalog advertises a fast variant. OpenAI requests use the priority service tier. GitHub Copilot requests use the account-supported fast variant without adding the OpenAI service-tier field. Fast mode does not apply to Azure OpenAI, OpenRouter, or generic OpenAI-compatible providers.
+Fast inference is not a setting. Where a provider supports it, Atomic publishes a second selectable model whose canonical ID is the base model ID plus `-fast`, and you choose it the same way you choose any other model — in `/model`, as a startup default, in `fallbackModels`, in `enabledModels`, in a workflow stage's `model`, or in a subagent definition. Thinking suffixes work unchanged: `openai-codex/gpt-5.6-sol-fast:medium`.
 
-Chat and workflow-stage scopes are independent. Workflow stages, nested `ctx.workflow(...)` stages, and subagents launched by those stages use `codexFastMode.workflow`; normal-chat subagents use `codexFastMode.chat`. Atomic resolves eligibility again for each fallback model, so the marker and request behavior follow the effective provider and model. When fast mode is active, Atomic shows `fast` after the model name in the chat footer, workflow stage model labels, and subagent results. Enable the workflow scope deliberately for broad fan-outs because each eligible stage can consume fast provider requests. The `codexFastMode` setting name remains for compatibility.
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `codexFastMode.chat` | boolean | `false` | Enable fast mode for supported normal chat models |
-| `codexFastMode.workflow` | boolean | `false` | Enable fast mode for supported workflow-stage models |
+Normal and fast IDs stay distinct everywhere, so `fallbackModels` can list both and each attempt is recorded separately:
 
 ```json
 {
-  "codexFastMode": {
-    "chat": true,
-    "workflow": false
-  }
+  "fallbackModels": [
+    "openai-codex/gpt-5.6-sol-fast:medium",
+    "openai-codex/gpt-5.6-sol:medium"
+  ]
 }
 ```
+
+See [Providers](/providers#fast-models) for which providers publish fast variants, what each one sends upstream, and how an exact `-fast` model ID you own yourself takes precedence over the derived one.
 
 ### UI & Display
 
@@ -116,7 +129,7 @@ Chat and workflow-stage scopes are independent. Workflow stages, nested `ctx.wor
 | `theme` | string | `"dark"` | Theme name (`"dark"`, `"light"`, a Catppuccin built-in, or custom) |
 | `fullscreenScrollbar` | string | `"auto"` | Fullscreen transcript scrollbar: `"auto"` shows it temporarily while scrolling, `"always"` reserves the rightmost transcript column and keeps it visible, and `"hidden"` hides it. The thumb can be dragged when shown. |
 | `fullscreenExitOutput` | string | `"transcript"` | Fullscreen exit output: `"transcript"` prints the final transcript and session resume hint, while `"resume-hint"` restores the terminal's previous screen and prints only the resume hint. Settable from `/settings` |
-| `fullscreenCopyOnSelect` | boolean | `true` | Copy fullscreen text selections automatically on mouse release. When `false`, the selection remains highlighted and main-editor Ctrl+X copies it; Ctrl+X falls back to the last assistant message when there is no selection. Settable from `/settings` |
+| `fullscreenCopyOnSelect` | boolean | `true` | Copy fullscreen text selections automatically on mouse release. When `false`, selection only highlights text. Ctrl+X does not copy; `/copy` copies the last assistant message. Settable from `/settings` |
 | `quietStartup` | boolean | `false` | Hide startup header |
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
@@ -183,6 +196,7 @@ On a genuine first run, Atomic previews available themes and asks whether to opt
 | `compaction.compression_ratio` | number | `0.5` | Fraction of compactable transcript **lines to keep** (`0 < value < 1`) |
 | `compaction.preserve_recent` | number | `2` | Exact number of newest context-visible messages kept outside the compactable region; `0` keeps none |
 | `compaction.query` | string | last user message | Optional relevance focus for selecting older lines to retain |
+| `compaction.modelOverrides` | object | `{}` | Exact `"provider/modelId"` keys with optional `reserveTokens` and `preserve_recent` overrides |
 
 ```json
 {
@@ -198,11 +212,30 @@ On a genuine first run, Atomic previews available themes and asks whether to opt
 
 The model emits numbered line ranges only; Atomic reconstructs retained text mechanically. `preserve_recent` is enforced client-side and is not a provider parameter. Atomic does not widen this exact message count to a user-turn boundary or force a final logical turn to remain outside compaction.
 
+Per-model budgets use exact, case-sensitive provider/model IDs (including any slashes in the model ID), not patterns or reasoning suffixes:
+
+```json
+{
+  "compaction": {
+    "reserveTokens": 16384,
+    "preserve_recent": 2,
+    "modelOverrides": {
+      "anthropic/claude-sonnet-4-5": { "reserveTokens": 32768, "preserve_recent": 4 },
+      "openai/gpt-5": { "preserve_recent": 0 }
+    }
+  }
+}
+```
+
+Each field resolves independently: the active model's override, then the ordinary compaction setting, then the built-in default. Global and trusted-project settings merge overrides per model and per field. Model switches take effect on the next compaction check or manual call; borrowing a fallback planner does not change the selected budgets. Explicit manual `preserve_recent` parameters still take precedence.
+
+Both fields must be non-negative safe integers, including ordinary settings. Invalid ordinary values are reported even if a model override exists; malformed matching entries and invalid override values are reported when that model is used. `enabled`, `compression_ratio`, and `query` remain ordinary settings, not per-model overrides. Unlike upstream pi's token-based recent-history budget, Atomic uses the exact-message `preserve_recent` setting, not `keepRecentTokens`, and retains its verbatim line compactor.
+
 ### Branch Summary
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `branchSummary.reserveTokens` | number | `16384` | Tokens reserved for branch summarization |
+| `branchSummary.reserveTokens` | number | `16384` | Tokens reserved when selecting branch history; output is capped at 4096 tokens |
 | `branchSummary.skipPrompt` | boolean | `false` | Skip "Summarize branch?" prompt on `/tree` navigation (defaults to no summary) |
 
 ### Session Summary
@@ -218,9 +251,12 @@ The model emits numbered line ranges only; Atomic reconstructs retained text mec
 | `retry.enabled` | boolean | `true` | Enable automatic agent-level retry on transient errors |
 | `retry.maxRetries` | number | `3` | Maximum agent-level retry attempts |
 | `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff (2s, 4s, 8s) |
+| `retry.maxAgentDelayMs` | number | `60000` | Maximum agent-level backoff delay (60s); `0` retries immediately |
 | `retry.provider.timeoutMs` | number | SDK default | Provider/SDK request timeout in milliseconds |
 | `retry.provider.maxRetries` | number | `0` | Provider/SDK retry attempts. Leave unset/`0` to let Atomic's agent-level retry handle transient failures |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Max server-requested delay before failing (60s) |
+
+Agent-level retries use exponential backoff capped by `retry.maxAgentDelayMs`, including the shared main-chat and workflow retry policy and summary calls. This is independent of provider retry limits. Legacy `retry.maxDelayMs` still migrates to `retry.provider.maxRetryDelayMs`, not the agent cap.
 
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs` (e.g., Google's "quota will reset after 5h"), the request fails immediately with an informative error instead of waiting silently. Set to `0` to disable the cap.
 
@@ -232,6 +268,7 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
     "enabled": true,
     "maxRetries": 3,
     "baseDelayMs": 2000,
+    "maxAgentDelayMs": 60000,
     "provider": {
       "timeoutMs": 3600000,
       "maxRetries": 0,
@@ -294,15 +331,15 @@ Older settings with a boolean `websockets` value are migrated to `transport`: `t
 | `terminal.trueColor` | boolean or `"auto"` | `"auto"` | JSON-only truecolor capability override. `true`/`false` overrides detection; `"auto"`, omitted, and invalid values preserve detection. Not shown in `/settings` |
 
 
-The installed pi-tui 0.84.4 renderer owns the matching environment overrides: `PI_HYPERLINKS=1|0|auto`, `PI_IMAGE_PROTOCOL=kitty|iterm2|none|auto`, and `PI_TRUE_COLOR=1|0|auto`. Explicit JSON booleans/protocols take precedence over those environment values. Use `"auto"` or omit a JSON value to leave environment and terminal detection in control.
+The installed pi-tui 0.85.0 renderer owns the matching environment overrides: `PI_HYPERLINKS=1|0|auto`, `PI_IMAGE_PROTOCOL=kitty|iterm2|none|auto`, and `PI_TRUE_COLOR=1|0|auto`. Explicit JSON booleans/protocols take precedence over those environment values. Use `"auto"` or omit a JSON value to leave environment and terminal detection in control.
 When `images.autoResize` is enabled, Atomic normalizes images before sending them to the model. Tool-result images are normalized after `tool_result` extension handlers run, so images an extension inserts receive the same limit; if processing fails, Atomic keeps the original image. Set it to `false` to preserve source dimensions.
 
 ### Shell
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `shellPath` | string | - | Custom shell path (e.g., for Cygwin on Windows) |
-| `shellCommandPrefix` | string | - | Prefix for every bash command (e.g., `"shopt -s expand_aliases"`) |
+| `shellPath` | string | - | Custom Bash path (e.g., for Cygwin on Windows); does not select the PowerShell used by native Windows `!`/`!!` or the interactive subshell |
+| `shellCommandPrefix` | string | - | Prefix for shell commands, including `!`/`!!`; use PowerShell syntax for native Windows interactive commands and Bash syntax elsewhere (e.g., `"shopt -s expand_aliases"`) |
 | `bashInterceptor.enabled` | boolean | `false` | When true, block shell commands that have dedicated tools and offer remaining `bash` tool calls to `user_bash` extension handlers before local execution. Also available in `/settings` as **Bash Interceptor**. |
 | `search.contextBefore` | number | `1` | Number of context lines before each `search` match. |
 | `search.contextAfter` | number | `3` | Number of context lines after each `search` match. |
@@ -395,7 +432,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 Mermaid code blocks render as themed Unicode diagrams in interactive transcripts when they fit the available width. `"off"` keeps the Markdown fence, `"final"` renders only finalized responses, and `"streaming"` also renders partial assistant responses. Invalid or too-wide diagrams remain as code, and rendering is display-only: stored messages and model context keep the original Markdown. LaTeX rendering is also display-only and converts supported expressions to terminal-friendly Unicode math; set `markdown.latex` to `false` to keep the source form.
 
-The installed pi-tui 0.84.4 LaTeX renderer also handles whitespace and matrix layouts correctly.
+The installed pi-tui 0.85.0 LaTeX renderer also handles whitespace and matrix layouts correctly.
 
 ### Resources
 
@@ -446,51 +483,8 @@ See [Atomic packages](/packages) for package management details.
 
 ## Example
 
-```json
-{
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4-20250514",
-  "defaultThinkingLevel": "medium",
-  "theme": "dark",
-  "compaction": {
-    "enabled": true,
-    "reserveTokens": 16384,
-    "compression_ratio": 0.5,
-    "preserve_recent": 2
-  },
-  "retry": {
-    "enabled": true,
-    "maxRetries": 3
-  },
-  "httpIdleTimeoutMs": 300000,
-  "enabledModels": ["claude-*", "gpt-4o"],
-  "warnings": {
-    "anthropicExtraUsage": true
-  },
-  "packages": ["pi-skills"],
-  "workflows": ["./workflows/*.ts"]
-}
-```
+Moved to [Configure Atomic](/guides/configuration#example).
 
 ## Project Overrides
 
-Project settings (`.atomic/settings.json`) override global settings. Nested objects merge recursively; arrays and scalar values replace global values:
-
-```json
-// ~/.atomic/agent/settings.json (global)
-{
-  "theme": "dark",
-  "compaction": { "enabled": true, "reserveTokens": 16384 }
-}
-
-// .atomic/settings.json (project)
-{
-  "compaction": { "reserveTokens": 8192 }
-}
-
-// Result
-{
-  "theme": "dark",
-  "compaction": { "enabled": true, "reserveTokens": 8192 }
-}
-```
+Moved to [Configure Atomic](/guides/configuration#project-overrides).

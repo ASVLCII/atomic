@@ -4,7 +4,7 @@ import { registerIntercomTool } from "../../packages/intercom/intercom-tool.js";
 import { routeIncomingReply } from "../../packages/intercom/reply-routing.js";
 import { ReplyTracker } from "../../packages/intercom/reply-tracker.js";
 import { ReplyWaiterRegistry } from "../../packages/intercom/reply-waiter.js";
-import type { Message, SessionInfo } from "../../packages/intercom/types.js";
+import type { Message, SessionInfo, WorkflowStageRosterEntry } from "../../packages/intercom/types.js";
 import { sleep } from "../helpers/runtime.js";
 
 type ToolResult = {
@@ -15,7 +15,7 @@ type ToolResult = {
 type Tool = {
 	execute(
 		id: string,
-		params: { action?: string; to?: string; message?: string },
+		params: { action?: string; to?: string; message?: string; group?: string; replyTo?: string },
 		signal: AbortSignal | undefined,
 		update: undefined,
 		ctx: object,
@@ -111,7 +111,7 @@ describe("Intercom full session ID targeting", () => {
 
 		const listed = await current.tool.execute("list-call", { action: "list" }, undefined, undefined, context);
 		const text = listed.content[0]?.text ?? "";
-		assert.match(text, new RegExp(`recipient \\(${recipient.id}\\)`));
+		assert.ok(text.includes(`- \`${recipient.id}\` [same cwd, idle] /worktree (test) name: recipient`));
 	});
 
 	test("send accepts an exact full session ID", async () => {
@@ -128,7 +128,9 @@ describe("Intercom full session ID targeting", () => {
 		);
 
 		assert.equal(result.isError, false, result.content[0]?.text);
-		assert.deepEqual(current.sent, [{ to: recipient.id }]);
+		assert.equal(current.sent.length, 1);
+		assert.equal(current.sent[0]?.to, recipient.id);
+		assert.equal(typeof current.sent[0]?.messageId, "string");
 	});
 
 	test("ask by a workflow stage name alias keys its reply waiter on the live stage session", async () => {
@@ -138,7 +140,7 @@ describe("Intercom full session ID targeting", () => {
 		// it blocked to the 10-minute timeout instead of settling.
 		const runId = "27840002-3528-413e-84c4-87a43e5037a2";
 		const stageSession = session("ee02315c-1111-4222-8333-123456789abc", "reviewer-stage");
-		const nameTarget = `${runId}:reviewer`;
+		const nameTarget = `workflow:${runId}/reviewer`;
 		let tool: Tool | undefined;
 		const client = {
 			sessionId: "self-session-id",
@@ -154,7 +156,7 @@ describe("Intercom full session ID targeting", () => {
 							runId,
 							stageId: "reviewer-id",
 							stageName: "reviewer",
-							target: `${runId}:reviewer-id`,
+							target: `workflow:${runId}/reviewer-id`,
 							lifecycle: "running" as const,
 							group: `workflow:${runId}/reviewers`,
 							sessionId: stageSession.id,
@@ -322,7 +324,10 @@ describe("Intercom full session ID targeting", () => {
 		);
 
 		assert.equal(result.isError, false, result.content[0]?.text);
-		assert.deepEqual(current.sent, [{ to: sender.id, replyTo: "question-sender" }]);
+		assert.equal(current.sent.length, 1);
+		assert.equal(current.sent[0]?.to, sender.id);
+		assert.equal(current.sent[0]?.replyTo, "question-sender");
+		assert.equal(typeof current.sent[0]?.messageId, "string");
 	});
 
 	test("exact case-insensitive session names resolve to the full ID", async () => {
@@ -339,7 +344,9 @@ describe("Intercom full session ID targeting", () => {
 		);
 
 		assert.equal(result.isError, false, result.content[0]?.text);
-		assert.deepEqual(current.sent, [{ to: recipient.id }]);
+		assert.equal(current.sent.length, 1);
+		assert.equal(current.sent[0]?.to, recipient.id);
+		assert.equal(typeof current.sent[0]?.messageId, "string");
 	});
 
 	test("an 8-character ID prefix is rejected for send", async () => {
@@ -449,4 +456,224 @@ describe("Intercom full session ID targeting", () => {
 		assert.doesNotMatch(result.content[0]?.text ?? "", /Cannot message the current session/);
 		assert.deepEqual(current.sent, []);
 	});
+});
+
+describe("intercom list renders possible future stage rows (D7)", () => {
+	const futureRow = {
+		kind: "workflow-future-stage" as const,
+		runId: "d7000009-0000-4000-8000-000000000009",
+		target: "workflow:d7000009-0000-4000-8000-000000000009/orchestrator-*",
+		queuedCount: 2,
+		group: "workflow:d7000009-0000-4000-8000-000000000009",
+	};
+	const broadcastRow = {
+		kind: "workflow-future-stage" as const,
+		runId: "d7000009-0000-4000-8000-000000000009",
+		target: "workflow:d7000009-0000-4000-8000-000000000009/**",
+		queuedCount: 1,
+		group: "workflow:d7000009-0000-4000-8000-000000000009",
+	};
+
+	function futureFixture(directory: {
+		sessions: SessionInfo[];
+		workflowStages: WorkflowStageRosterEntry[];
+		workflowFutureStages: readonly unknown[];
+	}) {
+		let tool: Tool | undefined;
+		const client = {
+			sessionId: "self-session-id",
+			groups: ["default"],
+			async listSessions(): Promise<SessionInfo[]> {
+				return directory.sessions;
+			},
+			async listDirectory(group?: string): Promise<typeof directory> {
+				return group === undefined ? directory : directory;
+			},
+		};
+		registerIntercomTool(
+			{
+				registerTool(value: Tool) {
+					tool = value;
+				},
+				appendEntry() {},
+			} as never,
+			{
+				ensureConnected: async () => client,
+				syncPresenceIdentity() {},
+				confirmSend: false,
+				beginReplyWait: () => ({ ok: false, reason: "busy" as const, limit: 0 }),
+				replyTracker: new ReplyTracker(),
+			} as never,
+		);
+		assert.ok(tool);
+		return { tool: tool! };
+	}
+
+	test("materialized pending and live workflow rows lead with canonical paths", async () => {
+		const stages: WorkflowStageRosterEntry[] = ["pending", "running"].map((lifecycle) => ({
+			kind: "workflow-stage",
+			runId: futureRow.runId,
+			stageId: lifecycle,
+			stageName: `review ${lifecycle}`,
+			target: `workflow:${futureRow.runId}/${lifecycle}`,
+			lifecycle: lifecycle as "pending" | "running",
+			group: futureRow.group,
+			...(lifecycle === "running" ? { sessionId: "full-live-session-id" } : {}),
+		}));
+		const { tool } = futureFixture({
+			sessions: [session("self-session-id", "self")],
+			workflowStages: stages,
+			workflowFutureStages: [],
+		});
+		const result = await tool.execute("list-stages", { action: "list" }, undefined, undefined, context);
+		assert.ok(
+			result.content[0]!.text.includes(`- \`${stages[0]!.target}\` [PENDING] workflow stage: review pending`),
+		);
+		assert.ok(
+			result.content[0]!.text.includes(
+				`- \`${stages[1]!.target}\` [RUNNING] workflow stage: review running session: \`full-live-session-id\``,
+			),
+		);
+	});
+
+	test("list renders the canonical target and the queued count for every future row", async () => {
+		const self = session("self-session-id", "self");
+		const { tool } = futureFixture({
+			sessions: [self],
+			workflowStages: [],
+			workflowFutureStages: [futureRow, broadcastRow],
+		});
+		const result = await tool.execute("list-call", { action: "list" }, undefined, undefined, context);
+		const text = result.content[0]?.text ?? "";
+		assert.match(
+			text,
+			/- `workflow:d7000009-0000-4000-8000-000000000009\/orchestrator-\*` \[future\] 2 queued messages\n/,
+		);
+		assert.match(text, /- `workflow:d7000009-0000-4000-8000-000000000009\/\*\*` \[future\] 1 queued message(\n|$)/);
+		const details = (result as unknown as { details?: { workflowFutureStages?: unknown[] } }).details;
+		assert.deepEqual(details?.workflowFutureStages, [futureRow, broadcastRow]);
+	});
+
+	test("the singular count form renders without the plural suffix", async () => {
+		const self = session("self-session-id", "self");
+		const { tool } = futureFixture({
+			sessions: [self],
+			workflowStages: [],
+			workflowFutureStages: [{ ...futureRow, queuedCount: 1 }],
+		});
+		const result = await tool.execute("list-call", { action: "list" }, undefined, undefined, context);
+		const rowLine = (result.content[0]?.text ?? "").split("\n").find((line) => line.includes("orchestrator-"));
+		assert.match(rowLine ?? "", /\[future\] 1 queued message$/);
+	});
+
+	test("read-only group peek renders future rows returned for the peeked group", async () => {
+		const self = session("self-session-id", "self");
+		self.groups = ["default"];
+		const peekedDirectory = {
+			sessions: [],
+			workflowStages: [],
+			workflowFutureStages: [futureRow],
+		};
+		let tool: Tool | undefined;
+		const client = {
+			sessionId: "self-session-id",
+			groups: ["default"],
+			async listSessions(): Promise<SessionInfo[]> {
+				return [self];
+			},
+			async listDirectory(group?: string) {
+				return group === undefined
+					? { sessions: [self], workflowStages: [], workflowFutureStages: [] }
+					: peekedDirectory;
+			},
+		};
+		registerIntercomTool(
+			{
+				registerTool(value: Tool) {
+					tool = value;
+				},
+				appendEntry() {},
+			} as never,
+			{
+				ensureConnected: async () => client,
+				syncPresenceIdentity() {},
+				confirmSend: false,
+				beginReplyWait: () => ({ ok: false, reason: "busy" as const, limit: 0 }),
+				replyTracker: new ReplyTracker(),
+			} as never,
+		);
+		assert.ok(tool);
+		const result = await tool!.execute(
+			"peek-call",
+			{ action: "list", group: "workflow:d7000009-0000-4000-8000-000000000009" },
+			undefined,
+			undefined,
+			context,
+		);
+		assert.match(
+			result.content[0]?.text ?? "",
+			/- `workflow:d7000009-0000-4000-8000-000000000009\/orchestrator-\*` \[future\] 2 queued messages/,
+		);
+		const details = (result as unknown as { details?: { workflowFutureStages?: unknown[] } }).details;
+		assert.deepEqual(details?.workflowFutureStages, [futureRow]);
+	});
+});
+
+test("agent list leads with copyable IDs and keeps meaningful names secondary", async () => {
+	const self = session("self-session-id", "subagent-chat-self-session-id");
+	const peer = session("6332faab-1111-4222-8333-123456789abc", "research");
+	const custom = session("custom-id", "subagent-chat-my-project");
+	const current = toolFixture(new ReplyTracker(), [self, peer, custom]);
+	const result = await current.tool.execute("list-targets", { action: "list" }, undefined, undefined, context);
+	assert.equal(result.isError, false);
+	const rows = result.content[0]!.text.split("\n").filter((row) => row.startsWith("- "));
+	assert.deepEqual(rows, [
+		"- `self-session-id` [self, idle] /worktree (test)",
+		"- `6332faab-1111-4222-8333-123456789abc` [same cwd, idle] /worktree (test) name: research",
+		"- `custom-id` [same cwd, idle] /worktree (test) name: subagent-chat-my-project",
+	]);
+});
+
+test("explicit invalid and ambiguous reply selectors send nothing and preserve pending asks", async () => {
+	const sender = session("sender-id", "sender");
+	const tracker = new ReplyTracker();
+	tracker.queueTurnContext(tracker.recordIncomingMessage(sender, ask("first")));
+	tracker.beginTurn();
+	tracker.recordIncomingMessage(sender, ask("second"));
+	const current = toolFixture(tracker, [sender]);
+	for (const selectors of [
+		{ to: sender.id },
+		{ replyTo: "missing" },
+		{ replyTo: "" },
+		{ to: "", replyTo: "first" },
+		{ to: "other", replyTo: "first" },
+	]) {
+		const result = await current.tool.execute(
+			"invalid-reply",
+			{ action: "reply", message: "must not send", ...selectors },
+			undefined,
+			undefined,
+			context,
+		);
+		assert.equal(result.isError, true, JSON.stringify(selectors));
+		assert.deepEqual(current.sent, []);
+		assert.deepEqual(
+			tracker.listPending().map((pending) => pending.message.id),
+			["first", "second"],
+		);
+	}
+	const result = await current.tool.execute(
+		"exact-reply",
+		{ action: "reply", to: sender.id, replyTo: "second", message: "answer" },
+		undefined,
+		undefined,
+		context,
+	);
+	assert.equal(result.isError, false);
+	assert.equal(current.sent[0]!.to, sender.id);
+	assert.equal(current.sent[0]!.replyTo, "second");
+	assert.deepEqual(
+		tracker.listPending().map((pending) => pending.message.id),
+		["first"],
+	);
 });

@@ -67,32 +67,32 @@ intercom({
 
 ### Pattern 2: Quick Status Check
 
-Before sending, verify who's connected. The full session ID printed by `list` is directly usable by `send`, `ask`, and targeted `reply`:
+Before sending, verify who's connected. Each list row leads with a copyable full session ID or canonical workflow path. Names are secondary; redundant generated aliases are omitted from the list but remain valid targets.
 
 ```typescript
 intercom({ action: "list" })
-// → • planner (6332faab-1111-4222-8333-123456789abc) — /workspace (model) [idle]
+// → - `6332faab-1111-4222-8333-123456789abc` [idle] /workspace (model) name: planner
 intercom({ action: "ask", to: "6332faab-1111-4222-8333-123456789abc", message: "Which option should I use?" })
 ```
 
-Live sessions accept an exact full Intercom session ID or exact case-insensitive name. For workflow stages, first use `intercom({ action: "list" })`: materialized stages appear as `PENDING` or `RUNNING` with canonical `<runId>:<stageId>` targets and actual groups. The invocation context can control owned isolated subgroups by exact target, while sibling subgroups and other runs remain isolated. Use queued `send` for `PENDING`; `ask` is supported only for `RUNNING`, where an exact correlated reply returns to the invocation asker.
+Live sessions accept an exact full Intercom session ID or exact case-insensitive name. For workflow stages, first join `workflow:<rootRunId>` and use `intercom({ action: "list" })`: materialized stages appear as `PENDING` or `RUNNING` with canonical `workflow:<rootRunId>/<segment>[/<segment>...]` targets and actual groups, followed by possible future targets with queued counts. The invocation context can control owned isolated subgroups by exact target, while sibling subgroups and other runs remain isolated. Use queued `send` for `PENDING` or future targets; `ask` is supported only for `RUNNING`, where an exact correlated reply returns to the invocation asker.
 
 ### Deliver to workflow stages that have not started
 
-Send material updates through Intercom to every affected workflow stage, including stages that have not started. Atomic queues messages for known pending stages and delivers them when their sessions initialize:
-
-Before steering a stage, join its invocation group. Use the Intercom `groups` action to discover it. Workflow invocation groups are named `workflow:<rootRunId>`.
+Send material updates through Intercom to every affected workflow stage, including stages that have not started. Before steering, join the invocation group `workflow:<rootRunId>` (discover it with the Intercom `groups` action), then use `intercom list` there to see live, pending, and possible future targets.
 
 ```typescript
 intercom({
   action: "send",
-  to: "<runId>:reviewer",
+  to: "workflow:<rootRunId>/reviewer",
   message: "Scope changed: preserve raw amendment text in the verification oracle."
 })
 // → queued, distinct from live-session delivered, with the FIFO position
 ```
 
-The stage receives the ordinary inbound Intercom message before its first model turn under **Messages received before you started**, with real sender identity and a `Sent:` timestamp. Only same-workflow-group sessions may queue messages. Each exact run/stage key holds at most 50 queued messages; the next send is refused rather than evicting one. Resume/replay, broker restart, and stage-attempt restart preserve exactly-once delivery. If the stage is skipped, cancelled, or becomes terminal before its session initializes, the message becomes undeliverable and acknowledgment-requesting senders receive a correlated failure. Do not use `ask`: Atomic returns `pending_stage_ask_unsupported` and recommends ordinary `send` instead of holding an unbounded waiter.
+Each path segment may be a stage name, a run id, or a glob: `*` matches one segment and may be embedded (`reviewer-*`), while `**` matches any depth. When shared scope or acceptance criteria change, broadcast one authoritative update to `workflow:<rootRunId>/**` (or a narrower pattern) rather than enumerating stages. The broadcast reaches every live stage immediately and remains sticky for every future matching stage, including nested children, until the root run terminates. Other name or pattern sends have the same every-future-match behavior.
+
+A syntactically valid target outside the persisted possible-stage set is accepted speculatively: the queued acknowledgment includes `notInKnownSet`. At terminal settlement, an entry that never delivered produces the correlated undeliverable notification; an entry delivered at least once does not. A stage receives queued messages through the ordinary inbound path before its first model turn under **Messages received before you started**, with real sender identity and a `Sent:` timestamp. Only same-workflow-group sessions may queue messages. Each target holds at most 50 queued messages; the next send is refused rather than evicting one. Resume/replay, broker restart, and stage-attempt restart preserve exactly-once delivery per message and materialized stage. Use `ask` only for a live target: pending, future, and pattern asks return `pending_stage_ask_unsupported`.
 
 ### Runtime named groups
 
@@ -128,7 +128,7 @@ intercom({ action: "pending" })
 intercom({ action: "reply", to: "planner", message: "Use exponential backoff starting at 100ms." })
 ```
 
-`reply` still preserves exact threading under the hood by sending the response with the original `replyTo` value.
+Explicit `to` selects that sender's pending ask even if another message triggered the current turn. Use `pending` and an exact `replyTo` when the sender has several asks. Stale, unknown, empty, or sender-mismatched explicit selectors fail without replying to another thread. Omit both selectors only when you intend to reply to the active message, or otherwise the single pending ask.
 
 ### Pattern 4: Broadcast to Multiple Workers
 
@@ -242,7 +242,7 @@ Use constructive quorum when several fresh-context reviewers judge the same arti
 3. Change a verdict only through evidence, never deference. Each reviewer emits its own final structured verdict and records whether the round changed it and which evidence caused the change.
 4. Let the deterministic reducer count final votes; this pattern does not change quorum counts or the `stop_review_loop` contract.
 
-In Atomic workflows, each invocation has its own Intercom group, and parallel stages and delegated subagents inherit it when Intercom is available. Sibling reviewers can therefore coordinate without custom group wiring. See the [constructive quorum workflow pattern](../../../coding-agent/docs/workflows.md#common-workflow-patterns).
+In Atomic workflows, each invocation has its own Intercom group, and parallel stages and delegated subagents inherit it when Intercom is available. Sibling reviewers can therefore coordinate without custom group wiring. See the [constructive quorum workflow pattern](../../../coding-agent/docs/workflows/reliable-design.md#common-workflow-patterns).
 
 ## Key Differences
 
@@ -251,7 +251,7 @@ In Atomic workflows, each invocation has its own Intercom group, and parallel st
 | `join` | Adds or creates a named membership in place | Sessions need another shared routing group |
 | `leave` | Removes one named membership, or resets to home when omitted | Stop sharing one group or restore startup membership |
 | `groups` | Lists every available group with counts and membership markers | Discover a group instead of guessing its name |
-| `send` | Fire-and-forget to a live session, or durable `queued` delivery to `<runId>:<stageKey>` before a workflow stage starts | You don't need a response |
+| `send` | Fire-and-forget to a live session, or durable sticky delivery to `workflow:<rootRunId>/<segment>[/<segment>...]`; globs and `**` broadcasts cover live and future matches | You don't need a response |
 | `ask` | Blocks until a live recipient replies (10 min timeout); refused for an unstarted stage | You need an answer to continue |
 | `reply` | Responds to the active or pending inbound ask; `to` accepts an exact full session ID or exact session name | You were asked something and need to answer naturally |
 | `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
@@ -358,6 +358,7 @@ If neither `cmux` nor `tmux` is available, skip this path and use normal `interc
 
 ### `ask` Limitations
 
+- **Terminal noninteractive children**: Completed, failed, interrupted, or cancelled subagents cannot reply, even if listed as `idle`. New asks fail immediately; an admitted ask fails if the child terminates before replying. Launch a fresh child with explicit context. Live interactive idle sessions and reply-capable workflow post-mortem conversations remain askable; `send` semantics are unchanged.
 - **10-minute timeout**: If no reply comes within 10 minutes, the ask fails
 - **Bounded concurrency**: Up to `maxPendingAsks` asks (default: 6) may wait concurrently; additional calls receive a structured capacity error
 - **Exact correlation**: Same-target and mixed-target asks may run together; out-of-order replies and peer disconnects settle only the matching sender/message pair
@@ -493,7 +494,15 @@ if (!result.delivered) {
 
 ### Connection lost
 
-Sessions automatically reconnect if the broker restarts. If persistently disconnected:
+Sessions automatically reconnect if the broker restarts. A single `send`, `ask`, or `reply` call also owns up to three internal retries after a typed recoverable disconnect, with 1, 2, and 5 second delays. Do not supply a retry token. The tool preserves the original message ID, arguments, and reply route, and never extends the original 11-minute deadline. Confirmation appears only once.
+
+Every new tool call is a new operation, even with identical text. If recovery cannot establish the result, the tool returns a terminal error with `outcome: "unknown"`: delivery may already have occurred. Do not repeat that operation automatically. Check with the recipient before intentionally sending again. Cancellation stops new attempts; a successful receipt still reports success. An accepted ask cancelled or timed out before its reply also warns against resending. Initial nondelivery and unrelated errors do not start recovery.
+
+Broker acceptance is retained for 12 minutes, so acknowledgement loss does not duplicate delivery and a deduplicated ask remains replyable. An implicit reply keeps its original sender/question snapshot across retries, so later inbound asks cannot redirect it. Durable SQLite stores keyed HMAC digests rather than message/attachment text; its key and database artifacts are owner-only on POSIX. Missing, malformed, uncertain, or capacity-bound authority fails closed rather than risking a duplicate.
+
+Fresh calls reserve one of 1,000 client identity slots before confirmation, target resolution, or send; existing internal retries remain usable at capacity. Client retry state is released when the call ends, without deleting broker authority. The broker and local result relay allow 10,000 live delivery records; the broker also bounds digest/routing authority to 64 MiB. Capacity refusal never evicts a still-valid delivery identity.
+
+If the session remains disconnected after those retries:
 
 ```typescript
 intercom({ action: "status" })

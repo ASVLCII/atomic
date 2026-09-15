@@ -48,10 +48,17 @@ ALPINE_MUSL_RUNTIME_VERSION="14.2.0-r6"
 ALPINE_MUSL_RUNTIME_BASE="https://dl-cdn.alpinelinux.org/alpine/$ALPINE_MUSL_RUNTIME_BRANCH/main"
 
 CLIPBOARD_STAGE_DIR=""
+ESBUILD_STAGE_DIR=""
 MUSL_RUNTIME_STAGE_DIR=""
 cleanup_clipboard_stage() {
     if [[ -n "$CLIPBOARD_STAGE_DIR" ]]; then
         rm -rf "$CLIPBOARD_STAGE_DIR"
+    fi
+}
+
+cleanup_esbuild_stage() {
+    if [[ -n "$ESBUILD_STAGE_DIR" ]]; then
+        rm -rf "$ESBUILD_STAGE_DIR"
     fi
 }
 
@@ -63,6 +70,7 @@ cleanup_musl_runtime_stage() {
 
 cleanup_build_stages() {
     cleanup_clipboard_stage
+    cleanup_esbuild_stage
     cleanup_musl_runtime_stage
 }
 trap cleanup_build_stages EXIT
@@ -188,6 +196,20 @@ if [[ "$SKIP_DEPS" == "false" ]]; then
     CLIPBOARD_STAGE_DIR="$(cd -- "$CLIPBOARD_STAGE_DIR" && pwd -P)"
     bun run packages/coding-agent/scripts/stage-clipboard-native-bindings.ts \
         "$CLIPBOARD_STAGE_DIR" "$clipboard_version"
+
+    echo "==> Staging cross-platform esbuild binaries for Chord..."
+    esbuild_version="$(node -p 'require("./node_modules/esbuild/package.json").version')"
+    ESBUILD_STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/atomic-esbuild-stage.XXXXXX")"
+    ESBUILD_STAGE_DIR="$(cd -- "$ESBUILD_STAGE_DIR" && pwd -P)"
+    printf '%s\n' '{"name":"atomic-esbuild-native-stage","private":true}' > "$ESBUILD_STAGE_DIR/package.json"
+    esbuild_targets=()
+    for esbuild_target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+        esbuild_targets+=("@esbuild/${esbuild_target}@${esbuild_version}")
+    done
+    (
+        cd "$ESBUILD_STAGE_DIR"
+        bun add --no-save --os '*' --cpu '*' "${esbuild_targets[@]}"
+    )
 else
     echo "==> Skipping cross-platform native bindings (--skip-deps)"
 fi
@@ -295,17 +317,14 @@ atomic_native_filename() {
     esac
 }
 
-# The @embedded-postgres leaf that can actually run on each archive. `embedded-postgres`
-# publishes no arm64 Windows package, so windows-arm64 names one that never matches and
-# every leaf is pruned.
-embedded_postgres_package_name() {
+esbuild_package_name() {
     case "$1" in
         darwin-arm64) echo "darwin-arm64" ;;
         darwin-x64) echo "darwin-x64" ;;
-        linux-x64) echo "linux-x64" ;;
-        linux-arm64) echo "linux-arm64" ;;
-        windows-x64) echo "windows-x64" ;;
-        windows-arm64) echo "windows-arm64" ;;
+        linux-arm64|linux-arm64-musl) echo "linux-arm64" ;;
+        linux-x64|linux-x64-musl) echo "linux-x64" ;;
+        windows-arm64) echo "win32-arm64" ;;
+        windows-x64) echo "win32-x64" ;;
         *) echo "Unknown platform: $1" >&2; return 1 ;;
     esac
 }
@@ -394,6 +413,8 @@ stage_musl_runtime() {
     cp -L "$MUSL_RUNTIME_STAGE_DIR/usr/lib/libstdc++.so.6" "$payload_dir/lib/libstdc++.so.6"
 
     local patched_count=0
+    # PostgreSQL already carries its own C++ libraries and relative search paths.
+    # Keep its verified bytes identical to the scriptless npm runtime.
     while IFS= read -r -d '' elf_file; do
         local needed
         if ! needed="$(patchelf --print-needed "$elf_file" 2>/dev/null)"; then
@@ -423,7 +444,7 @@ stage_musl_runtime() {
         esac
         patchelf --set-rpath "$next_rpath" "$elf_file"
         patched_count=$((patched_count + 1))
-    done < <(find "$payload_dir" -type f \( -path "$payload_dir/atomic" -o -name '*.node' -o -name '*.so' -o -name '*.so.*' \) -print0)
+    done < <(find "$payload_dir" -type f ! -path "$payload_dir/node_modules/@bastani/atomic-natives/postgres-runtime/*" \( -path "$payload_dir/atomic" -o -name '*.node' -o -name '*.so' -o -name '*.so.*' \) -print0)
 
     [[ "$patched_count" -gt 0 ]] || {
         echo "No musl payload ELF declared libgcc_s.so.1 or libstdc++.so.6: $platform" >&2
@@ -460,20 +481,28 @@ for platform in "${PLATFORMS[@]}"; do
     fi
 
     cp -r "$runtime_deps_dir" "binaries/$platform/node_modules"
-    if [[ "$platform" == linux-*-musl ]]; then
-        # The embedded-postgres wrapper remains useful for its Docker/in-memory fallback,
-        # but its optional @embedded-postgres/* packages contain glibc binaries only.
-        rm -rf "binaries/$platform/node_modules/@embedded-postgres"
-    else
-        # Every archive is built on one runner, so the shared runtime copy carries that
-        # runner's @embedded-postgres binary into all of them. Keep only the leaf that
-        # matches this archive; a foreign one cannot run and the wrapper falls back.
-        embedded_postgres_leaf="$(embedded_postgres_package_name "$platform")"
-        embedded_postgres_dir="binaries/$platform/node_modules/@embedded-postgres"
-        if [ -d "$embedded_postgres_dir" ]; then
-            find "$embedded_postgres_dir" -mindepth 1 -maxdepth 1 -type d ! -name "$embedded_postgres_leaf" -exec rm -rf {} +
-        fi
+    # Chord 0.85 uses esbuild for facet bundling. The shared dependency tree contains only the
+    # build host's optional native leaf, so replace it with the leaf for this archive target.
+    esbuild_leaf="$(esbuild_package_name "$platform")"
+    esbuild_source_root="$runtime_deps_dir"
+    if [[ -n "$ESBUILD_STAGE_DIR" ]]; then
+        esbuild_source_root="$ESBUILD_STAGE_DIR/node_modules"
     fi
+    rm -rf "binaries/$platform/node_modules/@esbuild"
+    if [ -d "$esbuild_source_root/@esbuild/$esbuild_leaf" ]; then
+        mkdir -p "binaries/$platform/node_modules/@esbuild"
+        cp -r "$esbuild_source_root/@esbuild/$esbuild_leaf" "binaries/$platform/node_modules/@esbuild/"
+    elif [[ "$SKIP_DEPS" == "false" ]]; then
+        echo "Missing esbuild native package for $platform: @esbuild/$esbuild_leaf" >&2
+        exit 1
+    else
+        echo "==> esbuild native package unavailable for $platform (--skip-deps)"
+    fi
+    # Acquire by archive target, never by the optional packages installed on this host.
+    # Compiled builtins resolve this filesystem payload without a bare JS import.
+    rm -rf "binaries/$platform/node_modules/@embedded-postgres"
+    echo "==> Staging embedded PostgreSQL runtime for $platform..."
+    node ../../scripts/stage-postgres-runtime.mjs "$platform" "binaries/$platform/node_modules/@bastani/atomic-natives"
     rm -rf "binaries/$platform/node_modules/@bastani/atomic-natives/npm"
     find "binaries/$platform/node_modules/@bastani/atomic-natives" -maxdepth 1 -type f -name 'atomic_natives.*.node' -delete
     atomic_native="$(atomic_native_filename "$platform")"
@@ -492,6 +521,7 @@ for platform in "${PLATFORMS[@]}"; do
         echo "==> Bundling musl C++ runtime for $platform..."
         stage_musl_runtime "$platform" "binaries/$platform"
     fi
+    node ../../scripts/stage-postgres-runtime.mjs "$platform" "binaries/$platform/node_modules/@bastani/atomic-natives" --validate
 
     # Last gate before the archive is created: no package staged here may declare a platform
     # this archive cannot run. Atomic 0.9.12 shipped @esbuild/linux-x64 in the arm64 archives.

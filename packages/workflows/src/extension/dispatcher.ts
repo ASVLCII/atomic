@@ -1,6 +1,6 @@
 /**
  * WorkflowDispatcher — routes tool actions (list, inputs, run) through the
- * WorkflowRegistry + executor.  status/interrupt/resume are handled upstream in
+ * WorkflowRegistry + executor.  status/pause/resume are handled upstream in
  * index.ts since they operate on in-flight run tracking, not the registry.
  *
  * Design: pure function `dispatch(args, opts)`.  No broad catch — caller sees
@@ -14,6 +14,7 @@ import { launchDetachedUntilStartup, workflowStartupFailureMessage } from "../ru
 import { resolveAndValidateInputs } from "../runs/foreground/executor.js";
 import type { StageAdapters } from "../runs/foreground/stage-runner.js";
 import { resolve_budget } from "../shared/budget.js";
+import { scanPossibleStagesFromSource } from "../shared/possible-stages.js";
 import { effectiveRunStatus } from "../shared/returned-run-status.js";
 import { deriveInputFields, schemaIsRequired } from "../shared/schema-introspection.js";
 import { store as defaultStore, type Store } from "../shared/store.js";
@@ -68,6 +69,12 @@ export interface DispatcherOpts {
 	adapters?: StageAdapters;
 	/** Store override (defaults to executor's singleton). */
 	store?: Store;
+	/**
+	 * Resolves a workflow's definition source path for the D1 possible-stage
+	 * scan (discovery filePath, else the builtin source probe). When absent,
+	 * launch skips the scan and the run simply has no known set.
+	 */
+	resolvePossibleStageEntry?: (normalizedName: string) => string | undefined;
 	/** Cancellation registry forwarded to the detached runner. */
 	cancellation?: CancellationRegistry;
 	/** Job tracker forwarded to runDetached() for background run management. */
@@ -91,7 +98,7 @@ export interface DispatcherOpts {
 	cwd?: string;
 	/** Host-resolved non-default session directory inherited by stages without explicit sessionDir. */
 	defaultSessionDir?: string;
-	/** Cancels only startup admission waiting; the detached run keeps its own lifecycle. */
+	/** Explicit caller cancellation owns startup; acknowledgement detaches execution. */
 	signal?: AbortSignal;
 	/** Reports the exact detached identity before startup admission is awaited. */
 	onRunAccepted?: (runId: string) => void;
@@ -108,6 +115,7 @@ export interface DispatcherOpts {
  * Returns a typed `WorkflowToolResult` — no broad catch, no success-shaped errors.
  */
 export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Promise<WorkflowToolResult> {
+	opts.signal?.throwIfAborted();
 	const action = args.action ?? "run";
 	const name = args.workflow ?? "";
 	const inputs = args.inputs ?? {};
@@ -180,6 +188,30 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 			}
 
 			const runId = crypto.randomUUID();
+			// D1/D10: derive the possible-stage set from the definition source at
+			// admission; a missing entry or scan failure is fine (undefined),
+			// the scan itself never blocks launch.
+			const entryPath = opts.resolvePossibleStageEntry?.(def.normalizedName);
+			let possibleStages: readonly string[] | undefined;
+			if (entryPath !== undefined) {
+				// Belt-and-braces around the scanner's never-throw discipline:
+				// a discovery failure must never block launch (D1).
+				try {
+					const scan = scanPossibleStagesFromSource(entryPath, { maxDepth: opts.config?.maxDepth });
+					possibleStages = scan.stages;
+					// D1: scan warnings surface at launch as one aggregate line,
+					// bounded so builtin-internal partials do not spam stderr.
+					if (scan.warnings.length > 0) {
+						const shown = scan.warnings.slice(0, 3).join(" | ");
+						const suffix = scan.warnings.length > 3 ? " | ..." : "";
+						console.warn(
+							`atomic-workflows: possible-stages scan produced ${scan.warnings.length} warning(s): ${shown}${suffix}`,
+						);
+					}
+				} catch {
+					possibleStages = undefined;
+				}
+			}
 			let launch: ReturnType<typeof launchDetachedUntilStartup>;
 			try {
 				launch = launchDetachedUntilStartup(def, inputs, {
@@ -197,7 +229,9 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 					cwd: opts.cwd,
 					defaultSessionDir: opts.defaultSessionDir,
 					...(opts.origin === undefined ? {} : { origin: opts.origin }),
+					...(possibleStages === undefined ? {} : { possibleStages }),
 					runId,
+					startupSignal: opts.signal,
 				});
 			} catch (error) {
 				return failedRunResult(def.name, runId, error instanceof Error ? error.message : String(error));
@@ -208,6 +242,16 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 			if (!admission.started) {
 				const activeStore = opts.store ?? defaultStore;
 				const snapshot = activeStore.runs().find((run) => run.id === accepted.runId);
+				if (snapshot?.status === "paused" && snapshot.exitReason === "quit") {
+					return {
+						action: "run",
+						name: accepted.name,
+						runId: accepted.runId,
+						status: "paused",
+						message: `Workflow run ${accepted.runId} was quit before startup admission. Inspect status before retrying.`,
+						stages: [],
+					};
+				}
 				const error = workflowStartupFailureMessage(
 					admission,
 					snapshot?.error,

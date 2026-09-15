@@ -1,5 +1,6 @@
 import type { IntercomClient } from "./broker/client.js";
 import type { InboundMessageAdmission } from "./inbound-message-admission.js";
+import { isDeliveryFeedback } from "./incoming-message-delivery.js";
 import type { InboundMessageEntry } from "./intercom-utils.js";
 import { routeIncomingReply } from "./reply-routing.js";
 import type { ReplyTracker } from "./reply-tracker.js";
@@ -9,9 +10,10 @@ import { sendWorkflowStageDeliveryFailure } from "./workflow-stage-delivery-fail
 
 /**
  * Owns late ingress after a workflow stage seals its active generation.
- * Blocking asks are handed to workflow post-mortem routing once and receive a
- * correlated remote tool error if revival fails. Ordinary late notifications
- * retain the stable parent-route retry used before completed-stage asks existed.
+ * The stage boundary retains the exact subagent run IDs it launched, so only
+ * matching child traffic is dropped instead of escaping to the parent route.
+ * Blocking asks from other sessions are handed to workflow post-mortem routing
+ * once; ordinary non-owned notifications retain the stable parent-route retry.
  */
 export function routeClosedWorkflowStageMessage(
   entry: InboundMessageEntry,
@@ -21,8 +23,12 @@ export function routeClosedWorkflowStageMessage(
   deliver: () => Promise<void>,
   currentClient: () => IntercomClient | null,
   isCurrent: () => boolean,
+  ownsSubagentRun: (runId: string) => boolean,
 ): void {
-  if (entry.message.expectsReply !== true) {
+  const sourceRunId = entry.message.source?.subagentRunId;
+  if (sourceRunId !== undefined && ownsSubagentRun(sourceRunId)) return;
+
+  if (entry.message.expectsReply !== true && !isDeliveryFeedback(entry.message)) {
     void retryStableDelivery({ deliver, isCurrent }).catch(() => {});
     return;
   }
@@ -30,6 +36,13 @@ export function routeClosedWorkflowStageMessage(
   if (admitted.kind !== "reserved") return;
   if (routeIncomingReply(waiter, entry.from, entry.message)) {
     admission.commit(admitted.reservation);
+    return;
+  }
+  if (isDeliveryFeedback(entry.message)) {
+    void retryStableDelivery({ deliver, isCurrent }).then(
+      () => { admission.commit(admitted.reservation); },
+      (error) => { admission.release(admitted.reservation, error instanceof Error ? error : new Error(String(error))); },
+    );
     return;
   }
   const replyContext = tracker.recordIncomingMessage(entry.from, entry.message);

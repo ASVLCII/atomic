@@ -2,8 +2,8 @@ import * as os from "node:os";
 import { pathToFileURL } from "node:url";
 import type { ImageContent, TextContent } from "@bastani/pi-ai/compat";
 import { getCapabilities, getImageDimensions, hyperlink, imageFallback } from "@earendil-works/pi-tui";
-import type { ThemeColor } from "../../modes/interactive/theme/theme.ts";
-import { stripAnsi } from "../../utils/ansi.ts";
+import type { ThemeColor } from "../../modes/interactive/theme/theme.js";
+import { stripAnsi } from "../../utils/ansi.js";
 import { resolvePath } from "../../utils/paths.ts";
 import { sanitizeBinaryOutput } from "../../utils/shell.ts";
 

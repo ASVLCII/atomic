@@ -30,6 +30,7 @@ export interface ResolvedInputs extends WorkflowInputValues {}
 export interface RunContinuationOpts {
 	readonly source: RunSnapshot;
 	readonly resumeFromStageId?: string;
+	readonly resumeFromToolNodeId?: string;
 }
 
 export interface StageSessionCheckpointOptions {
@@ -66,6 +67,12 @@ export interface RunOpts
 	defaultSessionDir?: string;
 	/** Internal detached-run mode: surface ctx.ui.* as node-local workflow prompt stages. */
 	usePromptNodesForUi?: boolean;
+	/**
+	 * Possible stage targets from the D1 static scan, computed by the caller at
+	 * launch and persisted with the root run (D10). Absent on resume: the scan
+	 * hydrates from durable metadata so mid-run edits cannot change it.
+	 */
+	possibleStages?: readonly string[];
 	/** Readiness-gate confirmation seam (#1099). */
 	confirmStageReadiness?: (request: {
 		readonly runId: string;

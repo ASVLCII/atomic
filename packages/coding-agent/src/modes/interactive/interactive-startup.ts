@@ -2,7 +2,9 @@ import { ScrollView, VStack } from "@earendil-works/pi-tui";
 import { markLifecycleTiming } from "../../core/lifecycle-timings.ts";
 import { isOfflineModeEnabled } from "../../core/package-manager-env.ts";
 import { createChildProcessEnvironment } from "../../utils/child-process.ts";
+import { setMarkitDiagnosticSink } from "../../utils/markit.js";
 import type { ToolStatus } from "../../utils/tools-manager.ts";
+import { renderDiagnosticStatus } from "../interactive-engine/engine-diagnostic-view.js";
 import {
 	onInteractiveEngineRemoteCommandsChanged,
 	onInteractiveEngineResourceExtensionsChanged,
@@ -10,7 +12,6 @@ import {
 } from "../interactive-engine/extension-ui-bridge.ts";
 import { renderAtomicAssemblyBanner, renderStartupManifesto } from "./components/atomic-banner.ts";
 import { StartupIdentityComponent } from "./components/startup-identity.ts";
-import { TranscriptFollowIndicator } from "./components/transcript-follow-indicator.ts";
 import { bindInitialEagerSession } from "./interactive-initial-session-binding.ts";
 import { InteractiveModeBase, seedStartupInput } from "./interactive-mode-base.ts";
 import {
@@ -23,7 +24,6 @@ import {
 	DynamicBorder,
 	ENV_OFFLINE,
 	ensureTool,
-	formatCodexFastModeModelLabel,
 	getAgentDir,
 	getChangelogPath,
 	getCwdRelativePath,
@@ -42,7 +42,6 @@ import {
 	path,
 	recordTimeSinceReset,
 	Spacer,
-	shouldApplyCodexFastMode,
 	spawn,
 	Text,
 	theme,
@@ -70,6 +69,26 @@ function prepareStartupNotices(mode: InteractiveModeBase): void {
 		mode.firstRunNoticeVisible = mode.isFirstRunOnboardingEligible?.() ?? false;
 	}
 }
+
+/**
+ * Show non-fatal model-catalog warnings — today, a derived `-fast` variant suppressed because
+ * something already owns that exact model ID.
+ *
+ * Called unconditionally at startup and again after deferred extension loading, because an extension
+ * provider can introduce a collision that did not exist at startup. The last reported text is kept so
+ * the second read only speaks when the diagnostic set actually changed.
+ */
+InteractiveModeBase.prototype.reportModelCatalogWarning = function (
+	this: InteractiveModeBase,
+	targetContainer: Container = this.chatContainer,
+): void {
+	const warning = this.session.modelRuntime.getWarning?.();
+	if (!warning || warning === this.reportedModelCatalogWarning) {
+		return;
+	}
+	this.reportedModelCatalogWarning = warning;
+	this.showWarning(warning, targetContainer);
+};
 
 InteractiveModeBase.prototype.showStartupNoticesIfNeeded = function (
 	this: InteractiveModeBase,
@@ -186,14 +205,9 @@ InteractiveModeBase.prototype.init = async function (this: InteractiveModeBase):
 		primary: true,
 		overscroll: "chain",
 		scrollbar: this.settingsManager.getFullscreenScrollbar(),
-		scrollbarStyle: (text) => theme.bg("scrollbarThumb", text),
-	});
-	const transcriptFollowIndicator = new TranscriptFollowIndicator({
-		isFollowing: () => this.transcriptScrollView?.isFollowingEnd ?? true,
-		keyLabel: () => this.getEditorKeyDisplay("tui.altScreen.bottom"),
+		scrollbarThumbStyle: (text) => theme.bg("scrollbarThumb", text),
 	});
 	const dock = new VStack([
-		{ component: transcriptFollowIndicator, shrink: 1, minSize: 0 },
 		{ component: this.pendingMessagesContainer, shrink: 1, minSize: 0 },
 		{ component: this.statusContainer, shrink: 1, minSize: 0 },
 		{ component: this.widgetContainerAbove, shrink: 1, minSize: 0 },
@@ -248,6 +262,7 @@ InteractiveModeBase.prototype.init = async function (this: InteractiveModeBase):
 	// still stay behind the engine-bound gate below.
 	markLifecycleTiming("tui-start");
 	this.ui.start();
+	this.disposeMarkitDiagnosticSink = setMarkitDiagnosticSink((message) => renderDiagnosticStatus(message, this));
 	this.footerDataProvider.onBranchChange(() => {
 		this.ui.requestRender();
 	});
@@ -561,17 +576,7 @@ InteractiveModeBase.prototype.getStartupModelLabel = function (this: Interactive
 		modelLabel = `${modelLabel} ${this.session.thinkingLevel || "off"}`;
 	}
 
-	if (!model) {
-		return modelLabel;
-	}
-
-	const fastModeEnabled = shouldApplyCodexFastMode(
-		model,
-		this.session.settingsManager.getCodexFastModeSettings(),
-		this.session.orchestrationContext,
-		this.session.modelRuntime.getCredentialSnapshot?.("github-copilot"),
-	);
-	return formatCodexFastModeModelLabel(modelLabel, fastModeEnabled);
+	return modelLabel;
 };
 
 InteractiveModeBase.prototype.getStartupIdentityText = function (

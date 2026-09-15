@@ -1,15 +1,18 @@
 import { markLifecycleTiming } from "../../core/lifecycle-timings.ts";
+import { getOwnerTaskStore } from "../../core/tasks/owner-store.js";
 import { yieldToEventLoop } from "../../utils/event-loop.ts";
 import {
 	interactiveEngineNeedsExplicitTermination,
 	interruptBlockedInteractiveEngine,
 	terminateInteractiveEngine,
 } from "../interactive-engine/extension-ui-bridge.ts";
+import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.js";
 import {
 	dismissRemoteProxy,
 	remoteEngineProxyOwner,
 	remoteProxyHandlesCtrlC,
 } from "../interactive-engine/remote-input-ownership.ts";
+import { showTaskInspector } from "../rpc/task-ui-bridge.js";
 import { StartupIdentityComponent } from "./components/startup-identity.ts";
 import { COMPACTION_ALREADY_IN_PROGRESS_WARNING } from "./interactive-bash-compact.ts";
 import { routeGlobalClearInput } from "./interactive-global-clear.ts";
@@ -118,9 +121,6 @@ InteractiveModeBase.prototype.setupKeyHandlers = function (this: InteractiveMode
 	});
 	this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
 	this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
-	this.defaultEditor.onAction("app.message.copy", () => {
-		void this.handleCopyCommand({ preferSelection: true });
-	});
 	this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
 	this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 	this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
@@ -278,14 +278,28 @@ InteractiveModeBase.prototype.setupEditorSubmitHandler = function (this: Interac
 		}
 		try {
 			// Handle commands
+			if (text === "/tasks" || text.startsWith("/tasks ")) {
+				if (this.runtimeHost instanceof IsolatedInteractiveRuntime) {
+					await this.runtimeHost.openTaskInspector(text.slice(6).trim() || undefined);
+					return;
+				}
+				if (!getOwnerTaskStore(this.session)) this.session.getAgentTaskHost();
+				const store = getOwnerTaskStore(this.session);
+				this.editor.setText("");
+				if (!store) {
+					this.showStatus("Launched agents and shells will appear here.");
+					return;
+				}
+				await showTaskInspector(
+					{ custom: (factory, options) => this.showExtensionCustom(factory, options) },
+					store,
+					text.slice(6).trim() || undefined,
+				);
+				return;
+			}
 			if (text === "/settings") {
 				this.showSettingsSelector();
 				this.editor.setText("");
-				return;
-			}
-			if (text === "/fast") {
-				this.editor.setText("");
-				this.showFastModeSelector();
 				return;
 			}
 			if (text === "/scoped-models") {

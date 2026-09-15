@@ -1,9 +1,9 @@
 import type { Component, EditorComponent, EditorTheme, MarkdownTheme, TUI } from "@earendil-works/pi-tui";
-import type { AgentSession } from "../../../core/agent-session.ts";
+import type { AgentSession } from "../../../core/agent-session.js";
 import type { BashResult } from "../../../core/bash-executor.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import type { ChatMessageEntry, ChatMessageRenderOptions } from "./chat-message-renderer.ts";
-import type { ChatTranscriptEntryLike } from "./chat-transcript.ts";
+import type { ChatTranscriptEntryLike } from "./chat-transcript.js";
 
 export interface ChatSessionHostStyle {
 	dim(text: string): string;
@@ -44,10 +44,12 @@ export type ChatSessionSubmitMode = "auto" | "followUp";
 export interface ChatSessionHostCommands {
 	ensureAttached?: () => Promise<void>;
 	prompt?: (text: string, mode: ChatSessionSubmitMode) => Promise<void>;
+	/** Host-owned admission route, used instead of raw SDK streaming shortcuts. */
+	submitUserMessage?: (text: string, mode: ChatSessionSubmitMode) => Promise<void>;
 	steer?: (text: string) => Promise<void>;
 	followUp?: (text: string) => Promise<void>;
 	interrupt?: () => Promise<void>;
-	resume?: (message?: string) => Promise<void>;
+	resume?: (message?: string, mode?: ChatSessionSubmitMode) => Promise<void>;
 	runBash?: (request: ChatSessionHostBashRequest) => Promise<BashResult>;
 	abortBash?: () => void | Promise<void>;
 	abortCompaction?: () => void | Promise<void>;
@@ -59,6 +61,8 @@ export interface ChatSessionHostOpts<TExtraEntry extends ChatTranscriptEntryLike
 	commands?: ChatSessionHostCommands;
 	requestRender?: () => void;
 	getAgentSession?: () => AgentSession | undefined;
+	/** Custom hosts may retain live task rows; interactive stage chat uses footer-only status. */
+	taskRowsInChat?: boolean;
 	isStreaming?: () => boolean;
 	isPaused?: () => boolean;
 	isDisabled?: () => boolean;
@@ -71,6 +75,7 @@ export interface ChatSessionHostOpts<TExtraEntry extends ChatTranscriptEntryLike
 	tui?: TUI;
 	keybindings?: unknown;
 	editorFactory?: (tui: TUI, theme: EditorTheme, keybindings: unknown) => EditorComponent;
+	autocompleteProvider?: import("@earendil-works/pi-tui").AutocompleteProvider;
 	editorTheme: EditorTheme;
 	getChatRenderSettings?: () => Partial<Omit<ChatMessageRenderOptions, "ui" | "cwd">> | undefined;
 	getCwd?: () => string;

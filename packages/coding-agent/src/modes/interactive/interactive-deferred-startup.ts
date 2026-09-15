@@ -47,7 +47,7 @@ InteractiveModeBase.prototype.ensureDeferredStartupComplete = async function (
 InteractiveModeBase.prototype.completeDeferredStartup = async function (this: InteractiveModeBase): Promise<void> {
 	try {
 		await this.bindCurrentSessionExtensions();
-		await this.session.reload({ reason: "startup" });
+		if (!(await this.runtimeHost?.completeStartup?.())) await this.session.reload({ reason: "startup" });
 		this.applyRuntimeSettings();
 		// Initial transcript rows precede deferred extension loading, so rebuild them
 		// against the new extension registry before releasing startup output.
@@ -80,6 +80,9 @@ InteractiveModeBase.prototype.completeDeferredStartup = async function (this: In
 		if (modelsJsonError) {
 			this.showError(`models.json error: ${modelsJsonError}`);
 		}
+		// Extension providers can introduce a `-fast` collision that did not exist at eager startup, so
+		// re-read; `reportModelCatalogWarning` suppresses a repeat of what startup already showed.
+		this.reportModelCatalogWarning(this.startupNoticesContainer);
 		void this.updateAvailableProviderCount().catch(() => {});
 		this.updateEditorBorderColor();
 		this.ui.requestRender();

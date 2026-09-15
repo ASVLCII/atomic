@@ -41,7 +41,7 @@ export type RunStatus = "pending" | "running" | "paused" | WorkflowExitStatus | 
 export type WorkflowActor = "user" | "agent";
 export type WorkflowDetailsMode = "named" | "inspection" | "control";
 export type WorkflowDetailsStatus = "accepted" | "running" | WorkflowExitStatus | "killed" | "noop";
-export type WorkflowAction = "list" | "get" | "inputs" | "run" | "status" | "interrupt" | "resume";
+export type WorkflowAction = "list" | "get" | "inputs" | "run" | "status" | "pause" | "resume";
 
 type WorkflowExitOutputValues<TOutputs extends WorkflowOutputValues = WorkflowOutputValues> = [keyof TOutputs] extends [
 	never,
@@ -150,15 +150,6 @@ export interface WorkflowScopedModel {
 	readonly model: WorkflowModelValue;
 	/** @deprecated Prefer suffixing model/fallbackModels entries with `:level`; removal is deferred. */
 	readonly thinkingLevel?: WorkflowThinkingLevel;
-}
-
-export interface WorkflowFastModeSettings extends WorkflowSerializableObject {
-	readonly enabled?: boolean;
-	readonly model?: string;
-}
-
-export interface WorkflowFastModeSettingsManager {
-	getCodexFastModeSettings(): WorkflowFastModeSettings;
 }
 
 export interface StageOptions<TSchemaDef extends TSchema | undefined = TSchema | undefined>
@@ -284,7 +275,6 @@ export interface StageSessionRuntime {
 	readonly messages: readonly WorkflowSerializableValue[];
 	readonly isStreaming: boolean;
 	readonly pendingMessageCount?: number;
-	readonly settingsManager?: WorkflowFastModeSettingsManager;
 	navigateTree(
 		targetId: string,
 		options?: {
@@ -305,7 +295,6 @@ export type StageSessionCreateOptions = StageOptions;
 
 export interface StageSessionCreateResult {
 	readonly session: StageSessionRuntime;
-	readonly settingsManager?: WorkflowFastModeSettingsManager;
 }
 
 export interface StageExecutionMeta {
@@ -403,7 +392,7 @@ export interface WorkflowTaskResult extends WorkflowTaskContext {
 	readonly sessionFile?: string;
 	readonly artifacts?: readonly WorkflowArtifact[];
 	readonly model?: string;
-	readonly fastMode?: boolean;
+	readonly thinkingLevel?: string;
 	readonly attemptedModels?: readonly string[];
 	readonly modelAttempts?: readonly WorkflowModelAttempt[];
 	readonly warnings?: readonly string[];
@@ -439,6 +428,8 @@ export interface WorkflowChainOptions extends WorkflowSharedTaskDefaults {
 export interface WorkflowParallelOptions extends WorkflowSharedTaskDefaults {
 	readonly concurrency?: number;
 	readonly failFast?: boolean;
+	/** Static discovery only: literal conservative stage names/globs for an otherwise opaque step array. */
+	readonly possibleStageNames?: readonly string[];
 }
 
 export type WorkflowTaskSessionOptions = StageOptions & WorkflowTaskSessionFields;

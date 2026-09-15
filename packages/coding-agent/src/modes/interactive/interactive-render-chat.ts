@@ -1,12 +1,13 @@
-import type { Usage } from "@bastani/pi-ai/compat";
+import type { AssistantMessage, Usage } from "@bastani/pi-ai/compat";
 import { CACHE_TTL_MS, collectCacheMisses } from "../../core/cache-stats.ts";
 import { markLifecycleTiming } from "../../core/lifecycle-timings.ts";
 import { VERBATIM_COMPACTION_PREFIX } from "../../core/messages.ts";
 import type { CustomEntry } from "../../core/session-manager.ts";
 import { buildContextEntries, type SessionEntry, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import { yieldToEventLoop } from "../../utils/event-loop.ts";
-import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.ts";
+import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.js";
 import { RemoteCustomMessageComponent, RemoteToolExecutionComponent } from "../interactive-engine/remote-renderer.ts";
+import { appendBoundedStderr } from "../rpc/rpc-client-process.js";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
@@ -36,24 +37,77 @@ import {
 	type VerbatimCompactionResult,
 } from "./interactive-mode-deps.ts";
 import type { InteractiveSubmission } from "./interactive-submission.ts";
+import { refreshInteractiveTasks } from "./interactive-task-projection.js";
 
-InteractiveModeBase.prototype.showStatus = function (this: InteractiveModeBase, message: string): void {
+InteractiveModeBase.prototype.maybeShowAssistantDiagnostics = function (
+	this: InteractiveModeBase,
+	message: AssistantMessage,
+): void {
+	if (!this.settingsManager.getShowCacheMissNotices()) return;
+
+	for (const diagnostic of message.diagnostics ?? []) {
+		if (diagnostic.type !== "anthropic_input_transformations") continue;
+		const count = diagnostic.details?.droppedBlockCount;
+		if (typeof count !== "number" || count <= 0) continue;
+		const reasons = Array.isArray(diagnostic.details?.reasons)
+			? diagnostic.details.reasons.filter((reason): reason is string => typeof reason === "string")
+			: [];
+		const paths = Array.isArray(diagnostic.details?.paths)
+			? diagnostic.details.paths.filter((path): path is string => typeof path === "string")
+			: [];
+		const noun = count === 1 ? "thinking block" : `${count} thinking blocks`;
+		const reason = reasons.length > 0 ? reasons.join(", ") : "unknown reason";
+		const location = paths.length > 0 ? ` at ${paths.join(", ")}` : "";
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(theme.fg("warning", `Anthropic dropped ${noun}: ${reason}${location}`), 1, 0),
+		);
+	}
+};
+
+// Weak keys leave cleared/rebuilt transcripts collectible without separate lifecycle state.
+// Only persistent diagnostic statuses participate; ordinary chat/status is never evicted.
+const diagnosticStatuses = new WeakMap<Component, { spacer: Spacer; bytes: number }>();
+const MAX_DIAGNOSTIC_STATUSES = 64;
+const MAX_DIAGNOSTIC_HISTORY_BYTES = 256 * 1024;
+
+InteractiveModeBase.prototype.showStatus = function (
+	this: InteractiveModeBase,
+	message: string,
+	persist = false,
+): void {
 	const children = this.chatContainer.children;
 	const last = children.length > 0 ? children[children.length - 1] : undefined;
 	const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
 
-	if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
+	if (!persist && last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
 		this.lastStatusText.setText(theme.fg("dim", message));
 		this.ui.requestRender();
 		return;
 	}
 
+	if (persist) message = appendBoundedStderr("", message);
 	const spacer = new Spacer(1);
 	const text = new Text(theme.fg("dim", message), 1, 0);
 	this.chatContainer.addChild(spacer);
 	this.chatContainer.addChild(text);
-	this.lastStatusSpacer = spacer;
-	this.lastStatusText = text;
+	this.lastStatusSpacer = persist ? undefined : spacer;
+	this.lastStatusText = persist ? undefined : text;
+	if (persist) {
+		diagnosticStatuses.set(text, { spacer, bytes: Buffer.byteLength(message) });
+		let count = 0;
+		let bytes = 0;
+		for (const child of [...children].reverse()) {
+			const diagnostic = diagnosticStatuses.get(child);
+			if (!diagnostic) continue;
+			count++;
+			bytes += diagnostic.bytes;
+			if (count > MAX_DIAGNOSTIC_STATUSES || bytes > MAX_DIAGNOSTIC_HISTORY_BYTES) {
+				this.chatContainer.removeChild(child);
+				this.chatContainer.removeChild(diagnostic.spacer);
+			}
+		}
+	}
 	this.ui.requestRender();
 };
 
@@ -426,6 +480,13 @@ InteractiveModeBase.prototype.renderSessionEntries = function (
 	}
 	flushMessages();
 	if (this.settingsManager.getShowCacheMissNotices()) {
+		for (const entry of sessionEntries) {
+			for (const message of sessionEntryToContextMessages(entry)) {
+				if (message.role === "assistant" && message.stopReason !== "aborted" && message.stopReason !== "error") {
+					this.maybeShowAssistantDiagnostics(message);
+				}
+			}
+		}
 		for (const miss of collectCacheMisses(sessionEntries, {
 			getModel: (provider, model) => this.session.modelRuntime.getModel(provider, model),
 		}).values()) {
@@ -472,6 +533,7 @@ InteractiveModeBase.prototype.renderInitialMessages = function (this: Interactiv
 	this.attachStartupNoticesContainer({ resetDetached: true });
 	const entries = buildContextEntries(this.sessionManager.getEntries(), this.sessionManager.getLeafId());
 	this.renderSessionEntries(entries, { updateFooter: true, populateHistory: true });
+	refreshInteractiveTasks(this);
 };
 
 InteractiveModeBase.prototype.getUserInput = async function (

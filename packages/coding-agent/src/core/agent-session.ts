@@ -26,6 +26,7 @@ import { agentSessionPromptMethods } from "./agent-session-prompt.ts";
 import { agentSessionRetryMethods } from "./agent-session-retry.ts";
 import { agentSessionStateMethods } from "./agent-session-state.ts";
 import { agentSessionSummaryMethods, type SessionSummaryRun } from "./agent-session-summary.ts";
+import { agentSessionTaskMethods } from "./agent-session-tasks.js";
 import { agentSessionToolHooksMethods } from "./agent-session-tool-hooks.ts";
 import { agentSessionToolRegistryMethods } from "./agent-session-tool-registry.ts";
 import { agentSessionTreeMethods } from "./agent-session-tree.ts";
@@ -46,7 +47,7 @@ import type {
 	SessionStartEvent,
 	SubagentChildPolicy,
 	ToolDefinition,
-} from "./extensions/index.ts";
+} from "./extensions/index.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRuntime } from "./model-runtime.js";
 import type { ResourceLoader } from "./resource-loader.ts";
@@ -112,6 +113,9 @@ class AgentSessionBase {
 	protected _admittedRecoveryTurn: Promise<void> | undefined = undefined;
 	protected _workflowStageDeliveryForwardTarget: AgentSessionInternalSurface | undefined = undefined;
 	protected _activeInterruptAbortMessage: string | undefined = undefined;
+	/** Priority input cancels the native operation, not the host-owned task. */
+	protected _priorityInterruptPending = false;
+	protected _activePromptCount = 0;
 	protected _pendingNextTurnMessages: CustomMessage[] = [];
 	/** Context-only custom messages queued during a run, flushed after the current turn's tool results. */
 	protected _pendingCustomMessages: CustomMessage[] = [];
@@ -141,6 +145,8 @@ class AgentSessionBase {
 	protected _stopAfterTurnBlockedContinuation = false;
 	protected _disposed = false;
 	protected _branchSummaryAbortController: AbortController | undefined = undefined;
+	/** Settles after the currently active branch-summary navigation finishes cleanup. */
+	protected _branchSummaryCompletion: Promise<void> | undefined = undefined;
 	protected _sessionSummaryAbortController: AbortController | undefined = undefined;
 	protected _sessionSummaryToken = 0;
 	/** The summary request currently in flight, published so a later launch can join it. */
@@ -186,6 +192,10 @@ class AgentSessionBase {
 	/** Protection claim on this session's temp tree and tool-results directory. */
 	protected _tempStorageLease: ProtectedPathLease | undefined;
 	protected _workflowStageAdmission: WorkflowStageAdmissionBoundary | undefined;
+	protected _subagentMessageAdmission: WorkflowStageAdmissionBoundary | undefined;
+	protected _agentTaskHost: import("./tasks/agent-adapter.js").AgentTaskHost | undefined;
+	protected _taskCompletionOutbox: import("./tasks/completion.js").TaskCompletionOutbox | undefined;
+	protected _taskAdmission: WorkflowStageAdmissionBoundary | undefined;
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
@@ -205,12 +215,37 @@ class AgentSessionBase {
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._orchestrationContext = config.orchestrationContext;
 		this._subagentPolicy = config.subagentPolicy;
+		if (config.subagentPolicy?.executionEnded !== undefined) {
+			// Reuse the stable-key admission/drain primitive, not workflow identity or task ownership.
+			const admission = WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch());
+			this._subagentMessageAdmission = admission;
+			this._subagentPolicy = {
+				...config.subagentPolicy,
+				messageAdmission: {
+					isOpen: () => admission.isOpen(),
+					run: (deliver) =>
+						admission.runMessageDelivery(deliver, () => {
+							throw new Error("Subagent execution is terminal and cannot accept messages");
+						}),
+				},
+			};
+			const ended = config.subagentPolicy.executionEnded;
+			if (ended.aborted) admission.seal();
+			else ended.addEventListener("abort", () => admission.seal(), { once: true });
+		}
 		this._systemPromptTransform = config.systemPromptTransform;
 		const stageContext =
 			config.orchestrationContext?.kind === "workflow-stage" ? config.orchestrationContext : undefined;
 		this._workflowStageAdmission =
 			stageContext?.messageAdmission?.boundary ??
 			(stageContext ? WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch()) : undefined);
+		if (stageContext) {
+			this._workflowStageAdmission?.bindTaskIdentity(
+				this.sessionManager.getSessionId(),
+				stageContext.workflowRunId,
+				stageContext.workflowStageId,
+			);
+		}
 		if (this._workflowStageAdmission && stageContext && stageContext.messageAdmission === undefined) {
 			(
 				stageContext as {
@@ -257,6 +292,7 @@ class AgentSessionBase {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
+		if (this._workflowStageAdmission?.hasAgentTaskHost()) internals.getAgentTaskHost();
 	}
 }
 
@@ -287,4 +323,5 @@ Object.assign(
 	agentSessionTreeMethods,
 	agentSessionExportMethods,
 	agentSessionSummaryMethods,
+	agentSessionTaskMethods,
 );

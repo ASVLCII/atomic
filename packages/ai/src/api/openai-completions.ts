@@ -187,6 +187,7 @@ type ResolvedOpenAICompletionsCompat = Omit<
 	| "deferredToolsMode"
 	| "supportsThinkingTokenBudget"
 	| "thinkingTokenBudgetField"
+	| "vllmPriority"
 	| "supportsTemperature"
 	| "supportsForcedToolChoice"
 > & {
@@ -194,6 +195,7 @@ type ResolvedOpenAICompletionsCompat = Omit<
 	deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
 	supportsThinkingTokenBudget?: OpenAICompletionsCompat["supportsThinkingTokenBudget"];
 	thinkingTokenBudgetField?: OpenAICompletionsCompat["thinkingTokenBudgetField"];
+	vllmPriority?: OpenAICompletionsCompat["vllmPriority"];
 	/** Optional so callers that build a resolved compat literal need not restate the defaults. */
 	supportsTemperature?: OpenAICompletionsCompat["supportsTemperature"];
 	supportsForcedToolChoice?: OpenAICompletionsCompat["supportsForcedToolChoice"];
@@ -802,15 +804,16 @@ function createClient(
 		Object.assign(headers, copilotHeaders);
 	}
 
+	const sessionAffinityHeaders: ProviderHeaders = {};
 	if (sessionId && compat.sendSessionAffinityHeaders) {
 		if (compat.sessionAffinityFormat === "openrouter") {
-			headers["x-session-id"] = sessionId;
+			sessionAffinityHeaders["x-session-id"] = sessionId;
 		} else {
 			if (compat.sessionAffinityFormat === "openai") {
-				headers.session_id = sessionId;
+				sessionAffinityHeaders.session_id = sessionId;
 			}
-			headers["x-client-request-id"] = sessionId;
-			headers["x-session-affinity"] = sessionId;
+			sessionAffinityHeaders["x-client-request-id"] = sessionId;
+			sessionAffinityHeaders["x-session-affinity"] = sessionId;
 		}
 	}
 
@@ -824,7 +827,8 @@ function createClient(
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
 		fetch,
-		defaultHeaders: headers,
+		// Affinity defaults yield to explicit model and request headers, including null suppression.
+		defaultHeaders: { ...sessionAffinityHeaders, ...headers },
 	});
 }
 
@@ -931,6 +935,11 @@ function buildParams(
 			}
 		}
 		params.tool_choice = options.toolChoice;
+	}
+
+	if (compat.vllmPriority !== undefined) {
+		const vllmParams = params as typeof params & { priority?: number };
+		vllmParams.priority = compat.vllmPriority;
 	}
 
 	const thinkingTokenBudgetField = resolveThinkingTokenBudgetField(compat);
@@ -1753,7 +1762,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
 		supportsOpenAIGrammarTools: false,
 		cacheControlFormat,
-		sendSessionAffinityHeaders: false,
+		sendSessionAffinityHeaders: isOpenRouter,
 		deferredToolsMode: undefined,
 		sessionAffinityFormat: isOpenRouter ? "openrouter" : "openai",
 		supportsLongCacheRetention: !(
@@ -1805,5 +1814,6 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		deferredToolsMode: model.compat.deferredToolsMode ?? detected.deferredToolsMode,
 		sessionAffinityFormat: model.compat.sessionAffinityFormat ?? detected.sessionAffinityFormat,
 		supportsLongCacheRetention: model.compat.supportsLongCacheRetention ?? detected.supportsLongCacheRetention,
+		vllmPriority: model.compat.vllmPriority,
 	};
 }

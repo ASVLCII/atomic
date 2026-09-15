@@ -1,13 +1,21 @@
+import { TERMINAL_CHILD_ASK_REFUSAL } from "../recipient-purpose.js";
 import type net from "node:net";
 import type { BrokerMessage, Message, SessionInfo } from "../types.js";
+import {
+	legacyWorkflowStageTargetMigrationHint,
+	parseLegacyWorkflowStageTarget,
+	parseWorkflowStageTarget,
+} from "../workflow-stage-target.js";
+import { normalizeGroup } from "../group.js";
 import { isMessage } from "./client-message-validation.js";
 import { resolveSessionTarget, sessionTargetFailureReason } from "../session-target.js";
 import { DeliveredMessageCache } from "./delivered-message-cache.js";
 import { buildMessageSendSignature } from "./send-signature.js";
 import { SupervisorChannelCache } from "./supervisor-channel.js";
 import { isVerticalBypass, sameGroup } from "./group-isolation.js";
-import { sessionsShareGroup } from "./group-membership.js";
+import { sessionGroups, sessionsShareGroup } from "./group-membership.js";
 import { PendingQuestionIndex } from "./pending-question-index.js";
+import { isAgentRecipient, NON_AGENT_RECIPIENT_REFUSAL } from "../recipient-purpose.js";
 
 export interface BrokerConnectedSession {
   socket: net.Socket;
@@ -28,18 +36,38 @@ export interface BrokerConnectedSession {
   supervisorOwnerToken?: string;
 }
 
+/** Immutable registration authority plus normalized memberships used when an accepted ask is rebound. */
+export function senderGroupIdentity(session: BrokerConnectedSession): string {
+	return JSON.stringify([
+		normalizeGroup(session.registrationGroup),
+		[...sessionGroups(session.info)].sort((left, right) => left.localeCompare(right)),
+	]);
+}
+
+
+/** Stable recipient authority used independently from the freshly resolved transport ID. */
+export function deliveryTargetIdentity(session: BrokerConnectedSession): string {
+	return session.registrationReturnAddress === undefined
+		? JSON.stringify(["session", session.info.id])
+		: JSON.stringify(["return", session.registrationReturnAddress, normalizeGroup(session.registrationGroup)]);
+}
 export interface PendingStageRoute {
   readonly socket: net.Socket;
   readonly from: BrokerConnectedSession;
-  readonly runId: string;
-  readonly stageKey: string;
+	readonly target: string;
   readonly message: Message;
   readonly attemptId?: string;
 	readonly liveTargetId?: string;
 	readonly signature?: string;
+	readonly resolveReplyTarget?: true;
 }
 
 export type PendingStageRouter = (route: PendingStageRoute) => boolean;
+export type ConfirmedMessageWriter = (
+	target: net.Socket,
+	message: BrokerMessage,
+	onSettled: (written: boolean) => void,
+) => void;
 
 export type LiveWorkflowStageResolver = (target: string) => BrokerConnectedSession | undefined;
 export type LiveWorkflowStageController = (
@@ -48,15 +76,7 @@ export type LiveWorkflowStageController = (
 	logicalTarget: string,
 ) => boolean;
 
-const WORKFLOW_RUN_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function parsePendingStageTarget(target: string): { runId: string; stageKey: string } | undefined {
-  const separator = target.indexOf(":");
-  if (separator < 0) return undefined;
-  const runId = target.slice(0, separator);
-  const stageKey = target.slice(separator + 1);
-  return WORKFLOW_RUN_ID_PATTERN.test(runId) && stageKey.length > 0 ? { runId, stageKey } : undefined;
-}
+export type LegacyWorkflowStageTargetResolver = (runId: string, stageKey: string) => string | undefined;
 export const PENDING_STAGE_ASK_REFUSAL =
   "Cannot ask a workflow stage whose session has not initialized. Use send; Atomic will queue the message until the stage session initializes.";
 
@@ -80,12 +100,21 @@ export function handleBrokerSend(
 	currentId: string | null,
 	sessions: Map<string, BrokerConnectedSession>,
 	deliveredMessages: DeliveredMessageCache,
-	write: (target: net.Socket, message: BrokerMessage) => void,
+	/**
+	 * Hand one frame to a socket. Returns whether the frame was actually written.
+	 * Durable acceptance is reserved before this call to close the restart window;
+	 * a `false` answer removes that exact reservation, while only `true` is
+	 * acknowledged to the sender.
+	 */
+	write: (target: net.Socket, message: BrokerMessage) => boolean,
 	supervisorCache: SupervisorChannelCache = new SupervisorChannelCache(),
 	pendingQuestions: PendingQuestionIndex = new PendingQuestionIndex(),
 	routePendingStage?: PendingStageRouter,
 	resolveLiveWorkflowStage?: LiveWorkflowStageResolver,
 	canControlLiveWorkflowStage?: LiveWorkflowStageController,
+	resolveLegacyWorkflowStageTarget?: LegacyWorkflowStageTargetResolver,
+	writeConfirmed?: ConfirmedMessageWriter,
+	isNonAgentWorkflowTarget?: (target: string) => boolean,
 ): void {
   const message = clientMessage.message;
   const messageId = wireMessageId(message);
@@ -99,15 +128,40 @@ export function handleBrokerSend(
     return;
   }
   const attemptId = typeof clientMessage.attemptId === "string" ? clientMessage.attemptId : undefined;
+  const hasLogicalTarget = Object.prototype.hasOwnProperty.call(clientMessage, "logicalTarget");
+  if (hasLogicalTarget && typeof clientMessage.logicalTarget !== "string") {
+    write(socket, { type: "delivery_failed", messageId, attemptId, reason: "Invalid logicalTarget format" });
+    return;
+  }
   if (typeof clientMessage.to !== "string" || !isMessage(message)) {
     write(socket, { type: "delivery_failed", messageId, attemptId, reason: "Invalid message format" });
     return;
   }
+  const hasRequirePendingReply = Object.prototype.hasOwnProperty.call(clientMessage, "requirePendingReply");
+  if (hasRequirePendingReply && clientMessage.requirePendingReply !== true) {
+    write(socket, { type: "delivery_failed", messageId, attemptId, reason: "Invalid requirePendingReply format" });
+    return;
+  }
+  const requirePendingReply = clientMessage.requirePendingReply === true;
+  const hasExpectedRecipientId = Object.prototype.hasOwnProperty.call(clientMessage, "expectedRecipientId");
+  if (hasExpectedRecipientId && (typeof clientMessage.expectedRecipientId !== "string" || !clientMessage.expectedRecipientId.trim())) {
+    write(socket, { type: "delivery_failed", messageId, attemptId, reason: "Invalid expectedRecipientId format" });
+    return;
+  }
+  const expectedRecipientId = hasExpectedRecipientId ? clientMessage.expectedRecipientId as string : undefined;
   if (Object.prototype.hasOwnProperty.call(clientMessage, "channel")) {
     write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: "Invalid channel" });
     return;
   }
   const supervisorSend = clientMessage.type === "supervisor_send";
+  if (requirePendingReply && (supervisorSend || message.replyTo === undefined || message.expectsReply === true)) {
+    write(socket, { type: "delivery_failed", messageId, attemptId, reason: "Invalid requirePendingReply message" });
+    return;
+  }
+  if (expectedRecipientId !== undefined && (supervisorSend || message.replyTo === undefined || message.expectsReply === true)) {
+    write(socket, { type: "delivery_failed", messageId, attemptId, reason: "Invalid expectedRecipientId message" });
+    return;
+  }
 
 
   const fromSession = currentId ? sessions.get(currentId) : undefined;
@@ -115,22 +169,17 @@ export function handleBrokerSend(
     write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: "Sender session not found" });
     return;
   }
-	const signature = buildMessageSendSignature(clientMessage.to, message, fromSession.info.id);
-	const deliveredMatch = deliveredMessages.lookup(message.id, signature);
-	if (deliveredMatch === "match") {
-		write(socket, { type: "delivered", messageId: message.id, attemptId });
-		return;
-	}
-	if (deliveredMatch === "conflict") {
-		write(socket, {
-			type: "delivery_failed",
-			messageId: message.id,
-			attemptId,
-			reason: `Intercom message ID '${message.id}' was already delivered with a different target or payload`,
-			reasonCode: "message_id_conflict",
-		});
-		return;
-	}
+	const senderIdentity = fromSession.registrationReturnAddress ?? fromSession.info.id;
+	const logicalTarget = typeof clientMessage.logicalTarget === "string" ? clientMessage.logicalTarget : clientMessage.to;
+	const messageSignature = buildMessageSendSignature(logicalTarget, message, senderIdentity);
+	const baseSignature = expectedRecipientId === undefined ? messageSignature : JSON.stringify({ expectedRecipientId, messageSignature });
+	const signature = requirePendingReply
+		? JSON.stringify({
+				requirePendingReply: true,
+				senderGroupIdentity: senderGroupIdentity(fromSession),
+				baseSignature,
+			})
+		: baseSignature;
   const trimmedTo = clientMessage.to.trim();
   if (supervisorSend && !fromSession.supervisorId) {
     write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: "Supervisor channel is not authorized" });
@@ -140,6 +189,34 @@ export function handleBrokerSend(
     write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: "Supervisor target does not match the authorized relationship" });
     return;
   }
+	const workflowTarget = parseWorkflowStageTarget(trimmedTo);
+	if (isNonAgentWorkflowTarget?.(trimmedTo)) {
+		write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: NON_AGENT_RECIPIENT_REFUSAL });
+		return;
+	}
+	// Slice 3 (D3): asks to pattern/future stage targets stay refused; `send` is queued
+	// sticky by the workflow host, so the refusal must happen before any live delivery.
+	if (workflowTarget !== undefined && workflowTarget.kind !== "path" && message.expectsReply === true) {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			...(attemptId ? { attemptId } : {}),
+			reason: PENDING_STAGE_ASK_REFUSAL,
+		});
+		return;
+	}
+	const legacyTarget = parseLegacyWorkflowStageTarget(trimmedTo);
+	if (legacyTarget !== undefined) {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			...(attemptId ? { attemptId } : {}),
+			reason: legacyWorkflowStageTargetMigrationHint(
+				resolveLegacyWorkflowStageTarget?.(legacyTarget.runId, legacyTarget.stageKey),
+			),
+		});
+		return;
+	}
 
 
   // Exact-id targeting always resolves against the full pool so a cross-group id
@@ -148,27 +225,85 @@ export function handleBrokerSend(
 	const liveWorkflowTarget = sessions.has(trimmedTo) ? undefined : resolveLiveWorkflowStage?.(trimmedTo);
 	const exactIdTarget = sessions.get(trimmedTo) ?? liveWorkflowTarget;
   const reachableAcrossGroups = supervisorSend || Boolean(message.replyTo);
-  const candidates = reachableAcrossGroups
-    ? Array.from(sessions.values(), (session) => session.info)
-    : Array.from(sessions.values(), (session) => session.info).filter(
-        (info) => sessionsShareGroup(info, fromSession.info),
-      );
+  const visibleCandidates = Array.from(sessions.values(), (session) => session.info).filter(
+	(info) => reachableAcrossGroups || sessionsShareGroup(info, fromSession.info),
+  );
+  const candidates = visibleCandidates.filter(isAgentRecipient);
   const resolution = exactIdTarget
     ? ({ kind: "resolved", session: exactIdTarget.info } as const)
     : resolveSessionTarget(candidates, trimmedTo);
+  if (expectedRecipientId !== undefined && (resolution.kind !== "resolved" || resolution.session.id !== expectedRecipientId)) {
+    write(socket, { type: "delivery_failed", messageId, attemptId,
+      reason: resolution.kind === "resolved" ? "Reply target does not match the expected recipient" : sessionTargetFailureReason(clientMessage.to, resolution),
+    });
+    return;
+  }
   if (resolution.kind === "resolved") {
     const target = sessions.get(resolution.session.id);
     if (!target) {
-      write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: "Session not found" });
+      write(socket, {
+        type: "delivery_failed",
+        messageId: message.id,
+        attemptId,
+        reason: "Session not found",
+        ...(requirePendingReply ? { reasonCode: "session_not_found" as const } : {}),
+      });
       return;
     }
+	if (!isAgentRecipient(target.info)) {
+		write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: NON_AGENT_RECIPIENT_REFUSAL });
+		return;
+	}
     if (target.info.id === fromSession.info.id) {
       write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: "Cannot message the current session" });
       return;
     }
+	const targetIdentity = deliveryTargetIdentity(target);
+	const deliveredMatch = deliveredMessages.lookupForTarget(message.id, signature, targetIdentity);
+	if (requirePendingReply && deliveredMatch === "match") {
+		write(socket, { type: "delivered", messageId: message.id, attemptId });
+		return;
+	}
+	if (requirePendingReply && deliveredMatch === "conflict") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: `Intercom message ID '${message.id}' was already delivered with a different target or payload`,
+			reasonCode: "message_id_conflict",
+		});
+		return;
+	}
+	if (requirePendingReply && deliveredMatch === "invalid") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Intercom accepted-delivery authority is invalid; refusing possible duplicate delivery",
+		});
+		return;
+	}
+	if (requirePendingReply && deliveredMatch === "uncertain") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Intercom cannot prove whether this reserved operation reached its recipient; refusing redelivery",
+		});
+		return;
+	}
 	const correlatedReply =
 		message.replyTo !== undefined &&
 		pendingQuestions.matchesReply(fromSession.info.id, target.info.id, message.replyTo);
+	if (requirePendingReply && !correlatedReply) {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Pending question route does not authorize this public reply",
+		});
+		return;
+	}
 	const bypass =
 		supervisorSend ||
 		isVerticalBypass({
@@ -188,49 +323,228 @@ export function handleBrokerSend(
       });
       return;
     }
-		const liveTarget = parsePendingStageTarget(trimmedTo);
+  if (message.expectsReply === true && target.info.replyCapability === "terminal") {
+    write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: TERMINAL_CHILD_ASK_REFUSAL });
+    return;
+  }
+	if (deliveredMatch === "match") {
+		if (message.expectsReply === true) {
+			const acceptedQuestionTarget = deliveredMessages.lookupQuestionTarget(
+				message.id,
+				signature,
+				senderGroupIdentity(fromSession),
+			);
+			if (acceptedQuestionTarget === undefined) {
+				write(socket, {
+					type: "delivery_failed",
+					messageId: message.id,
+					attemptId,
+					reason: "Accepted Intercom question route could not be securely rebound",
+				});
+				return;
+			}
+			pendingQuestions.record(fromSession.info.id, target.info.id, message.id);
+			if (clientMessage.resolveReplyTarget === true && attemptId !== undefined)
+				write(socket, { type: "question_target", messageId: message.id, attemptId, sessionId: target.info.id });
+		}
+		write(socket, { type: "delivered", messageId: message.id, attemptId });
+		return;
+	}
+	if (deliveredMatch === "conflict") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: `Intercom message ID '${message.id}' was already delivered with a different target or payload`,
+			reasonCode: "message_id_conflict",
+		});
+		return;
+	}
+	if (deliveredMatch === "invalid") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Intercom accepted-delivery authority is invalid; refusing possible duplicate delivery",
+		});
+		return;
+	}
+	if (deliveredMatch === "uncertain") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Intercom cannot prove whether this reserved operation reached its recipient; refusing redelivery",
+		});
+		return;
+	}
 		if (
 			liveWorkflowTarget !== undefined &&
-			liveTarget !== undefined &&
+			workflowTarget !== undefined &&
 			routePendingStage?.({
 				socket,
 				from: fromSession,
-				...liveTarget,
+				target: trimmedTo,
 				message,
 				...(attemptId ? { attemptId } : {}),
 				liveTargetId: target.info.id,
 				signature,
+				...(clientMessage.resolveReplyTarget === true ? { resolveReplyTarget: true } : {}),
 			})
 		) {
 			return;
 		}
-    write(target.socket, supervisorSend
-      ? { type: "message", from: fromSession.info, message, channel: "supervisor" }
-      : { type: "message", from: fromSession.info, message });
-    deliveredMessages.record(message.id, signature);
-    if (message.expectsReply === true) {
-      pendingQuestions.record(fromSession.info.id, target.info.id, message.id);
-    }
-    if (message.replyTo !== undefined) {
-      pendingQuestions.clearReply(fromSession.info.id, target.info.id, message.replyTo);
-    }
-    if (supervisorSend) supervisorCache.record(message.id, fromSession.info.id, target.info.id);
-    write(socket, { type: "delivered", messageId: message.id, attemptId });
-    return;
-  }
-  if (resolution.kind === "not_found" && !supervisorSend && routePendingStage !== undefined) {
-    const pendingTarget = parsePendingStageTarget(trimmedTo);
-    if (
-      pendingTarget !== undefined &&
-      routePendingStage({ socket, from: fromSession, ...pendingTarget, message, ...(attemptId ? { attemptId } : {}) })
-    ) {
+    const outbound = supervisorSend
+      ? ({ type: "message", from: fromSession.info, message, channel: "supervisor" } as const)
+      : ({ type: "message", from: fromSession.info, message } as const);
+    const failDelivery = (): void => {
+	  if (reservation === "recorded") deliveredMessages.forget(message.id, signature);
+      write(socket, {
+        type: "delivery_failed",
+        messageId: message.id,
+        attemptId,
+        reason: "Session not found",
+        ...(requirePendingReply ? { reasonCode: "session_not_found" as const } : {}),
+      });
+    };
+	const reservation = message.expectsReply === true
+		? deliveredMessages.reserveQuestion(
+			message.id,
+			signature,
+			{
+				targetSessionId: target.info.id,
+				senderGroupIdentity: senderGroupIdentity(fromSession),
+			},
+			Date.now(),
+			targetIdentity,
+		)
+		: deliveredMessages.reserve(message.id, signature, Date.now(), targetIdentity);
+	if (reservation === "match") {
+		if (
+			message.expectsReply === true &&
+			deliveredMessages.lookupQuestionTarget(
+				message.id,
+				signature,
+				senderGroupIdentity(fromSession),
+			) === undefined
+		) {
+			write(socket, {
+				type: "delivery_failed",
+				messageId: message.id,
+				attemptId,
+				reason: "Accepted Intercom question route could not be securely rebound",
+			});
+			return;
+		}
+		if (message.expectsReply === true) pendingQuestions.record(fromSession.info.id, target.info.id, message.id);
+		if (message.expectsReply === true && clientMessage.resolveReplyTarget === true && attemptId !== undefined)
+			write(socket, { type: "question_target", messageId: message.id, attemptId, sessionId: target.info.id });
+		write(socket, { type: "delivered", messageId: message.id, attemptId });
+		return;
+	}
+	if (reservation !== "recorded") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: reservation === "capacity"
+				? "Intercom accepted-delivery capacity is full; refusing delivery without evicting live retry authority"
+				: reservation === "uncertain"
+					? "Intercom cannot prove whether this reserved operation reached its recipient; refusing redelivery"
+					: "Intercom accepted-delivery authority changed before forwarding; refusing possible duplicate delivery",
+			...(reservation === "conflict" ? { reasonCode: "message_id_conflict" as const } : {}),
+		});
+		return;
+	}
+	if (message.expectsReply === true && clientMessage.resolveReplyTarget === true && attemptId !== undefined)
+		write(socket, { type: "question_target", messageId: message.id, attemptId, sessionId: target.info.id });
+    const finishDelivery = (): void => {
+	  let accepted: ReturnType<DeliveredMessageCache["accept"]>;
+	  try {
+		accepted = deliveredMessages.accept(message.id, signature, targetIdentity);
+	  } catch {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Intercom could not durably confirm the forwarded operation; refusing a possibly unsafe retry",
+		});
+		return;
+	  }
+	  if (accepted !== "accepted") {
+		write(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			attemptId,
+			reason: "Intercom could not durably confirm the forwarded operation; refusing a possibly unsafe retry",
+			...(accepted === "conflict" ? { reasonCode: "message_id_conflict" as const } : {}),
+		});
+		return;
+	  }
+      // A terminal presence frame can arrive while the socket write callback is pending.
+      // Retain accepted-delivery authority, but never open a reply route after termination.
+      if (message.expectsReply === true && target.info.replyCapability === "terminal") {
+        write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: TERMINAL_CHILD_ASK_REFUSAL });
+        return;
+      }
+      if (message.expectsReply === true && sessions.get(target.info.id) !== target) {
+        write(socket, { type: "delivery_failed", messageId: message.id, attemptId,
+          reason: `Session "${target.info.name ?? target.info.id}" disconnected before replying` });
+        return;
+      }
+      if (message.expectsReply === true) {
+        pendingQuestions.record(fromSession.info.id, target.info.id, message.id);
+	  }
+      if (message.replyTo !== undefined) {
+        pendingQuestions.clearReply(fromSession.info.id, target.info.id, message.replyTo);
+      }
+      if (supervisorSend) supervisorCache.record(message.id, fromSession.info.id, target.info.id);
+      write(socket, { type: "delivered", messageId: message.id, attemptId });
+    };
+    if (writeConfirmed !== undefined) {
+      writeConfirmed(target.socket, outbound, (written) => {
+        if (written) finishDelivery();
+        else failDelivery();
+      });
       return;
     }
+    if (!write(target.socket, outbound)) {
+      // Nothing was written, so the message id and reply authorization remain
+      // available for an honest retry.
+      failDelivery();
+      return;
+    }
+    finishDelivery();
+    return;
   }
+	if (resolution.kind === "not_found" && visibleCandidates.some((info) => !isAgentRecipient(info) && info.name?.toLowerCase() === trimmedTo.toLowerCase())) {
+		write(socket, { type: "delivery_failed", messageId: message.id, attemptId, reason: NON_AGENT_RECIPIENT_REFUSAL });
+		return;
+	}
+	if (
+		resolution.kind === "not_found" &&
+		!supervisorSend &&
+		routePendingStage !== undefined &&
+		workflowTarget !== undefined &&
+		routePendingStage({
+			socket,
+			from: fromSession,
+			target: trimmedTo,
+			message,
+			...(attemptId ? { attemptId } : {}),
+			signature,
+			...(clientMessage.resolveReplyTarget === true ? { resolveReplyTarget: true } : {}),
+		})
+	) {
+		return;
+	}
   write(socket, {
     type: "delivery_failed",
     messageId: message.id,
     attemptId,
     reason: sessionTargetFailureReason(clientMessage.to, resolution),
+		...(requirePendingReply && resolution.kind === "not_found"
+			? { reasonCode: "session_not_found" as const }
+			: {}),
   });
 }
