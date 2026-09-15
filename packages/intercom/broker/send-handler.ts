@@ -234,10 +234,19 @@ export function handleBrokerSend(
   );
   const candidates = visibleCandidates.filter(isAgentRecipient);
   // Preserve explicit named-reply collision rejection without exposing hidden identities (#2603).
-  if (expectedRecipientId !== undefined && !exactIdTarget && Array.from(sessions.values()).some(
-    ({ info }) => isAgentRecipient(info) && info.name?.toLowerCase() === trimmedTo.toLowerCase() &&
-      !candidates.some((candidate) => candidate.id === info.id),
-  )) {
+  const originalSelector = logicalTarget.trim();
+  const hiddenReplyCollision = (selector: string) =>
+    Array.from(sessions.values()).some(
+      ({ info }) =>
+        isAgentRecipient(info) &&
+        (info.id === selector || info.name?.toLowerCase() === selector.toLowerCase()) &&
+        !candidates.some((candidate) => candidate.id === info.id),
+    );
+  if (
+    expectedRecipientId !== undefined &&
+    ((!exactIdTarget && hiddenReplyCollision(trimmedTo)) ||
+      (originalSelector !== trimmedTo && hiddenReplyCollision(originalSelector)))
+  ) {
     write(socket, { type: "delivery_failed", messageId, attemptId,
       reason: "Reply target cannot be resolved safely; use the exact sender ID",
     });

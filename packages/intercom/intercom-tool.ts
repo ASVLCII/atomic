@@ -1001,7 +1001,17 @@ one shared membership; contact_supervisor remains the only cross-group path.`,
               if (replyTarget.kind === "resolved" && replyTarget.session.id !== route.senderId) {
                 throw new Error("Reply target cannot be resolved safely; use the exact sender ID");
               }
-              if (replyTarget.kind === "resolved") replySendTo = replyTarget.session.id;
+              if (replyTarget.kind === "resolved") {
+                const trimmedTo = to.trim();
+                const exactId = replyTarget.session.id === trimmedTo;
+                const exactName =
+                  replyTarget.session.name !== undefined &&
+                  replyTarget.session.name.toLowerCase() === trimmedTo.toLowerCase();
+                // Exact IDs and names must reach the broker unchanged so hidden
+                // collisions can be refused. Genuine unique UUID prefixes still
+                // canonicalize to the stored session ID.
+                if (!exactId && !exactName) replySendTo = replyTarget.session.id;
+              }
             }
             const replyLogicalTarget = to ?? route.senderId;
             const displayTarget = route.senderName || route.senderId;

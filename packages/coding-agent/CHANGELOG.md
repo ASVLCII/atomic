@@ -10,7 +10,7 @@
 
 - Stage-scoped durable workflow resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
-- Explicit Intercom reply UUID prefixes keep exact name and custom-ID precedence, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Explicit Intercom reply names and full session IDs keep their original identity through broker collision checks, unique UUID prefixes still canonicalize to the stored session ID, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
 ## [0.9.20-alpha.2] - 2026-09-15
 

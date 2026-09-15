@@ -12,7 +12,7 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 
 - UUID-prefix targeting now keeps reply discovery within authorized relationships, resolves pending ask UUID prefixes before reply fallback, and accepts an isolated child's authorized supervisor prefix ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
-- Explicit reply UUID prefixes resolve against authorized sessions so exact names and custom IDs keep precedence, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Explicit reply names and full session IDs keep their original identity through broker collision checks, unique UUID prefixes still canonicalize to the stored session ID, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

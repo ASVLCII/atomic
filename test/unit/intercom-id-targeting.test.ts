@@ -499,6 +499,27 @@ describe("Intercom full session ID targeting", () => {
 		assert.equal(replies.listPending().length, 0);
 	});
 
+	test("explicit reply names and full IDs keep their original selector", async () => {
+		// Regression: #2603 — blanket canonicalization bypassed hidden broker collisions.
+		const sender = session("ee903b5c-1111-4222-8333-123456789abc", "Parent");
+		for (const to of [sender.id, "Parent", "parent"]) {
+			const replies = new ReplyTracker();
+			replies.recordIncomingMessage(sender, ask("question-sender"));
+			const current = toolFixture(replies);
+			const result = await current.tool.execute(
+				`reply-original-${to}`,
+				{ action: "reply", to, message: "answer" },
+				undefined,
+				undefined,
+				context,
+			);
+			assert.equal(result.isError, false, `${to}: ${result.content[0]?.text}`);
+			assert.equal(current.sent.length, 1, to);
+			assert.equal(current.sent[0]?.to, to);
+			assert.equal(replies.listPending().length, 0, to);
+		}
+	});
+
 	test("an unknown target is not found", async () => {
 		const self = session("self-session-id", "self");
 		const recipient = session("ff014c6d-1111-4222-8333-123456789abc", "recipient");
