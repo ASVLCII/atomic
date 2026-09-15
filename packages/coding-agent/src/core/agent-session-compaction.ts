@@ -12,7 +12,6 @@ import {
 	getKeptTailTokenEstimate,
 	prepareCompactionBoundary,
 	runVerbatimCompaction,
-	widenToWholeContextStats,
 	VERBATIM_COMPACTION_PROMPT_VERSION,
 	VERBATIM_COMPACTION_STRATEGY,
 	type VerbatimCompactionDetails,
@@ -20,6 +19,7 @@ import {
 	type VerbatimCompactionPreparation,
 	type VerbatimCompactionResult,
 	type VerbatimCompactionStats,
+	widenToWholeContextStats,
 } from "./compaction/index.ts";
 import type {
 	SessionBeforeCompactEvent,
@@ -77,8 +77,7 @@ function extensionStats(preparation: VerbatimCompactionPreparation, compactedTex
 			rangeCount: 0,
 			tokensBefore,
 			tokensAfter,
-			percentReduction:
-				tokensBefore === 0 ? 0 : Math.round((1 - tokensAfter / tokensBefore) * 1000) / 10,
+			percentReduction: tokensBefore === 0 ? 0 : Math.round((1 - tokensAfter / tokensBefore) * 1000) / 10,
 		},
 		getKeptTailTokenEstimate(preparation),
 		true,
