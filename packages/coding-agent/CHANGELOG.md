@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bundled integration documentation is discoverable under the same `docs/` root in npm and binary installations, including the MCP setup guide at `docs/mcp.md`.
+
 ## [0.9.20-alpha.1] - 2026-09-14
 
 ### Fixed
