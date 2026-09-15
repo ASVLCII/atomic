@@ -207,7 +207,9 @@ Diagnostic categories distinguish malformed output, valid output with no usable 
 
 Interactive main chat and attached workflow stage chat treat `compaction_end` as the authority for cancellation and failure UI. A failed or cancelled `/compact` stops its spinner, shows the event-provided status or diagnostic path without a duplicate stack trace, writes no boundary, and leaves the session usable for another `/compact` attempt or a normal follow-up turn.
 
-Context thresholds and persisted token-reduction statistics use API-aware normalized usage. OpenAI Responses, Codex Responses, and OpenAI Completions sum uncached input plus cache-read/cache-write partitions. Anthropic Messages alone applies the mirrored-cache guard needed by compatible endpoints that duplicate the same prompt tokens across `input` and cache fields.
+Context thresholds and the Compacted from token count use API-aware normalized usage. OpenAI Responses, Codex Responses, and OpenAI Completions sum uncached input plus cache-read/cache-write partitions. Anthropic Messages alone applies the mirrored-cache guard needed by compatible endpoints that duplicate the same prompt tokens across `input` and cache fields.
+
+Persisted `stats.tokensBefore`, `stats.tokensAfter`, and `percentReduction` are symmetric heuristic estimates of the compactable region plus the kept tail. They are separate from the provider-aware `tokensBefore` on the compaction entry, which is used only for budgeting and display. If the reconstructed text estimates larger than the original region, `percentReduction` is negative.
 
 ## Persistence and resume
 
