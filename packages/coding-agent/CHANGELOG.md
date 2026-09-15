@@ -18,6 +18,7 @@
 - Live executor resume allows up to 10 seconds for database confirmation instead of using the 500ms pause acknowledgement budget, avoiding false timeouts on healthy remote PostgreSQL connections ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Keep ready shared PostgreSQL running across Atomic client exit and reload, with installation-independent cluster ownership records and consumer leases ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Managed PostgreSQL verifies server identity and SQL readiness, supports `ATOMIC_POSTGRES_PORT`, and shares an available actual port across sessions without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 
 ## [0.9.20-alpha.2] - 2026-09-15
 
