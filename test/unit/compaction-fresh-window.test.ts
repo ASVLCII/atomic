@@ -78,8 +78,8 @@ test("the preserve_recent tail is kept when it fits under the hard input limit",
 });
 
 test("the tail is dropped only when keeping it would still exceed the hard input limit", async () => {
-	// tokensBefore far exceeds the region estimate, so the tail alone is huge.
-	const prep = preparation({ region: region(40), tokensBefore: 500_000 });
+	// Independent registered tail larger than the 1_000-token fixture window.
+	const prep = preparation({ region: region(40), tokensBefore: 500_000, keptTailTokens: 499_840 });
 	const stream = scriptedStream({ default: [{ errorMessage: "429 Too Many Requests" }] });
 	const result = await runVerbatimCompaction(
 		prep,
@@ -118,8 +118,19 @@ test("load-bearing urgency reaches the fresh rung when every model fails", async
 test("a load-bearing fresh rung reports the dropped tail so persistence clears the boundary", async () => {
 	const stream = scriptedStream({ default: [{ errorMessage: "insufficient_quota" }] });
 	const result = await runVerbatimCompaction(
-		preparation({ tokensBefore: 500_000 }),
+		preparation({ tokensBefore: 500_000, keptTailTokens: 499_840 }),
 		testModel({ contextWindow: 1_000 }),
+		runRequest({ streamFn: stream.streamFn, urgency: "load_bearing" }),
+	);
+	assert.equal(result.rung, "fresh");
+	assert.equal(result.keptTail, false);
+});
+
+test("an unregistered kept tail is dropped conservatively on the fresh rung (P1 regression #3010)", async () => {
+	const stream = scriptedStream({ default: [{ errorMessage: "429 Too Many Requests" }] });
+	const result = await runVerbatimCompaction(
+		preparation({ keptTailMessageCount: 2, keptTailTokens: null }),
+		testModel(),
 		runRequest({ streamFn: stream.streamFn, urgency: "load_bearing" }),
 	);
 	assert.equal(result.rung, "fresh");

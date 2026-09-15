@@ -7,6 +7,7 @@
 import type { Api, AssistantMessage, Model, SimpleStreamOptions, Usage } from "@bastani/pi-ai/compat";
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../packages/coding-agent/src/core/compaction/compaction.js";
+import { setKeptTailTokenEstimate } from "../../packages/coding-agent/src/core/compaction/compaction-boundary.js";
 import type { CompactionRunRequest } from "../../packages/coding-agent/src/core/compaction/compaction-runner.js";
 import type {
 	BorrowedPlanner,
@@ -49,9 +50,21 @@ export function region(lineCount = 60, protectedLines: number[] = []): NumberedR
 	} as NumberedRegion;
 }
 
-export function preparation(overrides: Partial<VerbatimCompactionPreparation> = {}): VerbatimCompactionPreparation {
-	const built = overrides.region ?? region();
-	return {
+/**
+ * Independent tail estimate for a 2-message fixture tail. Matches the package
+ * suite's registered value. Must not be derived from `tokensBefore - region`.
+ */
+export const KEPT_TAIL_TOKENS = 40;
+
+/** Fixture-only override. `keptTailTokens: null` leaves the tail unregistered. */
+export type PreparationOverrides = Partial<VerbatimCompactionPreparation> & {
+	keptTailTokens?: number | null;
+};
+
+export function preparation(overrides: PreparationOverrides = {}): VerbatimCompactionPreparation {
+	const { keptTailTokens = KEPT_TAIL_TOKENS, ...prepOverrides } = overrides;
+	const built = prepOverrides.region ?? region();
+	const prep: VerbatimCompactionPreparation = {
 		firstKeptEntryId: "tail-1",
 		region: built,
 		regionEntryIds: ["e1", "e2"],
@@ -59,8 +72,12 @@ export function preparation(overrides: Partial<VerbatimCompactionPreparation> = 
 		tokensBefore: 10_000,
 		parameters: PARAMETERS,
 		settings: DEFAULT_COMPACTION_SETTINGS,
-		...overrides,
+		...prepOverrides,
 	};
+	if (keptTailTokens !== null) {
+		setKeptTailTokenEstimate(prep, keptTailTokens);
+	}
+	return prep;
 }
 
 const ZERO_USAGE: Usage = {
