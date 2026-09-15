@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { Component, Terminal, TUI } from "@earendil-works/pi-tui";
 import {
 	getKeybindings,
@@ -113,7 +114,7 @@ test("/settings renders keybinding guidance for the active agent directory", () 
 	const rendered = stripTerminalSequences(selector.getSettingsList().render(160).join("\n"));
 
 	expect(rendered).toContain("Keybindings");
-	expect(rendered).toContain(`${agentDir}\\keybindings.json`);
+	expect(rendered).toContain(path.join(agentDir, "keybindings.json"));
 	expect(rendered).toContain("/reload");
 	expect(rendered).toContain("/hotkeys shows common active and extension shortcuts");
 	expect(rendered).toContain("Keybindings documentation is the complete reference");
