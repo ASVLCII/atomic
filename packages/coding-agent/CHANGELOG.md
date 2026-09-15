@@ -6,6 +6,10 @@
 
 - Session, Workflow, and Intercom UUID selectors accept unique 8-character hexadecimal prefixes while preserving exact custom IDs and visibility boundaries ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
+### Fixed
+
+- Stage-scoped durable workflow resume now refuses before dispatch instead of resuming the whole root, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
 ## [0.9.20-alpha.2] - 2026-09-15
 
 ### Fixed

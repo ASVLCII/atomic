@@ -6,6 +6,7 @@ import { isWorkflowRunResumable } from "../durable/resume-eligibility.js";
 import { type DurableWorkflowDeleteOutcome, deleteDurableWorkflowIfSafe } from "../durable/retention-policy.js";
 import type { ResumableWorkflowEntry } from "../durable/types.js";
 import { resolveRunIdTarget } from "../shared/run-id.js";
+import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import { store } from "../shared/store.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import { workflowRunResumeCandidate } from "../shared/workflow-artifacts.js";
@@ -43,6 +44,10 @@ export type WorkflowResumeTargetResolution =
 	| { readonly kind: "malformed"; readonly message: string }
 	| { readonly kind: "ambiguous"; readonly message: string }
 	| { readonly kind: "not_found" };
+
+export function stageScopedDurableResumeMessage(workflowId: string): string {
+	return `Stage-scoped resume is not supported for durable workflow ${workflowId}. Omit the stage selector to resume the whole run.`;
+}
 
 export async function prepareWorkflowResumeCatalog(
 	runtime: ExtensionRuntime,
@@ -191,7 +196,8 @@ export function resolveWorkflowResumeTarget(
 			targets.set(entry.workflowId, { kind: "completed", workflowId: entry.workflowId, name: entry.name });
 		}
 	}
-	for (const run of liveRuns.filter(isExplicitResumeCandidate)) {
+	// Nested children stay reachable by exact id; prefix resume uses the top-level namespace.
+	for (const run of topLevelWorkflowRuns(liveRuns).filter(isExplicitResumeCandidate)) {
 		targets.set(run.id, {
 			kind: run.status === "completed" ? "completed" : "live",
 			workflowId: run.id,

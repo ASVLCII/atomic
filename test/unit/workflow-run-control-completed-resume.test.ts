@@ -17,10 +17,12 @@ import {
 	handleDurableResume,
 	prepareWorkflowResumeCatalog,
 	resolveWorkflowResumeTarget,
+	stageScopedDurableResumeMessage,
 	type WorkflowRunControlDeps,
 } from "../../packages/workflows/src/extension/workflow-durable-resume-command.js";
 import { collectResumePickerLiveRuns } from "../../packages/workflows/src/extension/workflow-resume-picker-rows.js";
 import { handleRunControlCommand } from "../../packages/workflows/src/extension/workflow-run-control-command.js";
+import { workflowResumeAction } from "../../packages/workflows/src/extension/workflow-tool-control.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
 import { ENV_WORKFLOW_ARTIFACT_DIR } from "../../packages/workflows/src/shared/workflow-artifacts.js";
 import { testRunId } from "../helpers/run-id.js";
@@ -109,17 +111,38 @@ async function resume(
 	target: string,
 	runtime: ExtensionRuntime,
 	opened: string[] = [],
+	rest: readonly string[] = [],
 ): Promise<{ messages: string[]; errors: string[] }> {
 	const messages: string[] = [];
 	const errors: string[] = [];
 	await handleRunControlCommand(
 		"resume",
-		[target],
+		[target, ...rest],
 		{ hasUI: true, ui: { notify: () => undefined } },
 		{ info: (message) => messages.push(message), error: (message) => errors.push(message) },
 		commandDeps(runtime, opened),
 	);
 	return { messages, errors };
+}
+
+function toolResumeDeps(runtime: ExtensionRuntime) {
+	return {
+		getRuntime: () => runtime,
+		policy: {} as never,
+		ensureWorkflowResourcesLoaded: () => undefined,
+	};
+}
+
+function pausedDurableEntry(workflowId: string, name = "fixture"): ResumableWorkflowEntry {
+	return {
+		workflowId,
+		name,
+		status: "paused",
+		completedCheckpoints: 1,
+		pendingPrompts: 0,
+		createdAt: 1,
+		updatedAt: 2,
+	};
 }
 
 test("resume target detects UUID prefix collisions across durable and completed catalogs", () => {
@@ -146,6 +169,231 @@ test("resume target detects UUID prefix collisions across durable and completed 
 		assert.match(resolution.message, new RegExp(durableId));
 		assert.match(resolution.message, new RegExp(completedId));
 	}
+});
+
+describe("durable prefix resume namespace and stage scope", () => {
+	const root = "2603abcd-1111-4222-8333-123456789abc";
+	const nestedChild = "2603abcd-2222-4222-8333-123456789abc";
+
+	test("prefix resume ignores a nested child that shares a completed root prefix", () => {
+		// Regression: #2603 — nested children are not root resume candidates.
+		store.recordRunStart({
+			id: nestedChild,
+			parentRunId: root,
+			name: "nested",
+			inputs: {},
+			status: "completed",
+			stages: [],
+			startedAt: 1,
+			endedAt: 2,
+		});
+		const resolution = resolveWorkflowResumeTarget(
+			"2603ABCD",
+			store.runs(),
+			[],
+			[
+				{
+					workflowId: root,
+					name: "root",
+					status: "completed",
+					completedCheckpoints: 1,
+					pendingPrompts: 0,
+					createdAt: 1,
+					updatedAt: 2,
+				},
+			],
+		);
+		assert.equal(resolution.kind, "completed");
+		if (resolution.kind === "completed") assert.equal(resolution.workflowId, root);
+	});
+
+	test("workflow tool prefix resume of a completed root is not made ambiguous by a nested child", async () => {
+		store.recordRunStart({
+			id: nestedChild,
+			parentRunId: root,
+			name: "nested",
+			inputs: {},
+			status: "completed",
+			stages: [],
+			startedAt: 1,
+			endedAt: 2,
+		});
+		const runtime = {
+			prepareDurableCatalog: async () => ({
+				resumable: [],
+				completed: [
+					{
+						workflowId: root,
+						name: "root",
+						status: "completed",
+						completedCheckpoints: 1,
+						pendingPrompts: 0,
+						createdAt: 1,
+						updatedAt: 2,
+					},
+				],
+			}),
+			resumeDurableWorkflow: async () => {
+				assert.fail("completed root must not dispatch");
+			},
+		} as unknown as ExtensionRuntime;
+		const exact = await workflowResumeAction({ action: "resume", runId: root }, toolResumeDeps(runtime));
+		const prefix = await workflowResumeAction({ action: "resume", runId: "2603ABCD" }, toolResumeDeps(runtime));
+		assert.equal("runId" in exact ? exact.runId : undefined, root);
+		assert.equal("runId" in prefix ? prefix.runId : undefined, root);
+		assert.match("message" in prefix && prefix.message ? prefix.message : "", /completed, not resumable/);
+		assert.doesNotMatch("message" in prefix && prefix.message ? prefix.message : "", /ambiguous/);
+	});
+
+	test("workflow tool prefix plus a stage selector refuses durable dispatch", async () => {
+		const calls: unknown[] = [];
+		const runtime = {
+			prepareDurableCatalog: async () => ({ resumable: [pausedDurableEntry(root)], completed: [] }),
+			resumeDurableWorkflow: async (...args: unknown[]) => {
+				calls.push(args);
+				return { ok: true, runId: root, message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		const result = await workflowResumeAction(
+			{ action: "resume", runId: "2603ABCD", stageId: "nonexistent-stage", message: "stage only" },
+			toolResumeDeps(runtime),
+		);
+		assert.equal(calls.length, 0);
+		assert.equal("status" in result ? result.status : undefined, "noop");
+		assert.equal("runId" in result ? result.runId : undefined, root);
+		assert.equal("message" in result ? result.message : undefined, stageScopedDurableResumeMessage(root));
+	});
+
+	test("workflow tool exact durable id plus a stage selector refuses durable dispatch", async () => {
+		const calls: unknown[] = [];
+		const runtime = {
+			prepareDurableCatalog: async () => ({ resumable: [pausedDurableEntry(root)], completed: [] }),
+			prepareDurableResumable: async () => [pausedDurableEntry(root)],
+			prepareCompletedDurable: async () => [],
+			resumeDurableWorkflow: async (...args: unknown[]) => {
+				calls.push(args);
+				return { ok: true, runId: root, message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		const result = await workflowResumeAction(
+			{ action: "resume", runId: root, stageId: "nonexistent-stage", message: "stage only" },
+			toolResumeDeps(runtime),
+		);
+		assert.equal(calls.length, 0);
+		assert.equal("status" in result ? result.status : undefined, "noop");
+		assert.equal("runId" in result ? result.runId : undefined, root);
+		assert.equal("message" in result ? result.message : undefined, stageScopedDurableResumeMessage(root));
+	});
+
+	test("workflow tool prefix durable resume without a stage still dispatches the canonical root", async () => {
+		const calls: unknown[] = [];
+		const runtime = {
+			prepareDurableCatalog: async () => ({ resumable: [pausedDurableEntry(root)], completed: [] }),
+			resumeDurableWorkflow: async (...args: unknown[]) => {
+				calls.push(args);
+				return { ok: true, runId: root, message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		const result = await workflowResumeAction({ action: "resume", runId: "2603ABCD" }, toolResumeDeps(runtime));
+		assert.equal(calls.length, 1);
+		assert.equal("status" in result ? result.status : undefined, "running");
+		assert.equal("runId" in result ? result.runId : undefined, root);
+	});
+
+	test("slash prefix plus a stage selector refuses durable dispatch", async () => {
+		const backend = new InMemoryDurableBackend();
+		setDurableBackend(backend);
+		backend.registerWorkflow({
+			workflowId: root,
+			name: "fixture",
+			inputs: {},
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+		});
+		backend.recordCheckpoint({
+			kind: "tool",
+			workflowId: root,
+			checkpointId: "tool:seed",
+			name: "seed",
+			argsHash: "seed",
+			output: true,
+			completedAt: 2,
+		});
+		let resumeCalls = 0;
+		const runtime = {
+			registry: { has: () => true },
+			prepareDurableCatalog: async () => ({ resumable: [pausedDurableEntry(root)], completed: [] }),
+			prepareDurableResumable: async () => [pausedDurableEntry(root)],
+			prepareCompletedDurable: async () => [],
+			resumeDurableWorkflow: () => {
+				resumeCalls += 1;
+				return { ok: true as const, runId: root, workflowId: root, name: "fixture", message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		const result = await resume("2603ABCD", runtime, [], ["nonexistent-stage", "stage", "only"]);
+		assert.equal(resumeCalls, 0);
+		assert.deepEqual(result.messages, []);
+		assert.deepEqual(result.errors, [stageScopedDurableResumeMessage(root)]);
+	});
+
+	test("slash exact durable id plus a stage selector refuses durable dispatch", async () => {
+		const backend = new InMemoryDurableBackend();
+		setDurableBackend(backend);
+		backend.registerWorkflow({
+			workflowId: root,
+			name: "fixture",
+			inputs: {},
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+		});
+		backend.recordCheckpoint({
+			kind: "tool",
+			workflowId: root,
+			checkpointId: "tool:seed",
+			name: "seed",
+			argsHash: "seed",
+			output: true,
+			completedAt: 2,
+		});
+		let resumeCalls = 0;
+		const runtime = {
+			registry: { has: () => true },
+			prepareDurableResumable: async () => [pausedDurableEntry(root)],
+			prepareCompletedDurable: async () => [],
+			resumeDurableWorkflow: () => {
+				resumeCalls += 1;
+				return { ok: true as const, runId: root, workflowId: root, name: "fixture", message: "dispatched" };
+			},
+		} as unknown as ExtensionRuntime;
+		const result = await resume(root, runtime, [], ["nonexistent-stage"]);
+		assert.equal(resumeCalls, 0);
+		assert.deepEqual(result.messages, []);
+		assert.deepEqual(result.errors, [stageScopedDurableResumeMessage(root)]);
+	});
+
+	test("slash prefix resume of a completed root ignores a nested child that shares the prefix", async () => {
+		const backend = new InMemoryDurableBackend();
+		setDurableBackend(backend);
+		registerCompleted(backend, root);
+		store.recordRunStart({
+			id: nestedChild,
+			parentRunId: root,
+			name: "nested",
+			inputs: {},
+			status: "completed",
+			stages: [],
+			startedAt: 1,
+			endedAt: 2,
+		});
+		const opened: string[] = [];
+		const exact = await resume(root, createExtensionRuntime({ store }), opened);
+		store.removeRun(root);
+		const prefix = await resume("2603ABCD", createExtensionRuntime({ store }), opened);
+		assert.doesNotMatch(`${exact.errors.join("\n")}\n${prefix.errors.join("\n")}`, /ambiguous/);
+		assert.deepEqual(opened, [root, root]);
+	});
 });
 
 describe("/workflow resume completed target", () => {

@@ -7,6 +7,7 @@ import { abortToolNode } from "../runs/background/quit-tool-node.js";
 import { pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
 import { workflowHasPausedStages, workflowHasPausedState } from "../runs/background/workflow-lifecycle-aggregate.js";
 import { isRunIdPrefix } from "../shared/run-id.js";
+import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import { store } from "../shared/store.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import type { WorkflowExecutionPolicy, WorkflowToolNodeIdentity } from "../shared/types.js";
@@ -15,7 +16,7 @@ import type { WorkflowToolArgs } from "./public-types.js";
 import type { WorkflowToolResult } from "./render-result.js";
 import type { ExtensionRuntime } from "./runtime.js";
 import { formatWorkflowReloadReport, formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.js";
-import { resolveWorkflowResumeTarget } from "./workflow-durable-resume-command.js";
+import { resolveWorkflowResumeTarget, stageScopedDurableResumeMessage } from "./workflow-durable-resume-command.js";
 import { normalizeWorkflowReloadReport, type WorkflowReloadReport } from "./workflow-reload-report.js";
 import { classifyDurableResumeShadow } from "./workflow-resume-shadow.js";
 import {
@@ -351,6 +352,18 @@ async function resumePreparedDurableTarget(
 		return controlFailure("resume", runId, error);
 	}
 }
+
+function refuseStageScopedDurableResume(runId: string, args: WorkflowToolArgs): WorkflowToolResult | undefined {
+	const stageId = args.stageId?.trim();
+	if (stageId === undefined || stageId.length === 0) return undefined;
+	return {
+		action: "resume",
+		runId,
+		status: "noop",
+		message: stageScopedDurableResumeMessage(runId),
+	};
+}
+
 async function resolveExplicitDurableTarget(
 	target: string,
 	args: WorkflowToolArgs,
@@ -380,7 +393,11 @@ async function resolveExplicitDurableTarget(
 	if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 		return { action: "resume", runId: target, status: "noop", message: resolved.message };
 	}
-	if (resolved.kind === "durable") return resumePreparedDurableTarget(resolved.workflowId, deps, args.budget);
+	if (resolved.kind === "durable") {
+		const refusal = refuseStageScopedDurableResume(resolved.workflowId, args);
+		if (refusal !== undefined) return refusal;
+		return resumePreparedDurableTarget(resolved.workflowId, deps, args.budget);
+	}
 	if (resolved.kind === "live") {
 		return workflowResumeAction({ ...args, runId: resolved.workflowId }, deps);
 	}
@@ -406,7 +423,11 @@ async function resolveExplicitDurableTarget(
 			message: `Workflow ${target} has no durable checkpoint or pending prompt progress and is not resumable.`,
 		};
 	}
-	if (durableHandle !== undefined) return resumePreparedDurableTarget(target, deps, args.budget);
+	if (durableHandle !== undefined) {
+		const refusal = refuseStageScopedDurableResume(target, args);
+		if (refusal !== undefined) return refusal;
+		return resumePreparedDurableTarget(target, deps, args.budget);
+	}
 	return { action: "resume", runId: target, status: "noop", message: `Run not found: ${target}` };
 }
 
@@ -422,7 +443,7 @@ export async function workflowResumeAction(
 	if (explicitTarget !== undefined && isRunIdPrefix(explicitTarget)) {
 		// #2603: resume prefixes must see both live and durable candidates before
 		// local precedence can select a run.
-		return resolveExplicitDurableTarget(explicitTarget, args, deps, store.runs());
+		return resolveExplicitDurableTarget(explicitTarget, args, deps, topLevelWorkflowRuns(store.runs()));
 	}
 	const target = resolveToolRunTarget(args, "No active run to resume.");
 	if (target.kind === "all")

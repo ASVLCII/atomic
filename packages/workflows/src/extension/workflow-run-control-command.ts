@@ -25,6 +25,7 @@ import {
 	handleDurableResume,
 	prepareWorkflowResumeCatalog,
 	resolveWorkflowResumeTarget,
+	stageScopedDurableResumeMessage,
 	type WorkflowRunControlDeps,
 } from "./workflow-durable-resume-command.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
@@ -422,6 +423,10 @@ export async function handleRunControlCommand(
 					return true;
 				}
 				if (combined.kind === "completed" || combined.kind === "durable") {
+					if (combined.kind === "durable" && stageTarget !== undefined && stageTarget.trim().length > 0) {
+						fail(stageScopedDurableResumeMessage(combined.workflowId));
+						return true;
+					}
 					return await handleDurableResume(combined.workflowId, ctx, reporter, deps);
 				}
 				if (combined.kind === "live") runId = combined.workflowId;
