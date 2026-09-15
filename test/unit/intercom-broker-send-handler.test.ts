@@ -646,6 +646,67 @@ test("canonicalized prefix replies still refuse a hidden exact name or custom ID
 	}
 });
 
+test("canonicalized prefix replies refuse a later visible UUID, name, or custom ID collision", () => {
+	// Regression: #2603 — rewriting a unique prefix to the pending sender UUID
+	// must revalidate the original selector against current authorized sessions.
+	for (const kind of ["unique", "uuid", "custom", "name"] as const) {
+		const selfSocket = {} as net.Socket;
+		const parentSocket = {} as net.Socket;
+		const self = session("self", "self", selfSocket);
+		const parent = session("2603abcd-1111-4111-8111-111111111111", "Parent", parentSocket);
+		self.info.group = "child";
+		parent.info.group = "parent";
+		const sessions = new Map<string, BrokerConnectedSession>([
+			[self.info.id, self],
+			[parent.info.id, parent],
+		]);
+		if (kind !== "unique") {
+			const collision =
+				kind === "uuid"
+					? session("2603abcd-2222-4222-8222-222222222222", "Other", {} as net.Socket)
+					: kind === "custom"
+						? session("2603abcd", "Other", {} as net.Socket)
+						: session("other", "2603ABCD", {} as net.Socket);
+			collision.info.group = "child";
+			sessions.set(collision.info.id, collision);
+		}
+		const pending = new PendingQuestionIndex();
+		pending.record(parent.info.id, self.info.id, "question");
+		const writes: Array<{ socket: net.Socket; message: BrokerMessage }> = [];
+		handleBrokerSend(
+			selfSocket,
+			{
+				type: "send",
+				to: parent.info.id,
+				logicalTarget: "2603abcd",
+				expectedRecipientId: parent.info.id,
+				requirePendingReply: true,
+				message: { ...message(`answer-${kind}`, "private answer"), replyTo: "question" },
+			},
+			self.info.id,
+			sessions,
+			new DeliveredMessageCache(),
+			(socket, outgoing) => {
+				writes.push({ socket, message: outgoing });
+				return true;
+			},
+			new SupervisorChannelCache(),
+			pending,
+		);
+		const deliveries = writes.filter((entry) => entry.message.type === "message").length;
+		const ack = writes.at(-1)?.message;
+		if (kind === "unique") {
+			assert.equal(ack?.type, "delivered", kind);
+			assert.equal(deliveries, 1, kind);
+			assert.equal(pending.matchesReply(self.info.id, parent.info.id, "question"), false, kind);
+		} else {
+			assert.equal(ack?.type, "delivery_failed", kind);
+			assert.equal(deliveries, 0, kind);
+			assert.equal(pending.matchesReply(self.info.id, parent.info.id, "question"), true, kind);
+		}
+	}
+});
+
 test("broker wire send keeps omitted retry fields compatible but rejects malformed present values", () => {
 	const sender = {} as net.Socket;
 	const recipient = {} as net.Socket;

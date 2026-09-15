@@ -14,6 +14,8 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 
 - Explicit reply names and full session IDs keep their original identity through broker collision checks, unique UUID prefixes still canonicalize to the stored session ID, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
+- Canonicalized Intercom UUID-prefix sends revalidate the original selector against the broker's current authorized sessions, so a newly visible same-prefix UUID, exact name, or custom ID refuses instead of delivering to the previously unique identity ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
 ## [0.9.20-alpha.1] - 2026-09-14
 
 ### Fixed

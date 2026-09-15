@@ -252,6 +252,37 @@ export function handleBrokerSend(
     });
     return;
   }
+  // Canonicalized UUID prefixes must still mean the same identity against the
+  // current authorized catalog; a newly visible UUID, exact name, or custom ID
+  // must not inherit the previously unique transport ID (#2603). Name-fallback
+  // retries keep `to` as a display name, so they are not prefix canonicalization.
+  if (originalSelector !== trimmedTo && exactIdTarget !== undefined) {
+    const revalidationCandidates = candidates.some((candidate) => candidate.id === exactIdTarget.info.id)
+      ? candidates
+      : [...candidates, exactIdTarget.info];
+    const originalResolution = resolveSessionTarget(revalidationCandidates, originalSelector);
+    if (
+      originalResolution.kind !== "resolved" ||
+      originalResolution.session.id !== exactIdTarget.info.id ||
+      (expectedRecipientId !== undefined && originalResolution.session.id !== expectedRecipientId)
+    ) {
+      let reason: string;
+      if (originalResolution.kind !== "resolved") {
+        reason = sessionTargetFailureReason(originalSelector, originalResolution);
+      } else if (expectedRecipientId !== undefined) {
+        reason = "Reply target does not match the expected recipient";
+      } else {
+        reason = "Reply target cannot be resolved safely; use the exact sender ID";
+      }
+      write(socket, {
+        type: "delivery_failed",
+        messageId,
+        attemptId,
+        reason,
+      });
+      return;
+    }
+  }
   const resolution = exactIdTarget
     ? ({ kind: "resolved", session: exactIdTarget.info } as const)
     : resolveSessionTarget(candidates, trimmedTo);
