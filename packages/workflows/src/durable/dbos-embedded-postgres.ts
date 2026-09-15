@@ -435,7 +435,21 @@ export function hydrateBinaryLibraryLinks(
 		return { absoluteSource, absoluteTarget };
 	});
 	for (const { absoluteSource, absoluteTarget } of plans) {
-		if (existsSync(absoluteTarget)) continue;
+		// A previous entry may have created this filesystem-equivalent target
+		// since planning (case folding, Unicode normalization, or a link callback).
+		if (lstatSync(absoluteTarget, { throwIfNoEntry: false })) {
+			const contained = relative(canonicalRoot, realpathSync(absoluteTarget));
+			if (
+				isAbsolute(contained) ||
+				contained === ".." ||
+				contained.startsWith("../") ||
+				contained.startsWith("..\\") ||
+				!statSync(absoluteTarget).isFile() ||
+				!readFileSync(absoluteTarget).equals(readFileSync(absoluteSource))
+			)
+				throw new Error(`incomplete PostgreSQL runtime: invalid alias target: ${absoluteTarget}`);
+			continue;
+		}
 		try {
 			createLink(relative(dirname(absoluteTarget), absoluteSource), absoluteTarget);
 		} catch {

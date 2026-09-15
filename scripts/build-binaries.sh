@@ -567,7 +567,7 @@ for platform in "${PLATFORMS[@]}"; do
         create_zip_archive "$platform"
     else
         echo "Creating atomic-$platform.tar.gz..."
-        mv "$platform" atomic && tar -czf "atomic-$platform.tar.gz" atomic && mv atomic "$platform"
+        mv "$platform" atomic && sh ../../../scripts/create-release-tar.sh "atomic-$platform.tar.gz" . atomic && mv atomic "$platform"
     fi
 done
 

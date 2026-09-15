@@ -278,6 +278,33 @@ describe("embedded PostgreSQL runtime resolution", () => {
 		);
 	});
 
+	// #3073: first hydration must check aliases created earlier in the same call.
+	test("rejects filesystem-equivalent conflicting targets on first hydration", () => {
+		const root = runtime();
+		try {
+			mkdirSync(join(root, "lib"));
+			writeFileSync(join(root, "lib/one"), "one");
+			writeFileSync(join(root, "lib/two"), "two");
+			const caseInsensitive = existsSync(join(root, "lib/ONE"));
+			writeFileSync(
+				join(root, "pg-symlinks.json"),
+				JSON.stringify([
+					{ source: "lib/one", target: "lib/Alias.dll" },
+					{ source: "lib/two", target: "lib/alias.dll" },
+				]),
+			);
+			if (caseInsensitive) {
+				assert.throws(() => hydrateBinaryLibraryLinks(join(root, "bin/pg_ctl")), /incomplete PostgreSQL runtime/u);
+			} else {
+				hydrateBinaryLibraryLinks(join(root, "bin/pg_ctl"));
+				assert.equal(readFileSync(join(root, "lib/Alias.dll"), "utf8"), "one");
+				assert.equal(readFileSync(join(root, "lib/alias.dll"), "utf8"), "two");
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	// #3073: npm manifests may refer to an alias created by an earlier entry.
 	test("hydrates safe ordered alias chains with native links and copy fallback", () => {
 		for (const copies of [false, true]) {

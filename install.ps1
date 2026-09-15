@@ -862,6 +862,12 @@ try {
         throw "Staged atomic.exe --version failed with exit code $stagedExitCode."
     }
 
+    $postgresRuntime = Join-Path $payloadPath "node_modules\@bastani\atomic-natives\postgres-runtime"
+    & $stagedAtomic "--internal-validate-postgres-runtime" $postgresRuntime
+    if ($LASTEXITCODE -ne 0) {
+        throw "Incomplete PostgreSQL runtime: payload validation failed; installation was not promoted. Download a repaired release."
+    }
+
     $postgresBin = Join-Path $payloadPath "node_modules\@bastani\atomic-natives\postgres-runtime\bin"
     foreach ($postgresCommand in @("postgres", "pg_ctl", "initdb")) {
         $postgresExecutable = Join-Path $postgresBin ($postgresCommand + ".exe")
