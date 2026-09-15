@@ -6,6 +6,10 @@
 
 - Install/update telemetry pings now go to the Atomic version-adoption endpoint instead of pi.dev. First-interactive-launch triggers, opt-outs, and the independent update check are unchanged ([#2498](https://github.com/bastani-inc/atomic/issues/2498)).
 
+### Fixed
+
+- Bundled integration documentation is discoverable under the same `docs/` root in npm and binary installations, including the MCP setup guide at `docs/mcp.md`.
+
 ## [0.9.20-alpha.1] - 2026-09-14
 
 ### Fixed
