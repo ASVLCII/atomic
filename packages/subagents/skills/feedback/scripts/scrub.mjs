@@ -456,7 +456,7 @@ const rules = [
 	{
 		category: "provider-token",
 		pattern:
-			/\b(?:AIza[\w-]{35}|eyJ[\w-]{8,}(?:\.[\w-]{8,}){2}|(?:xox[abposr]|glpat|xai)-[\w-]{10,}|(?:sk_live_|hf_|npm_)\w{16,})/gu,
+			/\b(?:AIza[\w-]{35}|ya29\.[\w-]{20,}|eyJ[\w-]{8,}(?:\.[\w-]{8,}){2}|(?:xox[abposr]|glpat|xai)-[\w-]{10,}|(?:sk_live_|hf_|npm_)\w{16,})/gu,
 		replacement: REDACTION_PLACEHOLDER,
 	},
 	{

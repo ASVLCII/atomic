@@ -857,6 +857,15 @@ describe("feedback privacy core", () => {
 		);
 	});
 
+	// Greptile review on #3063: a bare Google OAuth access token (no Bearer prefix, no KEY= label) was not scrubbed.
+	test("scrubs a standalone Google OAuth access token", () => {
+		const token = `ya29.a0${"A".repeat(40)}-${"b".repeat(20)}`;
+		const result = scrubFeedback("safe", `Gemini call failed with token ${token} in the request log.`);
+		assert.equal(result.body.includes(token), false);
+		assert.equal(result.body, "Gemini call failed with token [REDACTED] in the request log.");
+		assert.deepEqual(result.replacements, [{ category: "provider-token", count: 1 }]);
+	});
+
 	test("bounds unterminated private-key mentions at report boundaries", () => {
 		const input = [
 			"### What happened?",
