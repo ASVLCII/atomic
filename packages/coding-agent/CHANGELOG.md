@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886)).
+
 ### Fixed
 
 - Running Atomic inside a Herdr pane no longer leaves the pane unreported or labelled as another agent when Herdr's installed Pi integration is present. Herdr installs `herdr-agent-state.ts` into the legacy `~/.pi/agent/extensions` directory that Atomic also loads from, and Atomic used to stand its built-in reporter down as soon as that file loaded — but the installed asset reports itself as `pi`, so the pane ended up mislabelled or never updated at all. Inside a Herdr pane Atomic now skips that installed integration when loading extensions and reports the pane itself; outside a Herdr pane the file loads exactly as before. Nothing to configure, and the extra extension no longer needs to be disabled by hand ([#2416](https://github.com/bastani-inc/atomic/pull/2416) by [@makgunay](https://github.com/makgunay))
