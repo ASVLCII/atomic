@@ -439,6 +439,48 @@ test("ordinary target staging merges physical and inherited links after relocati
 	}
 });
 
+// #3073: resolve the complete physical link graph before removing any alias.
+test("standalone staging preserves chained aliases regardless of directory order", async () => {
+	const root = temporaryDirectory("atomic-pg-chain-");
+	const fixture = npmArtifact(root, "linux-x64", (native) => {
+		symlinkSync("library.1", join(native, "lib/a"));
+		symlinkSync("a", join(native, "lib/z"));
+	});
+	const runtime = await stagePostgresRuntime({
+		target: "linux-x64",
+		packageRoot: packageDirectory(root),
+		artifactFile: fixture.path,
+		artifact: fixture.artifact,
+		standalone: true,
+	});
+	assert.equal(readFileSync(join(runtime, "lib/z"), "utf8"), "library");
+});
+
+// #3073: standalone archives must work without npm's first-use hydration.
+test("standalone staging materializes aliases and validates them after extraction", async () => {
+	const root = temporaryDirectory("atomic-pg-standalone-");
+	const fixture = npmArtifact(root, "linux-x64");
+	await stagePostgresRuntime({
+		target: "linux-x64",
+		packageRoot: packageDirectory(root),
+		artifactFile: fixture.path,
+		artifact: fixture.artifact,
+		standalone: true,
+	});
+	const archive = "candidate.tgz";
+	execFileSync("tar", ["-czf", archive, "-C", "leaf/postgres-runtime", "."], { cwd: root });
+	const extracted = join(root, "extracted");
+	mkdirSync(extracted);
+	execFileSync("tar", ["-xzf", archive, "-C", "extracted"], { cwd: root });
+	assert.equal(readFileSync(join(extracted, "lib/library"), "utf8"), "library");
+	validatePostgresRuntime(extracted, "linux-x64", fixture.artifact, { standalone: true });
+	rmSync(join(extracted, "lib/library"));
+	assert.throws(
+		() => validatePostgresRuntime(extracted, "linux-x64", fixture.artifact, { standalone: true }),
+		/materialized runtime link/,
+	);
+});
+
 for (const [label, mutate] of [
 	["missing initdb", (native) => rmSync(join(native, "bin", "initdb"))],
 	["wrong CPU", (native) => writeFileSync(join(native, "bin", "initdb"), targetExecutable("linux-arm64"))],

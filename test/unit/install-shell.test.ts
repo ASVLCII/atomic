@@ -152,6 +152,14 @@ function createArchive(workspace: string, tag: string, asset: string): { path: s
 		join(payload, "atomic"),
 		`#!/bin/sh\nversion='${tag}'\nif [ "\${ATOMIC_FIXTURE_FAIL_STAGED_VERSION:-}" = "$version" ]; then exit 17; fi\ncase "$0" in\n  *atomic-install.*) ;;\n  *) if [ "\${ATOMIC_FIXTURE_FAIL_FINAL_VERSION:-}" = "$version" ]; then exit 23; fi ;;\nesac\nif [ "\${1:-}" = --version ]; then printf '%s\\n' "$version"; exit 0; fi\nprintf '%s\\n' "$version:$*"\n`,
 	);
+	const postgresBin = join(payload, "node_modules/@bastani/atomic-natives/postgres-runtime/bin");
+	mkdirSync(postgresBin, { recursive: true });
+	for (const binary of ["postgres", "pg_ctl", "initdb"]) {
+		writeExecutable(
+			join(postgresBin, binary),
+			`#!/bin/sh\n[ "\${ATOMIC_FIXTURE_FAIL_POSTGRES:-}" != '${tag}' ] || exit 134\nprintf 'PostgreSQL 18.4\\n'\n`,
+		);
+	}
 	const regularFiles = [
 		[join(payload, "package.json"), JSON.stringify({ name: "@bastani/atomic", version: tag })],
 		[join(payload, "app.js"), `fixture-${tag}`],
@@ -980,6 +988,28 @@ unixTest("shell installer selects every Darwin and Linux archive, including Rose
 			assertSuccess(fixture.run({ ...host, args: ["--ref", "1.0.0"] }));
 			assert.equal(readFileSync(join(fixture.installRoot, "current", "asset.txt"), "utf8"), asset);
 			assert.match(readFileSync(fixture.requestLog, "utf8"), new RegExp(`${asset.replaceAll(".", "\\.")}$`, "mu"));
+		} finally {
+			fixture.cleanup();
+		}
+	}
+});
+
+// #3073: a runnable launcher must not promote an unusable database runtime.
+unixTest("shell installer rejects incomplete PostgreSQL on first install and upgrade before promotion", () => {
+	for (const upgrade of [false, true]) {
+		const fixture = createFixture();
+		try {
+			if (upgrade) assertSuccess(fixture.run({ args: ["--ref", "1.0.0"] }));
+			const result = fixture.run({
+				args: ["--ref", "2.0.0"],
+				environment: { ATOMIC_FIXTURE_FAIL_POSTGRES: "2.0.0" },
+			});
+			assert.notEqual(result.exitCode, 0, output(result));
+			assert.match(output(result), /incomplete PostgreSQL runtime/u);
+			assert.equal(existsSync(join(fixture.installRoot, "versions/2.0.0")), false);
+			if (upgrade) assert.equal(currentVersion(fixture), "1.0.0");
+			else assert.equal(existsSync(join(fixture.installRoot, "current")), false);
+			assertNoTemporaryState(fixture);
 		} finally {
 			fixture.cleanup();
 		}

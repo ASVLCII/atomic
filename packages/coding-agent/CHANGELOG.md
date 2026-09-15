@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Standalone installations include PostgreSQL library aliases and reject unusable database runtimes before installing or upgrading. A server left running by an older installation no longer hides an incomplete runtime ([#3073](https://github.com/bastani-inc/atomic/issues/3073)).
+
 ## [0.9.20-alpha.2] - 2026-09-15
 
 ### Fixed

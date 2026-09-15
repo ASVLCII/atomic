@@ -30,3 +30,17 @@ Expected: `No unresolved inbound asks.`
 **Limits:** reproduced on the candidate tree against unchanged base files, not by executing the full base tree. It does not demonstrate a cross-group transport bypass or a successful wrong-recipient reply through the broker; those stronger claims were not established.
 
 **Suggested repair (later scope):** exclude typed child executions from parent-generation reply-ledger binding/preservation; retain generation sharing only for replacement sessions of the same workflow-stage conversation. Add a parent-plus-two-children public pending/reply isolation regression.
+
+## #3073 — optional upstream PostgreSQL module closure remains unresolved
+
+The missing standalone aliases are repaired by materializing the existing manifest during standalone staging. Required extracted `postgres`, `pg_ctl`, and `initdb` entrypoints and isolated macOS/Linux lifecycle checks pass. Installation now checks those entrypoints before promotion; npm keeps manifest-based first-use hydration.
+
+The broader full-image requirement is **not satisfied**: upstream `@embedded-postgres/darwin-arm64@18.4.0-beta.17` contains `lib/libpq-oauth-18.dylib` importing `@loader_path/../lib/libcurl.4.dylib`, but contains no libcurl payload. This optional module is not loaded by the required entrypoints/lifecycle. Do not rewrite Mach-O load commands, substitute system libcurl, or re-sign/supply dependencies without authorization.
+
+Repeat the negative diagnostic against a standalone staged or extracted macOS runtime:
+
+```sh
+node --input-type=module -e 'import {validateRuntimeDependencies as validate} from "./scripts/postgres-runtime-dependencies.mjs"; validate(process.argv[1])' /path/to/postgres-runtime
+```
+
+Expected current failure: `incomplete PostgreSQL dependency closure: lib/libpq-oauth-18.dylib -> @loader_path/../lib/libcurl.4.dylib` (exit 1). The diagnostic scans supported Mach-O images, including optional modules; it does not validate ELF/PE. Regression: `node --test scripts/postgres-runtime-dependencies.test.mjs`. Required native-loader preflight is deliberately separate from this failing all-image diagnostic. Full closure/readiness remains unresolved, not waived.
