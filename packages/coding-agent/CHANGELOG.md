@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Bundled integration documentation is discoverable under the same `docs/` root in npm and binary installations, including the MCP setup guide at `docs/mcp.md`.
+
+## [0.9.20-alpha.1] - 2026-09-14
+
+### Fixed
+
 - Workflow startup now reports its phase and age, and explicit cancellation releases waiting callers while retaining unfinished creation ownership. Cancelled queued reloads cannot start later; late SDK/binding results cannot attach or dispatch ([#3040](https://github.com/bastani-inc/atomic/issues/3040)).
 
 ## [0.9.19] - 2026-09-13
