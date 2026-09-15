@@ -707,6 +707,58 @@ test("canonicalized prefix replies refuse a later visible UUID, name, or custom 
 	}
 });
 
+test("unauthorized exact transport targets stay out of prefix ambiguity diagnostics", () => {
+	// Regression: #2603 — a sender who still knows a formerly visible UUID can
+	// submit that UUID as `to` and its prefix as logicalTarget. A visible
+	// same-prefix peer must not make the refusal disclose the hidden name.
+	const hiddenId = "2603abcd-2222-4222-8222-222222222222";
+	for (const logicalTarget of [hiddenId, "2603abcd"] as const) {
+		for (const replyTo of [undefined, "question"] as const) {
+			const senderSocket = {} as net.Socket;
+			const visibleSocket = {} as net.Socket;
+			const hiddenSocket = {} as net.Socket;
+			const sender = session("sender", "Sender", senderSocket);
+			const visible = session("2603abcd-1111-4111-8111-111111111111", "Visible", visibleSocket);
+			const hidden = session(hiddenId, "HIDDEN_PRIVATE_NAME", hiddenSocket);
+			sender.info.group = "visible";
+			visible.info.group = "visible";
+			hidden.info.group = "private";
+			const sessions = new Map([sender, visible, hidden].map((peer) => [peer.info.id, peer]));
+			const pending = new PendingQuestionIndex();
+			pending.record(visible.info.id, sender.info.id, "question");
+			const writes: Array<{ socket: net.Socket; message: BrokerMessage }> = [];
+			handleBrokerSend(
+				senderSocket,
+				{
+					type: "send",
+					to: hidden.info.id,
+					logicalTarget,
+					message: {
+						...message(`probe-${logicalTarget}-${replyTo ?? "none"}`, "test"),
+						...(replyTo === undefined ? {} : { replyTo }),
+					},
+				},
+				sender.info.id,
+				sessions,
+				new DeliveredMessageCache(),
+				(socket, outgoing) => {
+					writes.push({ socket, message: outgoing });
+					return true;
+				},
+				new SupervisorChannelCache(),
+				pending,
+			);
+			assert.doesNotMatch(JSON.stringify(writes), /HIDDEN_PRIVATE_NAME/);
+			assert.equal(writes.filter((entry) => entry.message.type === "message").length, 0, logicalTarget);
+			assert.equal(writes.length, 1, logicalTarget);
+			assert.equal(writes[0]?.socket, senderSocket, logicalTarget);
+			const ack = writes[0]?.message;
+			assert.equal(ack?.type, "delivery_failed", logicalTarget);
+			assert.equal(pending.matchesReply(sender.info.id, visible.info.id, "question"), true, logicalTarget);
+		}
+	}
+});
+
 test("broker wire send keeps omitted retry fields compatible but rejects malformed present values", () => {
 	const sender = {} as net.Socket;
 	const recipient = {} as net.Socket;

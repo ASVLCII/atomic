@@ -256,11 +256,14 @@ export function handleBrokerSend(
   // current authorized catalog; a newly visible UUID, exact name, or custom ID
   // must not inherit the previously unique transport ID (#2603). Name-fallback
   // retries keep `to` as a display name, so they are not prefix canonicalization.
-  if (originalSelector !== trimmedTo && exactIdTarget !== undefined) {
-    const revalidationCandidates = candidates.some((candidate) => candidate.id === exactIdTarget.info.id)
-      ? candidates
-      : [...candidates, exactIdTarget.info];
-    const originalResolution = resolveSessionTarget(revalidationCandidates, originalSelector);
+  // Unauthorized exact transport targets stay out of prefix diagnostics so a
+  // formerly visible UUID cannot disclose a hidden peer's current name.
+  if (
+    originalSelector !== trimmedTo &&
+    exactIdTarget !== undefined &&
+    candidates.some((candidate) => candidate.id === exactIdTarget.info.id)
+  ) {
+    const originalResolution = resolveSessionTarget(candidates, originalSelector);
     if (
       originalResolution.kind !== "resolved" ||
       originalResolution.session.id !== exactIdTarget.info.id ||
