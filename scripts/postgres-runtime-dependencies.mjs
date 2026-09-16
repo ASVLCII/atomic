@@ -66,7 +66,8 @@ function elfDependencies(bytes) {
 	}
 	if (!dynamic) return { dependencies: [], rpaths: [] };
 	const needed = [],
-		paths = [];
+		rpaths = [],
+		runpaths = [];
 	let strings;
 	for (let offset = dynamic.offset; offset + 16 <= dynamic.offset + dynamic.size; offset += 16) {
 		const tag = u64(offset),
@@ -74,7 +75,8 @@ function elfDependencies(bytes) {
 		if (tag === 0) break;
 		if (tag === 1) needed.push(value);
 		if (tag === 5) strings = value;
-		if (tag === 15 || tag === 29) paths.push(value);
+		if (tag === 15) rpaths.push(value);
+		if (tag === 29) runpaths.push(value);
 	}
 	if (needed.length === 0) return { dependencies: [], rpaths: [] };
 	const segment = segments.find(({ address, size }) => strings >= address && strings < address + size);
@@ -82,12 +84,13 @@ function elfDependencies(bytes) {
 	const base = segment.offset + strings - segment.address;
 	return {
 		dependencies: needed.map((offset) => cstring(bytes, base + offset)),
-		rpaths: paths.flatMap((offset) => cstring(bytes, base + offset).split(":")),
+		rpaths: (runpaths.length ? runpaths : rpaths).flatMap((offset) => cstring(bytes, base + offset).split(":")),
+		hasRunpath: runpaths.length > 0,
 	};
 }
 
-// The host ABI supplies its C runtime and dynamic loader, never Perl/Python/Tcl
-// or non-system third-party libraries. Do not consult the build host's ld cache.
+// Never consult the build host's ld cache. glibc distributions also provide
+// the compiler ABI; musl artifacts bundle it and must resolve it in the payload.
 const ELF_SYSTEM_LIBRARIES = new Set([
 	"libc.so.6",
 	"libm.so.6",
@@ -114,7 +117,7 @@ export function validateRuntimeDependencies(root, links = []) {
 	let images = 0;
 	let edges = 0;
 	const visited = new Set();
-	function visit(path) {
+	function visit(path, inheritedPaths = [], musl = false) {
 		const canonical = realpathSync(path);
 		if (visited.has(canonical)) return;
 		visited.add(canonical);
@@ -122,19 +125,24 @@ export function validateRuntimeDependencies(root, links = []) {
 		const elf = elfDependencies(bytes);
 		const dependencies = elf?.dependencies ?? imageDependencies(bytes);
 		if (dependencies === undefined) return;
+		musl ||= dependencies.some((name) => name.startsWith("libc.musl-"));
+		const localPaths = (elf?.rpaths ?? [])
+			.filter((search) => /^\$(?:ORIGIN|\{ORIGIN\})(?:\/|$)/u.test(search))
+			.map((search) => resolve(search.replace(/\$\{ORIGIN\}|\$ORIGIN/gu, dirname(path))));
+		const searchPaths = [...localPaths, ...inheritedPaths];
+		const childPaths = musl || !elf?.hasRunpath ? searchPaths : inheritedPaths;
 		images++;
 		for (const dependency of dependencies) {
 			edges++;
 			if (
 				elf
-					? ELF_SYSTEM_LIBRARIES.has(dependency)
+					? ELF_SYSTEM_LIBRARIES.has(dependency) ||
+						(!musl && ["libstdc++.so.6", "libgcc_s.so.1"].includes(dependency))
 					: dependency.startsWith("/usr/lib/") || dependency.startsWith("/System/Library/")
 			)
 				continue;
 			const candidates = elf
-				? elf.rpaths
-						.filter((search) => /^\$(?:ORIGIN|\{ORIGIN\})(?:\/|$)/u.test(search))
-						.map((search) => resolve(search.replace(/\$\{ORIGIN\}|\$ORIGIN/gu, dirname(path)), dependency))
+				? searchPaths.map((search) => resolve(search, dependency))
 				: [resolve(dirname(path), dependency.replace(/^@loader_path\//u, ""))];
 			const source = candidates
 				.map((candidate) => aliases.get(candidate) ?? candidate)
@@ -150,7 +158,7 @@ export function validateRuntimeDependencies(root, links = []) {
 				!lstatSync(source).isFile()
 			)
 				throw new Error(`PostgreSQL dependency escapes payload: ${dependency}`);
-			visit(source);
+			visit(source, childPaths, musl);
 		}
 	}
 	for (const name of ["postgres", "pg_ctl", "initdb"]) {
