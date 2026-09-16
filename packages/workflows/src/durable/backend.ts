@@ -90,6 +90,8 @@ export interface DurableWorkflowBackend {
 		registration: WorkflowRegistrationInput | undefined,
 		signal: AbortSignal,
 	): Promise<void>;
+	/** Whether this run's admission failed on database availability; performs no I/O. */
+	isAdmissionUnavailable?(workflowId: string): boolean;
 	/** Persist one logical run's pending-stage transition under its durable owner. */
 	persistPendingStageMessages(
 		workflowId: string,

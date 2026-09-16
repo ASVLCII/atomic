@@ -206,6 +206,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	private readonly onUnavailable?: (error: DbosDependencyError) => void;
 	private readonly checkReady?: () => Promise<void>;
 	private admissionUnavailable = false;
+	private readonly unavailableAdmissions = new Set<string>();
 
 	constructor(
 		sdk: DbosSdkHandle,
@@ -226,6 +227,10 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 				this.enqueueWrite(workflowId, () => this.sdk.recordStepOutput(workflowId, stepName, output));
 			},
 		});
+	}
+
+	isAdmissionUnavailable(workflowId: string): boolean {
+		return this.unavailableAdmissions.has(workflowId);
 	}
 
 	async admitWorkflow(
@@ -249,9 +254,12 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 				signal,
 			);
 			this.admissionUnavailable = false;
+			this.unavailableAdmissions.delete(workflowId);
 		} catch (error) {
 			if (isDbosDependencyError(error)) {
 				this.admissionUnavailable = true;
+				// Another root's successful admission must not enable cleanup of this identity.
+				this.unavailableAdmissions.add(workflowId);
 				this.onUnavailable?.(error);
 			}
 			throw error;
