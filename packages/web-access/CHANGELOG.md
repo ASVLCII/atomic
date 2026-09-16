@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.20-alpha.3] - 2026-09-16
+
 ### Fixed
 
 - `loadConfig` now resolves the readable web-search config path on every call instead of once at module load, so `/curator on` and other `saveConfig` writes to `~/.atomic/web-search.json` take effect immediately when Atomic started with only the legacy `~/.pi/web-search.json` ([#3058](https://github.com/bastani-inc/atomic/issues/3058)).

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.20-alpha.3] - 2026-09-16
+
 ### Fixed
 
 - Fixed compaction statistics mixing authoritative provider token counts with heuristic region estimates, which could produce incorrect/negative percentReduction. Statistics now use symmetric heuristic estimates (region + explicit tail) while preserving the authoritative tokensBefore for budgeting and display ([#2052](https://github.com/bastani-inc/atomic/issues/2052)).
