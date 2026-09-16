@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getUserConfigPaths } from "@bastani/atomic";
 import { afterAll, beforeEach, test } from "vitest";
+import type { WebSearchConfig } from "../../packages/web-access/web-search-config.js";
 
 // web-search-config resolves its config paths from the home directory while
 // the module loads, so the temporary home must be in place before the dynamic
-// import below; a static import would be hoisted above it.
+// import below; a static import would be hoisted above it. The type-only
+// import above is erased before emit and loads nothing.
 const previousEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
 const home = mkdtempSync(join(tmpdir(), "web-search-config-home-"));
 process.env.HOME = home;
@@ -23,7 +25,7 @@ const { loadConfig, loadConfigForExtensionInit, saveConfig } = await import(
 	"../../packages/web-access/web-search-config.js"
 );
 
-function writeConfig(path: string, contents: unknown): void {
+function writeConfig(path: string, contents: WebSearchConfig | string): void {
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, typeof contents === "string" ? contents : `${JSON.stringify(contents, null, 2)}\n`);
 }
