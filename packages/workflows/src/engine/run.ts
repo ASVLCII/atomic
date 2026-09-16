@@ -822,7 +822,15 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 								),
 							},
 			}).catch((error: unknown) => {
-				if (!isDbosDependencyError(error)) durableAdmissionFailure = { error };
+				// Invalid topology is a failed nonresumable result, not a storage write rejection.
+				const isTopologyError =
+					typeof error === "object" &&
+					error !== null &&
+					"name" in error &&
+					error.name === "DurableNestedTopologyError";
+				if (!isDbosDependencyError(error) && !isTopologyError) {
+					durableAdmissionFailure = { error };
+				}
 				throw error;
 			}),
 			ownController.signal,

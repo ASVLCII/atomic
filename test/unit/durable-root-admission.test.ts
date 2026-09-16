@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
+import { DurableNestedTopologyError } from "../../packages/workflows/src/durable/boundary-topology.js";
 import { DBOS_ADMISSION_TIMEOUT_MS, DbosDependencyError } from "../../packages/workflows/src/durable/dbos-admission.js";
 import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
 import { resetDbosLifecycleForTests } from "../../packages/workflows/src/durable/dbos-lifecycle.js";
@@ -51,6 +52,46 @@ test("immediate non-dependency admission write failure rejects with the original
 	assert.equal(executions, 0);
 	assert.equal(store.runs()[0]?.status, "failed");
 	assert.equal(backend.getWorkflow(runId)?.status, "failed");
+	assert.equal(controls.runControl(runId), undefined);
+	assert.equal(controls.admissionBoundary(runId), undefined);
+});
+
+// #3072 / #2022: a retained backend may throw an error from another loader generation.
+test("topology rejection from another module generation remains a nonresumable result", async () => {
+	vi.resetModules();
+	const previous = await import("../../packages/workflows/src/durable/boundary-topology.js");
+	const topologyError = new previous.DurableNestedTopologyError("malformed saved root");
+	assert.equal(topologyError instanceof DurableNestedTopologyError, false);
+	class PreviousGenerationBackend extends InMemoryDurableBackend {
+		async admitWorkflow(): Promise<void> {
+			throw topologyError;
+		}
+	}
+	const store = createStore();
+	const controls = createToolControlRegistry();
+	const runId = "previous-topology-error";
+	const definition = workflow({
+		name: runId,
+		description: "",
+		inputs: {},
+		outputs: {},
+		run: async () => {
+			assert.fail("malformed admission must not execute workflow code");
+		},
+	});
+	const result = await run(
+		definition,
+		{},
+		{
+			runId,
+			durableBackend: new PreviousGenerationBackend(),
+			store,
+			toolControlRegistry: controls,
+		},
+	);
+	assert.equal(result.status, "failed");
+	assert.match(result.error ?? "", /malformed saved root/);
+	assert.equal(store.runs()[0]?.resumable, false);
 	assert.equal(controls.runControl(runId), undefined);
 	assert.equal(controls.admissionBoundary(runId), undefined);
 });
