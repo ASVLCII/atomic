@@ -93,3 +93,28 @@ for (const entrypoint of ["pg_ctl", "initdb"]) {
 		}
 	});
 }
+
+// #3073: a glibc image's RUNPATH masks ancestor RPATH for its direct imports, unlike musl.
+for (const libc of ["libc.so.6", "libc.musl-aarch64.so.1"]) {
+	test(`mixed ancestor RPATH and direct RUNPATH: ${libc}`, () => {
+		const root = mkdtempSync(join(tmpdir(), "pg-mixed-"));
+		try {
+			for (const directory of ["bin", "lib", "transitive", "unrelated"]) mkdirSync(join(root, directory));
+			for (const name of ["postgres", "pg_ctl", "initdb"]) {
+				writeFileSync(
+					join(root, "bin", name),
+					elf(["libfirst.so", libc], "$ORIGIN/../lib:$ORIGIN/../transitive", 15),
+				);
+			}
+			writeFileSync(join(root, "lib/libfirst.so"), elf(["libsecond.so", libc], "$ORIGIN/../unrelated"));
+			writeFileSync(join(root, "transitive/libsecond.so"), elf([libc]));
+			if (libc === "libc.so.6") {
+				assert.throws(() => validateRuntimeDependencies(root), /libfirst.so -> libsecond.so/u);
+			} else assert.deepEqual(validateRuntimeDependencies(root), { images: 5, edges: 9 });
+			writeFileSync(join(root, "lib/libfirst.so"), elf(["libsecond.so", libc], "$ORIGIN/../transitive"));
+			assert.deepEqual(validateRuntimeDependencies(root), { images: 5, edges: 9 });
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+}

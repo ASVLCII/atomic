@@ -130,7 +130,8 @@ export function validateRuntimeDependencies(root, links = []) {
 		const localPaths = (elf?.rpaths ?? [])
 			.filter((search) => /^\$(?:ORIGIN|\{ORIGIN\})(?:\/|$)/u.test(search))
 			.map((search) => resolve(search.replace(/\$\{ORIGIN\}|\$ORIGIN/gu, dirname(path))));
-		const searchPaths = [...localPaths, ...inheritedPaths];
+		// glibc RUNPATH masks ancestor RPATH for this image's direct dependencies.
+		const searchPaths = elf?.hasRunpath && !musl ? localPaths : [...localPaths, ...inheritedPaths];
 		const childPaths = musl || !elf?.hasRunpath ? searchPaths : inheritedPaths;
 		if (!counted.has(canonical)) {
 			counted.add(canonical);
