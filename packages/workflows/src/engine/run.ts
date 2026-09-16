@@ -76,7 +76,11 @@ import { buildExitGatedUiContext } from "./primitives/ui.js";
 import { createChildWorkflowRunner } from "./primitives/workflow.js";
 import { createContinuationReplayIndex } from "./replay.js";
 import { createRunBudgetController, WorkflowBudgetExceededError } from "./run-budget.js";
-import { createDurableAdmissionSettlement, durableRootRegistrationForRun } from "./run-durable-admission.js";
+import {
+	backgroundAdmissionControl,
+	createDurableAdmissionSettlement,
+	durableRootRegistrationForRun,
+} from "./run-durable-admission.js";
 import { createDurableStageSessionRecorder } from "./run-durable-stage-session.js";
 import {
 	createDurableCachedStageRecorder,
@@ -736,9 +740,10 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 	let pausePersistence: Promise<void> | undefined;
 	const persistRunControl = async (status: "paused" | "running"): Promise<void> => {
 		ownController.signal.throwIfAborted();
-		if (opts.parentRun !== undefined || durableBackend.getWorkflow(runId) === undefined) return;
-		// Controls share the admission outcome rather than draining its abandoned queue.
-		await admission.ready();
+		if (opts.parentRun !== undefined) return;
+		// Wait for durable registration, not an independent startup flush drain.
+		await durableBackend.settleWorkflowAdmission?.(runId);
+		if (durableBackend.getWorkflow(runId) === undefined) return;
 		if (
 			!(await transitionDurableWorkflowStatus(durableBackend, runId, ["running", "paused"], status, undefined, true))
 		) {
@@ -755,12 +760,25 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		get paused() {
 			return scheduler.isRunPaused();
 		},
+		get admitting() {
+			return admission.admitting;
+		},
+		get admissionSettlement() {
+			return durableBackend.settleWorkflowAdmission?.(runId);
+		},
 		pause: () => {
 			ownController.signal.throwIfAborted();
 			scheduler.pauseRun();
 			activeStore.recordRunPaused(runId, undefined, { resumable: true });
 			pausePersistence = persistRunControl("paused");
-			return pausePersistence;
+			if (!admission.admitting) return pausePersistence;
+			backgroundAdmissionControl(durableBackend, runId, pausePersistence, (error, resumable) => {
+				runSnapshot.error = unknownErrorMessage(error);
+				// Keep the paused initialization owner; explicit resume releases its failure.
+				activeStore.recordRunPaused(runId, undefined, { resumable });
+				return runSnapshot.error;
+			});
+			return Promise.resolve();
 		},
 		resume: async () => {
 			try {
@@ -777,7 +795,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		},
 		quit: () => {
 			ownController.abort(new WorkflowGracefulQuitError(runId, "workflow runtime"));
-			return runtimeSettled.promise.then(() => admission.settled());
+			return runtimeSettled.promise;
 		},
 	});
 	terminalEvents.register();

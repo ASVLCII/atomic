@@ -97,6 +97,8 @@ export interface DurableWorkflowBackend {
 	isAdmissionUnavailable?(workflowId: string): boolean;
 	/** Await this identity's bounded admission, retaining its rejection until a new attempt. */
 	settleWorkflowAdmission?(workflowId: string): Promise<void>;
+	/** Whether bounded registration is pending or retains a failed settlement. */
+	hasWorkflowAdmissionSettlement?(workflowId: string): boolean;
 	/** Persist one logical run's pending-stage transition under its durable owner. */
 	persistPendingStageMessages(
 		workflowId: string,

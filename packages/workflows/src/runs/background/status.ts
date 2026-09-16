@@ -502,7 +502,7 @@ async function pauseRunWithAction(
 				ok: true,
 				runId,
 				paused: [],
-				message: `Run ${runId} paused. Resume with /workflow resume on this live process; untracked initialization or workflow code may still finish, but further workflow steps and completion wait for resume. Cross-process resume requires durable checkpoint or pending prompt progress.`,
+				message: `Run ${runId} paused. Resume with /workflow resume on this live process; untracked initialization or workflow code may still finish, but further workflow steps and completion wait for resume. Cross-process resume requires durable checkpoint or pending prompt progress.${runtimeControls.some(({ handle }) => handle.admitting) ? " Database pause settlement is pending; inspect workflow status for persistence errors." : ""}`,
 			};
 		}
 		return { ok: false, runId, reason: "no_active_stages" };

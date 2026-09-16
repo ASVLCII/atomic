@@ -70,13 +70,36 @@ export async function admitDurableRootRun(args: {
 	);
 }
 
+/** Observe and fence failed durable controls without blocking local acknowledgement. */
+export function backgroundAdmissionControl(
+	backend: DurableWorkflowBackend | undefined,
+	runId: string,
+	settlement: Promise<void>,
+	onFailure: (error: unknown, resumable: boolean) => void,
+): void {
+	void settlement.catch((error: unknown) => {
+		const handle = backend?.getWorkflow(runId);
+		const resumable =
+			handle !== undefined && isDurableWorkflowResumable({ ...handle, status: "paused", resumable: true });
+		onFailure(error, resumable);
+		if (handle === undefined || (handle.status !== "running" && handle.status !== "paused")) return;
+		// Never enqueue an unfenced write behind abandoned admission. Preserve progress
+		// and expose uncertainty in the existing local status/error fields only.
+		const fence = new AbortController();
+		fence.abort();
+		dbosAdmissionContext.run(fence.signal, () => backend?.setWorkflowStatus(runId, "paused", undefined, resumable));
+	});
+}
+
 /** One owner for admission and every executor exit, including a detached graceful quit. */
 export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeInput, signal: AbortSignal) {
 	let admitted = false;
 	let rejected = false;
 	let pending: Promise<void> | undefined;
-	let settlement: Promise<void> = Promise.resolve();
 	return {
+		get admitting(): boolean {
+			return !admitted;
+		},
 		admit(registration: WorkflowRegistrationInput | undefined): Promise<void> {
 			const controller = new AbortController();
 			const onAbort = () => {
@@ -106,18 +129,12 @@ export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeI
 		get failed(): boolean {
 			return rejected;
 		},
-		async ready(): Promise<void> {
-			await pending;
-		},
-		async settled(): Promise<void> {
-			await settlement;
-		},
 		async settle(cancelled: boolean, onUnconfirmedCancellation: () => void): Promise<void> {
 			const gracefulQuit = findWorkflowGracefulQuit(signal.reason) !== undefined;
-			settlement = (async () => {
+			const settlement = (async () => {
 				if (gracefulQuit) {
 					try {
-						await pending;
+						await input.durableBackend.settleWorkflowAdmission?.(input.runId);
 					} catch (error) {
 						// Preserve the prompt local stop, not a fictitious durable pause.
 						// Never flush the abandoned queue under a new, unfenced context.
@@ -143,9 +160,10 @@ export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeI
 					onUnconfirmedCancellation();
 				}
 			})();
-			// The public quit acknowledgement awaits this same settlement, while
-			// the suspended executor can return without waiting for in-flight SQL.
-			if (!gracefulQuit) await settlement;
+			// Public quit observes the backend's retained registration outcome separately.
+			// The suspended executor must not wait for independent startup drains.
+			if (gracefulQuit) void settlement.catch(() => {});
+			else await settlement;
 		},
 	};
 }

@@ -184,6 +184,13 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	if (paused) {
 		control = pauseRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => error);
 	}
+	if (control !== undefined && (paused || quit)) {
+		await vi.advanceTimersByTimeAsync(0);
+		const acknowledgement = await control;
+		assert.ok(acknowledgement && typeof acknowledgement === "object" && "ok" in acknowledgement);
+		assert.equal(acknowledgement.ok, true, "control acknowledges before admission settles");
+		assert.equal(author.mock.calls.length, 0);
+	}
 	if (exit === "quit-before-then-kill") {
 		await vi.advanceTimersByTimeAsync(0);
 		assert.equal((await killRun(runId, { store, cancellation })).ok, true);
@@ -193,11 +200,13 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	else if (!exit.endsWith("cancel-before")) release.resolve();
 	await vi.advanceTimersByTimeAsync(0);
 	if (paused && (unavailable || rejected)) {
-		const pauseError = await control;
-		if (rejected) assert.equal(pauseError, rejection);
-		else assert.ok(pauseError instanceof DbosDependencyError);
+		assert.match(store.runs()[0]?.error ?? "", rejected ? /permission denied/ : /database|timed out/);
+		assert.equal(store.runs()[0]?.status, "paused");
+		assert.equal(backend.getWorkflow(runId)?.status, "paused");
+		assert.ok(controls.runControl(runId), "failed pause retains its initialization owner until resume");
 		await assert.rejects(resumeRun(runId, { store, toolControlRegistry: controls }), (error: Error) => {
-			assert.equal(error, pauseError, "resume surfaces the original admission failure");
+			if (rejected) assert.equal(error, rejection);
+			else assert.ok(error instanceof DbosDependencyError);
 			return true;
 		});
 	}
@@ -212,16 +221,16 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	const result = await outcome;
 	if (rejected && !quit) assert.equal(result, rejection);
 	if (quit && (unavailable || rejected)) {
-		assert.ok(controlResult instanceof Error);
-		if (rejected) assert.equal(controlResult.cause, rejection);
-		if (unavailable) assert.ok(controlResult.cause instanceof DbosDependencyError);
-		assert.match(controlResult.message, /durable paused transition failed/);
-		assert.doesNotMatch(controlResult.message, /not resumable/);
+		assert.ok(controlResult && typeof controlResult === "object" && "ok" in controlResult);
+		assert.equal(controlResult.ok, true);
+		const error = store.runs()[0]?.error ?? "";
+		assert.match(error, /durable paused transition failed/);
+		assert.match(error, rejected ? /permission denied/ : /database|timed out/);
+		assert.doesNotMatch(error, /not resumable/);
 		assert.deepEqual([...sdk.state.steps.entries()], priorSteps, "failed re-admission preserves prior metadata");
-		await assert.rejects(quitRun(runId, { store, toolControlRegistry: controls }), (error: Error) => {
-			assert.equal(error, controlResult.cause, "repeated quit surfaces the original admission failure");
-			return true;
-		});
+		assert.equal((await quitRun(runId, { store, toolControlRegistry: controls })).ok, true);
+		await vi.advanceTimersByTimeAsync(0);
+		assert.equal(store.runs()[0]?.error, error, "repeated quit retains the original admission diagnostic");
 	} else if (quit) {
 		assert.ok(controlResult && typeof controlResult === "object" && "ok" in controlResult);
 		assert.equal(controlResult.ok, true);

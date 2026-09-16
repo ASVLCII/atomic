@@ -301,8 +301,8 @@ for (const operation of ["cancel", "metadata"] as const) {
 	);
 }
 
-// #3072 / #3074: quit releases the executor promptly but never acknowledges
-// durable suspension until the same bounded admission owner settles.
+// #3072 / #3074: quit acknowledges locally before registration settles; failures
+// remain visible through status without losing durable progress or fencing.
 test.each(["deadline", "dependency", "rejection"] as const)(
 	"public quit settles failed admission: %s",
 	async (mode) => {
@@ -341,31 +341,28 @@ test.each(["deadline", "dependency", "rejection"] as const)(
 		const pending = run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry: controls });
 		await entered.promise;
 		const quit = quitRun(runId, { store, toolControlRegistry: controls });
-		const rejected = assert.rejects(quit, (error: Error) => {
-			assert.match(error.message, /durable paused transition failed/);
-			if (mode === "rejection") assert.equal(error.cause, rejection);
-			return true;
-		});
+		assert.equal((await quit).ok, true, "quit acknowledges before SDK admission is released");
 		assert.equal((await pending).status, "paused");
 		assert.equal(store.runs()[0]?.resumable, false);
 		let concurrentSettled = false;
-		const concurrent = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => {
+		const concurrent = quitRun(runId, { store, toolControlRegistry: controls }).then((result) => {
 			concurrentSettled = true;
-			return error;
+			return result;
 		});
+		assert.equal((await concurrent).ok, true, "concurrent quit also acknowledges pending admission");
 		if (mode !== "deadline") late.resolve();
 		await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
-		await rejected;
-		assert.equal(concurrentSettled, true, "concurrent quit shares bounded admission failure");
-		assert.ok((await concurrent) instanceof Error);
+		assert.match(store.runs()[0]?.error ?? "", /durable paused transition failed/);
+		assert.match(store.runs()[0]?.error ?? "", mode === "rejection" ? /permission denied/ : /database|timed out/);
+		assert.equal(concurrentSettled, true);
 		let repeatedSettled = false;
-		const repeated = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => {
+		const repeated = quitRun(runId, { store, toolControlRegistry: controls }).then((result) => {
 			repeatedSettled = true;
-			return error;
+			return result;
 		});
 		await vi.advanceTimersByTimeAsync(0);
 		assert.equal(repeatedSettled, true, "repeat quit cannot wait on an abandoned queue");
-		assert.ok((await repeated) instanceof Error);
+		assert.equal((await repeated).ok, true);
 		assert.equal(backend.getWorkflow(runId)?.status, "paused");
 		assert.equal(backend.getWorkflow(runId)?.resumable, false);
 		assert.equal(backend.isAdmissionUnavailable(runId), mode !== "rejection");

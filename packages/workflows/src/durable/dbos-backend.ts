@@ -238,6 +238,9 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	settleWorkflowAdmission(workflowId: string): Promise<void> {
 		return this.admissionSettlements.get(workflowId) ?? Promise.resolve();
 	}
+	hasWorkflowAdmissionSettlement(workflowId: string): boolean {
+		return this.admissionSettlements.has(workflowId);
+	}
 
 	admitWorkflow(
 		workflowId: string,
@@ -252,7 +255,12 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 			},
 			() => {},
 		);
-		return pending;
+		// Keep extensible startup drains on executor admission, not control acknowledgement.
+		return pending.then(async () => {
+			await dbosAdmissionContext.run(signal, () => this.flush(workflowId));
+			signal.throwIfAborted();
+			this.admissionMetadataAttempted.delete(workflowId);
+		});
 	}
 
 	private async performAdmission(
@@ -271,12 +279,11 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 					signal.throwIfAborted();
 					if (registration !== undefined) this.registerWorkflow(registration);
 					else this.setWorkflowStatus(workflowId, "running");
-					await this.flush(workflowId);
+					await this.flushWrites(workflowId);
 					signal.throwIfAborted();
 				}),
 				signal,
 			);
-			this.admissionMetadataAttempted.delete(workflowId);
 			this.admissionUnavailable = false;
 			this.unavailableAdmissions.delete(workflowId);
 		} catch (error) {
@@ -625,6 +632,10 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	}
 
 	async flush(workflowId?: string): Promise<void> {
+		await this.flushWrites(workflowId);
+	}
+
+	private async flushWrites(workflowId?: string): Promise<void> {
 		const workflowIds =
 			workflowId === undefined
 				? [...new Set([...this.writeQueues.keys(), ...this.writeErrors.keys()])]
