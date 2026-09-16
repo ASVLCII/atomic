@@ -181,6 +181,14 @@ describe("openai-completions prompt caching", () => {
 		},
 	);
 
+	it("sends Baseten session affinity for built-in catalog models", async () => {
+		// Regression for upstream #9629.
+		const model = getModel("baseten", "zai-org/GLM-5.2");
+		const { headers } = await captureRequest({ sessionId: "baseten-catalog-session" }, model);
+		expect(headers["x-session-affinity"]).toBe("baseten-catalog-session");
+		expect(headers["x-client-request-id"]).toBe("baseten-catalog-session");
+	});
+
 	it("uses OpenAI no-session format when configured", async () => {
 		const model = createModel({
 			compat: { sendSessionAffinityHeaders: true, sessionAffinityFormat: "openai-nosession" },
@@ -229,7 +237,11 @@ describe("openai-completions prompt caching", () => {
 				...getModel("openrouter", "auto"),
 				headers: { "x-session-id": sessionId },
 			};
-			const { headers } = await captureRequest({ sessionId: "generated-session" }, model);
+			// Probe runtime null suppression even though Model.headers only declares string values.
+			const { headers } = await captureRequest(
+				{ sessionId: "generated-session" },
+				model as Model<"openai-completions">,
+			);
 
 			expect(headers["x-session-id"]).toBe(sessionId);
 		},
