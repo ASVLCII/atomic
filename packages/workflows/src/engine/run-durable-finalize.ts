@@ -33,6 +33,8 @@ export async function finalizeUnadmittedDurableStatus(input: DurableTerminalFina
 /** Best-effort durable cancellation uses neither the caller's aborted fence nor its queue. */
 export async function finalizeCancelledAdmission(input: DurableTerminalFinalizeInput): Promise<void> {
 	if (!input.isRoot || input.durableBackend.isAdmissionUnavailable?.(input.runId)) return;
+	// Graceful quit also aborts admission, but publishes a pause rather than cancellation.
+	if (toDurableStatus(effectiveRunStatus(input.runSnapshot)) !== "cancelled") return;
 	await boundedAdmission(async (signal) => {
 		await input.durableBackend.cancelUnadmittedWorkflow?.(input.runId, signal);
 	});

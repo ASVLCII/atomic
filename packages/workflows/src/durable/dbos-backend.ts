@@ -272,6 +272,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 
 	async cancelUnadmittedWorkflow(workflowId: string, signal: AbortSignal): Promise<void> {
 		if (!this.admissionMetadataAttempted.delete(workflowId) || this.isAdmissionUnavailable(workflowId)) return;
+		if (this.mem.getWorkflow(workflowId)?.status !== "cancelled") return;
 		// The aborted admission may still own a pending queue. Its signal fences
 		// subsequent writes; cancellation must use a fresh, independently bounded path.
 		await dbosAdmissionContext.run(signal, async () => {

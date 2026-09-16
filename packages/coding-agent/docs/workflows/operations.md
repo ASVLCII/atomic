@@ -91,6 +91,8 @@ Explicit user interruption is different from the request deadline. Before startu
 
 Cancellation does not undo mutations that already happened. If registration metadata may already have reached PostgreSQL, Atomic makes a separate bounded attempt to persist cancellation. If that attempt fails, a warning says that cancellation is local and database state is unknown. Inspect status and external effects before retrying an interrupted mutation. Request timeout retains its unknown-outcome behavior and does not cancel an accepted detached launch.
 
+Run-level `quit` is different from interrupting the startup request: it preserves a paused run, even if registration metadata was just saved, rather than cancelling its durable record. If no checkpoint progress exists, quit reports the run as nonresumable. Inspect status before starting a new run.
+
 From interactive chat, named workflow launches run in the background so the parent chat stays available. Run `/workflow connect <run>` to see agents working and chat with and steer each stage. Inspection, prompt-response, and control calls (`status`, `stages`, `stage`, `transcript`, `answer`, `pause`, `resume`, `quit`) remain available while work runs.
 
 The no-`runId` status listing includes bounded pending-stage rows after each run summary. Each row gives the display name, canonical stage ID, literal `pending` lifecycle, `pendingStageDeliveryAvailable`, and either the exact usable Intercom target or `unavailable`. Interactive status cards and run detail show the same identity/availability distinction within their width budgets. Status cards wrap exact targets onto continuation rows instead of rendering a partially truncated address; bounded omissions retain an explicit remaining-stage count.

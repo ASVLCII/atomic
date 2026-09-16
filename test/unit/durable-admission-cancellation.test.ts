@@ -10,6 +10,8 @@ import { resetDbosLifecycleForTests } from "../../packages/workflows/src/durable
 import { isMetadataStep, parseCurrentMetadataRecord } from "../../packages/workflows/src/durable/dbos-metadata.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { run } from "../../packages/workflows/src/engine/run.js";
+import { createToolControlRegistry } from "../../packages/workflows/src/engine/run-tool-control-registry.js";
+import { quitRun } from "../../packages/workflows/src/runs/background/quit.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createMockSdk } from "./durable-dbos-backend-helpers.js";
 
@@ -17,6 +19,77 @@ afterEach(() => {
 	vi.useRealTimers();
 	setDurableBackend(undefined);
 	resetDbosLifecycleForTests();
+});
+
+// #3072 / #3074: graceful quit during admission must not durably cancel a paused run.
+test("public quit after admission metadata commits preserves paused durable state", async () => {
+	vi.useFakeTimers();
+	const sdk = createMockSdk();
+	const runId = "quit-after-commit";
+	const store = createStore();
+	const toolControlRegistry = createToolControlRegistry();
+	let quit: ReturnType<typeof quitRun> | undefined;
+	const backend = new DbosDurableBackend({
+		...sdk,
+		recordStepOutput: async (id, step, output) => {
+			await sdk.recordStepOutput(id, step, output);
+			if (isMetadataStep(step) && quit === undefined) {
+				quit = quitRun(runId, { store, toolControlRegistry, actor: "user" });
+			}
+		},
+	});
+	setDurableBackend(backend);
+	const author = vi.fn(async () => ({}));
+	const definition = workflow({ name: runId, description: "", inputs: {}, outputs: {}, run: author });
+	const pending = run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry });
+	await vi.advanceTimersByTimeAsync(0);
+	const result = await pending;
+	assert.ok(quit, "quit landed after the admission metadata write");
+	const quitResult = await quit;
+	assert.equal(quitResult.ok, true);
+	assert.equal(result.status, "paused");
+	assert.equal(result.exitReason, "quit");
+	assert.equal(store.runs()[0]?.status, "paused");
+	assert.equal(store.runs()[0]?.exitReason, "quit");
+	assert.equal(store.runs()[0]?.resumable, false, "registration alone is not durable progress");
+	assert.equal(author.mock.calls.length, 0);
+	assert.deepEqual(sdk.state.cancels, [], "graceful quit is not destructive cancellation");
+	assert.equal(backend.getWorkflow(runId)?.status, "paused");
+	const other = new DbosDurableBackend(sdk, { executorId: "other-executor" });
+	await other.hydrateWorkflow(runId);
+	assert.equal(other.getWorkflow(runId)?.status, "paused");
+	assert.equal(other.getWorkflow(runId)?.resumable, false);
+	assert.equal(store.notices().length, 0);
+	assert.equal(vi.getTimerCount(), 0);
+});
+
+// #3072 / #3074: the backend must reject cancellation for non-cancelled outcomes too.
+test.each(["running", "paused"] as const)("unadmitted cancellation leaves a %s record untouched", async (status) => {
+	const sdk = createMockSdk();
+	const admission = new AbortController();
+	const reason = new Error("admission interrupted after commit");
+	const runId = `guard-${status}`;
+	const backend = new DbosDurableBackend({
+		...sdk,
+		recordStepOutput: async (id, step, output) => {
+			await sdk.recordStepOutput(id, step, output);
+			if (isMetadataStep(step)) admission.abort(reason);
+		},
+	});
+	await assert.rejects(
+		backend.admitWorkflow(
+			runId,
+			{ workflowId: runId, name: runId, inputs: {}, createdAt: 1, status: "running" },
+			admission.signal,
+		),
+		(error) => error === reason,
+	);
+	dbosAdmissionContext.run(admission.signal, () => backend.setWorkflowStatus(runId, status));
+	const persisted = [...sdk.state.steps.entries()];
+	await backend.cancelUnadmittedWorkflow(runId, new AbortController().signal);
+	assert.deepEqual(sdk.state.cancels, []);
+	assert.deepEqual([...sdk.state.steps.entries()], persisted);
+	assert.equal(backend.getWorkflow(runId)?.status, status);
 });
 
 // #3072 / #3074: cancellation must retire a possibly committed running owner,
