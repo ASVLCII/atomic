@@ -81,7 +81,11 @@ export class ModelRuntimeStreaming {
 	): Promise<{ provider: Provider; model: Model<Api>; options: StreamOptions }> {
 		const provider = this.models.getProvider(model.provider);
 		if (!provider) throw new ModelsError("provider", `Unknown provider: ${model.provider}`);
-		const resolution = await this.resolveAuth(model, { apiKey: options?.apiKey, env: options?.env });
+		const resolution = await this.resolveAuth(model, {
+			apiKey: options?.apiKey,
+			env: options?.env,
+			signal: options?.signal,
+		});
 		if (!resolution) throw new ModelsError("auth", `Provider is not configured: ${model.provider}`);
 
 		const { transformHeaders, ...providerOptions } = options ?? {};

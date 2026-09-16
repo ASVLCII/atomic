@@ -278,7 +278,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, streamOptions) => {
-			const authResult = await modelRuntime.getRequestAuth(model);
+			const authResult = await modelRuntime.getRequestAuth(model, {
+				apiKey: streamOptions?.apiKey,
+				env: streamOptions?.env,
+				signal: streamOptions?.signal,
+			});
 			const compatibility = authResult ? undefined : modelRuntime.getCompatibilityRequestConfig(model);
 			if (!authResult && compatibility?.authHeader) {
 				throw new Error(`No API key found for "${model.provider}"`);

@@ -177,6 +177,20 @@ describe("classifyWorkflowFailure", () => {
 		assert.equal(failure.userMessage, "OAuth callback metadata parse failed");
 	});
 
+	test("classifies request-auth preparation timeout as recoverable login_required", () => {
+		// Issue #3085
+		const failure = classifyWorkflowFailure({
+			role: "assistant",
+			stopReason: "error",
+			errorMessage: "Request authentication timed out for openai-codex. Please log in to continue.",
+		});
+		assert.equal(failure.kind, "auth");
+		assert.equal(failure.code, "login_required");
+		assert.equal(failure.recoverability, "recoverable");
+		assert.equal(failure.disposition, "active_blocked");
+		assert.equal(failure.resumable, true);
+	});
+
 	test("classifies git subprocess timeouts without treating them as repository setup errors", () => {
 		const failure = classifyWorkflowFailure(
 			new Error(

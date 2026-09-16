@@ -7,6 +7,7 @@ import {
 	buildModelCandidates,
 	buildModelCandidatesFromCatalog,
 	isRetryableModelFailure,
+	isRetryableSameModelFailure,
 	normalizeModelFailureSignal,
 	splitReasoningSuffix,
 	validateWorkflowModels,
@@ -508,6 +509,17 @@ describe("model fallback helpers", () => {
 			"another process). Retry shortly or run '/login anthropic' to re-authenticate.";
 		assert.equal(isRetryableModelFailure(new Error(message)), true);
 		assert.equal(normalizeModelFailureSignal(new Error(message)).kind, "auth_on_candidate_provider");
+	});
+
+	test("request-auth preparation timeout is fallbackable auth, not same-model retry (#3085)", () => {
+		const failure = {
+			role: "assistant",
+			stopReason: "error",
+			errorMessage: "Request authentication timed out for openai-codex. Please log in to continue.",
+		};
+		assert.equal(isRetryableModelFailure(failure), true);
+		assert.equal(normalizeModelFailureSignal(failure).kind, "auth_on_candidate_provider");
+		assert.equal(isRetryableSameModelFailure(failure), false);
 	});
 
 	test("retry classifier refuses cancellation and task failures despite structured-looking text", () => {

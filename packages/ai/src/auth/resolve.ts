@@ -15,6 +15,9 @@ import type {
 
 export type ModelsErrorCode = "model_source" | "model_validation" | "provider" | "stream" | "auth" | "oauth";
 
+/** Bound for pre-transport request-auth work: credential read, OAuth refresh, and toAuth. */
+export const REQUEST_AUTH_PREPARATION_TIMEOUT_MS = 15_000;
+
 export interface AuthResolutionOverrides {
 	apiKey?: string;
 	env?: ProviderEnv;
@@ -53,11 +56,32 @@ export function resolveProviderAuth(
 	authContext: AuthContext,
 	overrides?: AuthResolutionOverrides,
 ): Promise<AuthResult | undefined> {
-	const signal = operationSignal(overrides?.signal);
-	return raceWithAbortSignal(
-		resolveProviderAuthWithSignal(provider, credentials, authContext, overrides, signal),
+	const caller = operationSignal(overrides?.signal);
+	const timeout = new AbortController();
+	const timer = setTimeout(() => {
+		timeout.abort();
+	}, REQUEST_AUTH_PREPARATION_TIMEOUT_MS);
+	const signal = AbortSignal.any([caller, timeout.signal]);
+	const operation = resolveProviderAuthWithSignal(
+		provider,
+		credentials,
+		authContext,
+		{ ...overrides, signal },
 		signal,
 	);
+	return raceWithAbortSignal(operation, signal)
+		.catch((error: unknown) => {
+			if (timeout.signal.aborted && !caller.aborted) {
+				throw new ModelsError(
+					"auth",
+					`Request authentication timed out for ${provider.id}. Please log in to continue.`,
+				);
+			}
+			throw error;
+		})
+		.finally(() => {
+			clearTimeout(timer);
+		});
 }
 
 async function resolveProviderAuthWithSignal(
@@ -117,7 +141,6 @@ function overlayEnvAuthContext(base: AuthContext, env: ProviderEnv): AuthContext
 }
 
 const DEFAULT_OAUTH_MINIMUM_VALIDITY_MS = 5 * 60 * 1000;
-const DEFAULT_OAUTH_REFRESH_TIMEOUT_MS = 15_000;
 
 /**
  * OAuth resolution with double-checked locking: tokens with less than five
@@ -146,12 +169,9 @@ async function resolveStoredOAuth(
 					if (current?.type !== "oauth") return undefined; // logged out meanwhile
 					if (!expiresSoon(current)) return undefined; // another process/request refreshed
 					try {
-						const refreshSignal = AbortSignal.any([
-							signal,
-							AbortSignal.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS),
-						]);
-						return await oauth.refresh(current, refreshSignal);
+						return await raceWithAbortSignal(oauth.refresh(current, signal), signal);
 					} catch (error) {
+						if (signal.aborted) throw error;
 						throw new ModelsError("oauth", `OAuth refresh failed for ${providerId}`, { cause: error });
 					}
 				},
@@ -159,6 +179,7 @@ async function resolveStoredOAuth(
 			);
 		} catch (error) {
 			if (error instanceof ModelsError) throw error;
+			signal.throwIfAborted();
 			throw new ModelsError("auth", `Credential store modify failed for ${providerId}`, { cause: error });
 		}
 		if (post?.type !== "oauth") return undefined; // logged out meanwhile

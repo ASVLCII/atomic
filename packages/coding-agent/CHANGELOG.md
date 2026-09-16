@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Request authentication now fails within 15 seconds when credential refresh or derivation does not settle, including a fallback whose OAuth login has expired. Operator cancellation still aborts without fallback or an auth-block notice, and the bound does not apply to human-input waits, tool execution, or an already-opened model stream ([#3085](https://github.com/bastani-inc/atomic/issues/3085)).
+
 ## [0.9.20-alpha.3] - 2026-09-16
 
 ### Fixed
