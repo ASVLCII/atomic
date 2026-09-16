@@ -117,6 +117,7 @@ export function validateRuntimeDependencies(root, links = []) {
 	let images = 0;
 	let edges = 0;
 	const visited = new Set();
+	const counted = new Set();
 	function visit(path, inheritedPaths = [], musl = false) {
 		const canonical = realpathSync(path);
 		if (visited.has(canonical)) return;
@@ -131,9 +132,12 @@ export function validateRuntimeDependencies(root, links = []) {
 			.map((search) => resolve(search.replace(/\$\{ORIGIN\}|\$ORIGIN/gu, dirname(path))));
 		const searchPaths = [...localPaths, ...inheritedPaths];
 		const childPaths = musl || !elf?.hasRunpath ? searchPaths : inheritedPaths;
-		images++;
+		if (!counted.has(canonical)) {
+			counted.add(canonical);
+			images++;
+			edges += dependencies.length;
+		}
 		for (const dependency of dependencies) {
-			edges++;
 			if (
 				elf
 					? ELF_SYSTEM_LIBRARIES.has(dependency) ||
@@ -162,6 +166,8 @@ export function validateRuntimeDependencies(root, links = []) {
 		}
 	}
 	for (const name of ["postgres", "pg_ctl", "initdb"]) {
+		// Executables have independent loader contexts; shared images must be revalidated.
+		visited.clear();
 		const path = join(root, "bin", name);
 		// The producer validates presence and architecture, including Windows .exe.
 		if (existsSync(path)) visit(path);

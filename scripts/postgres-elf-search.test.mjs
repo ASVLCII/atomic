@@ -70,3 +70,26 @@ test("glibc permits host compiler ABI without permitting optional interpreter li
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+// #3073: each executable starts a separate loader, even when it shares libraries.
+for (const entrypoint of ["pg_ctl", "initdb"]) {
+	test(`${entrypoint} cannot inherit postgres's successful dependency traversal`, () => {
+		const root = mkdtempSync(join(tmpdir(), "pg-roots-"));
+		try {
+			for (const directory of ["bin", "lib", "transitive"]) mkdirSync(join(root, directory));
+			const completeSearch = "$ORIGIN/../lib:$ORIGIN/../transitive";
+			for (const name of ["postgres", "pg_ctl", "initdb"]) {
+				writeFileSync(join(root, "bin", name), elf(["libfirst.so", "libc.so.6"], completeSearch, 15));
+			}
+			writeFileSync(join(root, "lib/libfirst.so"), elf(["libsecond.so", "libc.so.6"]));
+			writeFileSync(join(root, "transitive/libsecond.so"), elf(["libc.so.6"]));
+			assert.deepEqual(validateRuntimeDependencies(root), { images: 5, edges: 9 });
+			writeFileSync(join(root, "bin", entrypoint), elf(["libfirst.so", "libc.so.6"], "$ORIGIN/../lib", 15));
+			assert.throws(() => validateRuntimeDependencies(root), /libfirst.so -> libsecond.so/u);
+			writeFileSync(join(root, "bin", entrypoint), elf(["libfirst.so", "libc.so.6"], completeSearch, 15));
+			assert.deepEqual(validateRuntimeDependencies(root), { images: 5, edges: 9 });
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+}
