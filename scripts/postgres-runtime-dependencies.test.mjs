@@ -19,7 +19,7 @@ function macho(dependency) {
 	return image;
 }
 
-// #3073: verify all bundled images, not just libraries loaded by --version.
+// #3073: verify the transitive closure needed by startup and workflow operation.
 test("dependency closure rejects a missing transitive library and accepts the repaired payload", () => {
 	const root = mkdtempSync(join(tmpdir(), "atomic-pg-closure-"));
 	try {
@@ -35,14 +35,16 @@ test("dependency closure rejects a missing transitive library and accepts the re
 	}
 });
 
-// #3073: an optional image outside the executable closure must still fail the full-image diagnostic.
-test("full-image diagnostic rejects the upstream OAuth module's absent libcurl", () => {
+// #3073: optional upstream OAuth gaps must not require supplemental libraries.
+test("required closure ignores optional OAuth but rejects it when an entrypoint imports it", () => {
 	const root = mkdtempSync(join(tmpdir(), "atomic-pg-oauth-"));
 	try {
 		mkdirSync(join(root, "bin"));
 		mkdirSync(join(root, "lib"));
 		writeFileSync(join(root, "bin/postgres"), macho("/usr/lib/libSystem.B.dylib"));
 		writeFileSync(join(root, "lib/libpq-oauth-18.dylib"), macho("@loader_path/../lib/libcurl.4.dylib"));
+		assert.equal(validateRuntimeDependencies(root).images, 1);
+		writeFileSync(join(root, "bin/postgres"), macho("@loader_path/../lib/libpq-oauth-18.dylib"));
 		assert.throws(() => validateRuntimeDependencies(root), /libpq-oauth-18.dylib -> .*libcurl.4.dylib/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -60,15 +62,16 @@ test("dependency closure ignores universal static archives alongside dynamic ima
 		archive.writeUInt32BE(8, 20);
 		archive.write("!<arch>\n", 32);
 		writeFileSync(join(root, "libpython.a"), archive);
-		writeFileSync(join(root, "postgres"), macho("/usr/lib/libSystem.B.dylib"));
+		mkdirSync(join(root, "bin"));
+		writeFileSync(join(root, "bin/postgres"), macho("/usr/lib/libSystem.B.dylib"));
 		assert.deepEqual(validateRuntimeDependencies(root), { images: 1, edges: 1 });
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
 
-// #3073: Linux language modules are invisible to entrypoint version probes too.
-test("ELF closure follows ORIGIN search paths and rejects missing language libraries", () => {
+// #3073: ELF entrypoint dependencies must resolve inside the supplied payload.
+test("ELF required closure follows ORIGIN search paths and rejects missing libraries", () => {
 	const root = mkdtempSync(join(tmpdir(), "atomic-pg-elf-"));
 	try {
 		const image = Buffer.alloc(1024);
@@ -90,9 +93,10 @@ test("ELF closure follows ORIGIN search paths and rejects missing language libra
 		image.writeBigUInt64LE(29n, 288);
 		image.writeBigUInt64LE(17n, 296);
 		image.write("\0libperl.so.5.26\0$ORIGIN\0", 512);
-		writeFileSync(join(root, "plperl.so"), image);
+		mkdirSync(join(root, "bin"));
+		writeFileSync(join(root, "bin/postgres"), image);
 		assert.throws(() => validateRuntimeDependencies(root), /libperl.so.5.26/u);
-		writeFileSync(join(root, "libperl.so.5.26"), "library fixture");
+		writeFileSync(join(root, "bin/libperl.so.5.26"), "library fixture");
 		assert.equal(validateRuntimeDependencies(root).edges, 1);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

@@ -10,7 +10,7 @@ function hash(path) {
 	return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 // #3073: exercise the shipped compiled dispatch, not a mocked launcher.
-test("standalone launcher validates sealed inventory, aliases and optional image dependencies", () => {
+test("standalone launcher validates sealed inventory, aliases and required image dependencies", () => {
 	const root = mkdtempSync(join(tmpdir(), "atomic-install-validator-"));
 	try {
 		const launcher = join(root, process.platform === "win32" ? "atomic.exe" : "atomic");
@@ -62,7 +62,11 @@ test("standalone launcher validates sealed inventory, aliases and optional image
 		name.copy(image, 56);
 		writeFileSync(join(runtime, "oauth.dylib"), image);
 		seal(["source", "alias", "pg-symlinks.json", "oauth.dylib"]);
-		assert.match(run().stderr, /dependency closure.*oauth.dylib.*libcurl.4.dylib/u);
+		assert.equal(run().status, 0, "optional OAuth is outside the required closure");
+		mkdirSync(join(runtime, "bin"));
+		writeFileSync(join(runtime, "bin/postgres"), image);
+		seal(["source", "alias", "pg-symlinks.json", "oauth.dylib", "bin/postgres"]);
+		assert.match(run().stderr, /dependency closure.*bin.postgres.*libcurl.4.dylib/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

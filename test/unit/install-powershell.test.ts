@@ -2082,14 +2082,19 @@ try {
             [pscustomobject]@{ State = "existing"; Move = "shim-install"; RollbackFailure = "shim-remove" }
         )
 
+        $caseIndex = 0
         foreach ($case in $caseSpecs) {
             $caseName = $case.State + "-" + $case.Move + "-" + $case.RollbackFailure
-            $caseRoot = Join-Path $workspace ("ctrl-c-" + $caseName)
+            # #3073: leave room for the PostgreSQL tree under .NET Framework's MAX_PATH.
+            $caseRoot = Join-Path $workspace ("c" + $caseIndex)
+            $caseIndex += 1
             $installContainer = Join-Path $caseRoot "created-install-parent"
             $binContainer = Join-Path $caseRoot "created-bin-parent"
             $installRoot = Join-Path $installContainer "install-root"
             $binDir = Join-Path $binContainer "bin-root"
             $caseTemp = Join-Path $caseRoot "temp"
+            $longestRuntimePath = Join-Path $caseTemp ("atomic-install-" + ("0" * 32) + "\payload\node_modules\@bastani\atomic-natives\postgres-runtime\bin\version.txt")
+            Assert-Fixture ($longestRuntimePath.Length -lt 260) "$caseName fixture exceeds legacy MAX_PATH: $longestRuntimePath"
             New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
             New-Item -ItemType Directory -Path $caseTemp -Force | Out-Null
             $parentMarker = Join-Path $caseRoot "pre-existing-parent.txt"

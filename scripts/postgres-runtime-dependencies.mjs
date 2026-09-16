@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 function cstring(bytes, offset) {
@@ -105,58 +105,58 @@ const ELF_SYSTEM_LIBRARIES = new Set([
 ]);
 
 /**
- * Producer gate for bundled 64-bit little-endian Mach-O/fat and ELF images.
- * Includes modules not loaded by entrypoint --version; not a PE validator.
+ * Required startup/workflow entrypoint closure for Mach-O/fat and ELF images.
+ * Optional modules are not roots. PE/DLL validation remains with Windows probes.
  */
 export function validateRuntimeDependencies(root, links = []) {
 	const canonicalRoot = realpathSync(root);
 	const aliases = new Map(links.map(({ source, target }) => [resolve(root, target), resolve(root, source)]));
 	let images = 0;
 	let edges = 0;
-	function visit(directory) {
-		for (const name of readdirSync(directory)) {
-			const path = join(directory, name);
-			const stat = lstatSync(path);
-			if (stat.isDirectory()) {
-				visit(path);
+	const visited = new Set();
+	function visit(path) {
+		const canonical = realpathSync(path);
+		if (visited.has(canonical)) return;
+		visited.add(canonical);
+		const bytes = readFileSync(path);
+		const elf = elfDependencies(bytes);
+		const dependencies = elf?.dependencies ?? imageDependencies(bytes);
+		if (dependencies === undefined) return;
+		images++;
+		for (const dependency of dependencies) {
+			edges++;
+			if (
+				elf
+					? ELF_SYSTEM_LIBRARIES.has(dependency)
+					: dependency.startsWith("/usr/lib/") || dependency.startsWith("/System/Library/")
+			)
 				continue;
-			}
-			if (!stat.isFile()) continue;
-			const bytes = readFileSync(path);
-			const elf = elfDependencies(bytes);
-			const dependencies = elf?.dependencies ?? imageDependencies(bytes);
-			if (dependencies === undefined) continue;
-			images++;
-			for (const dependency of dependencies) {
-				edges++;
-				if (
-					elf
-						? ELF_SYSTEM_LIBRARIES.has(dependency)
-						: dependency.startsWith("/usr/lib/") || dependency.startsWith("/System/Library/")
-				)
-					continue;
-				const candidates = elf
-					? elf.rpaths
-							.filter((search) => /^\$(?:ORIGIN|\{ORIGIN\})(?:\/|$)/u.test(search))
-							.map((search) => resolve(search.replace(/\$\{ORIGIN\}|\$ORIGIN/gu, dirname(path)), dependency))
-					: [resolve(dirname(path), dependency.replace(/^@loader_path\//u, ""))];
-				const source = candidates
-					.map((candidate) => aliases.get(candidate) ?? candidate)
-					.find((candidate) => existsSync(candidate));
-				if (source === undefined)
-					throw new Error(`incomplete PostgreSQL dependency closure: ${relative(root, path)} -> ${dependency}`);
-				const contained = relative(canonicalRoot, realpathSync(source));
-				if (
-					isAbsolute(contained) ||
-					contained === ".." ||
-					contained.startsWith("../") ||
-					contained.startsWith("..\\") ||
-					!lstatSync(source).isFile()
-				)
-					throw new Error(`PostgreSQL dependency escapes payload: ${dependency}`);
-			}
+			const candidates = elf
+				? elf.rpaths
+						.filter((search) => /^\$(?:ORIGIN|\{ORIGIN\})(?:\/|$)/u.test(search))
+						.map((search) => resolve(search.replace(/\$\{ORIGIN\}|\$ORIGIN/gu, dirname(path)), dependency))
+				: [resolve(dirname(path), dependency.replace(/^@loader_path\//u, ""))];
+			const source = candidates
+				.map((candidate) => aliases.get(candidate) ?? candidate)
+				.find((candidate) => existsSync(candidate));
+			if (source === undefined)
+				throw new Error(`incomplete PostgreSQL dependency closure: ${relative(root, path)} -> ${dependency}`);
+			const contained = relative(canonicalRoot, realpathSync(source));
+			if (
+				isAbsolute(contained) ||
+				contained === ".." ||
+				contained.startsWith("../") ||
+				contained.startsWith("..\\") ||
+				!lstatSync(source).isFile()
+			)
+				throw new Error(`PostgreSQL dependency escapes payload: ${dependency}`);
+			visit(source);
 		}
 	}
-	visit(root);
+	for (const name of ["postgres", "pg_ctl", "initdb"]) {
+		const path = join(root, "bin", name);
+		// The producer validates presence and architecture, including Windows .exe.
+		if (existsSync(path)) visit(path);
+	}
 	return { images, edges };
 }

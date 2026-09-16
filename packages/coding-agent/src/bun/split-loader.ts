@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { validateInstalledPostgres } from "../../../../scripts/validate-installed-postgres.mjs";
+import { validateInstalledPostgres } from "../../../../scripts/validate-installed-postgres.js";
 import { markLifecycleTiming } from "../core/lifecycle-timings.ts";
 import { ATOMIC_AI_AGENT } from "../utils/agent-attribution.ts";
 import { stripBom } from "../utils/text.ts";

@@ -44,7 +44,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir, uptime } from "node:os";
-import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import type { RetainedPostgres, RetainedPostgresSpawnOptions } from "@bastani/atomic-natives";
 import {
 	cleanupAbandonedRuntimeStages,
@@ -122,7 +122,6 @@ export function ensureEmbeddedDbosPostgres(): Promise<void> {
 async function ensure(): Promise<void> {
 	const loaded = await loadEmbeddedPostgresBinaries();
 	hydrateBinaryLibraryLinks(loaded.pg_ctl);
-	embeddedPostgresRuntimeEnvironment(loaded.postgres);
 	// An older server listening on the shared port must not hide a broken installation.
 	for (const binary of [loaded.postgres, loaded.pg_ctl, loaded.initdb]) {
 		const result = await runLocalCommand(binary, ["--version"]);
@@ -276,34 +275,6 @@ async function initializeCluster(initdb: string, dataDir: string, context: Embed
 	}
 }
 
-/** Resolve only the packaged interpreter search paths; never mutate the parent environment. */
-export function embeddedPostgresRuntimeEnvironment(postgres: string): Record<string, string> {
-	const root = dirname(dirname(postgres));
-	const manifest = join(root, "language-runtime.json");
-	if (!existsSync(manifest)) return {};
-	const paths = JSON.parse(readFileSync(manifest, "utf8")) as Record<string, string[]>;
-	const environment: Record<string, string> = {};
-	for (const [name, entries] of Object.entries(paths)) {
-		if (!["PYTHONHOME", "PERL5LIB", "TCL_LIBRARY"].includes(name) || !Array.isArray(entries))
-			throw new Error("incomplete PostgreSQL language runtime configuration");
-		environment[name] = entries
-			.map((entry) => {
-				if (typeof entry !== "string" || isAbsolute(entry) || entry.split(/[\\/]/u).includes(".."))
-					throw new Error("PostgreSQL language runtime path escapes payload");
-				const path = resolve(root, entry);
-				if (!existsSync(path)) throw new Error(`incomplete PostgreSQL language runtime: ${path}`);
-				const contained = relative(realpathSync(root), realpathSync(path));
-				if (isAbsolute(contained) || contained.split(/[\\/]/u).includes(".."))
-					throw new Error("PostgreSQL language runtime path escapes payload");
-				if (!statSync(path).isDirectory()) throw new Error(`incomplete PostgreSQL language runtime: ${path}`);
-				return path;
-			})
-			.join(delimiter);
-	}
-	if (environment.PYTHONHOME !== undefined) environment.PYTHONDONTWRITEBYTECODE = "1";
-	return environment;
-}
-
 async function startCluster(
 	postgres: string,
 	dataDir: string,
@@ -311,14 +282,12 @@ async function startCluster(
 	context: EmbeddedPostgresRunContext,
 	isReachable: ReachabilityProbe = tcpReachable,
 ): Promise<RetainedPostgres | undefined> {
-	const env = embeddedPostgresRuntimeEnvironment(postgres);
 	try {
 		return retainedPostgresSpawner()({
 			executable: postgres,
 			args: ["-D", dataDir, "-p", String(EMBEDDED_PORT), "-c", `listen_addresses=${EMBEDDED_HOST}`],
 			cwd: dataDir,
 			logFile,
-			...(Object.keys(env).length === 0 ? {} : { env }),
 			...(context.owner === undefined ? {} : { uid: context.owner.uid, gid: context.owner.gid }),
 		});
 	} catch (error) {

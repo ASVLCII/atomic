@@ -415,8 +415,8 @@ function npmArtifact(root, target, mutate = () => {}) {
 	};
 }
 
-// #3073: optional modules must not bypass the producer's promotion gate.
-test("rejects an unresolved module dependency before replacing an installed payload", async () => {
+// #3073: required entrypoints must not bypass the producer's promotion gate.
+test("rejects an unresolved required dependency before replacing an installed payload", async () => {
 	const root = temporaryDirectory("atomic-pg-closure-");
 	const packageRoot = packageDirectory(root);
 	mkdirSync(join(packageRoot, "postgres-runtime"));
@@ -431,7 +431,7 @@ test("rejects an unresolved module dependency before replacing an installed payl
 		binary.writeUInt32LE(24 + dependency.length, 36);
 		binary.writeUInt32LE(24, 40);
 		dependency.copy(binary, 56);
-		writeFileSync(join(native, "lib/module.dylib"), binary);
+		writeFileSync(join(native, "bin/postgres"), binary);
 	});
 	await assert.rejects(
 		stagePostgresRuntime({
