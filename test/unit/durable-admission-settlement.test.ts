@@ -41,6 +41,10 @@ const exits = [
 	"continuation",
 	"continuation-dependency",
 	"continuation-rejection",
+	"continuation-quit-before",
+	"continuation-quit-before-dependency",
+	"continuation-quit-before-rejection",
+	"continuation-quit-before-deadline",
 	"shutdown",
 ] as const;
 
@@ -55,7 +59,9 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	const runId = `matrix-${exit}`;
 	const rejection = new Error("permission denied for admission");
 	const continuation = exit.startsWith("continuation");
-	const unavailable = exit === "deadline" || exit.endsWith("dependency");
+	const quit = exit.includes("quit");
+	const deadline = exit.endsWith("deadline");
+	const unavailable = deadline || exit.endsWith("dependency");
 	const rejected = exit.endsWith("rejection");
 	let armed = false;
 	let control: Promise<unknown> | undefined;
@@ -65,7 +71,7 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		admissionSignal ??= dbosAdmissionContext.getStore();
 		entered.resolve();
 		await release.promise;
-		if (unavailable && exit !== "deadline") throw new DbosDependencyError();
+		if (unavailable && !deadline) throw new DbosDependencyError();
 		if (rejected) throw rejection;
 	};
 	const backend = new DbosDurableBackend({
@@ -98,8 +104,19 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 			createdAt: 1,
 			resumable: true,
 		});
+		backend.recordCheckpoint({
+			kind: "stage",
+			workflowId: runId,
+			checkpointId: "prior-stage",
+			name: "prior-stage",
+			replayKey: "prior-stage",
+			completedAt: 1,
+			result: "ok",
+		});
 		await backend.flush(runId);
+		assert.equal(backend.getWorkflow(runId)?.completedCheckpoints, 1);
 	}
+	const priorSteps = [...sdk.state.steps.entries()];
 	const shutdown = vi.fn(async () => {});
 	if (exit === "shutdown") {
 		resetDbosLifecycleForTests(
@@ -152,10 +169,12 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	);
 	await entered.promise;
 	if (exit === "cancel-before") caller.abort(new Error("user cancelled"));
-	if (exit === "quit-before") control = quitRun(runId, { store, toolControlRegistry: controls });
+	if (exit === "quit-before" || (continuation && quit)) {
+		control = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => error);
+	}
 	if (exit === "pause") control = pauseRun(runId, { store, toolControlRegistry: controls });
 	if (exit === "shutdown") control = shutdownDbos();
-	if (exit === "deadline") await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
+	if (deadline) await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
 	else release.resolve();
 	await vi.advanceTimersByTimeAsync(0);
 	if (exit === "pause") {
@@ -165,19 +184,50 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		assert.equal(author.mock.calls.length, 0);
 		assert.equal((await resumeRun(runId, { store, toolControlRegistry: controls })).ok, true);
 	}
-	await control;
+	const controlResult = await control;
 	const result = await outcome;
-	if (rejected) assert.equal(result, rejection);
+	if (rejected && !quit) assert.equal(result, rejection);
+	if (quit && (unavailable || rejected)) {
+		assert.ok(controlResult instanceof Error);
+		if (rejected) assert.equal(controlResult.cause, rejection);
+		if (unavailable) assert.ok(controlResult.cause instanceof DbosDependencyError);
+		assert.match(controlResult.message, /durable paused transition failed/);
+		assert.doesNotMatch(controlResult.message, /not resumable/);
+		assert.deepEqual([...sdk.state.steps.entries()], priorSteps, "failed re-admission preserves prior metadata");
+		await assert.rejects(quitRun(runId, { store, toolControlRegistry: controls }), (error: Error) => {
+			assert.equal(error, controlResult.cause, "repeated quit surfaces the original admission failure");
+			return true;
+		});
+	} else if (quit) {
+		assert.ok(controlResult && typeof controlResult === "object" && "ok" in controlResult);
+		assert.equal(controlResult.ok, true);
+	}
 	const cancelled = exit.startsWith("cancel");
-	const quit = exit.startsWith("quit");
 	const status = cancelled ? "cancelled" : quit ? "paused" : unavailable || rejected ? "failed" : "completed";
 	assert.equal(backend.getWorkflow(runId)?.status, status);
 	assert.equal(store.runs()[0]?.status, cancelled ? "killed" : status);
 	assert.equal(backend.isAdmissionUnavailable(runId), unavailable);
 	assert.equal(author.mock.calls.length, status === "completed" ? 1 : 0);
 	assert.deepEqual(sdk.state.cancels, exit === "cancel-after" ? [runId] : []);
-	if (quit || cancelled || rejected) assert.equal(backend.getWorkflow(runId)?.resumable, false);
-	if (unavailable)
+	if (quit) {
+		assert.equal(backend.getWorkflow(runId)?.resumable, continuation);
+		assert.equal(store.runs()[0]?.resumable, continuation);
+		assert.equal(
+			backend.listResumableWorkflows().some((entry) => entry.workflowId === runId),
+			continuation,
+		);
+		if (continuation) {
+			const fresh = new DbosDurableBackend(sdk);
+			await fresh.hydrateWorkflow(runId);
+			assert.equal(fresh.getWorkflow(runId)?.completedCheckpoints, unavailable || rejected ? 1 : 2);
+			assert.equal(fresh.getWorkflow(runId)?.resumable, true);
+			assert.equal(
+				fresh.listResumableWorkflows().some((entry) => entry.workflowId === runId),
+				true,
+			);
+		}
+	} else if (cancelled || rejected) assert.equal(backend.getWorkflow(runId)?.resumable, false);
+	if (unavailable && !quit)
 		assert.equal(
 			backend.getWorkflow(runId)?.resumable,
 			true,

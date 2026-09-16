@@ -192,11 +192,13 @@ export async function quitRunWithAction(
 	if (runtimeQuit !== undefined) {
 		// Suspension is prompt; successful durable acknowledgement still waits for
 		// bounded registration settlement before publishing a resumable pause.
-		publishLocalQuit(activeStore, runId, pausedRunIds, false, opts?.actor);
+		publishLocalQuit(activeStore, runId, pausedRunIds, hasDurableQuitProgress(runId), opts?.actor);
 		try {
 			await runtimeQuit;
 		} catch (error) {
-			throw new Error(unrecordedDurableQuitMessage(error), { cause: error });
+			const resumable = hasDurableQuitProgress(runId);
+			publishLocalQuit(activeStore, runId, pausedRunIds, resumable, opts?.actor);
+			throw new Error(unrecordedDurableQuitMessage(error, resumable), { cause: error });
 		}
 	}
 	const toolHandles = controllableToolHandles(activeStore, toolControls, runId);
@@ -222,24 +224,21 @@ export async function quitRunWithAction(
 		if (abandonedTools.length > 0) jobs.detach(runId, jobs.get(runId));
 	};
 	const needsProgressCheck = runtimeQuit !== undefined || (current.resumable === false && graph.nodes.length === 0);
-	const durableHandle = needsProgressCheck ? discoverDurableQuitBackend(runId)?.getWorkflow(runId) : undefined;
-	const resumable =
-		!needsProgressCheck ||
-		(durableHandle !== undefined &&
-			isDurableWorkflowResumable({ ...durableHandle, status: "paused", resumable: true }));
-	// The executor has relinquished ownership. Report that local stop even if
-	// the non-cancellable durable write stalls; only its completion permits resume.
-	if (runtimeQuit !== undefined) publishLocalQuit(activeStore, runId, pausedRunIds, false);
+	const resumable = !needsProgressCheck || hasDurableQuitProgress(runId);
+	// Existing checkpoints survive an unconfirmed transition; a fresh run cannot
+	// become resumable merely because its executor stopped locally.
+	if (runtimeQuit !== undefined) publishLocalQuit(activeStore, runId, pausedRunIds, hasDurableQuitProgress(runId));
 	let durableTransition: DurableQuitOutcome;
 	try {
 		durableTransition = await markDurableQuit(runId, current, resumable);
 	} catch (error) {
 		if (!suspendedByAbort) throw error;
-		publish(false);
-		throw new Error(unrecordedDurableQuitMessage(error), { cause: error });
+		const preservedProgress = hasDurableQuitProgress(runId);
+		publish(preservedProgress);
+		throw new Error(unrecordedDurableQuitMessage(error, preservedProgress), { cause: error });
 	}
 	if (durableTransition === "refused") {
-		if (suspendedByAbort) publish(false);
+		if (suspendedByAbort) publish(hasDurableQuitProgress(runId));
 		return { ok: false, runId, reason: "already_ended" };
 	}
 	publish(resumable);
@@ -253,11 +252,9 @@ export async function quitRunWithAction(
 /**
  * Publish the local paused record for this workflow boundary.
  *
- * `resumable` follows the durable outcome rather than the local one: a pause the
- * durable backend never accepted is still real — the run stopped — but no future
- * process could resume from it, so it is not advertised as resumable. Recording
- * it keeps the run controllable, so a later `/workflow quit` re-attempts the
- * transition and upgrades the record.
+ * An unconfirmed transition does not create durable progress, but must not
+ * discard existing checkpoints either. Recording the local stop keeps the run
+ * controllable so a later quit can retry the durable transition.
  *
  * The boundary run is deliberately excluded from the descendant loop: a bare
  * `recordRunPaused(runId)` first would publish a plain paused state, and a
@@ -288,12 +285,18 @@ function publishLocalQuit(
  * Every caller already names the run ("Failed to quit run …: "), so this reads
  * as the rest of that sentence.
  */
-function unrecordedDurableQuitMessage(error: unknown): string {
+function unrecordedDurableQuitMessage(error: unknown, resumable: boolean): string {
 	const detail = error instanceof Error ? error.message : String(error);
 	return (
 		`Workflow execution stopped locally but the durable paused transition failed: ${detail}.` +
-		" The run is paused locally and is not resumable. Inspect workflow status and database availability before retrying."
+		` The run is paused locally and ${resumable ? "retains resumable durable progress" : "is not resumable"}. Inspect workflow status and database availability before retrying.`
 	);
+}
+
+/** Progress already recorded survives a failed attempt to persist the quit. */
+function hasDurableQuitProgress(runId: string): boolean {
+	const handle = discoverDurableQuitBackend(runId)?.getWorkflow(runId);
+	return handle !== undefined && isDurableWorkflowResumable({ ...handle, status: "paused", resumable: true });
 }
 
 /** Distinct admission boundaries owned by this workflow boundary's runs. */
@@ -399,9 +402,8 @@ async function markDurableQuit(runId: string, run: RunSnapshot, resumable = true
 	await backend.settleWorkflowAdmission?.(runId);
 	// The workflow is durably tracked, so a failure to persist the paused
 	// transition or flush it must surface: swallowing it here would let quitRun
-	// advertise a resumable pause no future process could resume from. The caller
-	// still reconciles an already-suspended executor into a pause that is not
-	// advertised as resumable, so the failure costs the promise, not the record.
+	// advertise a newly resumable pause no future process could resume from.
+	// Existing durable progress remains resumable even when this transition fails.
 	const transitioned = await transitionDurableWorkflowStatus(
 		backend,
 		runId,

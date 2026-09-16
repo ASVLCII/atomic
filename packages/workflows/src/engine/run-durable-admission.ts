@@ -8,6 +8,7 @@
 
 import type { DurableWorkflowBackend, WorkflowRegistrationInput } from "../durable/backend.js";
 import { boundedAdmission, dbosAdmissionContext } from "../durable/dbos-admission.js";
+import { isDurableWorkflowResumable } from "../durable/resume-eligibility.js";
 import type { WorkflowSerializableValue } from "../shared/types.js";
 import {
 	type DurableTerminalFinalizeInput,
@@ -109,10 +110,14 @@ export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeI
 					} catch (error) {
 						// Preserve the prompt local stop, not a fictitious durable pause.
 						// Never flush the abandoned queue under a new, unfenced context.
+						const handle = input.durableBackend.getWorkflow(input.runId);
+						const resumable =
+							handle !== undefined &&
+							isDurableWorkflowResumable({ ...handle, status: "paused", resumable: true });
 						const fence = new AbortController();
 						fence.abort();
 						dbosAdmissionContext.run(fence.signal, () =>
-							input.durableBackend.setWorkflowStatus(input.runId, "paused", undefined, false),
+							input.durableBackend.setWorkflowStatus(input.runId, "paused", undefined, resumable),
 						);
 						throw error;
 					}
