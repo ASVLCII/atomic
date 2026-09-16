@@ -21,41 +21,46 @@ afterEach(() => {
 });
 
 // #3072: local-only finalization must preserve immediate write rejection without a second flush.
-test("immediate non-dependency admission write failure rejects with the original error and cleans up", async () => {
-	const writeError = new Error("durable admission write failed");
-	let flushes = 0;
-	let executions = 0;
-	class FailingWriteBackend extends InMemoryDurableBackend {
-		override async flush(): Promise<void> {
-			flushes++;
-			throw writeError;
+test.each(["durable admission write failed", 'permission denied for table "dbos"."workflow_status"'])(
+	"immediate admission failure preserves the original rejection and diagnostic: %s",
+	async (message) => {
+		const writeError = new Error(message);
+		let flushes = 0;
+		let executions = 0;
+		class FailingWriteBackend extends InMemoryDurableBackend {
+			override async flush(): Promise<void> {
+				flushes++;
+				throw writeError;
+			}
 		}
-	}
-	const backend = new FailingWriteBackend();
-	const store = createStore();
-	const controls = createToolControlRegistry();
-	const runId = "immediate-admission-failure";
-	const definition = workflow({
-		name: runId,
-		description: "",
-		inputs: {},
-		outputs: {},
-		run: async () => {
-			executions++;
-			return {};
-		},
-	});
-	await assert.rejects(
-		run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry: controls }),
-		(error) => error === writeError,
-	);
-	assert.equal(flushes, 1, "failure cleanup must not retry durable writes");
-	assert.equal(executions, 0);
-	assert.equal(store.runs()[0]?.status, "failed");
-	assert.equal(backend.getWorkflow(runId)?.status, "failed");
-	assert.equal(controls.runControl(runId), undefined);
-	assert.equal(controls.admissionBoundary(runId), undefined);
-});
+		const backend = new FailingWriteBackend();
+		const store = createStore();
+		const controls = createToolControlRegistry();
+		const runId = "immediate-admission-failure";
+		const definition = workflow({
+			name: runId,
+			description: "",
+			inputs: {},
+			outputs: {},
+			run: async () => {
+				executions++;
+				return {};
+			},
+		});
+		await assert.rejects(
+			run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry: controls }),
+			(error) => error === writeError,
+		);
+		assert.equal(flushes, 1, "failure cleanup must not retry durable writes");
+		assert.equal(executions, 0);
+		assert.equal(store.runs()[0]?.status, "failed");
+		assert.equal(store.runs()[0]?.error, message);
+		assert.equal(store.runs()[0]?.resumable, false, "rejected admission is not a persisted resume target");
+		assert.equal(backend.getWorkflow(runId)?.status, "failed");
+		assert.equal(controls.runControl(runId), undefined);
+		assert.equal(controls.admissionBoundary(runId), undefined);
+	},
+);
 
 // #3072 / #2022: a retained backend may throw an error from another loader generation.
 test("topology rejection from another module generation remains a nonresumable result", async () => {

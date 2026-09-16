@@ -540,6 +540,23 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 
 	async deleteWorkflowIfInactive(workflowId: string): Promise<DurableInactiveDeleteResult> {
 		await this.flush(workflowId);
+		// Rejected registration can leave only an inactive local mirror. Do not
+		// manufacture metadata/tombstones for an identity DBOS never accepted.
+		// Any durable evidence (including malformed records), or an uncertain
+		// admission outcome, must retain the authoritative deletion guards below.
+		if (
+			this.locallyRegistered.has(workflowId) &&
+			!this.isAdmissionUnavailable(workflowId) &&
+			this.mem.getWorkflow(workflowId)?.status !== "running" &&
+			(await this.sdk.listStepRecords(workflowId)).length === 0 &&
+			(await this.sdk.retrieveWorkflow(workflowId)) === undefined
+		) {
+			this.current.delete(workflowId);
+			this.locallyRegistered.delete(workflowId);
+			this.promptReservations.delete(workflowId);
+			await this.mem.deleteWorkflow(workflowId);
+			return { ok: true };
+		}
 		await this.hydrateWorkflow(workflowId);
 		const handle = this.getLoadableWorkflow(workflowId);
 		if (handle === undefined) return { ok: false, reason: "not_found" };

@@ -281,6 +281,10 @@ export function strongDecisionFromNormalizedCode(
 	if (normalized === "durablenestedtopologyerror") {
 		return { ...unknownDecision(), resumable: false, recoverability: "non_recoverable" };
 	}
+	// Storage admission diagnostics must not become provider-credential advice.
+	if (normalized === "atomic_durable_admission_rejected") {
+		return { ...unknownDecision(), resumable: false, recoverability: "non_recoverable" };
+	}
 	if (CANCELLED_CODES.has(normalized)) return cancelledDecision();
 	if (INVALID_API_KEY_CODES.has(normalized)) return authDecision("invalid_api_key");
 	if (MISSING_API_KEY_CODES.has(normalized)) return authDecision("missing_api_key");

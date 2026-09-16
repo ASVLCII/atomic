@@ -23,7 +23,7 @@ import type {
 	DurableToolCheckpoint,
 	DurableUiCheckpoint,
 } from "../../packages/workflows/src/durable/types.js";
-import { createMockSdk } from "./durable-dbos-backend-helpers.js";
+import { createMockSdk, seedMockWorkflow } from "./durable-dbos-backend-helpers.js";
 
 // ---------------------------------------------------------------------------
 // DBOS adapter delegation tests (existing behavior)
@@ -105,6 +105,63 @@ describe("DbosDurableBackend (mock SDK)", () => {
 		assert.deepEqual(await backend.deleteWorkflowIfInactive("wf-running"), { ok: false, reason: "running" });
 		assert.deepEqual(await backend.deleteWorkflowIfInactive("wf-paused"), { ok: true });
 		assert.equal(backend.getWorkflow("wf-paused"), undefined);
+	});
+
+	// #3072 / #3074: local-only rejection cleanup must not erase durable evidence.
+	test.each([
+		"running metadata",
+		"malformed metadata",
+		"identity only",
+		"record read rejection",
+		"identity read rejection",
+	] as const)("rejected registration preserves guarded DBOS state with %s", async (evidence) => {
+		const workflowId = "rejected-with-evidence";
+		const rejected = new Error("registration rejected");
+		const readError = new Error("inspection denied");
+		const rejectingBackend = new DbosDurableBackend({
+			...sdk,
+			startWorkflow: async () => {
+				throw rejected;
+			},
+			listStepRecords: async (id) => {
+				if (evidence === "record read rejection") throw readError;
+				return sdk.listStepRecords(id);
+			},
+			retrieveWorkflow: async (id) => {
+				if (evidence === "identity read rejection") throw readError;
+				return sdk.retrieveWorkflow(id);
+			},
+		});
+		await assert.rejects(
+			rejectingBackend.admitWorkflow(
+				workflowId,
+				{
+					workflowId,
+					name: workflowId,
+					inputs: {},
+					createdAt: 1,
+					status: "failed",
+				},
+				new AbortController().signal,
+			),
+			(error) => error === rejected,
+		);
+		if (evidence === "running metadata") seedMockWorkflow(sdk, { workflowId });
+		if (evidence === "malformed metadata") {
+			sdk.state.steps.set(`${workflowId}:checkpoint:__atomic_metadata:1:seed`, { invalid: true });
+		}
+		if (evidence === "identity only") await sdk.startWorkflow(workflowId, workflowId, {});
+		const records = [...sdk.state.steps.entries()];
+		const identities = [...sdk.state.workflows.entries()];
+		if (evidence === "record read rejection" || evidence === "identity read rejection") {
+			await assert.rejects(rejectingBackend.deleteWorkflowIfInactive(workflowId), (error) => error === readError);
+			assert.equal(rejectingBackend.getWorkflow(workflowId)?.status, "failed");
+		} else {
+			assert.equal((await rejectingBackend.deleteWorkflowIfInactive(workflowId)).ok, false);
+		}
+		assert.deepEqual(sdk.state.deletions, []);
+		assert.deepEqual([...sdk.state.steps.entries()], records);
+		assert.deepEqual([...sdk.state.workflows.entries()], identities);
 	});
 
 	test("stage checkpoint envelope round-trips hydration metadata", () => {

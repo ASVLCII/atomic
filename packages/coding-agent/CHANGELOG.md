@@ -9,6 +9,7 @@
 - After DBOS initialization, workflow root database registration now has a 10-second deadline instead of waiting for the request timeout. Unavailable admission skips database cleanup, preserving the failure diagnostic and run identity even when PostgreSQL stops answering. Cancelled admission cannot start workflow code later, and database loss invalidates admission readiness. First-time provisioning and initialization are outside this bound ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Malformed saved workflow topology is non-resumable. Rejection during root admission returns a failed run result without executing workflow code or hiding database write failures ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Timed-out or cancelled workflow resume admission no longer publishes stale ownership metadata when its database operation finishes late ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Database-rejected workflow admission preserves PostgreSQL authentication and permission diagnostics and removes a never-persisted local run without reporting it as still running ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 
 ## [0.9.20-alpha.2] - 2026-09-15
 

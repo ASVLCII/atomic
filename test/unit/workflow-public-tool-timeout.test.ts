@@ -67,6 +67,56 @@ afterEach(() => {
 });
 
 describe("public workflow tool request deadline", () => {
+	// #3072 / #3074: ordinary database rejection is not a running or uncertain admission.
+	test.each([
+		["28P01", 'password authentication failed for user "atomic"'],
+		["42501", 'permission denied for table "dbos"."workflow_status"'],
+	])("%s admission rejection preserves its diagnostic and discards only the local run", async (code, message) => {
+		vi.useFakeTimers();
+		const sdk = createMockSdk();
+		const startWorkflow = vi.fn(async () => {
+			throw Object.assign(new Error(message), { code });
+		});
+		const backend = new DbosDurableBackend({ ...sdk, startWorkflow });
+		setDurableBackend(backend);
+		let bodyExecutions = 0;
+		const definition = workflow({
+			name: "public-auth-rejected-admission",
+			description: "",
+			inputs: {},
+			outputs: {},
+			run: async () => {
+				bodyExecutions++;
+				return {};
+			},
+		});
+		const runtime = createExtensionRuntime({ definitions: [definition] });
+		const tool = registeredTool(makeExecuteWorkflowTool(runtime, () => undefined));
+		const pending = tool.execute(
+			"auth-rejection",
+			{ action: "run", workflow: definition.name },
+			undefined,
+			undefined,
+			{},
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		const result = await pending;
+		assert.equal(result.details.action, "run");
+		assert.equal(result.details.status, "failed");
+		const runId = "runId" in result.details ? result.details.runId : undefined;
+		assert.ok(runId);
+		assert.equal("error" in result.details ? result.details.error : undefined, message);
+		assert.equal(workflowStore.runs().length, 0);
+		assert.equal(backend.getWorkflow(runId), undefined);
+		assert.equal(sdk.state.workflows.has(runId), false);
+		assert.equal(sdk.state.steps.size, 0);
+		assert.deepEqual(sdk.state.deletions, []);
+		await vi.advanceTimersByTimeAsync(WORKFLOW_TOOL_REQUEST_TIMEOUT_MS);
+		assert.equal(startWorkflow.mock.calls.length, 1);
+		assert.equal(bodyExecutions, 0);
+		assert.equal(vi.getTimerCount(), 0);
+	});
+
 	// #3072 / verifier F7: failed admission must not re-enter an unavailable DB for cleanup.
 	for (const mode of ["frozen", "refusing"] as const) {
 		test(`preserves the admission failure and identity through a ${mode} database outage`, async () => {

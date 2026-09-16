@@ -830,6 +830,16 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 					error.name === "DurableNestedTopologyError";
 				if (!isDbosDependencyError(error) && !isTopologyError) {
 					durableAdmissionFailure = { error };
+					// Admission is a storage operation, not a model-provider request.
+					// Classify that boundary explicitly while preserving the original rejection.
+					classifiedFailures.set(
+						error,
+						classifyWorkflowFailure({
+							code: "ATOMIC_DURABLE_ADMISSION_REJECTED",
+							message: unknownErrorMessage(error),
+							cause: error,
+						}),
+					);
 				}
 				throw error;
 			}),
