@@ -9,6 +9,7 @@ import { resetDbosLifecycleForTests } from "../../packages/workflows/src/durable
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { run } from "../../packages/workflows/src/engine/run.js";
 import { admitDurableRootRun } from "../../packages/workflows/src/engine/run-durable-admission.js";
+import { finalizeUnadmittedDurableStatus } from "../../packages/workflows/src/engine/run-durable-finalize.js";
 import { createToolControlRegistry } from "../../packages/workflows/src/engine/run-tool-control-registry.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createMockSdk } from "./durable-dbos-backend-helpers.js";
@@ -130,6 +131,81 @@ test("root admission has its own deadline and rejects late completion", async ()
 	}
 	assert.equal(outcome, "rejected", "late storage completion cannot admit the abandoned root");
 });
+
+// #3072 / #3074: same-ID resume admission must not publish ownership after abandonment.
+test.each(["deadline", "caller cancellation"] as const)(
+	"abandoned DB resume publishes no late metadata after %s",
+	async (cause) => {
+		vi.useFakeTimers();
+		const entered = Promise.withResolvers<void>();
+		const late = Promise.withResolvers<void>();
+		const sdk = createMockSdk();
+		const backend = new DbosDurableBackend({
+			...sdk,
+			resumeWorkflow: async (workflowId) => {
+				entered.resolve();
+				await late.promise;
+				await sdk.resumeWorkflow(workflowId);
+			},
+		});
+		const runId = "abandoned-resume";
+		backend.registerWorkflow({
+			workflowId: runId,
+			name: runId,
+			inputs: {},
+			status: "paused",
+			createdAt: 1,
+			resumable: true,
+		});
+		await backend.flush(runId);
+		const persisted = [...sdk.state.steps.entries()];
+		assert.equal(persisted.length, 1, "seeded resume has durable metadata");
+		const caller = new AbortController();
+		const cancelled = new Error("caller cancelled resume admission");
+		let admissions = 0;
+		const pending = admitDurableRootRun({
+			backend,
+			runId,
+			isChildRun: false,
+			registration: undefined,
+			signal: caller.signal,
+			timeoutMs: 100,
+		}).then(() => {
+			admissions++;
+		});
+		const rejected = assert.rejects(pending, (error) =>
+			cause === "deadline" ? error instanceof DbosDependencyError : error === cancelled,
+		);
+		try {
+			await entered.promise;
+			if (cause === "deadline") await vi.advanceTimersByTimeAsync(100);
+			else caller.abort(cancelled);
+			await rejected;
+			await finalizeUnadmittedDurableStatus({
+				runId,
+				isRoot: true,
+				durableBackend: backend,
+				runSnapshot: {
+					id: runId,
+					name: runId,
+					inputs: {},
+					status: cause === "deadline" ? "failed" : "killed",
+					stages: [],
+					startedAt: 1,
+					endedAt: Date.now(),
+				},
+			});
+			assert.equal(backend.getWorkflow(runId)?.status, cause === "deadline" ? "failed" : "cancelled");
+			assert.deepEqual([...sdk.state.steps.entries()], persisted, "unadmitted finalization is local only");
+		} finally {
+			late.resolve();
+			await vi.advanceTimersByTimeAsync(0);
+		}
+		assert.deepEqual(sdk.state.resumes, [runId], "the abandoned SDK call settled late");
+		assert.equal(admissions, 0, "late settlement cannot pass the author-execution admission gate");
+		assert.deepEqual([...sdk.state.steps.entries()], persisted, "late resume cannot publish metadata");
+	},
+);
 
 // #3072: exercise the executor boundary, including an SDK that settles after cancellation.
 test("timed-out DB root never executes late and the same identity admits once on retry", async () => {

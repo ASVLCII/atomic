@@ -408,8 +408,10 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		this.mem.setWorkflowStatus(workflowId, status, pendingPrompts, resumable, failure);
 		this.enqueueWrite(workflowId, async () => {
 			if (!this.isWorkflowLoadable(workflowId)) return;
+			dbosAdmissionContext.getStore()?.throwIfAborted();
 			if (status === "cancelled") await this.sdk.cancelWorkflow(workflowId);
 			else if (status === "running") await this.sdk.resumeWorkflow(workflowId);
+			dbosAdmissionContext.getStore()?.throwIfAborted();
 			await this.writeMetadata(workflowId);
 		});
 	}
