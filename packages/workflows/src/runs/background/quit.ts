@@ -189,7 +189,16 @@ export async function quitRunWithAction(
 	// acknowledged is included, and none can start afterwards — not even while
 	// `markDurableQuit()` awaits the backend.
 	await closeToolAdmission(admissionBoundaries, runId);
-	await runtimeQuit;
+	if (runtimeQuit !== undefined) {
+		// Suspension is prompt; successful durable acknowledgement still waits for
+		// bounded registration settlement before publishing a resumable pause.
+		publishLocalQuit(activeStore, runId, pausedRunIds, false, opts?.actor);
+		try {
+			await runtimeQuit;
+		} catch (error) {
+			throw new Error(unrecordedDurableQuitMessage(error), { cause: error });
+		}
+	}
 	const toolHandles = controllableToolHandles(activeStore, toolControls, runId);
 	const abandonedTools = await abortInFlightTools(activeStore, toolHandles);
 	const cancelledTools = collectCancelledToolNodes(activeStore, toolHandles);
@@ -282,8 +291,8 @@ function publishLocalQuit(
 function unrecordedDurableQuitMessage(error: unknown): string {
 	const detail = error instanceof Error ? error.message : String(error);
 	return (
-		`the in-flight ctx.tool work was cancelled but the durable paused transition failed: ${detail}.` +
-		" The run is paused locally and is not resumable until a retried quit records it durably."
+		`Workflow execution stopped locally but the durable paused transition failed: ${detail}.` +
+		" The run is paused locally and is not resumable. Inspect workflow status and database availability before retrying."
 	);
 }
 
@@ -387,6 +396,7 @@ type DurableQuitOutcome = "transitioned" | "not_needed" | "refused";
 async function markDurableQuit(runId: string, run: RunSnapshot, resumable = true): Promise<DurableQuitOutcome> {
 	const backend = discoverDurableQuitBackend(runId);
 	if (backend === undefined) return "not_needed";
+	await backend.settleWorkflowAdmission?.(runId);
 	// The workflow is durably tracked, so a failure to persist the paused
 	// transition or flush it must surface: swallowing it here would let quitRun
 	// advertise a resumable pause no future process could resume from. The caller

@@ -95,6 +95,8 @@ export interface DurableWorkflowBackend {
 	): Promise<void>;
 	/** Whether this run's admission failed on database availability; performs no I/O. */
 	isAdmissionUnavailable?(workflowId: string): boolean;
+	/** Await this identity's bounded admission, retaining its rejection until a new attempt. */
+	settleWorkflowAdmission?(workflowId: string): Promise<void>;
 	/** Persist one logical run's pending-stage transition under its durable owner. */
 	persistPendingStageMessages(
 		workflowId: string,

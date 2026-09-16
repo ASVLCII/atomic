@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Database-rejected workflow admission preserves PostgreSQL authentication and permission diagnostics and removes a never-persisted local run without reporting it as still running ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Resume continuations skip cleanup when database admission is unavailable, leaving the source resumable instead of waiting on the failed database ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Cancellation during admission now retires a possibly committed running database record without waiting on the abandoned admission write. Failed cancellation persistence retains the local cancelled outcome and warns that database state is unknown ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
-- Graceful quit during startup admission now preserves the paused durable run instead of cancelling it after registration metadata has committed. Runs without checkpoint progress remain nonresumable ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Graceful quit during startup admission now preserves the paused durable run both before and after registration metadata commits. It stops workflow execution immediately and drains registration within the admission deadline before persisting the pause. Failed admission leaves a local nonresumable pause and reports the database error, including on repeated quit requests. Runs without checkpoint progress remain nonresumable ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

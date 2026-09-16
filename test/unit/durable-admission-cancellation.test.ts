@@ -3,6 +3,7 @@ import { afterEach, test, vi } from "vitest";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import {
 	DBOS_ADMISSION_TIMEOUT_MS,
+	DbosDependencyError,
 	dbosAdmissionContext,
 } from "../../packages/workflows/src/durable/dbos-admission.js";
 import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
@@ -22,46 +23,73 @@ afterEach(() => {
 });
 
 // #3072 / #3074: graceful quit during admission must not durably cancel a paused run.
-test("public quit after admission metadata commits preserves paused durable state", async () => {
-	vi.useFakeTimers();
-	const sdk = createMockSdk();
-	const runId = "quit-after-commit";
-	const store = createStore();
-	const toolControlRegistry = createToolControlRegistry();
-	let quit: ReturnType<typeof quitRun> | undefined;
-	const backend = new DbosDurableBackend({
-		...sdk,
-		recordStepOutput: async (id, step, output) => {
-			await sdk.recordStepOutput(id, step, output);
-			if (isMetadataStep(step) && quit === undefined) {
-				quit = quitRun(runId, { store, toolControlRegistry, actor: "user" });
-			}
-		},
-	});
-	setDurableBackend(backend);
-	const author = vi.fn(async () => ({}));
-	const definition = workflow({ name: runId, description: "", inputs: {}, outputs: {}, run: author });
-	const pending = run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry });
-	await vi.advanceTimersByTimeAsync(0);
-	const result = await pending;
-	assert.ok(quit, "quit landed after the admission metadata write");
-	const quitResult = await quit;
-	assert.equal(quitResult.ok, true);
-	assert.equal(result.status, "paused");
-	assert.equal(result.exitReason, "quit");
-	assert.equal(store.runs()[0]?.status, "paused");
-	assert.equal(store.runs()[0]?.exitReason, "quit");
-	assert.equal(store.runs()[0]?.resumable, false, "registration alone is not durable progress");
-	assert.equal(author.mock.calls.length, 0);
-	assert.deepEqual(sdk.state.cancels, [], "graceful quit is not destructive cancellation");
-	assert.equal(backend.getWorkflow(runId)?.status, "paused");
-	const other = new DbosDurableBackend(sdk, { executorId: "other-executor" });
-	await other.hydrateWorkflow(runId);
-	assert.equal(other.getWorkflow(runId)?.status, "paused");
-	assert.equal(other.getWorkflow(runId)?.resumable, false);
-	assert.equal(store.notices().length, 0);
-	assert.equal(vi.getTimerCount(), 0);
-});
+test.each(["before-commit", "after-commit"] as const)(
+	"public quit %s preserves paused durable state",
+	async (timing) => {
+		vi.useFakeTimers();
+		const sdk = createMockSdk();
+		const runId = `quit-${timing}`;
+		const store = createStore();
+		const toolControlRegistry = createToolControlRegistry();
+		let quit: ReturnType<typeof quitRun> | undefined;
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const backend = new DbosDurableBackend({
+			...sdk,
+			startWorkflow: async (...args) => {
+				if (timing === "before-commit") {
+					entered.resolve();
+					await release.promise;
+				}
+				await sdk.startWorkflow(...args);
+			},
+			recordStepOutput: async (id, step, output) => {
+				await sdk.recordStepOutput(id, step, output);
+				if (timing === "after-commit" && isMetadataStep(step) && quit === undefined) {
+					quit = quitRun(runId, { store, toolControlRegistry, actor: "user" });
+				}
+			},
+		});
+		setDurableBackend(backend);
+		const author = vi.fn(async () => ({}));
+		const definition = workflow({ name: runId, description: "", inputs: {}, outputs: {}, run: author });
+		const pending = run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry });
+		if (timing === "before-commit") {
+			await entered.promise;
+			quit = quitRun(runId, { store, toolControlRegistry, actor: "user" });
+		}
+		await vi.advanceTimersByTimeAsync(0);
+		const result = await pending;
+		assert.ok(quit);
+		assert.equal(store.runs()[0]?.status, "paused", "local quit does not wait for admission SQL");
+		release.resolve();
+		await vi.advanceTimersByTimeAsync(0);
+		const quitResult = await quit;
+		assert.equal(quitResult.ok, true);
+		assert.equal(result.status, "paused");
+		assert.equal(result.exitReason, "quit");
+		assert.equal(store.runs()[0]?.status, "paused");
+		assert.equal(store.runs()[0]?.exitReason, "quit");
+		assert.equal(store.runs()[0]?.resumable, false, "registration alone is not durable progress");
+		assert.equal(author.mock.calls.length, 0);
+		assert.deepEqual(sdk.state.cancels, [], "graceful quit is not destructive cancellation");
+		assert.equal(backend.getWorkflow(runId)?.status, "paused");
+		assert.equal(backend.getWorkflow(runId)?.resumable, false);
+		assert.equal(
+			backend.listResumableWorkflows().some((entry) => entry.workflowId === runId),
+			false,
+		);
+		assert.equal(backend.isAdmissionUnavailable(runId), false);
+		assert.equal(toolControlRegistry.runControl(runId), undefined);
+		assert.equal(toolControlRegistry.admissionBoundary(runId), undefined);
+		const other = new DbosDurableBackend(sdk, { executorId: "other-executor" });
+		await other.hydrateWorkflow(runId);
+		assert.equal(other.getWorkflow(runId)?.status, "paused");
+		assert.equal(other.getWorkflow(runId)?.resumable, false);
+		assert.equal(store.notices().length, 0);
+		assert.equal(vi.getTimerCount(), 0);
+	},
+);
 
 // #3072 / #3074: the backend must reject cancellation for non-cancelled outcomes too.
 test.each(["running", "paused"] as const)("unadmitted cancellation leaves a %s record untouched", async (status) => {
@@ -272,3 +300,89 @@ for (const operation of ["cancel", "metadata"] as const) {
 		},
 	);
 }
+
+// #3072 / #3074: quit releases the executor promptly but never acknowledges
+// durable suspension until the same bounded admission owner settles.
+test.each(["deadline", "dependency", "rejection"] as const)(
+	"public quit settles failed admission: %s",
+	async (mode) => {
+		vi.useFakeTimers();
+		const sdk = createMockSdk();
+		const entered = Promise.withResolvers<void>();
+		const late = Promise.withResolvers<void>();
+		const rejection = new Error("permission denied during admission");
+		let attempts = 0;
+		const backend = new DbosDurableBackend({
+			...sdk,
+			startWorkflow: async (...args) => {
+				const first = ++attempts === 1;
+				entered.resolve();
+				await late.promise;
+				if (first && mode === "rejection") throw rejection;
+				if (first && mode === "dependency") throw new DbosDependencyError();
+				await sdk.startWorkflow(...args);
+			},
+		});
+		setDurableBackend(backend);
+		const store = createStore();
+		const controls = createToolControlRegistry();
+		const runId = `quit-failed-${mode}`;
+		const author = vi.fn(async () => ({}));
+		const definition = workflow({
+			name: runId,
+			description: "",
+			inputs: {},
+			outputs: {},
+			run: async (ctx) => {
+				await ctx.tool("effect", {}, author);
+				return {};
+			},
+		});
+		const pending = run(definition, {}, { runId, durableBackend: backend, store, toolControlRegistry: controls });
+		await entered.promise;
+		const quit = quitRun(runId, { store, toolControlRegistry: controls });
+		const rejected = assert.rejects(quit, (error: Error) => {
+			assert.match(error.message, /durable paused transition failed/);
+			if (mode === "rejection") assert.equal(error.cause, rejection);
+			return true;
+		});
+		assert.equal((await pending).status, "paused");
+		assert.equal(store.runs()[0]?.resumable, false);
+		let concurrentSettled = false;
+		const concurrent = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => {
+			concurrentSettled = true;
+			return error;
+		});
+		if (mode !== "deadline") late.resolve();
+		await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
+		await rejected;
+		assert.equal(concurrentSettled, true, "concurrent quit shares bounded admission failure");
+		assert.ok((await concurrent) instanceof Error);
+		let repeatedSettled = false;
+		const repeated = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => {
+			repeatedSettled = true;
+			return error;
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		assert.equal(repeatedSettled, true, "repeat quit cannot wait on an abandoned queue");
+		assert.ok((await repeated) instanceof Error);
+		assert.equal(backend.getWorkflow(runId)?.status, "paused");
+		assert.equal(backend.getWorkflow(runId)?.resumable, false);
+		assert.equal(backend.isAdmissionUnavailable(runId), mode !== "rejection");
+		assert.deepEqual(sdk.state.cancels, []);
+		assert.equal(author.mock.calls.length, 0);
+		assert.equal(controls.runControl(runId), undefined);
+		assert.equal(controls.admissionBoundary(runId), undefined);
+		late.resolve();
+		await vi.advanceTimersByTimeAsync(0);
+		assert.equal(sdk.state.steps.size, 0, "failed admission cannot publish late running metadata");
+		assert.equal(
+			(await run(definition, {}, { runId, durableBackend: backend, store: createStore() })).status,
+			"completed",
+		);
+		assert.equal(author.mock.calls.length, 1, "retry executes once and retires the previous admission failure");
+		assert.equal(backend.isAdmissionUnavailable(runId), false);
+		await backend.settleWorkflowAdmission(runId);
+		assert.equal(vi.getTimerCount(), 0);
+	},
+);

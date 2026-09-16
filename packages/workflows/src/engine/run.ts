@@ -76,12 +76,7 @@ import { buildExitGatedUiContext } from "./primitives/ui.js";
 import { createChildWorkflowRunner } from "./primitives/workflow.js";
 import { createContinuationReplayIndex } from "./replay.js";
 import { createRunBudgetController, WorkflowBudgetExceededError } from "./run-budget.js";
-import { admitDurableRootRun, durableRootRegistrationForRun } from "./run-durable-admission.js";
-import {
-	finalizeCancelledAdmission,
-	finalizeDurableTerminalStatus,
-	finalizeUnadmittedDurableStatus,
-} from "./run-durable-finalize.js";
+import { createDurableAdmissionSettlement, durableRootRegistrationForRun } from "./run-durable-admission.js";
 import { createDurableStageSessionRecorder } from "./run-durable-stage-session.js";
 import {
 	createDurableCachedStageRecorder,
@@ -750,6 +745,10 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		recordRunTimingCheckpoint(durableBackend, runSnapshot);
 		await durableBackend.flush(runId);
 	};
+	const admission = createDurableAdmissionSettlement(
+		{ runId, runSnapshot, isRoot: opts.parentRun === undefined, durableBackend },
+		ownController.signal,
+	);
 	const unregisterRunControl = toolControls.registerRun(runId, {
 		get paused() {
 			return scheduler.isRunPaused();
@@ -770,11 +769,10 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		},
 		quit: () => {
 			ownController.abort(new WorkflowGracefulQuitError(runId, "workflow runtime"));
-			return runtimeSettled.promise;
+			return runtimeSettled.promise.then(() => admission.settled());
 		},
 	});
 	terminalEvents.register();
-	let durableRootAdmitted = false;
 	let durableAdmissionFailure: { error: unknown } | undefined;
 	try {
 		workflowObservationRuntime(activeStore).startRun(runId);
@@ -808,12 +806,8 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		while (scheduler.isRunPaused()) await waitForRunRelease();
 		ownController.signal.throwIfAborted();
 		await raceAbort(
-			admitDurableRootRun({
-				backend: durableBackend,
-				runId,
-				isChildRun: opts.parentRun !== undefined,
-				signal: ownController.signal,
-				registration:
+			admission
+				.admit(
 					durableRootRegistration === undefined
 						? undefined
 						: {
@@ -825,31 +819,31 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 									runSnapshot.origin,
 								),
 							},
-			}).catch((error: unknown) => {
-				// Invalid topology is a failed nonresumable result, not a storage write rejection.
-				const isTopologyError =
-					typeof error === "object" &&
-					error !== null &&
-					"name" in error &&
-					error.name === "DurableNestedTopologyError";
-				if (!isDbosDependencyError(error) && !isTopologyError) {
-					durableAdmissionFailure = { error };
-					// Admission is a storage operation, not a model-provider request.
-					// Classify that boundary explicitly while preserving the original rejection.
-					classifiedFailures.set(
-						error,
-						classifyWorkflowFailure({
-							code: "ATOMIC_DURABLE_ADMISSION_REJECTED",
-							message: unknownErrorMessage(error),
-							cause: error,
-						}),
-					);
-				}
-				throw error;
-			}),
+				)
+				.catch((error: unknown) => {
+					// Invalid topology is a failed nonresumable result, not a storage write rejection.
+					const isTopologyError =
+						typeof error === "object" &&
+						error !== null &&
+						"name" in error &&
+						error.name === "DurableNestedTopologyError";
+					if (!isDbosDependencyError(error) && !isTopologyError) {
+						durableAdmissionFailure = { error };
+						// Admission is a storage operation, not a model-provider request.
+						// Classify that boundary explicitly while preserving the original rejection.
+						classifiedFailures.set(
+							error,
+							classifyWorkflowFailure({
+								code: "ATOMIC_DURABLE_ADMISSION_REJECTED",
+								message: unknownErrorMessage(error),
+								cause: error,
+							}),
+						);
+					}
+					throw error;
+				}),
 			ownController.signal,
 		);
-		durableRootAdmitted = true;
 		while (scheduler.isRunPaused()) await waitForRunRelease();
 		ownController.signal.throwIfAborted();
 		if (opts.deferWorkflowStart === true) opts.onWorkflowStartReady?.();
@@ -1044,32 +1038,16 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		runtimeSettled.resolve();
 		unregisterRunControl();
 		try {
-			const finalize = durableRootAdmitted ? finalizeDurableTerminalStatus : finalizeUnadmittedDurableStatus;
-			await finalize({
-				runId,
-				runSnapshot,
-				isRoot: opts.parentRun === undefined,
-				durableBackend,
+			await admission.settle(terminalEvents.winner()?.kind === "cancellation", () => {
+				activeStore.recordNotice({
+					id: `workflow-cancellation-persistence:${runId}`,
+					runId,
+					level: "warning",
+					message:
+						"Workflow cancelled locally; durable cancellation could not be confirmed. Database state is unknown.",
+					createdAt: Date.now(),
+				});
 			});
-			if (!durableRootAdmitted && terminalEvents.winner()?.kind === "cancellation") {
-				try {
-					await finalizeCancelledAdmission({
-						runId,
-						runSnapshot,
-						isRoot: opts.parentRun === undefined,
-						durableBackend,
-					});
-				} catch {
-					activeStore.recordNotice({
-						id: `workflow-cancellation-persistence:${runId}`,
-						runId,
-						level: "warning",
-						message:
-							"Workflow cancelled locally; durable cancellation could not be confirmed. Database state is unknown.",
-						createdAt: Date.now(),
-					});
-				}
-			}
 		} finally {
 			try {
 				gitWorktreeSetupCacheOwner.release(() => {

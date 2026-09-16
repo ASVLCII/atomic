@@ -208,6 +208,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	private admissionUnavailable = false;
 	private readonly unavailableAdmissions = new Set<string>();
 	private readonly admissionMetadataAttempted = new Set<string>();
+	private readonly admissionSettlements = new Map<string, Promise<void>>();
 
 	constructor(
 		sdk: DbosSdkHandle,
@@ -234,7 +235,27 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		return this.unavailableAdmissions.has(workflowId);
 	}
 
-	async admitWorkflow(
+	settleWorkflowAdmission(workflowId: string): Promise<void> {
+		return this.admissionSettlements.get(workflowId) ?? Promise.resolve();
+	}
+
+	admitWorkflow(
+		workflowId: string,
+		registration: WorkflowRegistrationInput | undefined,
+		signal: AbortSignal,
+	): Promise<void> {
+		const pending = this.performAdmission(workflowId, registration, signal);
+		this.admissionSettlements.set(workflowId, pending);
+		void pending.then(
+			() => {
+				if (this.admissionSettlements.get(workflowId) === pending) this.admissionSettlements.delete(workflowId);
+			},
+			() => {},
+		);
+		return pending;
+	}
+
+	private async performAdmission(
 		workflowId: string,
 		registration: WorkflowRegistrationInput | undefined,
 		signal: AbortSignal,
@@ -549,6 +570,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		this.invalid.add(workflowId);
 		this.current.delete(workflowId);
 		this.locallyRegistered.delete(workflowId);
+		this.admissionSettlements.delete(workflowId);
 		this.promptReservations.delete(workflowId);
 		await this.mem.deleteWorkflow(workflowId);
 		await this.enqueueWrite(workflowId, async () => {
@@ -572,6 +594,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		) {
 			this.current.delete(workflowId);
 			this.locallyRegistered.delete(workflowId);
+			this.admissionSettlements.delete(workflowId);
 			this.promptReservations.delete(workflowId);
 			await this.mem.deleteWorkflow(workflowId);
 			return { ok: true };
