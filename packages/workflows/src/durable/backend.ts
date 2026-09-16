@@ -84,6 +84,9 @@ export interface DurableWorkflowBackend {
 	readonly persistent: boolean;
 	/** Register or update a workflow's top-level metadata. */
 	registerWorkflow(handle: WorkflowRegistrationInput): void;
+	/** Retire possibly committed admission metadata without waiting on its abandoned queue. */
+	cancelUnadmittedWorkflow?(workflowId: string, signal: AbortSignal): Promise<void>;
+
 	/** Cancellable root persistence boundary. Child runs retain their root's queue. */
 	admitWorkflow?(
 		workflowId: string,

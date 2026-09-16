@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Malformed saved workflow topology is non-resumable. Rejection during root admission returns a failed run result without executing workflow code or hiding database write failures ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Timed-out or cancelled workflow resume admission no longer publishes stale ownership metadata when its database operation finishes late ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Database-rejected workflow admission preserves PostgreSQL authentication and permission diagnostics and removes a never-persisted local run without reporting it as still running ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Resume continuations skip cleanup when database admission is unavailable, leaving the source resumable instead of waiting on the failed database ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Cancellation during admission now retires a possibly committed running database record without waiting on the abandoned admission write. Failed cancellation persistence retains the local cancelled outcome and warns that database state is unknown ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

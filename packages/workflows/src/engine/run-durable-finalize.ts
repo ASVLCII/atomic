@@ -10,7 +10,7 @@
  */
 
 import type { DurableWorkflowBackend } from "../durable/backend.js";
-import { dbosAdmissionContext } from "../durable/dbos-admission.js";
+import { boundedAdmission, dbosAdmissionContext } from "../durable/dbos-admission.js";
 import { recordRunTimingCheckpoint } from "../durable/run-timing.js";
 import type { DurableWorkflowStatus } from "../durable/types.js";
 import { effectiveRunStatus } from "../shared/returned-run-status.js";
@@ -28,6 +28,14 @@ export async function finalizeUnadmittedDurableStatus(input: DurableTerminalFina
 	const controller = new AbortController();
 	controller.abort();
 	await dbosAdmissionContext.run(controller.signal, () => finalizeDurableTerminalStatus(input));
+}
+
+/** Best-effort durable cancellation uses neither the caller's aborted fence nor its queue. */
+export async function finalizeCancelledAdmission(input: DurableTerminalFinalizeInput): Promise<void> {
+	if (!input.isRoot || input.durableBackend.isAdmissionUnavailable?.(input.runId)) return;
+	await boundedAdmission(async (signal) => {
+		await input.durableBackend.cancelUnadmittedWorkflow?.(input.runId, signal);
+	});
 }
 
 /** Persist the terminal durable status and surface DBOS write failures. */

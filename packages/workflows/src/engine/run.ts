@@ -77,7 +77,11 @@ import { createChildWorkflowRunner } from "./primitives/workflow.js";
 import { createContinuationReplayIndex } from "./replay.js";
 import { createRunBudgetController, WorkflowBudgetExceededError } from "./run-budget.js";
 import { admitDurableRootRun, durableRootRegistrationForRun } from "./run-durable-admission.js";
-import { finalizeDurableTerminalStatus, finalizeUnadmittedDurableStatus } from "./run-durable-finalize.js";
+import {
+	finalizeCancelledAdmission,
+	finalizeDurableTerminalStatus,
+	finalizeUnadmittedDurableStatus,
+} from "./run-durable-finalize.js";
 import { createDurableStageSessionRecorder } from "./run-durable-stage-session.js";
 import {
 	createDurableCachedStageRecorder,
@@ -1047,6 +1051,25 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 				isRoot: opts.parentRun === undefined,
 				durableBackend,
 			});
+			if (!durableRootAdmitted && terminalEvents.winner()?.kind === "cancellation") {
+				try {
+					await finalizeCancelledAdmission({
+						runId,
+						runSnapshot,
+						isRoot: opts.parentRun === undefined,
+						durableBackend,
+					});
+				} catch {
+					activeStore.recordNotice({
+						id: `workflow-cancellation-persistence:${runId}`,
+						runId,
+						level: "warning",
+						message:
+							"Workflow cancelled locally; durable cancellation could not be confirmed. Database state is unknown.",
+						createdAt: Date.now(),
+					});
+				}
+			}
 		} finally {
 			try {
 				gitWorktreeSetupCacheOwner.release(() => {

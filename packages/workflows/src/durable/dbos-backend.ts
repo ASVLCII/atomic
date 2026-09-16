@@ -207,6 +207,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	private readonly checkReady?: () => Promise<void>;
 	private admissionUnavailable = false;
 	private readonly unavailableAdmissions = new Set<string>();
+	private readonly admissionMetadataAttempted = new Set<string>();
 
 	constructor(
 		sdk: DbosSdkHandle,
@@ -238,6 +239,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		registration: WorkflowRegistrationInput | undefined,
 		signal: AbortSignal,
 	): Promise<void> {
+		this.admissionMetadataAttempted.delete(workflowId);
 		try {
 			await raceAbort(
 				dbosAdmissionContext.run(signal, async () => {
@@ -253,10 +255,12 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 				}),
 				signal,
 			);
+			this.admissionMetadataAttempted.delete(workflowId);
 			this.admissionUnavailable = false;
 			this.unavailableAdmissions.delete(workflowId);
 		} catch (error) {
 			if (isDbosDependencyError(error)) {
+				this.admissionMetadataAttempted.delete(workflowId);
 				this.admissionUnavailable = true;
 				// Another root's successful admission must not enable cleanup of this identity.
 				this.unavailableAdmissions.add(workflowId);
@@ -264,6 +268,18 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 			}
 			throw error;
 		}
+	}
+
+	async cancelUnadmittedWorkflow(workflowId: string, signal: AbortSignal): Promise<void> {
+		if (!this.admissionMetadataAttempted.delete(workflowId) || this.isAdmissionUnavailable(workflowId)) return;
+		// The aborted admission may still own a pending queue. Its signal fences
+		// subsequent writes; cancellation must use a fresh, independently bounded path.
+		await dbosAdmissionContext.run(signal, async () => {
+			signal.throwIfAborted();
+			await this.sdk.cancelWorkflow(workflowId);
+			signal.throwIfAborted();
+			await this.writeMetadata(workflowId);
+		});
 	}
 
 	registerWorkflow(handle: WorkflowRegistrationInput): void {
@@ -283,6 +299,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 			dbosAdmissionContext.getStore()?.throwIfAborted();
 			await this.sdk.startWorkflow(handle.workflowId, handle.name, handle.inputs);
 			dbosAdmissionContext.getStore()?.throwIfAborted();
+			if (dbosAdmissionContext.getStore()) this.admissionMetadataAttempted.add(handle.workflowId);
 			await this.writeMetadata(handle.workflowId);
 		});
 	}
@@ -420,6 +437,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 			if (status === "cancelled") await this.sdk.cancelWorkflow(workflowId);
 			else if (status === "running") await this.sdk.resumeWorkflow(workflowId);
 			dbosAdmissionContext.getStore()?.throwIfAborted();
+			if (status === "running" && dbosAdmissionContext.getStore()) this.admissionMetadataAttempted.add(workflowId);
 			await this.writeMetadata(workflowId);
 		});
 	}
