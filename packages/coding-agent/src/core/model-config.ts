@@ -126,26 +126,6 @@ const OpenAIResponsesCompatSchema = Type.Object({
 	supportsMaxOutputTokens: Type.Optional(Type.Boolean()),
 });
 
-const AnthropicMessagesCompatSchema = Type.Object({
-	supportsEagerToolInputStreaming: Type.Optional(Type.Boolean()),
-	supportsLongCacheRetention: Type.Optional(Type.Boolean()),
-	sendSessionAffinityHeaders: Type.Optional(Type.Boolean()),
-	supportsCacheControlOnTools: Type.Optional(Type.Boolean()),
-	supportsTemperature: Type.Optional(Type.Boolean()),
-	forceAdaptiveThinking: Type.Optional(Type.Boolean()),
-	allowEmptySignature: Type.Optional(Type.Boolean()),
-	supportsStrictTools: Type.Optional(Type.Boolean()),
-	supportsMidConvoEffort: Type.Optional(Type.Boolean()),
-	enforcesPreservedThinkingBinding: Type.Optional(Type.Boolean()),
-	supportsToolReferences: Type.Optional(Type.Boolean()),
-});
-
-const ProviderCompatSchema = Type.Union([
-	OpenAICompletionsCompatSchema,
-	OpenAIResponsesCompatSchema,
-	AnthropicMessagesCompatSchema,
-]);
-
 const ModelCostRatesSchema = {
 	input: Type.Number(),
 	output: Type.Number(),
@@ -160,6 +140,38 @@ const ModelCostSchema = Type.Object({
 	...ModelCostRatesSchema,
 	tiers: Type.Optional(Type.Array(ModelCostTierSchema)),
 });
+
+const AnthropicMessagesCompatSchema = Type.Object({
+	supportsEagerToolInputStreaming: Type.Optional(Type.Boolean()),
+	supportsLongCacheRetention: Type.Optional(Type.Boolean()),
+	sendSessionAffinityHeaders: Type.Optional(Type.Boolean()),
+	supportsCacheControlOnTools: Type.Optional(Type.Boolean()),
+	supportsTemperature: Type.Optional(Type.Boolean()),
+	forceAdaptiveThinking: Type.Optional(Type.Boolean()),
+	allowEmptySignature: Type.Optional(Type.Boolean()),
+	supportsStrictTools: Type.Optional(Type.Boolean()),
+	supportsMidConvoEffort: Type.Optional(Type.Boolean()),
+	enforcesPreservedThinkingBinding: Type.Optional(Type.Boolean()),
+	supportsToolReferences: Type.Optional(Type.Boolean()),
+	allowedFallbackModels: Type.Optional(
+		Type.Array(
+			Type.Object({
+				provider: Type.String({ minLength: 1 }),
+				model: Type.String({ minLength: 1 }),
+				cost: ModelCostSchema,
+			}),
+			{ maxItems: 3 },
+		),
+	),
+});
+
+const ProviderCompatSchema = Type.Union(
+	[OpenAICompletionsCompatSchema, OpenAIResponsesCompatSchema, AnthropicMessagesCompatSchema],
+	{
+		// OpenAI branches permit unknown fields; enforce fallback metadata across every branch.
+		allOf: [Type.Object({ allowedFallbackModels: AnthropicMessagesCompatSchema.properties.allowedFallbackModels })],
+	},
+);
 
 const ModelDefinitionSchema = Type.Object({
 	id: Type.String({ minLength: 1 }),
