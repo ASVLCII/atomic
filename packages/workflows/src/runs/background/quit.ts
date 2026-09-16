@@ -209,7 +209,9 @@ export async function quitRunWithAction(
 	for (const handle of toolHandles) if (handle.runId !== runId) pausedRunIds.add(handle.runId);
 	const current = activeStore.runs().find((candidate) => candidate.id === runId);
 	if (current === undefined) return { ok: false, runId, reason: "not_found" };
-	if (current.endedAt !== undefined) return { ok: false, runId, reason: "already_ended" };
+	// A quit that suspended the executor owns durable settlement even if a kill
+	// ended the local run while registration drained. Do not leave it running in DBOS.
+	if (current.endedAt !== undefined && runtimeQuit === undefined) return { ok: false, runId, reason: "already_ended" };
 	// A quit that aborted a call is committed: each of those callbacks observed a
 	// whole-run quit, so its executor suspends without writing any terminal
 	// record, and only the publication below can report that the run stopped.

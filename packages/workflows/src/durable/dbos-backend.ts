@@ -456,10 +456,12 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		this.enqueueWrite(workflowId, async () => {
 			if (!this.isWorkflowLoadable(workflowId)) return;
 			dbosAdmissionContext.getStore()?.throwIfAborted();
+			// A continuation already has authoritative metadata before resume starts.
+			// Cancellation during that SDK call must still settle the known identity.
+			if (status === "running" && dbosAdmissionContext.getStore()) this.admissionMetadataAttempted.add(workflowId);
 			if (status === "cancelled") await this.sdk.cancelWorkflow(workflowId);
 			else if (status === "running") await this.sdk.resumeWorkflow(workflowId);
 			dbosAdmissionContext.getStore()?.throwIfAborted();
-			if (status === "running" && dbosAdmissionContext.getStore()) this.admissionMetadataAttempted.add(workflowId);
 			await this.writeMetadata(workflowId);
 		});
 	}

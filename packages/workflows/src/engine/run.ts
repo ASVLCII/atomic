@@ -737,6 +737,8 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 	const persistRunControl = async (status: "paused" | "running"): Promise<void> => {
 		ownController.signal.throwIfAborted();
 		if (opts.parentRun !== undefined || durableBackend.getWorkflow(runId) === undefined) return;
+		// Controls share the admission outcome rather than draining its abandoned queue.
+		await admission.ready();
 		if (
 			!(await transitionDurableWorkflowStatus(durableBackend, runId, ["running", "paused"], status, undefined, true))
 		) {
@@ -761,7 +763,13 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 			return pausePersistence;
 		},
 		resume: async () => {
-			await pausePersistence;
+			try {
+				await pausePersistence;
+			} catch (error) {
+				// Release a held admission failure so the executor can publish it and retire.
+				if (admission.failed) scheduler.releaseRun();
+				throw error;
+			}
 			await persistRunControl("running");
 			ownController.signal.throwIfAborted();
 			activeStore.recordRunResumed(runId, undefined, { source: "run_control" });

@@ -73,6 +73,7 @@ export async function admitDurableRootRun(args: {
 /** One owner for admission and every executor exit, including a detached graceful quit. */
 export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeInput, signal: AbortSignal) {
 	let admitted = false;
+	let rejected = false;
 	let pending: Promise<void> | undefined;
 	let settlement: Promise<void> = Promise.resolve();
 	return {
@@ -95,8 +96,18 @@ export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeI
 				.then(() => {
 					admitted = true;
 				})
+				.catch((error: unknown) => {
+					rejected = true;
+					throw error;
+				})
 				.finally(() => signal.removeEventListener("abort", onAbort));
 			return pending;
+		},
+		get failed(): boolean {
+			return rejected;
+		},
+		async ready(): Promise<void> {
+			await pending;
 		},
 		async settled(): Promise<void> {
 			await settlement;

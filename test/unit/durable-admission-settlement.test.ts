@@ -16,8 +16,9 @@ import {
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { run } from "../../packages/workflows/src/engine/run.js";
 import { createToolControlRegistry } from "../../packages/workflows/src/engine/run-tool-control-registry.js";
+import { createCancellationRegistry } from "../../packages/workflows/src/runs/background/cancellation-registry.js";
 import { quitRun } from "../../packages/workflows/src/runs/background/quit.js";
-import { pauseRun, resumeRun } from "../../packages/workflows/src/runs/background/status.js";
+import { killRun, pauseRun, resumeRun } from "../../packages/workflows/src/runs/background/status.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createMockSdk } from "./durable-dbos-backend-helpers.js";
 
@@ -37,6 +38,11 @@ const exits = [
 	"cancel-after",
 	"quit-before",
 	"quit-after",
+	"quit-before-then-kill",
+	"continuation-cancel-before",
+	"pause-then-deadline",
+	"pause-then-dependency",
+	"pause-then-rejection",
 	"pause",
 	"continuation",
 	"continuation-dependency",
@@ -56,10 +62,12 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	const caller = new AbortController();
 	const store = createStore();
 	const controls = createToolControlRegistry();
+	const cancellation = createCancellationRegistry();
 	const runId = `matrix-${exit}`;
 	const rejection = new Error("permission denied for admission");
 	const continuation = exit.startsWith("continuation");
 	const quit = exit.includes("quit");
+	const paused = exit.startsWith("pause");
 	const deadline = exit.endsWith("deadline");
 	const unavailable = deadline || exit.endsWith("dependency");
 	const rejected = exit.endsWith("rejection");
@@ -147,6 +155,7 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 			durableBackend: backend,
 			signal: caller.signal,
 			toolControlRegistry: controls,
+			cancellation,
 			...(continuation
 				? {
 						continuation: {
@@ -168,15 +177,30 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		(error: unknown) => error,
 	);
 	await entered.promise;
-	if (exit === "cancel-before") caller.abort(new Error("user cancelled"));
-	if (exit === "quit-before" || (continuation && quit)) {
+	if (exit === "cancel-before" || exit === "continuation-cancel-before") caller.abort(new Error("user cancelled"));
+	if (exit === "quit-before" || exit === "quit-before-then-kill" || (continuation && quit)) {
 		control = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => error);
 	}
-	if (exit === "pause") control = pauseRun(runId, { store, toolControlRegistry: controls });
+	if (paused) {
+		control = pauseRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => error);
+	}
+	if (exit === "quit-before-then-kill") {
+		await vi.advanceTimersByTimeAsync(0);
+		assert.equal((await killRun(runId, { store, cancellation })).ok, true);
+	}
 	if (exit === "shutdown") control = shutdownDbos();
 	if (deadline) await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
-	else release.resolve();
+	else if (!exit.endsWith("cancel-before")) release.resolve();
 	await vi.advanceTimersByTimeAsync(0);
+	if (paused && (unavailable || rejected)) {
+		const pauseError = await control;
+		if (rejected) assert.equal(pauseError, rejection);
+		else assert.ok(pauseError instanceof DbosDependencyError);
+		await assert.rejects(resumeRun(runId, { store, toolControlRegistry: controls }), (error: Error) => {
+			assert.equal(error, pauseError, "resume surfaces the original admission failure");
+			return true;
+		});
+	}
 	if (exit === "pause") {
 		await control;
 		assert.equal(store.runs()[0]?.status, "paused");
@@ -202,13 +226,13 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		assert.ok(controlResult && typeof controlResult === "object" && "ok" in controlResult);
 		assert.equal(controlResult.ok, true);
 	}
-	const cancelled = exit.startsWith("cancel");
+	const cancelled = exit.includes("cancel");
 	const status = cancelled ? "cancelled" : quit ? "paused" : unavailable || rejected ? "failed" : "completed";
 	assert.equal(backend.getWorkflow(runId)?.status, status);
-	assert.equal(store.runs()[0]?.status, cancelled ? "killed" : status);
+	assert.equal(store.runs()[0]?.status, cancelled || exit === "quit-before-then-kill" ? "killed" : status);
 	assert.equal(backend.isAdmissionUnavailable(runId), unavailable);
 	assert.equal(author.mock.calls.length, status === "completed" ? 1 : 0);
-	assert.deepEqual(sdk.state.cancels, exit === "cancel-after" ? [runId] : []);
+	assert.deepEqual(sdk.state.cancels, exit === "cancel-after" || exit === "continuation-cancel-before" ? [runId] : []);
 	if (quit) {
 		assert.equal(backend.getWorkflow(runId)?.resumable, continuation);
 		assert.equal(store.runs()[0]?.resumable, continuation);
@@ -227,6 +251,9 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 			);
 		}
 	} else if (cancelled || rejected) assert.equal(backend.getWorkflow(runId)?.resumable, false);
+	if (exit === "continuation-cancel-before") {
+		assert.equal(backend.getWorkflow(runId)?.completedCheckpoints, 1);
+	}
 	if (unavailable && !quit)
 		assert.equal(
 			backend.getWorkflow(runId)?.resumable,
