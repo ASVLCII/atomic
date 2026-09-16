@@ -2,15 +2,24 @@ import type { Api, Model, SimpleStreamOptions } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_COMPACTION_SETTINGS, estimateContextTokens } from "../src/core/compaction/compaction.js";
-import { getKeptTailTokenEstimate, prepareCompactionBoundary } from "../src/core/compaction/compaction-boundary.js";
+import {
+	getKeptTailTokenEstimate,
+	prepareCompactionBoundary,
+	setKeptTailTokenEstimate,
+} from "../src/core/compaction/compaction-boundary.js";
 import { runVerbatimCompaction, targetKeepLines } from "../src/core/compaction/compaction-runner.js";
-import type { VerbatimCompactionPreparation } from "../src/core/compaction/compaction-types.js";
+import type {
+	VerbatimCompactionPreparation,
+	VerbatimCompactionStats,
+} from "../src/core/compaction/compaction-types.js";
+import { reconstructCompactedTranscript, validateDeletedRanges } from "../src/core/compaction/deleted-ranges.js";
 import {
 	buildRangePlannerPrompt,
 	extractDeletedRanges,
 	planDeletedLineRanges,
 } from "../src/core/compaction/range-planner.js";
 import { createNumberedRegion } from "../src/core/compaction/transcript-serialization.js";
+import { widenToWholeContextStats } from "../src/core/compaction/whole-context-stats.js";
 import { buildSessionContext } from "../src/core/session-manager-history.js";
 import type { SessionEntry } from "../src/core/session-manager-types.js";
 import { planner, run } from "./compaction-planner-fixtures.js";
@@ -86,6 +95,18 @@ function preparation(): VerbatimCompactionPreparation {
 		tokensBefore: region.tokenEstimate + 5,
 		parameters: { compression_ratio: 0.5, preserve_recent: 2, query: "objective" },
 		settings: DEFAULT_COMPACTION_SETTINGS,
+	};
+}
+
+function regionStats(tokensBefore: number, tokensAfter: number): VerbatimCompactionStats {
+	return {
+		linesBefore: 10,
+		linesDeleted: 4,
+		linesKept: 6,
+		rangeCount: 1,
+		tokensBefore,
+		tokensAfter,
+		percentReduction: 99,
 	};
 }
 
@@ -457,5 +478,177 @@ describe("single planned compaction rung", () => {
 				}),
 			),
 		).rejects.toThrow("Compaction cancelled");
+	});
+});
+
+describe("compaction rung whole-context stats (#2052)", () => {
+	it("widens planned stats with the kept tail on both sides and never mixes the authoritative count", async () => {
+		const prep = preparation();
+		// A large kept tail, recorded independently of the authoritative count the
+		// way prepareCompactionBoundary does at construction time.
+		setKeptTailTokenEstimate(prep, 500);
+		const faux = createFauxStreamFn(["1,20\n"]);
+		const result = await runVerbatimCompaction(prep, model, run({ streamFn: faux.streamFn }));
+		expect(result.rung).toBe("planned");
+		const tail = getKeptTailTokenEstimate(prep);
+		const regionOnly = reconstructCompactedTranscript(
+			prep.region,
+			validateDeletedRanges([{ start: 1, end: 20 }], prep.region),
+		).stats;
+		const before = regionOnly.tokensBefore + tail;
+		const after = regionOnly.tokensAfter + tail;
+		expect(result.stats.tokensBefore).toBe(before);
+		expect(result.stats.tokensAfter).toBe(after);
+		expect(result.stats.percentReduction).toBe(Math.round((1 - after / before) * 1000) / 10);
+		expect(result.stats.tokensAfter).toBeLessThan(result.stats.tokensBefore);
+		// The authoritative count is neither used as a stats before-count nor lost.
+		// The authoritative count lives on VerbatimCompactionResult at the session
+		// layer, not on CompactionRungResult here; session-layer tests verify it.
+		expect(result.stats.tokensBefore).not.toBe(prep.tokensBefore);
+	});
+
+	it("reports a non-negative percentReduction when the authoritative count is smaller than the heuristic region estimate", async () => {
+		// Maintainer reproduction: a provider-counted authoritative before below
+		// the chars/4 heuristic region estimate used to produce a negative
+		// percentage. The reduction has to be measured symmetrically between the
+		// heuristic before and after.
+		const base = preparation();
+		const prep = { ...base, tokensBefore: Math.floor(base.region.tokenEstimate * 0.4) };
+		const faux = createFauxStreamFn(["2,10\n"]);
+		const result = await runVerbatimCompaction(prep, model, run({ streamFn: faux.streamFn }));
+		expect(result.rung).toBe("planned");
+		expect(result.stats.tokensBefore).toBe(prep.region.tokenEstimate);
+		expect(result.stats.tokensAfter).toBeLessThan(result.stats.tokensBefore);
+		expect(result.stats.percentReduction).toBeGreaterThan(0);
+		expect(result.stats.percentReduction).toBeLessThan(100);
+	});
+
+	it("keeps the tail on both sides of fresh stats when the hard context limit admits it", async () => {
+		const prep = preparation();
+		setKeptTailTokenEstimate(prep, 40);
+		const result = await runVerbatimCompaction(
+			prep,
+			model,
+			run({
+				streamFn: createFauxStreamFn([{ error: "provider unavailable" }]).streamFn,
+				urgency: "load_bearing",
+			}),
+		);
+		expect(result.rung).toBe("fresh");
+		expect(result.keptTail).toBe(true);
+		const tail = getKeptTailTokenEstimate(prep);
+		const regionOnly = reconstructCompactedTranscript(
+			prep.region,
+			validateDeletedRanges([{ start: 1, end: prep.region.lines.length }], prep.region),
+		).stats;
+		expect(result.stats.tokensBefore).toBe(regionOnly.tokensBefore + tail);
+		expect(result.stats.tokensAfter).toBe(regionOnly.tokensAfter + tail);
+		expect(result.stats.percentReduction).toBeGreaterThan(0);
+	});
+
+	it("drops the tail from the after-count of fresh stats when the hard context limit excludes it", async () => {
+		const prep = preparation();
+		setKeptTailTokenEstimate(prep, 500);
+		const small = { ...model, contextWindow: 100 };
+		const result = await runVerbatimCompaction(
+			prep,
+			small,
+			run({
+				streamFn: createFauxStreamFn([{ error: "provider unavailable" }]).streamFn,
+				urgency: "load_bearing",
+			}),
+		);
+		expect(result.rung).toBe("fresh");
+		expect(result.keptTail).toBe(false);
+		const regionOnly = reconstructCompactedTranscript(
+			prep.region,
+			validateDeletedRanges([{ start: 1, end: prep.region.lines.length }], prep.region),
+		).stats;
+		expect(result.stats.tokensBefore).toBe(regionOnly.tokensBefore + getKeptTailTokenEstimate(prep));
+		expect(result.stats.tokensAfter).toBe(regionOnly.tokensAfter);
+		// Dropping the tail makes the reduction honestly reflect the content loss.
+		expect(result.stats.tokensAfter).toBeLessThan(result.stats.tokensBefore);
+		expect(result.stats.percentReduction).toBeGreaterThan(0);
+	});
+
+	it("drops an unregistered kept tail in fresh compaction (P1 regression #3010)", async () => {
+		// A directly constructed preparation with kept tail messages but NO
+		// registered estimate in the WeakMap. With no registered estimate the
+		// fresh rung must conservatively drop the tail rather than assume it fits.
+		const prep: VerbatimCompactionPreparation = {
+			firstKeptEntryId: "tail",
+			region: createNumberedRegion("[User]: retained\n"),
+			regionEntryIds: ["a", "b"],
+			keptTailMessageCount: 2,
+			tokensBefore: 100,
+			parameters: { compression_ratio: 0.5, preserve_recent: 2, query: "q" },
+			settings: DEFAULT_COMPACTION_SETTINGS,
+		};
+		// No setKeptTailTokenEstimate call — simulates a directly constructed prep
+		const small = { ...model, contextWindow: 100 };
+		const result = await runVerbatimCompaction(
+			prep,
+			small,
+			run({
+				streamFn: createFauxStreamFn([{ error: "provider unavailable" }]).streamFn,
+				urgency: "load_bearing",
+			}),
+		);
+		expect(result.rung).toBe("fresh");
+		expect(result.keptTail).toBe(false);
+		// The unregistered tail contributes no estimate anywhere; nothing fabricates a count.
+		expect(getKeptTailTokenEstimate(prep)).toBe(0);
+	});
+
+	it("keeps a zero-message tail in fresh compaction without a registered estimate (P1 regression #3010)", async () => {
+		// An empty tail cannot be oversized: with no kept messages the fresh rung
+		// keeps the tail even though nothing is registered in the WeakMap.
+		const prep: VerbatimCompactionPreparation = {
+			firstKeptEntryId: null,
+			region: createNumberedRegion("[User]: retained\n"),
+			regionEntryIds: ["a", "b"],
+			keptTailMessageCount: 0,
+			tokensBefore: 100,
+			parameters: { compression_ratio: 0.5, preserve_recent: 2, query: "q" },
+			settings: DEFAULT_COMPACTION_SETTINGS,
+		};
+		const small = { ...model, contextWindow: 100 };
+		const result = await runVerbatimCompaction(
+			prep,
+			small,
+			run({
+				streamFn: createFauxStreamFn([{ error: "provider unavailable" }]).streamFn,
+				urgency: "load_bearing",
+			}),
+		);
+		expect(result.rung).toBe("fresh");
+		expect(result.keptTail).toBe(true);
+	});
+
+	it("keeps a genuine expansion negative and does not mutate the region stats (#2052)", () => {
+		const input = regionStats(10, 40);
+		const snapshot = structuredClone(input);
+		const widened = widenToWholeContextStats(input, 5, true);
+		expect(input).toEqual(snapshot);
+		expect(widened.linesBefore).toBe(10);
+		expect(widened.linesDeleted).toBe(4);
+		expect(widened.linesKept).toBe(6);
+		expect(widened.rangeCount).toBe(1);
+		expect(widened.tokensBefore).toBe(15);
+		expect(widened.tokensAfter).toBe(45);
+		expect(widened.percentReduction).toBe(Math.round((1 - 45 / 15) * 1000) / 10);
+		expect(widened.percentReduction).toBeLessThan(0);
+	});
+
+	it("reports zero percentReduction when the heuristic before-count is zero (#2052)", () => {
+		const empty = widenToWholeContextStats(regionStats(0, 0), 0, true);
+		expect(empty.tokensBefore).toBe(0);
+		expect(empty.tokensAfter).toBe(0);
+		expect(empty.percentReduction).toBe(0);
+
+		const afterOnly = widenToWholeContextStats(regionStats(0, 10), 0, true);
+		expect(afterOnly.tokensBefore).toBe(0);
+		expect(afterOnly.tokensAfter).toBe(10);
+		expect(afterOnly.percentReduction).toBe(0);
 	});
 });

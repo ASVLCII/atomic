@@ -32,12 +32,44 @@ interface VisibleEntry {
 
 const keptTailTokensByPreparation = new WeakMap<VerbatimCompactionPreparation, number>();
 
-/** Return the independently estimated cost of the protected tail. */
+/**
+ * Return the independently estimated cost of the protected tail.
+ *
+ * Only the explicit estimate recorded by `prepareCompactionBoundary` (or a test)
+ * is returned. The old fallback of `tokensBefore - region.tokenEstimate` was
+ * removed because it mixed the authoritative whole-context count with the
+ * heuristic region estimate; when no explicit estimate exists the tail simply
+ * contributes nothing rather than a wrong-numbered value. Whether an estimate is
+ * registered at all is visible through `hasKeptTailTokenEstimate`, which the
+ * fresh rung uses to decide a tail whose size is unknown (P1 #3010).
+ */
 export function getKeptTailTokenEstimate(preparation: VerbatimCompactionPreparation): number {
-	return (
-		keptTailTokensByPreparation.get(preparation) ??
-		Math.max(0, preparation.tokensBefore - preparation.region.tokenEstimate)
-	);
+	const registered = keptTailTokensByPreparation.get(preparation);
+	return registered === undefined ? 0 : registered;
+}
+
+/**
+ * Whether an independent tail estimate is registered for this preparation.
+ *
+ * A preparation built by `prepareCompactionBoundary` always has one. A directly
+ * constructed preparation may not; the fresh rung treats a kept tail whose size
+ * is unregistered as unknown and drops it conservatively rather than assuming it
+ * fits (P1 #3010).
+ */
+export function hasKeptTailTokenEstimate(preparation: VerbatimCompactionPreparation): boolean {
+	return keptTailTokensByPreparation.has(preparation);
+}
+
+/**
+ * Record the independent tail estimate for a preparation.
+ *
+ * `prepareCompactionBoundary` does this itself from the kept-tail messages;
+ * this setter is for test preparations built directly and for any other code
+ * that constructs a `VerbatimCompactionPreparation` without the boundary
+ * preparer. The estimate lives in a module-private map and is never persisted.
+ */
+export function setKeptTailTokenEstimate(preparation: VerbatimCompactionPreparation, estimate: number): void {
+	keptTailTokensByPreparation.set(preparation, Math.max(0, estimate));
 }
 
 function messageFromEntry(entry: SessionEntry): AgentMessage | undefined {

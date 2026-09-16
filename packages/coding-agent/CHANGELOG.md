@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed compaction statistics mixing authoritative provider token counts with heuristic region estimates, which could produce incorrect/negative percentReduction. Statistics now use symmetric heuristic estimates (region + explicit tail) while preserving the authoritative tokensBefore for budgeting and display ([#2052](https://github.com/bastani-inc/atomic/issues/2052)).
 - Standalone installations include PostgreSQL library aliases and reject unusable database runtimes before installing or upgrading. macOS and Linux packaging validates the transitive dependencies required for PostgreSQL startup and workflow database operation. A server left running by an older installation no longer hides an incomplete runtime. npm hydration preserves safe ordered alias chains ([#3073](https://github.com/bastani-inc/atomic/issues/3073)).
 
 ## [0.9.20-alpha.2] - 2026-09-15

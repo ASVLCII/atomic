@@ -1,7 +1,7 @@
 import type { RetryCallbacks, RetryPolicy } from "@bastani/pi-ai";
 import type { Api, Model, Usage } from "@bastani/pi-ai/compat";
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { getKeptTailTokenEstimate } from "./compaction-boundary.js";
+import { getKeptTailTokenEstimate, hasKeptTailTokenEstimate } from "./compaction-boundary.js";
 import type {
 	BorrowedPlanner,
 	CompactedTranscript,
@@ -29,6 +29,7 @@ import {
 } from "./range-planner.js";
 import { writeSuccessDiagnosticSidecar } from "./range-planner-diagnostics.js";
 import { nextTrimOffset, rebaseTrimmedRanges, trimRegionHead } from "./region-trimming.js";
+import { widenToWholeContextStats } from "./whole-context-stats.js";
 
 export interface CompactionPlanOptions {
 	streamFn: StreamFn;
@@ -111,17 +112,24 @@ function hardInputLimitFor(model: Model<Api>): number {
 	return model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 }
 
+/**
+ * Widen region-level transcript stats to whole-context stats (#2052).
+ *
+ * `result.stats` must be the symmetric region-only stats produced by
+ * `reconstructCompactedTranscript`; this adds the independently estimated kept
+ * tail to the heuristic before count on both sides — and, only when the tail is
+ * kept, to the after count — via the shared `widenToWholeContextStats`. The
+ * authoritative `preparation.tokensBefore` is deliberately absent from this
+ * comparison and travels separately for budgeting/display.
+ */
 function withWholeContextStats(
 	result: CompactedTranscript,
 	preparation: VerbatimCompactionPreparation,
 	keptTail: boolean,
 ): CompactedTranscript {
-	const tokensAfter = result.stats.tokensAfter + (keptTail ? getKeptTailTokenEstimate(preparation) : 0);
-	const percentReduction =
-		preparation.tokensBefore === 0 ? 0 : Math.round((1 - tokensAfter / preparation.tokensBefore) * 1000) / 10;
 	return {
 		...result,
-		stats: { ...result.stats, tokensBefore: preparation.tokensBefore, tokensAfter, percentReduction },
+		stats: widenToWholeContextStats(result.stats, getKeptTailTokenEstimate(preparation), keptTail),
 	};
 }
 
@@ -146,7 +154,12 @@ function buildFreshContextWindow(preparation: VerbatimCompactionPreparation, har
 	// way, and counting the reconstructed protected/marker text here would drop a
 	// tail that fits. A rebuilt context that still cannot be sent is the post-tool
 	// gate's problem, not a reason for this rung to discard more.
-	return { transcript: buildFreshTranscript(preparation), keptTail: getKeptTailTokenEstimate(preparation) <= limit };
+	// A kept tail with no registered estimate (a directly constructed
+	// preparation) is dropped conservatively rather than assumed to fit (P1 #3010).
+	const keptTail =
+		preparation.keptTailMessageCount === 0 ||
+		(hasKeptTailTokenEstimate(preparation) && getKeptTailTokenEstimate(preparation) <= limit);
+	return { transcript: buildFreshTranscript(preparation), keptTail };
 }
 
 /**
