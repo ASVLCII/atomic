@@ -201,7 +201,14 @@ export type WorkflowTimeoutResult = {
 	error: string;
 };
 
+type DependencyResult = {
+	action: "dependency";
+	operation: "status" | "doctor" | "recover";
+	report: import("../durable/dependency-doctor-types.js").WorkflowDependencyReport;
+};
+
 export type WorkflowToolResult =
+	| DependencyResult
 	| ListResult
 	| StatusResult
 	| StatusDetailResult

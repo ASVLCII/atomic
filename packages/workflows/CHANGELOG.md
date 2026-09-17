@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added `workflowDependency()`, `/workflow dependency` and the workflow tool's `dependency` action for bounded database inspection and registered managed-cluster recovery, with actual port, verified identity, runtime versions, consumers, retained latest failure and safe guidance. External database endpoints receive query-only checks ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
+
 ### Fixed
 
 - After DBOS initialization, bound database-dependent root admission to 10 seconds and stop cancelled admission writes from retrying or starting workflow code later. Unavailable admission skips database cleanup, preserving the failure diagnostic and run identity even when PostgreSQL stops answering. Database readiness lost during admission is rechecked before the next admission without switching existing durable runs to memory. First-time provisioning and initialization are outside this bound ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
@@ -21,13 +27,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Keep ready embedded PostgreSQL running when its starter exits or reloads, retain shared cluster identity and consumer leases outside installation directories, and preserve the original provider's cleanup across bundle reloads ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Verify managed PostgreSQL SQL/data/process identity before attachment, support `ATOMIC_POSTGRES_PORT`, and atomically share the actual port after bounded start/bind retries without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Monitor managed PostgreSQL SQL/process identity after attachment, invalidate lost connections, elect a shared recovery starter with bounded retries, and reconnect existing database consumers without relaunching workflow execution or changing external database endpoints ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Pool acquisition timeouts and PostgreSQL connection-capacity refusals, including refused managed health checks, no longer disconnect unrelated healthy database consumers or trigger managed PostgreSQL recovery ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Explicit resume reconciles retained database-failed admission under the original run ID, refuses conflicting incomplete records, and prevents stale concurrent resume from claiming a newer running generation. Awaited checkpoint writes now have a 10-second deadline; recovery rereads committed receipts rather than repeating checkpointed effects. External effects without a saved checkpoint remain uncertain and may repeat ([#3072](https://github.com/bastani-inc/atomic/issues/3072), [#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Same-ID database recovery remains retryable when resume preparation fails after reconciliation, including a temporarily missing workflow definition. Retried resume preserves saved tool receipts instead of switching to a new continuation ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Managed PostgreSQL recovery no longer waits on a vanished server when shutdown overlaps a health check. Recovery retains the existing cluster and checkpoints instead of exhausting readiness polling against the old process ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Managed PostgreSQL startup no longer rejects an owned server when initialization crosses a second boundary. Identity failures now identify the mismatched fields while preserving the cluster and ownership records ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 - Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
-
-### Added
-
-- Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
-- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

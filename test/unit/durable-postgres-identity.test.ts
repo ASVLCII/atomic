@@ -3,9 +3,11 @@ import { once } from "node:events";
 import { rmSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
+import { Client } from "pg";
 import { afterEach, test, vi } from "vitest";
 import {
 	embeddedDbosSystemDatabaseUrl,
+	embeddedPostgresHealth,
 	embeddedPostgresTestHooks as hooks,
 	resetEmbeddedDbosPostgresForTests,
 	shutdownEmbeddedDbosPostgres,
@@ -13,6 +15,7 @@ import {
 import {
 	availablePostgresPort,
 	managedPostmaster,
+	POSTGRES_IDENTITY_SQL,
 	preferredPostgresPort,
 	probePostgresIdentity,
 	verifyPostgresIdentity,
@@ -186,7 +189,7 @@ test("an exited bind-race child is cleaned before a verified alternate start", a
 	assert.ok(managedPostgresMetadata(f.root, 18, false).server);
 });
 
-test("SQL identity rejects foreign data, port, address, start time and system identifier", async () => {
+test("SQL identity rejects foreign data, port, address, pidfile start time and system identifier with field diagnostics", async () => {
 	const f = fixture();
 	const port = await availablePostgresPort(0);
 	f.pidfile(port);
@@ -199,23 +202,28 @@ test("SQL identity rejects foreign data, port, address, start time and system id
 	]) {
 		await assert.rejects(
 			verifyPostgresIdentity(f.metadata, port, process.pid, async () => ({ ...f.row(port), ...change })),
-			/identity mismatch/,
+			(error: Error) => {
+				assert.match(error.message, /identity mismatch/);
+				assert.ok(error.message.includes(`sql.${Object.keys(change)[0]}: expected `), error.message);
+				assert.match(error.message, /observed /);
+				return true;
+			},
 		);
 	}
 	await assert.rejects(
 		verifyPostgresIdentity(f.metadata, port, process.pid + 1, async () => f.row(port)),
-		/identity mismatch/,
+		/process.pid: expected \d+, observed \d+/,
 	);
 	await assert.rejects(
 		verifyPostgresIdentity(f.metadata, port, null, async () => f.row(port)),
-		/identity mismatch/,
+		/process.pid: expected null, observed \d+/,
 	);
 	await assert.rejects(
 		verifyPostgresIdentity(f.metadata, port, process.pid, async () => {
 			f.pidfile(port, 2);
 			return f.row(port);
 		}),
-		/identity mismatch/,
+		/process.after.started: expected 1, observed 2/,
 	);
 });
 
@@ -238,4 +246,191 @@ test("preferred port validation rejects ambiguous or out-of-range values", () =>
 	for (const value of ["", "0", "65536", "1.5", "-1", " 5439", "abc"])
 		assert.throws(() => preferredPostgresPort(value), /ATOMIC_POSTGRES_PORT/);
 	assert.equal(preferredPostgresPort("15439"), 15439);
+});
+
+// #3074: independent module owners contend through the filesystem recovery lock.
+test("live consumers elect one recovery starter and retain cluster identity", async () => {
+	const f = fixture();
+	f.pidfile(await availablePostgresPort(0));
+	await hooks.ensureCluster(f.options);
+	vi.resetModules();
+	const peer = await import("../../packages/workflows/src/durable/dbos-embedded-postgres.js");
+	await peer.embeddedPostgresTestHooks.ensureCluster(f.options);
+	const localHealth = embeddedPostgresHealth()!;
+	const peerHealth = peer.embeddedPostgresHealth()!;
+	await Promise.all([localHealth.check(), peerHealth.check()]);
+	let starts = 0,
+		signals = 0;
+	const spawn = (options: import("@bastani/atomic-natives").RetainedPostgresSpawnOptions) => {
+		starts++;
+		f.pidfile(Number(options.args[options.args.indexOf("-p") + 1]));
+		return {
+			pid: process.pid,
+			wait: async () => {
+				throw new Error("Timed out waiting for the retained Postgres process to exit");
+			},
+			interruptAndWait: async () => {
+				signals++;
+				return { exited: true, signaled: true };
+			},
+			release() {},
+		};
+	};
+	hooks.setRetainedPostgresSpawner(spawn);
+	peer.embeddedPostgresTestHooks.setRetainedPostgresSpawner(spawn);
+	rmSync(join(f.data, "postmaster.pid"));
+	try {
+		const urls = await Promise.all([localHealth.check(), peerHealth.check()]);
+		assert.equal(urls[0], urls[1]);
+		assert.equal(starts, 1);
+		assert.equal(signals, 0);
+		assert.equal(managedPostgresMetadata(f.root, 18, false).clusterId, f.metadata.clusterId);
+		assert.equal(readTextSync(join(f.data, "PG_VERSION"), "utf8"), "18\n");
+	} finally {
+		await peer.shutdownEmbeddedDbosPostgres();
+	}
+});
+
+// #3074: shutdown during recovery must not strand the elected starter on a dead PID.
+test("recovery starts once when the captured postmaster shuts down during its identity probe", async () => {
+	const f = fixture();
+	const port = await availablePostgresPort(0);
+	f.pidfile(port);
+	await hooks.ensureCluster(f.options);
+	const before = managedPostgresMetadata(f.root, 18, false);
+	let starts = 0;
+	let signals = 0;
+	hooks.setRetainedPostgresSpawner((options) => {
+		starts++;
+		f.pidfile(Number(options.args[options.args.indexOf("-p") + 1]));
+		return {
+			pid: process.pid,
+			wait: async () => {
+				throw new Error("Timed out waiting for the retained Postgres process to exit");
+			},
+			interruptAndWait: async () => {
+				signals++;
+				return { exited: true, signaled: true };
+			},
+			release() {},
+		};
+	});
+	let shuttingDown = true;
+	await hooks.ensureCluster({
+		...f.options,
+		recovery: before,
+		probeIdentity: async (selectedPort) => {
+			if (shuttingDown) {
+				shuttingDown = false;
+				rmSync(join(f.data, "postmaster.pid"));
+				return undefined;
+			}
+			return f.row(selectedPort);
+		},
+	});
+	assert.equal(starts, 1);
+	assert.equal(signals, 0, "a published postmaster is never signaled by recovery");
+	const after = managedPostgresMetadata(f.root, 18, false);
+	assert.equal(after.clusterId, before.clusterId);
+	assert.equal(after.directoryIdentity, before.directoryIdentity);
+	assert.equal(after.server?.systemIdentifier, before.server?.systemIdentifier);
+	assert.equal(after.server?.port, port);
+});
+
+// #3074: a failed SQL probe alone never authorizes a second server or a signal.
+test("an unavailable but present postmaster stays on the attach path", async () => {
+	const f = fixture();
+	f.pidfile(await availablePostgresPort(0));
+	await hooks.ensureCluster(f.options);
+	let probes = 0;
+	let starts = 0;
+	hooks.setRetainedPostgresSpawner(() => {
+		starts++;
+		throw new Error("must not start beside a live postmaster");
+	});
+	await assert.rejects(
+		hooks.ensureCluster({
+			...f.options,
+			probeIdentity: async () => {
+				if (++probes === 1) return undefined;
+				throw new Error("identity probe refused");
+			},
+		}),
+		/identity probe refused/,
+	);
+	assert.equal(probes, 2);
+	assert.equal(starts, 0);
+});
+
+test("live health refuses replaced ownership and never initializes missing data", async () => {
+	const f = fixture();
+	f.pidfile(await availablePostgresPort(0));
+	await hooks.ensureCluster(f.options);
+	const health = embeddedPostgresHealth()!;
+	await health.check();
+	let starts = 0;
+	hooks.setRetainedPostgresSpawner(() => {
+		starts++;
+		throw new Error("must not start");
+	});
+	rmSync(join(f.data, "postmaster.pid"));
+	rmSync(join(f.data, "PG_VERSION"));
+	await assert.rejects(health.check(), /ENOENT/);
+	assert.equal(starts, 0);
+	assert.equal(readTextSync(join(f.root, "v18.shared", "cluster.json"), "utf8").includes(f.metadata.clusterId), true);
+});
+
+test("recovery revalidates its pinned cluster after waiting for the cross-process lock", async () => {
+	const f = fixture();
+	f.pidfile(await availablePostgresPort(0));
+	await hooks.ensureCluster(f.options);
+	const health = embeddedPostgresHealth()!;
+	await health.check();
+	let release!: () => void;
+	let entered!: () => void;
+	const locked = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const holder = hooks.withSetupLock(join(f.root, "v18.setup-lock"), async () => {
+		entered();
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+	});
+	await locked;
+	let starts = 0;
+	hooks.setRetainedPostgresSpawner(() => {
+		starts++;
+		throw new Error("must not start displaced cluster");
+	});
+	rmSync(join(f.data, "postmaster.pid"));
+	const pending = assert.rejects(health.check(), /unavailable after bounded recovery/);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	const changed = { ...managedPostgresMetadata(f.root, 18, false), clusterId: crypto.randomUUID() };
+	writeTextSync(join(f.root, "v18.shared", "cluster.json"), JSON.stringify(changed));
+	release();
+	await Promise.all([holder, pending]);
+	assert.match(health.lastFailure?.message ?? "", /recovery identity changed/);
+	assert.equal(starts, 0);
+	assert.equal(managedPostgresMetadata(f.root, 18, false).clusterId, changed.clusterId);
+});
+
+// #3074: a prior healthy probe must not authorize a different socket on the same port.
+test("borrowed connections prove their own SQL identity before caller queries", async () => {
+	const f = fixture();
+	const port = await availablePostgresPort(0);
+	f.pidfile(port);
+	await hooks.ensureCluster(f.options);
+	const health = embeddedPostgresHealth()!;
+	await health.check();
+	const client = Object.assign(new Client(), { release() {} });
+	const query = vi
+		.spyOn(client, "query")
+		.mockImplementation(async () => ({ rows: [{ ...f.row(port), system_identifier: "foreign" }] }));
+	let invalidations = 0;
+	health.subscribe(() => invalidations++);
+	await assert.rejects(health.validate(client), /identity mismatch/);
+	assert.equal(invalidations, 1);
+	assert.equal(query.mock.calls.length, 1);
+	assert.deepEqual(query.mock.calls[0], [{ text: POSTGRES_IDENTITY_SQL, query_timeout: 1000 }]);
 });

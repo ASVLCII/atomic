@@ -182,7 +182,11 @@ function statusToInfo(status: DbosStatus, fallbackId: string): DbosWorkflowInfo 
 	if (status.input !== undefined && status.input.length >= 2) {
 		const inputs = status.input[1];
 		if (typeof inputs === "object" && inputs !== null && !Array.isArray(inputs)) {
-			return { ...info, inputs: inputs as import("./types.js").WorkflowSerializableObject };
+			return {
+				...info,
+				name: typeof status.input[0] === "string" ? status.input[0] : info.name,
+				inputs: inputs as import("./types.js").WorkflowSerializableObject,
+			};
 		}
 	}
 	return info;

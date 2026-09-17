@@ -46,6 +46,7 @@ import { createRequire } from "node:module";
 import { tmpdir, uptime } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import type { RetainedPostgres, RetainedPostgresSpawnOptions } from "@bastani/atomic-natives";
+import { DbosDependencyError } from "./dbos-admission.js";
 import {
 	cleanupAbandonedRuntimeStages,
 	type EmbeddedPostgresRunContext,
@@ -58,16 +59,20 @@ import {
 	type EmbeddedPostgresHost,
 	resolveEmbeddedPostgresTarget,
 } from "./dbos-embedded-postgres-targets.js";
+import { PostgresHealth } from "./dbos-postgres-health.js";
 import {
 	availablePostgresPort,
 	managedPostmaster,
+	POSTGRES_IDENTITY_SQL,
 	type PostgresIdentityProbe,
+	type PostgresIdentityRow,
 	preferredPostgresPort,
 	verifyPostgresIdentity,
 } from "./dbos-postgres-identity.js";
 import {
 	acquirePostgresConsumer,
 	inspectPostgresConsumers,
+	type ManagedPostgresMetadata,
 	type ManagedPostgresServer,
 	managedPostgresMetadata,
 	type PostgresConsumerLease,
@@ -125,9 +130,35 @@ let retainedPostgresSpawnerOverride: RetainedPostgresSpawner | undefined;
 let ensured: Promise<void> | undefined;
 let consumer: PostgresConsumerLease | undefined;
 let initializing = false;
+let health: PostgresHealth | undefined;
+let lastFailure: Error | undefined;
 
-/** Start or attach to the shared embedded DBOS Postgres exactly once per process. */
+export function embeddedPostgresLastFailure(): Error | undefined {
+	return health?.lastFailure ?? lastFailure;
+}
+
+export function embeddedPostgresHealth(): PostgresHealth | undefined {
+	return health;
+}
+
+/** Explicit repair only for an existing registered cluster, never initial provisioning. */
+export async function recoverEmbeddedPostgres(
+	context: EmbeddedPostgresRunContext,
+	metadata: ManagedPostgresMetadata,
+): Promise<void> {
+	if (activeCluster && !activeCluster.shared)
+		throw new EmbeddedPostgresCleanupPendingError([], "Managed Postgres cleanup is still pending.");
+	// Detach only the old native handle; a published server is never signaled.
+	activeCluster?.lease.release();
+	activeCluster = undefined;
+	await ensureCluster({ context, recovery: metadata });
+	// Subsequent provisioning must health-check the published recovery, not treat it as failed startup.
+	ensured ??= Promise.resolve();
+}
+
+/** Start once, then verify the live shared identity on subsequent requests. */
 export function ensureEmbeddedDbosPostgres(): Promise<void> {
+	if (ensured !== undefined && !initializing && health !== undefined) return health.check().then(() => {});
 	if (ensured === undefined && activeCluster !== undefined) {
 		return Promise.reject(
 			new EmbeddedPostgresCleanupPendingError(
@@ -140,6 +171,7 @@ export function ensureEmbeddedDbosPostgres(): Promise<void> {
 	ensured ??= ensureOperation()
 		.catch((error: unknown) => {
 			ensured = undefined;
+			lastFailure = error instanceof Error ? error : new Error(String(error));
 			throw error;
 		})
 		.finally(() => {
@@ -166,6 +198,8 @@ async function ensureCluster(
 		binaries?: EmbeddedPostgresBinaries;
 		isReachable?: ReachabilityProbe;
 		probeIdentity?: PostgresIdentityProbe;
+		recovery?: ManagedPostgresMetadata;
+		prepared?: boolean;
 	} = {},
 ): Promise<void> {
 	const isReachable = options.isReachable ?? tcpReachable;
@@ -205,6 +239,16 @@ async function ensureCluster(
 				);
 			}
 			let metadata = registered ? managedPostgresMetadata(root, EMBEDDED_PG_MAJOR, false) : undefined;
+			if (options.recovery && !metadata)
+				throw new Error("Managed Postgres recovery requires existing ownership records.");
+			if (
+				options.recovery &&
+				(metadata?.clusterId !== options.recovery.clusterId ||
+					metadata.directoryIdentity !== options.recovery.directoryIdentity ||
+					metadata.server?.systemIdentifier !== options.recovery.server?.systemIdentifier)
+			) {
+				throw new Error("Managed Postgres recovery identity changed while waiting for ownership.");
+			}
 			const existing = metadata && managedPostmaster(metadata);
 			let port = existing?.port ?? metadata?.server?.port ?? preferredPort;
 			if (
@@ -219,12 +263,33 @@ async function ensureCluster(
 				);
 			}
 			let verified: ManagedPostgresServer | undefined;
-			if (!existing) {
+			let prepared = options.prepared ? options.binaries : undefined;
+			if (existing) {
+				await waitForClusterReadiness(
+					logFile,
+					undefined,
+					async () => {
+						verified = await verifyPostgresIdentity(metadata!, port, existing.pid, options.probeIdentity);
+						// A shutdown can overlap the SQL probe. Once that postmaster is gone,
+						// leave the attach wait and start under this same setup lease instead
+						// of polling the captured PID until the readiness deadline expires.
+						return verified !== undefined || managedPostmaster(metadata!) === undefined;
+					},
+					READY_ATTEMPTS,
+					delay,
+					port,
+				);
+			}
+			if (!verified) {
 				const loaded = options.binaries ?? (await loadEmbeddedPostgresBinaries());
-				const binaries = await prepareBinariesForOwner(loaded, context, undefined, {
-					publicationLease: setup.runtimePublicationLease,
-				});
+				const binaries =
+					prepared ??
+					(await prepareBinariesForOwner(loaded, context, undefined, {
+						publicationLease: setup.runtimePublicationLease,
+					}));
+				prepared = binaries;
 				if (!existsSync(join(dataDir, "PG_VERSION"))) {
+					if (options.recovery) throw new Error("Managed Postgres recovery must not initialize data.");
 					if (existsSync(postgresOwnershipDirectory(root, EMBEDDED_PG_MAJOR))) {
 						throw new Error(
 							`Managed Postgres data is missing PG_VERSION; preserve its ownership records: ${dataDir}`,
@@ -269,25 +334,68 @@ async function ensureCluster(
 						startedCluster = undefined;
 					}
 				}
-			} else {
-				await waitForClusterReadiness(
-					logFile,
-					undefined,
-					async () => {
-						verified = await verifyPostgresIdentity(metadata!, port, existing.pid, options.probeIdentity);
-						return verified !== undefined;
-					},
-					READY_ATTEMPTS,
-					delay,
-					port,
-				);
 			}
 			if (!metadata || !verified) throw new Error("Managed Postgres identity was not verified.");
+			if (health === undefined) {
+				prepared ??= await prepareBinariesForOwner(
+					options.binaries ?? (await loadEmbeddedPostgresBinaries()),
+					context,
+					undefined,
+					{ publicationLease: setup.runtimePublicationLease },
+				);
+			}
 			if (!setup.runtimePublicationLease.refresh()) throw new Error("Postgres setup lease lost before attach.");
 			publishPostgresServer(root, metadata, verified);
 			actualPort = port;
 			inspectPostgresConsumers(root, metadata);
-			consumer = acquirePostgresConsumer(root, metadata, `${process.execPath} | ${import.meta.url}`);
+			const nextConsumer = acquirePostgresConsumer(root, metadata, `${process.execPath} | ${import.meta.url}`);
+			consumer?.release();
+			consumer = nextConsumer;
+			if (health === undefined) {
+				const pinned = { ...metadata, server: verified };
+				const recoveryOptions = { ...options, context, binaries: prepared, prepared: true, recovery: pinned };
+				const inspect = async (probe = options.probeIdentity) => {
+					const current = managedPostgresMetadata(root, EMBEDDED_PG_MAJOR, false);
+					if (
+						current.clusterId !== pinned.clusterId ||
+						current.directoryIdentity !== pinned.directoryIdentity ||
+						current.server?.systemIdentifier !== pinned.server.systemIdentifier
+					) {
+						throw new Error(
+							"Managed Postgres health identity mismatch. Preserve the data and ownership records.",
+						);
+					}
+					const server = current.server;
+					if (!server) throw new Error("Managed Postgres published identity is missing.");
+					const live = await verifyPostgresIdentity(current, server.port, server.pid, probe);
+					if (!live) return undefined;
+					if (live.started !== server.started)
+						throw new Error("Managed Postgres published start identity mismatch.");
+					actualPort = live.port;
+					return { url: embeddedDbosSystemDatabaseUrl(), identity: JSON.stringify(live) };
+				};
+				health = new PostgresHealth({
+					probe: () => inspect(),
+					validate: async (client) => {
+						// Bind SQL identity to this borrowed socket, not just a prior probe on the same port.
+						const identity = await inspect(async () => {
+							// pg supports per-query read timeouts; @types/pg omits this option from QueryConfig.
+							const query = { text: POSTGRES_IDENTITY_SQL, query_timeout: 1000 };
+							const result = await client.query<PostgresIdentityRow>(query);
+							return result.rows[0];
+						});
+						if (!identity) throw new DbosDependencyError();
+					},
+					recover: async () => {
+						if (activeCluster && !activeCluster.shared)
+							throw new Error("Managed Postgres cleanup is still pending.");
+						// Drop only the native handle. A published process is never signaled, even when health fails.
+						activeCluster?.lease.release();
+						activeCluster = undefined;
+						await ensureCluster(recoveryOptions);
+					},
+				});
+			}
 		});
 	} catch (startupError) {
 		// Readiness already attempted rollback; retain its lease for a later shutdown retry.
@@ -366,6 +474,13 @@ async function assertRetainedPostgresRunning(
 /** Detach from a published server; stop only an unpublished startup lease. */
 export function shutdownEmbeddedDbosPostgres(): Promise<void> {
 	if (initializing && ensured !== undefined) return ensured.catch(() => {}).then(() => shutdownEmbeddedDbosPostgres());
+	if (health !== undefined) {
+		const previous = health;
+		return previous.stop().then(() => {
+			if (health === previous) health = undefined;
+			return shutdownEmbeddedDbosPostgres();
+		});
+	}
 	consumer?.release();
 	consumer = undefined;
 	ensured = undefined;
@@ -586,6 +701,8 @@ type PackageResolver = (specifier: string) => string;
 type PackageImporter = (specifier: string) => Promise<Partial<EmbeddedPostgresBinaries>>;
 
 interface EmbeddedPostgresLoadOptions {
+	/** Inspection must not repair executable permissions. */
+	readonly readOnly?: boolean;
 	readonly host?: EmbeddedPostgresHost;
 	readonly runtimeDirectory?: string;
 	readonly moduleUrl?: string;
@@ -593,7 +710,11 @@ interface EmbeddedPostgresLoadOptions {
 	readonly importPackage?: PackageImporter;
 }
 
-function binariesFromDirectory(runtimeDirectory: string, platform: NodeJS.Platform): EmbeddedPostgresBinaries {
+function binariesFromDirectory(
+	runtimeDirectory: string,
+	platform: NodeJS.Platform,
+	readOnly = false,
+): EmbeddedPostgresBinaries {
 	const executableSuffix = platform === "win32" ? ".exe" : "";
 	const binaries = {
 		pg_ctl: join(runtimeDirectory, "bin", `pg_ctl${executableSuffix}`),
@@ -602,7 +723,7 @@ function binariesFromDirectory(runtimeDirectory: string, platform: NodeJS.Platfo
 	};
 	for (const [name, binary] of Object.entries(binaries)) {
 		if (!existsSync(binary)) throw new Error(`missing bin/${name}${executableSuffix}`);
-		ensureExecutable(binary);
+		if (!readOnly) ensureExecutable(binary);
 	}
 	return binaries;
 }
@@ -698,7 +819,7 @@ export async function loadEmbeddedPostgresBinaries(
 			}
 		}
 		try {
-			return binariesFromDirectory(candidate.path, host.platform);
+			return binariesFromDirectory(candidate.path, host.platform, options.readOnly);
 		} catch (error) {
 			searched[searched.length - 1] += ` (${error instanceof Error ? error.message : String(error)})`;
 		}
@@ -713,7 +834,7 @@ export async function loadEmbeddedPostgresBinaries(
 			const legacy = resolvePackageManifest(target.npmPackageName, resolvePackage);
 			if (legacy.manifest !== undefined) {
 				try {
-					return binariesFromDirectory(join(dirname(legacy.manifest), "native"), host.platform);
+					return binariesFromDirectory(join(dirname(legacy.manifest), "native"), host.platform, options.readOnly);
 				} catch {
 					// Nonstandard/older wrappers retain their existing import API below.
 				}
@@ -726,7 +847,8 @@ export async function loadEmbeddedPostgresBinaries(
 				throw new Error("package did not export pg_ctl/initdb paths");
 			}
 			const postgres = join(dirname(binaries.pg_ctl), host.platform === "win32" ? "postgres.exe" : "postgres");
-			for (const binary of [binaries.pg_ctl, binaries.initdb, postgres]) ensureExecutable(binary);
+			if (!options.readOnly)
+				for (const binary of [binaries.pg_ctl, binaries.initdb, postgres]) ensureExecutable(binary);
 			return { pg_ctl: binaries.pg_ctl, initdb: binaries.initdb, postgres };
 		} catch (error) {
 			searched[searched.length - 1] += ` (${error instanceof Error ? error.message : String(error)})`;
@@ -1136,6 +1258,9 @@ export const embeddedPostgresTestHooks = {
 };
 
 export function resetEmbeddedDbosPostgresForTests(): void {
+	void health?.stop();
+	health = undefined;
+	lastFailure = undefined;
 	ensured = undefined;
 	actualPort = EMBEDDED_PORT;
 	consumer?.release();

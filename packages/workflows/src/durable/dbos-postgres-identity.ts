@@ -84,10 +84,17 @@ export interface PostgresIdentityRow {
 	data_dir: string;
 	port: number;
 	host: string;
+	/** MyStartTime from the server's postmaster.pid, not the separately sampled PgStartTime. */
 	started: string;
 	system_identifier: string;
+	server_version?: string;
 }
 export type PostgresIdentityProbe = (port: number) => Promise<PostgresIdentityRow | undefined>;
+
+export const POSTGRES_IDENTITY_SQL = `SELECT current_setting('data_directory') AS data_dir,
+	inet_server_port() AS port, host(inet_server_addr()) AS host,
+	split_part(pg_read_file('postmaster.pid'), E'\\n', 3) AS started,
+	system_identifier::text, current_setting('server_version') AS server_version FROM pg_control_system()`;
 
 export async function probePostgresIdentity(port: number): Promise<PostgresIdentityRow | undefined> {
 	const client = new Client({
@@ -104,17 +111,18 @@ export async function probePostgresIdentity(port: number): Promise<PostgresIdent
 	client.on("error", () => {}); // Connection loss is reported by the pending connect/query.
 	try {
 		await client.connect();
-		const result = await client.query<PostgresIdentityRow>(`SELECT current_setting('data_directory') AS data_dir,
-			inet_server_port() AS port, host(inet_server_addr()) AS host,
-			floor(extract(epoch FROM pg_postmaster_start_time()))::text AS started,
-			system_identifier::text FROM pg_control_system()`);
+		const result = await client.query<PostgresIdentityRow>(POSTGRES_IDENTITY_SQL);
 		return result.rows[0];
 	} catch (error) {
 		const code = error instanceof Error && "code" in error ? error.code : undefined;
 		if (
 			code === "ECONNREFUSED" ||
+			code === "ECONNRESET" ||
+			code === "EPIPE" ||
+			code === "57P01" ||
+			code === "57P02" ||
 			code === "57P03" ||
-			(error instanceof Error && /timeout|timed out/i.test(error.message))
+			(error instanceof Error && /timeout|timed out|connection terminated/i.test(error.message))
 		)
 			return undefined;
 		throw error;
@@ -131,22 +139,35 @@ export async function verifyPostgresIdentity(
 ): Promise<ManagedPostgresServer | undefined> {
 	const before = managedPostmaster(metadata);
 	if (!before) return undefined;
-	if (before.port !== port || (expectedPid !== undefined && before.pid !== expectedPid)) {
-		throw new Error("Managed Postgres process/port identity mismatch.");
-	}
+	const mismatches: string[] = [];
+	const compare = (
+		field: string,
+		expected: string | number | null | undefined,
+		actual: string | number | undefined,
+	) => {
+		if (expected !== actual)
+			mismatches.push(`${field}: expected ${JSON.stringify(expected)}, observed ${JSON.stringify(actual)}`);
+	};
+	const rejectMismatch = (kind: string) => {
+		if (mismatches.length)
+			throw new Error(
+				`Managed Postgres ${kind} identity mismatch (${mismatches.join("; ")}). Preserve the cluster and ownership records.`,
+			);
+	};
+	compare("process.port", port, before.port);
+	if (expectedPid !== undefined) compare("process.pid", expectedPid, before.pid);
+	rejectMismatch("process/port");
 	const row = await probe(port);
 	if (!row) return undefined;
-	if (
-		realpathSync(row.data_dir) !== metadata.dataDir ||
-		row.port !== port ||
-		row.host !== "127.0.0.1" ||
-		Number(row.started) !== before.started ||
-		row.system_identifier !== before.systemIdentifier ||
-		JSON.stringify(managedPostmaster(metadata)) !== JSON.stringify(before)
-	) {
-		throw new Error(
-			"Managed Postgres SQL/data/process identity mismatch. Preserve the cluster and ownership records.",
-		);
+	compare("sql.data_dir", metadata.dataDir, realpathSync(row.data_dir));
+	compare("sql.port", port, row.port);
+	compare("sql.host", "127.0.0.1", row.host);
+	compare("sql.started", before.started, Number(row.started));
+	compare("sql.system_identifier", before.systemIdentifier, row.system_identifier);
+	const after = managedPostmaster(metadata);
+	for (const field of ["pid", "port", "started", "systemIdentifier"] as const) {
+		compare(`process.after.${field}`, before[field], after?.[field]);
 	}
+	rejectMismatch("SQL/data/process");
 	return before;
 }

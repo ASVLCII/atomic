@@ -125,14 +125,24 @@ describe("MockExtensionAPI — tool registration", () => {
 			};
 		};
 		const actionSchema = params.properties.action;
-		// TypeBox Optional(Union([...])) wraps in anyOf
-		const raw = JSON.stringify(actionSchema);
-		for (const literal of ["run", "list", "get", "status", "pause", "quit", "resume", "inputs", "models"]) {
-			assert.ok(raw.includes(literal));
-		}
-		assert.ok(!raw.includes("kill"));
-		assert.ok(!raw.includes("interrupt"));
-		assert.ok(!raw.includes("doctor"));
+		const literals = actionSchema.anyOf?.flatMap((variant) => variant.const ?? variant.enum ?? []);
+		assert.deepEqual(literals?.sort(), [
+			"answer",
+			"dependency",
+			"get",
+			"inputs",
+			"list",
+			"models",
+			"pause",
+			"quit",
+			"reload",
+			"resume",
+			"run",
+			"stage",
+			"stages",
+			"status",
+			"transcript",
+		]);
 	});
 
 	test("tool execute returns run stub for default action", async () => {

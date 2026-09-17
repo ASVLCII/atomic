@@ -34,7 +34,6 @@ export function classifyDurableResumeShadow(
 	)
 		return "not_shadow";
 	const handle = getLoadableDurableWorkflow(backend, run.id);
-	if (handle?.status !== "paused" && handle?.status !== "running") return "not_shadow";
 	const jobs = deps.jobs ?? jobTracker;
 	if (jobs.has(run.id)) return "not_shadow";
 	const controls = deps.stageControls ?? stageControlRegistry;
@@ -42,6 +41,24 @@ export function classifyDurableResumeShadow(
 	const controlRunIds = new Set<string>([run.id]);
 	for (const stage of graph.stages) controlRunIds.add(stage.workflowGraphTarget.runId);
 	if ([...controlRunIds].some((runId) => controls.run(runId).stages().length > 0)) return "not_shadow";
+	// A reconciled outage remains a same-ID replay even if a prior resume failed
+	// definition/input validation. Ordinary blocked continuations are unchanged.
+	if (
+		handle?.status === "blocked" &&
+		backend.isWorkflowRecoveryPending?.(run.id) &&
+		isDurableWorkflowResumable(handle)
+	)
+		return "eligible";
+	// Database failures resume the same identity so committed checkpoints remain
+	// authoritative even when their acknowledgement was lost.
+	if (
+		handle !== undefined &&
+		handle.resumable !== false &&
+		(handle.status === "failed" || handle.status === "running" || handle.status === "paused") &&
+		(backend.isAdmissionUnavailable?.(run.id) || backend.isCheckpointUnavailable?.(run.id))
+	)
+		return "eligible";
+	if (handle?.status !== "paused" && handle?.status !== "running") return "not_shadow";
 	if (!isDurableWorkflowResumable(handle)) return "ineligible";
 	if (run.status !== "paused" || run.exitReason !== "quit" || run.resumable !== true) {
 		store.recordRunPaused(run.id, undefined, { exitReason: "quit", resumable: true });
