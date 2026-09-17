@@ -553,6 +553,42 @@ test("sanitizePromptDisplay well-forms unpaired surrogates and treats NEL as whi
 	assert.deepEqual(run, raw);
 });
 
+test("sanitizePromptDisplay backs off the display cap around an astral character", () => {
+	const astral = "\ud83d\ude80";
+	const atCap = `${"a".repeat(255)}${astral}`;
+	const underCap = `${"a".repeat(254)}${astral}`;
+	assert.equal(atCap.length, 257);
+	assert.equal(underCap.length, 256);
+
+	const capped = sanitizePromptDisplay(atCap);
+	assert.equal(capped.length, 255);
+	assert.equal(capped, "a".repeat(255));
+	assert.equal(capped.isWellFormed(), true);
+	assert.equal(capped.includes(astral), false);
+
+	const retained = sanitizePromptDisplay(underCap);
+	assert.equal(retained.length, 256);
+	assert.equal(retained.endsWith(astral), true);
+	assert.equal(retained.isWellFormed(), true);
+
+	const atCapRun = makeRun("astral-cap", "astral-cap", "running");
+	atCapRun.pendingPrompt = primitive("astral-cap-prompt", atCap);
+	const atCapRaw = structuredClone(atCapRun);
+	const atCapProjected = pendingInputAffordance(atCapRun, [atCapRun])?.message;
+	assert.equal(atCapProjected?.length, 255);
+	assert.equal(atCapProjected?.isWellFormed(), true);
+	assert.deepEqual(atCapRun, atCapRaw);
+
+	const underCapRun = makeRun("astral-keep", "astral-keep", "running");
+	underCapRun.pendingPrompt = primitive("astral-keep-prompt", underCap);
+	const underCapRaw = structuredClone(underCapRun);
+	const underCapProjected = pendingInputAffordance(underCapRun, [underCapRun])?.message;
+	assert.equal(underCapProjected?.length, 256);
+	assert.equal(underCapProjected?.endsWith(astral), true);
+	assert.equal(underCapProjected?.isWellFormed(), true);
+	assert.deepEqual(underCapRun, underCapRaw);
+});
+
 test("pause resume and block keep a pending prompt preview and answering while paused clears it", () => {
 	const store = createStore();
 	store.recordRunStart({

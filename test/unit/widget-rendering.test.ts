@@ -1504,4 +1504,71 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		assert.ok(waitingLines[3]?.includes('"Approve metadata parity?"'));
 		assert.ok(waitingLines[4]?.includes(`Answer: /workflow connect ${id}`));
 	});
+
+	test("completed retained cards drop stale prompt actions while quit cards suppress them until resume", () => {
+		const completedStore = createStore();
+		const completedId = "completed-retained-prompt";
+		completedStore.recordRunStart({
+			id: completedId,
+			name: "completed-retained",
+			inputs: {},
+			status: "running",
+			startedAt: Date.now() - 5_000,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			completedStore.recordStagePendingPrompt(completedId, "ask", {
+				id: "completed-prompt",
+				kind: "confirm",
+				message: "Approve the completed prompt?",
+				createdAt: Date.now(),
+			}),
+			true,
+		);
+		const waitingCompleted = renderWidgetLines(completedStore.snapshot(), 120).map(stripAnsi).join("\n");
+		assert.match(waitingCompleted, /"Approve the completed prompt\?"/);
+		assert.match(waitingCompleted, new RegExp(`Answer: /workflow connect ${completedId}`));
+
+		assert.equal(completedStore.recordRunEnd(completedId, "completed"), true);
+		const completedLines = renderWidgetLines(completedStore.snapshot(), 120).map(stripAnsi);
+		const completedJoined = completedLines.join("\n");
+		assert.ok(completedJoined.includes(completedId));
+		assert.doesNotMatch(completedJoined, /"Approve the completed prompt\?"/);
+		assert.doesNotMatch(completedJoined, /Answer: \/workflow connect/);
+
+		const quitStore = createStore();
+		const quitId = "quit-retained-prompt";
+		quitStore.recordRunStart({
+			id: quitId,
+			name: "quit-retained",
+			inputs: {},
+			status: "running",
+			startedAt: Date.now() - 5_000,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			quitStore.recordStagePendingPrompt(quitId, "ask", {
+				id: "quit-prompt",
+				kind: "confirm",
+				message: "Continue after quitting?",
+				createdAt: Date.now(),
+			}),
+			true,
+		);
+		assert.equal(quitStore.recordRunPaused(quitId, undefined, { exitReason: "quit", resumable: true }), true);
+		const quitRun = quitStore.runs()[0]!;
+		assert.equal(quitRun.exitReason, "quit");
+		assert.equal(quitRun.resumable, true);
+		assert.equal(quitRun.stages[0]!.pendingPrompt?.id, "quit-prompt");
+		assert.equal(quitRun.stages[0]!.pendingPrompt?.message, "Continue after quitting?");
+		const quitJoined = renderWidgetLines(quitStore.snapshot(), 120).map(stripAnsi).join("\n");
+		assert.ok(quitJoined.includes(quitId));
+		assert.doesNotMatch(quitJoined, /"Continue after quitting\?"/);
+		assert.doesNotMatch(quitJoined, /Answer: \/workflow connect/);
+
+		assert.equal(quitStore.recordRunResumed(quitId), true);
+		const resumedJoined = renderWidgetLines(quitStore.snapshot(), 120).map(stripAnsi).join("\n");
+		assert.match(resumedJoined, /"Continue after quitting\?"/);
+		assert.match(resumedJoined, new RegExp(`Answer: /workflow connect ${quitId}`));
+	});
 });

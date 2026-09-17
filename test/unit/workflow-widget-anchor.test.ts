@@ -314,6 +314,104 @@ test("every prompt and navigation row remains reachable in a one-row viewport", 
 	assert.ok([...seen].some((line) => line.includes(`/workflow connect ${uuid(1)}`)));
 });
 
+test("multi-root prompt and connect pairs stay inside their owning layout ranges", () => {
+	const subsets: Array<{ awaiting: readonly number[]; rows: number }> = [
+		{ awaiting: [], rows: 10 },
+		{ awaiting: [1], rows: 12 },
+		{ awaiting: [2], rows: 12 },
+		{ awaiting: [1, 3], rows: 14 },
+		{ awaiting: [1, 2, 3], rows: 16 },
+	];
+	for (const { awaiting, rows } of subsets) {
+		const waiting = new Set(awaiting);
+		const snapshot = {
+			version: 0,
+			notices: [],
+			runs: [1, 2, 3].map((index) => ({
+				id: uuid(index),
+				name: `root-${index}`,
+				status: "running" as RunStatus,
+				startedAt: now + index,
+				inputs: {},
+				stages: waiting.has(index)
+					? [
+							{
+								id: "ask",
+								name: "ask",
+								status: "awaiting_input" as const,
+								parentIds: [],
+								toolEvents: [],
+								pendingPrompt: {
+									id: `prompt-${index}`,
+									kind: "confirm" as const,
+									message: `Approve root ${index}?`,
+									createdAt: now,
+								},
+							},
+						]
+					: [],
+			})),
+		} satisfies StoreSnapshot;
+		const layout: WorkflowWidgetRowLayout = { runs: [] };
+		const lines = buildThemedWidgetLines(snapshot, undefined, 120, now, layout);
+		assert.equal(lines.length, rows, `awaiting ${awaiting.join(",") || "none"}`);
+		assert.equal(layout.runs.length, 3);
+		assert.deepEqual(
+			layout.runs.map((run) => run.id),
+			[uuid(3), uuid(2), uuid(1)],
+		);
+		for (let i = 1; i < layout.runs.length; i++) {
+			assert.ok(layout.runs[i]!.start > layout.runs[i - 1]!.start);
+			assert.ok(layout.runs[i]!.start >= layout.runs[i - 1]!.end);
+		}
+
+		const answerOwners = new Map<number, string>();
+		for (const range of layout.runs) {
+			const card = lines.slice(range.start, range.end);
+			const index = Number(range.id.slice(-1));
+			const prompt = `Approve root ${index}?`;
+			const connect = `Answer: /workflow connect ${range.id}`;
+			if (waiting.has(index)) {
+				assert.equal(
+					card.some((line) => line.includes(`"${prompt}"`)),
+					true,
+					range.id,
+				);
+				assert.equal(
+					card.some((line) => line.includes(connect)),
+					true,
+					range.id,
+				);
+			} else {
+				assert.equal(
+					card.some((line) => line.includes('"')),
+					false,
+					range.id,
+				);
+				assert.equal(
+					card.some((line) => line.includes("Answer: /workflow connect")),
+					false,
+					range.id,
+				);
+			}
+			for (const [lineIndex, line] of card.entries()) {
+				if (!line.includes("Answer: /workflow connect")) continue;
+				const absolute = range.start + lineIndex;
+				assert.equal(answerOwners.has(absolute), false, `answer row ${absolute} reused`);
+				answerOwners.set(absolute, range.id);
+			}
+		}
+		assert.equal(answerOwners.size, awaiting.length);
+		for (const [absolute, ownerId] of answerOwners) {
+			const owners = layout.runs.filter((range) => absolute >= range.start && absolute < range.end);
+			assert.deepEqual(
+				owners.map((range) => range.id),
+				[ownerId],
+			);
+		}
+	}
+});
+
 test("below-editor pending input growth stays a differential redraw", async () => {
 	const NOW = Date.now();
 	const runId = "00000000-0000-4000-8000-000000000042";
