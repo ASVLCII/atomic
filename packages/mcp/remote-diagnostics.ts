@@ -29,7 +29,10 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 		url.hash.slice(1),
 		...url.search.slice(1).split("&").map((part) => (part.includes("=") ? part.slice(part.indexOf("=") + 1) : "")),
 	], url.searchParams.values());
-	const pathRepresentations = secretRepresentations(url.pathname.split("/"));
+	const pathRepresentations = secretRepresentations([
+		...url.pathname.split("/"),
+		...url.search.slice(1).split("&").map((part) => part.split("=")[0]!),
+	], url.searchParams.keys());
 	// Also hide discovered OAuth/SSE URLs, which need not equal the configured endpoint.
 	message = message.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
 		if (preserveSafeUrls) {
@@ -49,7 +52,7 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 			const pattern = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%[\da-f]{2}/gi, (encodedByte) =>
 				encodedByte.replace(/[a-f]/gi, (hex) => `[${hex.toUpperCase()}${hex.toLowerCase()}]`),
 			);
-			// Paths can be short/common words: redact diagnostic tokens, not substrings
+			// Paths and query names can be short/common words: redact tokens, not substrings
 			// of ordinary words. No component (including literal 'mcp') is exempt.
 			return representations.has(secret) ? pattern : `(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`;
 		});

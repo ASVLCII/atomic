@@ -73,7 +73,7 @@ Automatic OAuth is opt-in through `settings.autoAuth`. Browser-based authorizati
 
 - Run `/mcp` to check server status and `/mcp tools` to list available tools.
 - After editing configuration manually, restart Atomic to load it. Use `/mcp reconnect my-server` to reconnect a configured server and refresh its tools.
-- If Atomic cannot open the authorization browser, use the manual URL when shown. Sensitive authorization URLs are omitted from errors; check your default browser and retry `/mcp-auth my-server`.
+- If Atomic cannot open the authorization browser, the manual URL includes ordinary OAuth state and callback parameters. URLs with additional sensitive parameters, such as a credential-bearing resource, are omitted. Browser-launch failure cancels the pending attempt; check your default browser and retry `/mcp-auth my-server`.
 - If a local server cannot start, check its executable, arguments, working directory, and required environment variables. Server configuration supports `cwd` and `env`.
 - If authorization fails, run `/mcp-auth my-server` again. Check the remote server's URL and authentication requirements.
 - For slow tools, a server's `timeoutMs` controls the inactivity timeout. Progress notifications reset it; it is not a total execution deadline.

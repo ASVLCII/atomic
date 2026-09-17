@@ -70,7 +70,7 @@ test("MCP Node discovery and tool RPC diagnostics redact secrets in messages and
 			context: null,
 			detail: "upstream unavailable",
 			docs: "https://docs.example/errors",
-			_meta: { attempts: ["[redacted URL]", { token: "[redacted]" }] },
+			_meta: { attempts: ["[redacted URL]", { "[redacted]": "[redacted]" }] },
 		});
 		return true;
 	};
@@ -308,7 +308,7 @@ test.each(["RISK%2FSECRET%2BKEY", "%52ISK%2fSECRET%2bKEY", "RISK+SECRET%2BKEY", 
 				for (const form of forms)
 					assert.ok(!inspect(error, { depth: null, showHidden: true }).includes(form), form);
 				assert.deepEqual(error.data, {
-					requestTarget: "/[redacted]?token=[redacted]&flag=[redacted]&flag=",
+					requestTarget: "/[redacted]?[redacted]=[redacted]&[redacted]=[redacted]&[redacted]=",
 					nested: forms.map(() => ({ "[redacted]": "[redacted]" })),
 					retryable: false,
 				});
@@ -409,5 +409,41 @@ test.each(["PATH_SECRET", "%50ATH%2fSECRET%2bKEY", "mcp", "s", "code", "message"
 			server.closeAllConnections();
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
+	},
+);
+
+// Regression for #3088 / PR #3091: a query credential can be the name with no value.
+test.each(["PRIVATE_TOKEN=", "PRIVATE_TOKEN", "%50RIVATE%2fTOKEN=", "PRIVATE+TOKEN", "PRIVATE%25TOKEN="])(
+	"MCP query-key diagnostics redact %s in relative and nested errors",
+	(query) => {
+		const endpoint = `https://host/mcp?${query}`;
+		const raw = query.split("=")[0]!;
+		const decoded = [...new URL(endpoint).searchParams.keys()][0]!;
+		const forms = [...new Set([raw, decoded, encodeURIComponent(decoded)])];
+		const transport = protectRemoteTransport<Transport>(
+			{ start: async () => {}, send: async () => {}, close: async () => {} },
+			endpoint,
+		);
+		let received: JSONRPCMessage | undefined;
+		transport.onmessage = (message) => {
+			received = message;
+		};
+		transport.onmessage({
+			jsonrpc: "2.0",
+			id: decoded,
+			error: { code: 0, message: `/mcp?${query}`, data: forms.map((form) => ({ [form]: form })) },
+		});
+		assert.deepEqual(received, {
+			jsonrpc: "2.0",
+			id: decoded,
+			error: {
+				code: 0,
+				message: `/[redacted]?[redacted]${query.endsWith("=") ? "=" : ""}`,
+				data: forms.map(() => ({ "[redacted]": "[redacted]" })),
+			},
+		});
+		const success: JSONRPCMessage = { jsonrpc: "2.0", id: 0, result: { content: forms } };
+		transport.onmessage(success);
+		assert.equal(received, success);
 	},
 );

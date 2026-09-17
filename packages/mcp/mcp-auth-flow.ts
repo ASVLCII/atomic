@@ -237,8 +237,11 @@ async function performAuthentication(
     } catch {
       assertActive(owner)
       const url = new URL(started.authorizationUrl)
-      // Opaque OAuth parameters (including state/resource) may carry endpoint secrets.
-      const publicParameters = new Set(["client_id", "scope", "response_type", "code_challenge", "code_challenge_method"])
+      // This is a requested authorization instruction, not an unsolicited diagnostic.
+      // Ordinary OAuth state and callback parameters are needed to open the complete URL.
+      const publicParameters = new Set([
+        "client_id", "scope", "response_type", "code_challenge", "code_challenge_method", "state", "redirect_uri",
+      ])
       const sensitive = url.username || url.password || url.hash ||
         [...url.searchParams.keys()].some((key) => !publicParameters.has(key))
       throw new Error(sensitive

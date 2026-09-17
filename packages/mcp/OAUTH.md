@@ -280,7 +280,7 @@ For pre-registered OAuth clients (`oauth.clientId`), the callback redirect URI m
 
 ### Browser doesn't open
 
-If the browser fails to open (e.g., in SSH sessions), the authorization URL will be displayed. Copy it manually to your browser.
+If the browser fails to open (e.g., in SSH sessions), ordinary authorization URLs are displayed intact, including state, callback and PKCE parameters. URLs with additional sensitive parameters, such as a credential-bearing resource, are omitted. Browser-launch failure cancels the pending attempt; configure a working browser opener and retry `/mcp-auth <server-name>`.
 
 ## Architecture
 
