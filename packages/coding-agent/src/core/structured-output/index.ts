@@ -6,7 +6,7 @@ import {
 	createStructuredOutputTool,
 	type JsonObject,
 	STRUCTURED_OUTPUT_TOOL_NAME,
-} from "../tools/structured-output.js";
+} from "../tools/structured-output.ts";
 import { inferJev, STRUCTURED_DECISION_POLICY } from "./jev.js";
 import { resolveRouterModel } from "./resolver.js";
 import type { RouterDecisionRequest, StructuredOutputRequest, StructuredOutputResult } from "./types.js";

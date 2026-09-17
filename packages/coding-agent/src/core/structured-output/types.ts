@@ -1,8 +1,8 @@
 import type { Api, Model } from "@bastani/pi-ai";
 import type { Static, TSchema } from "typebox";
-import type { ModelRegistry } from "../model-registry.js";
-import type { SettingsManager } from "../settings-manager.js";
-import type { JsonObject } from "../tools/structured-output.js";
+import type { ModelRegistry } from "../model-registry.ts";
+import type { SettingsManager } from "../settings-manager.ts";
+import type { JsonObject } from "../tools/structured-output.ts";
 
 /** A semantic judgment, not an execution instruction. IDs are only correlation keys. */
 export interface StructuredChoiceQuestion {
