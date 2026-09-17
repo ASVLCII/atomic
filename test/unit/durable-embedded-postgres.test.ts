@@ -15,7 +15,11 @@ import { join } from "node:path";
 import type { RetainedPostgres, RetainedPostgresSpawnOptions } from "@bastani/atomic-natives";
 import { afterEach, test } from "vitest";
 import {
+	embeddedPostgresLastFailure,
 	embeddedPostgresTestHooks,
+	loadEmbeddedPostgresBinaries,
+	recoverEmbeddedPostgres,
+	resetEmbeddedDbosPostgresForTests,
 	shutdownEmbeddedDbosPostgres,
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
 import {
@@ -70,6 +74,92 @@ afterEach(() => {
 	embeddedPostgresTestHooks.setActiveCluster(undefined);
 });
 
+test.skipIf(process.platform === "win32")("read-only runtime inspection preserves executable permissions", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-doctor-runtime-"));
+	try {
+		mkdirSync(join(root, "bin"));
+		for (const binary of ["postgres", "pg_ctl", "initdb"])
+			writeFileSync(join(root, "bin", binary), "fixture", { mode: 0o600 });
+		const options = {
+			runtimeDirectory: root,
+			host: { platform: "linux" as const, arch: "x64" as const, libc: "glibc" as const },
+			readOnly: true,
+		};
+		const binaries = await loadEmbeddedPostgresBinaries(options);
+		for (const binary of Object.values(binaries)) assert.equal(statSync(binary).mode & 0o777, 0o600);
+		await loadEmbeddedPostgresBinaries({ ...options, readOnly: false });
+		for (const binary of Object.values(binaries)) assert.equal(statSync(binary).mode & 0o777, 0o755);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("embedded test reset clears the recorded startup failure", async () => {
+	embeddedPostgresTestHooks.setEnsureOperation(async () => {
+		throw new Error("fixture startup failure");
+	});
+	await assert.rejects(embeddedPostgresTestHooks.ensure(), /fixture startup failure/);
+	assert.equal(embeddedPostgresLastFailure()?.message, "fixture startup failure");
+	resetEmbeddedDbosPostgresForTests();
+	assert.equal(embeddedPostgresLastFailure(), undefined);
+});
+
+test("explicit recovery releases a published native handle without signaling the server", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-doctor-published-"));
+	const lease = new FakeLease();
+	const cluster = embeddedPostgresTestHooks.setActiveCluster(lease);
+	await embeddedPostgresTestHooks.waitForClusterReadiness("/postgres.log", cluster, async () => true);
+	try {
+		await assert.rejects(
+			recoverEmbeddedPostgres(
+				{ ...context(), baseDir: root },
+				{
+					version: 1,
+					clusterId: "registered",
+					dataDir: join(root, "v18"),
+					directoryIdentity: "identity",
+					major: 18,
+				},
+			),
+			/requires existing ownership records/,
+		);
+		assert.equal(lease.releaseCalls, 1);
+		assert.deepEqual(lease.interruptCalls, []);
+		await shutdownEmbeddedDbosPostgres();
+		assert.equal(lease.releaseCalls, 1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("explicit recovery preserves an unpublished retained lease for cleanup", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-doctor-retained-"));
+	const lease = new FakeLease();
+	embeddedPostgresTestHooks.setActiveCluster(lease);
+	try {
+		await assert.rejects(
+			recoverEmbeddedPostgres(
+				{ ...context(), baseDir: root },
+				{
+					version: 1,
+					clusterId: "registered",
+					dataDir: join(root, "v18"),
+					directoryIdentity: "identity",
+					major: 18,
+				},
+			),
+			/cleanup is still pending/,
+		);
+		assert.equal(lease.releaseCalls, 0);
+		assert.deepEqual(lease.interruptCalls, []);
+		await shutdownEmbeddedDbosPostgres();
+		assert.equal(lease.releaseCalls, 1);
+		assert.deepEqual(lease.interruptCalls, [60_000]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("Windows command-line fixture preserves Postgres paths and options as direct arguments", async () => {
 	const lease = new FakeLease();
 	let options: RetainedPostgresSpawnOptions | undefined;
@@ -113,20 +203,16 @@ test("Linux root ownership is passed to the direct native spawn", async () => {
 	assert.equal(options?.gid, 71);
 });
 
-test("a reachable competing server after spawn failure is attached without ownership", async () => {
+// #3074: a listening port is not managed-cluster identity.
+test("a reachable competing server after spawn failure is never adopted", async () => {
 	embeddedPostgresTestHooks.setRetainedPostgresSpawner(() => {
 		throw new Error("address already in use");
 	});
 
-	const lease = await embeddedPostgresTestHooks.startCluster(
-		"postgres",
-		"/data",
-		"/postgres.log",
-		context(),
-		async () => true,
+	await assert.rejects(
+		embeddedPostgresTestHooks.startCluster("postgres", "/data", "/postgres.log", context()),
+		/address already in use/,
 	);
-
-	assert.equal(lease, undefined);
 	await shutdownEmbeddedDbosPostgres();
 });
 
@@ -139,7 +225,7 @@ test("a spawn failure without a reachable competitor preserves the native error 
 	});
 	try {
 		await assert.rejects(
-			embeddedPostgresTestHooks.startCluster("postgres", root, logFile, context(), async () => false),
+			embeddedPostgresTestHooks.startCluster("postgres", root, logFile, context()),
 			/spawn denied[\s\S]*native postmaster detail/,
 		);
 	} finally {
@@ -329,6 +415,16 @@ test("readiness accepts a live retained process and leaves attached servers unow
 	await embeddedPostgresTestHooks.waitForClusterReadiness("/postgres.log", undefined, async () => true);
 	await shutdownEmbeddedDbosPostgres();
 	assert.equal(lease.releaseCalls, 1, "attached readiness creates no ownership or extra shutdown");
+});
+
+// #3074: readiness publishes a shared server; its starter is no longer its lifetime owner.
+test("orderly owner exit leaves a ready shared server running for attached consumers", async () => {
+	const lease = new FakeLease();
+	const cluster = embeddedPostgresTestHooks.setActiveCluster(lease);
+	await embeddedPostgresTestHooks.waitForClusterReadiness("/postgres.log", cluster, async () => true);
+	await shutdownEmbeddedDbosPostgres();
+	assert.deepEqual(lease.interruptCalls, [], "owner exit must not signal a published shared server");
+	assert.equal(lease.releaseCalls, 1);
 });
 
 // PR #2982: only the native zero-timeout result means an owned process is alive.

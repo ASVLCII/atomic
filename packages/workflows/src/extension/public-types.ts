@@ -216,6 +216,7 @@ export interface WorkflowToolArgs {
 		| "list"
 		| "get"
 		| "status"
+		| "dependency"
 		| "stages"
 		| "stage"
 		| "transcript"
@@ -225,6 +226,7 @@ export interface WorkflowToolArgs {
 		| "resume"
 		| "reload"
 		| "inputs";
+	operation?: "status" | "doctor" | "recover";
 	runId?: string;
 	all?: boolean;
 	stageId?: string;

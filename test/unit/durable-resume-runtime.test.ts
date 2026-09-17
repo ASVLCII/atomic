@@ -169,6 +169,44 @@ describe("resumeDurableWorkflow", () => {
 		if (result.ok) assert.equal(result.workflowId, fullId);
 	});
 
+	test("canonicalizes recovery prefixes and rejects invalid selectors before reconciliation", async () => {
+		// Regression: #3093 — prefix selection must precede outage recovery side effects.
+		const fullId = testRunId("prefix-reconciliation");
+		const reconciled: string[] = [];
+		class RecoveryBackend extends InMemoryDurableBackend {
+			isCheckpointUnavailable(workflowId: string): boolean {
+				assert.equal(workflowId, fullId);
+				return true;
+			}
+			async reconcileWorkflowAdmission(workflowId: string): Promise<void> {
+				reconciled.push(workflowId);
+			}
+		}
+		const recovery = new RecoveryBackend();
+		recovery.registerWorkflow({
+			workflowId: fullId,
+			name: "resumable-pipeline",
+			inputs: { topic: "data" },
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+		});
+		const recoveryDeps = { ...deps(), durableBackend: recovery };
+		const collision = `${fullId.slice(0, 8)}-${testRunId("collision").slice(9)}`;
+		for (const selector of ["bad", fullId.slice(0, 8)]) {
+			const result = await resumeDurableWorkflow(selector, recoveryDeps, [
+				...recovery.listResumableWorkflows(),
+				makeEntry(collision, "other", "paused"),
+			]);
+			assert.equal(result.ok, false);
+			assert.match(result.message, selector === "bad" ? /must be a full/ : /ambiguous/);
+			assert.deepEqual(reconciled, []);
+		}
+		const result = await resumeDurableWorkflow(fullId.slice(0, 8).toUpperCase(), recoveryDeps);
+		assert.equal(result.ok, true);
+		assert.deepEqual(reconciled, [fullId]);
+	});
+
 	test("rejects a shared prefix while full workflow ids remain independently addressable", async () => {
 		const firstId = testRunId("ambiguous-first");
 		const secondId = `${firstId.slice(0, 8)}-${testRunId("ambiguous-second").slice(9)}`;

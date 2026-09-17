@@ -5,8 +5,9 @@
 
 import assert from "node:assert/strict";
 import type { RetainedPostgres } from "@bastani/atomic-natives";
-import { afterEach, describe, test } from "vitest";
+import { afterEach, describe, test, vi } from "vitest";
 import { effectiveSystemDatabaseUrl } from "../../packages/workflows/src/durable/dbos-backend.js";
+import * as embeddedPostgres from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
 import {
 	EMBEDDED_DBOS_SYSTEM_DATABASE_URL,
 	embeddedPostgresTestHooks,
@@ -14,8 +15,10 @@ import {
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
 import {
 	provisionResolvedLocalDbos,
+	recoverManagedPostgres,
 	resetLocalDbosProvisioningForTests,
 	resolveDbosSystemDatabaseUrl,
+	resolvedPostgresProvider,
 	shouldProvisionLocalDbos,
 	shutdownResolvedLocalDbos,
 } from "../../packages/workflows/src/durable/dbos-local-postgres.js";
@@ -26,6 +29,73 @@ afterEach(() => {
 	resetLocalDbosProvisioningForTests();
 	if (originalUrl === undefined) delete process.env.DBOS_SYSTEM_DATABASE_URL;
 	else process.env.DBOS_SYSTEM_DATABASE_URL = originalUrl;
+});
+
+test("explicit recovery before URL resolution retains embedded teardown ownership", async () => {
+	delete process.env.DBOS_SYSTEM_DATABASE_URL;
+	let stops = 0;
+	resetLocalDbosProvisioningForTests(
+		async () => {},
+		async () => {},
+		async () => {
+			stops++;
+		},
+	);
+	const recover = vi.spyOn(embeddedPostgres, "recoverEmbeddedPostgres").mockResolvedValue(undefined);
+	try {
+		await recoverManagedPostgres(
+			{
+				baseDir: "/unused",
+				runAsOwner: async () => {
+					throw new Error("must not execute");
+				},
+			},
+			{ version: 1, clusterId: "cluster", dataDir: "/unused/v18", directoryIdentity: "identity", major: 18 },
+		);
+		assert.equal(resolvedPostgresProvider(), "embedded");
+		await shutdownResolvedLocalDbos();
+		assert.equal(stops, 1);
+	} finally {
+		recover.mockRestore();
+	}
+});
+
+test("explicit recovery keeps a pending cleanup lease reachable through local shutdown", async () => {
+	delete process.env.DBOS_SYSTEM_DATABASE_URL;
+	let stops = 0;
+	let releases = 0;
+	embeddedPostgresTestHooks.setActiveCluster({
+		pid: 4242,
+		wait: async () => ({ exited: false, signaled: false }),
+		interruptAndWait: async () => {
+			stops++;
+			return { exited: true, signaled: false };
+		},
+		release: () => {
+			releases++;
+		},
+	});
+	try {
+		await assert.rejects(
+			recoverManagedPostgres(
+				{
+					baseDir: "/unused",
+					runAsOwner: async () => {
+						throw new Error("must not execute");
+					},
+				},
+				{ version: 1, clusterId: "cluster", dataDir: "/unused/v18", directoryIdentity: "identity", major: 18 },
+			),
+			/cleanup is still pending/,
+		);
+		assert.equal(resolvedPostgresProvider(), "embedded");
+		assert.equal(releases, 0);
+		await shutdownResolvedLocalDbos();
+		assert.equal(stops, 1);
+		assert.equal(releases, 1);
+	} finally {
+		embeddedPostgresTestHooks.setActiveCluster(undefined);
+	}
 });
 
 describe("resolveDbosSystemDatabaseUrl", () => {
@@ -42,6 +112,8 @@ describe("resolveDbosSystemDatabaseUrl", () => {
 		);
 
 		assert.equal(await resolveDbosSystemDatabaseUrl(), undefined);
+		await provisionResolvedLocalDbos();
+		await shutdownResolvedLocalDbos();
 		assert.equal(provisioned, 0);
 	});
 
@@ -222,6 +294,34 @@ describe("resolveDbosSystemDatabaseUrl", () => {
 
 		assert.equal(shutdownCalls, 0);
 	});
+});
+
+// #3074: DBOS survives /reload, so teardown must retain the original provider closure.
+test("a reloaded bundle releases the original provider once and clears its resolution memo", async () => {
+	delete process.env.DBOS_SYSTEM_DATABASE_URL;
+	let starts = 0;
+	let stops = 0;
+	resetLocalDbosProvisioningForTests(
+		async () => {
+			starts++;
+		},
+		async () => {
+			throw new Error("must not use Docker");
+		},
+		async () => {
+			stops++;
+		},
+	);
+	await resolveDbosSystemDatabaseUrl();
+	vi.resetModules();
+	const reloaded = await import("../../packages/workflows/src/durable/dbos-local-postgres.js");
+	assert.notEqual(reloaded.shutdownResolvedLocalDbos, shutdownResolvedLocalDbos);
+	await Promise.all([reloaded.shutdownResolvedLocalDbos(), shutdownResolvedLocalDbos()]);
+	assert.equal(stops, 1);
+	await reloaded.resolveDbosSystemDatabaseUrl();
+	assert.equal(starts, 2);
+	await reloaded.shutdownResolvedLocalDbos();
+	assert.equal(stops, 2);
 });
 
 describe("shouldProvisionLocalDbos", () => {

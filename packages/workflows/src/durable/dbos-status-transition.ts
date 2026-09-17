@@ -6,6 +6,7 @@ import { isAbsorbingDurableStatus } from "./workflow-status-transition.js";
 interface DbosStatusTransitionInput {
 	readonly expectedStatuses: readonly DurableWorkflowStatus[];
 	readonly status: DurableWorkflowStatus;
+	readonly expectedUpdatedAt?: number;
 	readonly flush: () => Promise<void>;
 	readonly read: () => Promise<DbosMetadataClassification>;
 	readonly local: () => DurableWorkflowHandle | undefined;
@@ -34,7 +35,8 @@ export async function transitionDbosWorkflowStatus(input: DbosStatusTransitionIn
 	if (
 		local === undefined ||
 		authoritative.kind !== "current" ||
-		!input.expectedStatuses.includes(authoritative.metadata.status)
+		!input.expectedStatuses.includes(authoritative.metadata.status) ||
+		(input.expectedUpdatedAt !== undefined && authoritative.metadata.updatedAt !== input.expectedUpdatedAt)
 	) {
 		if (authoritative.kind === "current") input.reconcile(authoritative.metadata);
 		return false;
@@ -75,5 +77,6 @@ export async function transitionDbosWorkflowStatus(input: DbosStatusTransitionIn
 		if (persisted.kind === "current") input.reconcile(persisted.metadata);
 		return false;
 	}
+	input.reconcile(persisted.metadata);
 	return true;
 }

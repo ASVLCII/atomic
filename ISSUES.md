@@ -30,3 +30,8 @@ Expected: `No unresolved inbound asks.`
 **Limits:** reproduced on the candidate tree against unchanged base files, not by executing the full base tree. It does not demonstrate a cross-group transport bypass or a successful wrong-recipient reply through the broker; those stronger claims were not established.
 
 **Suggested repair (later scope):** exclude typed child executions from parent-generation reply-ledger binding/preservation; retain generation sharing only for replacement sessions of the same workflow-stage conversation. Add a parent-plus-two-children public pending/reply isolation regression.
+
+## PostgreSQL stack CI failures outside #3095's repair
+
+- #3092 runtime-resolver bundling failure and #3093 nested pending-prompt regression are inherited and assigned to the parent; their assertions remain unchanged.
+- Run 35188751755 also records a Windows Intercom reconnect timeout on the first attempt, absent on retry. Stack attribution is unestablished; no Intercom change is justified here.

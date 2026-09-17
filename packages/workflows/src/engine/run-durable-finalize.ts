@@ -43,6 +43,12 @@ export async function finalizeCancelledAdmission(input: DurableTerminalFinalizeI
 /** Persist the terminal durable status and surface DBOS write failures. */
 export async function finalizeDurableTerminalStatus(input: DurableTerminalFinalizeInput): Promise<void> {
 	if (!input.isRoot) return;
+	if (!dbosAdmissionContext.getStore()?.aborted && input.durableBackend.isCheckpointUnavailable?.(input.runId)) {
+		// The failed checkpoint already exhausted its database boundary. Preserve
+		// the local outcome without starting an unbounded terminal write behind it.
+		await finalizeUnadmittedDurableStatus(input);
+		return;
+	}
 	const status = effectiveRunStatus(input.runSnapshot);
 	const isExitTerminal = input.runSnapshot.exited === true && status !== "running";
 	const isBlocked =

@@ -27,15 +27,13 @@ export async function boundedAdmission<T>(
 	operation: (signal: AbortSignal) => Promise<T>,
 	signal?: AbortSignal,
 	timeoutMs = DBOS_ADMISSION_TIMEOUT_MS,
+	timeoutMessage = "Workflow database admission timed out.",
 ): Promise<T> {
 	const controller = new AbortController();
 	const abort = (): void => controller.abort(signal?.reason);
 	if (signal?.aborted) abort();
 	else signal?.addEventListener("abort", abort, { once: true });
-	const timer = setTimeout(
-		() => controller.abort(new DbosDependencyError("Workflow database admission timed out.")),
-		timeoutMs,
-	);
+	const timer = setTimeout(() => controller.abort(new DbosDependencyError(timeoutMessage)), timeoutMs);
 	try {
 		controller.signal.throwIfAborted();
 		return await raceAbort(operation(controller.signal), controller.signal);

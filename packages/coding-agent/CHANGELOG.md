@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers, retained latest failure and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Session, Workflow, and Intercom UUID selectors accept unique 8-character hexadecimal prefixes while preserving exact custom IDs and visibility boundaries ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 - Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 
@@ -36,6 +37,8 @@
 - Workflow status distinguishes pending database admission from execution and reports dependency failures, phase age, and last progress. Live executor pause/resume reports local versus confirmed database persistence, stays responsive during outages, and preserves the paused owner for same-ID recovery ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Live executor resume allows up to 10 seconds for database confirmation instead of using the 500ms pause acknowledgement budget, avoiding false timeouts on healthy remote PostgreSQL connections ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Keep ready shared PostgreSQL running across Atomic client exit and reload, with installation-independent cluster ownership records and consumer leases ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Managed PostgreSQL verifies server identity and SQL readiness, supports `ATOMIC_POSTGRES_PORT`, and shares an available actual port across sessions without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

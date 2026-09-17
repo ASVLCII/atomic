@@ -102,6 +102,14 @@ For desktop computer use, or CUA, use PyAutoGUI for mouse, keyboard and screensh
 
 The bundled herdr skill is copied from [herdr v0.9.0](https://github.com/herdrdev/herdr/blob/v0.9.0/skills/herdr/SKILL.md) and lives beside tmux in `packages/subagents/skills/herdr/SKILL.md`. It requires an explicit Herdr mention or request and `HERDR_ENV=1`; it stops outside a Herdr-managed pane. It discovers the installed CLI, uses returned pane IDs and distinguishes command submission from completion. The skill does not install Herdr or authorize control of unrelated panes.
 
+### Report feedback
+
+Use `/skill:feedback <what happened or what you want to change>` to draft an Atomic bug report or enhancement. The bundled feedback skill runs one foreground debugger investigation for a bug and no subagent for an enhancement. It summarizes findings and unknowns rather than attaching files or transcripts.
+
+Review the Markdown draft and its `Privacy scrubbed:` summary. Ask for changes to get a revised, re-scrubbed draft, or say you want it posted. An unrelated request continues the conversation without creating an issue. Posting uses your own authenticated `gh` CLI login to create an issue in `bastani-inc/atomic`; install GitHub CLI and run `gh auth login` if needed. If posting fails, Atomic reports the error and keeps the draft in the conversation.
+
+The scrubber replaces recognized API tokens, bearer credentials, credential assignments, URL credentials, private keys and email addresses with `[REDACTED]`, and home-directory prefixes with `~`. Review before posting: arbitrary secrets and sensitive business context may remain. Blank lines and Markdown headings stop multiline credential matching; complete template placeholders and Markdown links are preserved. Content beyond those boundaries and secret text in links can therefore require manual removal. Scrubbing cannot remove information already sent to your model provider.
+
 ## Skill Commands
 
 Skills register as `/skill:name` commands:
