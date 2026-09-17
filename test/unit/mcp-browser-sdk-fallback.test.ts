@@ -87,7 +87,7 @@ for (const [template, authorizationEndpoint] of [
 				return true;
 			});
 			assert.ok(requests.some((url) => url.includes("oauth-protected-resource")));
-			assert.ok(requests.includes("https://example.com/register"));
+			assert.ok(requests.some((url) => url === "https://example.com/register"));
 			assert.equal(getPendingAuthCount(), 0);
 			assert.equal(getOAuthState("sdk-browser"), undefined);
 			await assert.rejects(completeAuth("sdk-browser", "unused"), /No pending OAuth flow/);
