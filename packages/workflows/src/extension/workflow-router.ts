@@ -1,4 +1,5 @@
 import { inferRouterDecision, type JsonObject } from "@bastani/atomic";
+import { containsKnownEnvCredential } from "@bastani/pi-ai";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import { resolve_budget, type WorkflowBudget } from "../shared/budget.js";
@@ -61,9 +62,7 @@ function assertJsonObject(value: unknown): asserts value is JsonObject {
 /** Reject known and obvious credential material before sending the snapshot to a decision provider. */
 function assertNoCredentials(value: unknown, suppliedValues: unknown): void {
 	const serialized = JSON.stringify(value);
-	// Match the credential Jev uses, including inside JSON-escaped values and property names.
-	const apiKey = process.env.TYPESAFE_AI_API_KEY?.trim();
-	if (apiKey && serialized.includes(JSON.stringify(apiKey).slice(1, -1))) {
+	if (containsKnownEnvCredential(serialized)) {
 		throw new Error("Workflow routing context contains a configured credential. Remove secrets before retrying.");
 	}
 	if (
@@ -175,6 +174,15 @@ export async function routeWorkflowLaunch(
 		throw new Error(
 			"Workflow routing requires the host routerModel accessor and model registry. Update the host; no workflow was launched.",
 		);
+	}
+	let containsCredential: boolean;
+	try {
+		containsCredential = (await modelRegistry.containsConfiguredCredential?.(JSON.stringify(snapshot))) ?? false;
+	} catch {
+		throw new Error("Workflow routing could not check configured credentials. No inference was performed.");
+	}
+	if (containsCredential) {
+		throw new Error("Workflow routing context contains a configured credential. Remove secrets before retrying.");
 	}
 	const names = definitions.map((def) => def.normalizedName);
 	const schema = Type.Object(

@@ -67,7 +67,8 @@ export interface PiCommandOptions {
 
 export type PiRuntimeModel = Model<Api>;
 
-export interface PiRuntimeModelRegistry extends Partial<Pick<ModelRegistry, "getAll" | "streamSimple">> {
+export interface PiRuntimeModelRegistry
+	extends Partial<Pick<ModelRegistry, "getAll" | "streamSimple" | "containsConfiguredCredential">> {
 	getAvailable(): PiRuntimeModel[];
 }
 

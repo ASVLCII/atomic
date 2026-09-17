@@ -9,6 +9,8 @@ import { getShellConfig } from "../utils/shell.ts";
 
 // Cache for shell command results (persists for process lifetime)
 const commandResultCache = new Map<string, string | undefined>();
+// Last observed uncached result, used only for privacy screening, never auth resolution.
+const observedCommandResults = new Map<string, string>();
 const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 const LEGACY_ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -156,6 +158,25 @@ export function resolveConfigValue(config: string, env?: Record<string, string>)
 	return resolveTemplate(reference.parts, env);
 }
 
+/** Inspect only known values: never execute a command just to screen routing context. */
+export function containsConfiguredValue(serialized: string, config: string, env?: Record<string, string>): boolean {
+	const reference = parseConfigValueReference(config);
+	const values =
+		reference.type === "command"
+			? [commandResultCache.get(config), observedCommandResults.get(config)]
+			: [
+					resolveTemplate(reference.parts, env),
+					...getTemplateEnvVarNames(reference.parts).map((name) => resolveEnvConfigValue(name, env)),
+				];
+	return values.some((value) => {
+		if (!value?.trim()) return false;
+		const token = /^(?:Bearer|Basic)\s+(.+)$/i.exec(value)?.[1];
+		return [value, token].some(
+			(candidate) => !!candidate && serialized.includes(JSON.stringify(candidate).slice(1, -1)),
+		);
+	});
+}
+
 function executeWithConfiguredShell(command: string): { executed: boolean; value: string | undefined } {
 	try {
 		const { shell, args, commandTransport } = getShellConfig();
@@ -205,12 +226,15 @@ function executeWithDefaultShell(command: string): string | undefined {
 
 function executeCommandUncached(commandConfig: string): string | undefined {
 	const command = commandConfig.slice(1);
-	return process.platform === "win32"
-		? (() => {
-				const configuredResult = executeWithConfiguredShell(command);
-				return configuredResult.executed ? configuredResult.value : executeWithDefaultShell(command);
-			})()
-		: executeWithDefaultShell(command);
+	const result =
+		process.platform === "win32"
+			? (() => {
+					const configuredResult = executeWithConfiguredShell(command);
+					return configuredResult.executed ? configuredResult.value : executeWithDefaultShell(command);
+				})()
+			: executeWithDefaultShell(command);
+	if (result) observedCommandResults.set(commandConfig, result);
+	return result;
 }
 
 function executeCommand(commandConfig: string): string | undefined {
@@ -292,4 +316,5 @@ export function resolveHeadersOrThrow(
 /** Clear the config value command cache. Exported for testing. */
 export function clearConfigValueCache(): void {
 	commandResultCache.clear();
+	observedCommandResults.clear();
 }

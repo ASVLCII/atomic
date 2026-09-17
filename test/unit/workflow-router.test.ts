@@ -195,6 +195,33 @@ test("different selection returns its decision without stale-input execution", a
 	f.noLaunch();
 });
 
+// #3089: post-decision setup errors retain observable decisions, not stale approvals.
+for (const stale of [false, true]) {
+	test(`launch setup failure retains only a current router decision (stale=${stale})`, async () => {
+		const f = fixture({ maxTokens: 0, maxCost: 1.125 });
+		vi.spyOn(f.runtime, "dispatch").mockImplementation(async () => {
+			if (stale) f.replace();
+			throw new Error("Launch setup unavailable");
+		});
+		const result = await f.call();
+		assert.equal(result.details.action, "run");
+		assert.ok("status" in result.details);
+		assert.equal(result.details.status, "failed");
+		const visible = JSON.parse(result.content[0]!.text as string);
+		assert.deepEqual(visible, result.details);
+		if (stale) assert.equal("routerDecision" in visible, false);
+		else {
+			assert.ok("routerDecision" in visible);
+			assert.deepEqual(visible.routerDecision, {
+				workflowType: "approved-change",
+				maxBudget: { maxTokens: 0, maxCost: 1.125 },
+			});
+		}
+		assert.equal(f.infer.mock.calls.length, 1);
+		f.noLaunch();
+	});
+}
+
 for (const value of [
 	{},
 	{ workflowType: "unregistered", maxBudget: {} },

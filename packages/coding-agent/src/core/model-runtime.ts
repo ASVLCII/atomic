@@ -31,6 +31,7 @@ import { getAgentDir } from "../config.js";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.js";
 import { normalizePath } from "../utils/paths.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
+import { containsAuthConfig } from "./credential-screening.ts";
 import {
 	copilotAdvertisedFastModelIds,
 	copilotAdvertisesModelId,
@@ -220,6 +221,19 @@ export class ModelRuntime implements Models {
 			...this.config.getProviderIds(),
 			...this.extensionProviders.keys(),
 		]);
+	}
+
+	/** Privacy boundary: no request auth resolution, credential commands, or OAuth refresh. */
+	async containsConfiguredCredential(serialized: string): Promise<boolean> {
+		if (await this.credentials.containsConfiguredCredential(serialized)) return true;
+		for (const providerId of this.providerIds()) {
+			if (
+				containsAuthConfig(serialized, this.config.getProvider(providerId)) ||
+				containsAuthConfig(serialized, this.extensionProviders.get(providerId))
+			)
+				return true;
+		}
+		return false;
 	}
 	/**
 	 * Overlay derived selectable `-fast` model variants. Applied last so exact `-fast` IDs owned by the

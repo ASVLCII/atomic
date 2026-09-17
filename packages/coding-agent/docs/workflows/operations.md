@@ -183,6 +183,8 @@ The router makes one request with a 30-second inference deadline, without an age
 
 The workflow tool returns the validated decision as `routerDecision` in its JSON content and structured details. That object contains exactly `workflowType` and `maxBudget`; run metadata remains outside it.
 
+The tool's visible result also shows a **ROUTER DECISION** panel with indented JSON, followed by the launch status or inline guidance. A launch-setup failure retains the validated decision unless a registry change has made it stale; it does not imply that a workflow started.
+
 | Decision | Result and next step |
 | --- | --- |
 | `workflowType: "none"` | `status: "not_launched"`, `runId: ""`, and guidance to continue inline within the existing authorized scope. No workflow or fallback runs. The router has not done the task; do not automatically reroute. |

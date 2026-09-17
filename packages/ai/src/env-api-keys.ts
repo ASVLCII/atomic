@@ -65,18 +65,7 @@ function hasVertexAdcCredentials(env?: ProviderEnv): boolean {
 	return cachedVertexAdcCredentialsExists;
 }
 
-function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
-	if (provider === "github-copilot") {
-		return ["COPILOT_GITHUB_TOKEN"];
-	}
-
-	// ANTHROPIC_AUTH_TOKEN participates in env discovery/status, but
-	// getEnvApiKey() skips it because requests must pass it as Authorization: Bearer.
-	if (provider === "anthropic") {
-		return [ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV];
-	}
-
-	const envMap: Record<string, string> = {
+const apiKeyEnvMap: Record<string, string> = {
 		"ant-ling": "ANT_LING_API_KEY",
 		"qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
 		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
@@ -115,8 +104,27 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		"xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
 	};
 
-	const envVar = envMap[provider];
+function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
+	if (provider === "github-copilot") return ["COPILOT_GITHUB_TOKEN"];
+	if (provider === "anthropic") {
+		return [ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV];
+	}
+	const envVar = apiKeyEnvMap[provider];
 	return envVar ? [envVar] : undefined;
+}
+
+/** Boolean-only privacy check; never resolves ambient SDK credentials or performs auth work. */
+export function containsKnownEnvCredential(serialized: string, env?: ProviderEnv): boolean {
+	const names = [
+		...Object.values(apiKeyEnvMap),
+		ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV,
+		"COPILOT_GITHUB_TOKEN", "TYPESAFE_AI_API_KEY",
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
+	];
+	return names.some((name) => {
+		const value = getProviderEnvValue(name, env);
+		return !!value?.trim() && serialized.includes(JSON.stringify(value.trim()).slice(1, -1));
+	});
 }
 
 /**

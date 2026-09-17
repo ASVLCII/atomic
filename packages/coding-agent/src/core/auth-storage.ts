@@ -203,6 +203,11 @@ export class ReadOnlyAuthStorage implements CredentialStore {
 		return this.data;
 	}
 
+	/** Raw configured values for privacy screening; never execute API-key commands. */
+	peek(providerId: string): Credential | undefined {
+		return this.load()[providerId];
+	}
+
 	async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
 		options?.signal?.throwIfAborted();
 		const credential = this.load()[providerId];

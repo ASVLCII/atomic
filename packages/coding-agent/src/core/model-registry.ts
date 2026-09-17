@@ -67,6 +67,11 @@ export class ModelRegistry {
 		return this.runtime.hasConfiguredAuth(model.provider);
 	}
 
+	/** Boolean-only access to configured credential screening, without resolving request auth. */
+	containsConfiguredCredential(serialized: string): Promise<boolean> {
+		return this.runtime.containsConfiguredCredential(serialized);
+	}
+
 	async getApiKeyAndHeaders(model: Model<Api>): Promise<ResolvedRequestAuth> {
 		try {
 			const resolution = await this.runtime.getAuth(model);

@@ -326,6 +326,18 @@ function transcriptNoticeText(result: TranscriptResult): string {
 }
 
 export function renderResult(result: WorkflowRegisteredToolResult | null | undefined, opts?: RenderResultOpts): string {
+	const body = renderResultBody(result, opts);
+	if (result?.action !== "run" || !("routerDecision" in result) || !result.routerDecision) return body;
+	const decision = renderNotice(
+		"ROUTER DECISION",
+		JSON.stringify(result.routerDecision, null, 2),
+		opts,
+		opts?.plain !== true,
+	);
+	return `${decision}\n${body}`;
+}
+
+function renderResultBody(result: WorkflowRegisteredToolResult | null | undefined, opts?: RenderResultOpts): string {
 	const partial = opts?.isPartial === true;
 	const themed = opts?.plain !== true;
 

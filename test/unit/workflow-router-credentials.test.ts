@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
+import * as childProcess from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Type } from "typebox";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { AuthStorage, ReadOnlyAuthStorage } from "../../packages/coding-agent/src/core/auth-storage.ts";
+import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.ts";
+import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.ts";
+import {
+	clearConfigValueCache,
+	resolveConfigValueOrThrow,
+} from "../../packages/coding-agent/src/core/resolve-config-value.ts";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
@@ -14,11 +25,21 @@ import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
 import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 
+vi.mock("child_process", async (importOriginal) => ({
+	...(await importOriginal<typeof import("node:child_process")>()),
+	execSync: vi.fn(() => {
+		throw new Error("Unexpected credential command");
+	}),
+	spawnSync: vi.fn(() => {
+		throw new Error("Unexpected credential command");
+	}),
+}));
 beforeEach(() => {
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
 });
 afterEach(() => {
 	setDurableBackend(undefined);
+	clearConfigValueCache();
 	vi.unstubAllEnvs();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
@@ -196,13 +217,15 @@ const locations = [
 // #3089: opaque configured keys must never reach either provider through the registered tool.
 for (const action of ["run", undefined] as const) {
 	for (const provider of ["ordinary", "jev"] as const) {
-		for (const [kind, key] of [
-			["opaque", "opaque-round-two-3089"],
-			["escaped", 'opaque-"quote"-\\slash-\nline-\ttab'],
+		for (const [kind, key, envName] of [
+			["opaque", "opaque-round-two-3089", "TYPESAFE_AI_API_KEY"],
+			["escaped", 'opaque-"quote"-\\slash-\nline-\ttab', "TYPESAFE_AI_API_KEY"],
+			["openai", "opaque-openai-repair-3089", "OPENAI_API_KEY"],
 		] as const) {
 			for (const location of locations) {
 				test(`rejects ${kind} key in ${location} (${action ?? "default"}, ${provider})`, async () => {
-					vi.stubEnv("TYPESAFE_AI_API_KEY", key);
+					vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-auth");
+					vi.stubEnv(envName, key);
 					const text = `Context ${key} end`;
 					const f = registeredFixture({ field: location, text });
 					f.args.action = action;
@@ -274,3 +297,207 @@ for (const action of ["run", undefined] as const) {
 		}
 	}
 }
+
+for (const provider of ["ordinary", "jev"] as const) {
+	for (const source of [
+		"stored key",
+		"stored env",
+		"oauth access",
+		"oauth refresh",
+		"runtime override",
+		"models key",
+		"models header",
+		"models bearer token",
+		"model header",
+		"extension key",
+		"extension header",
+	] as const) {
+		test(`registered ${provider} rejects ${source} without resolving auth`, async () => {
+			const key = 'synthetic-opaque-"auth"-\\value';
+			vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-auth");
+			const command = vi.mocked(childProcess.execSync);
+			const spawn = vi.mocked(childProcess.spawnSync);
+			command.mockClear();
+			spawn.mockClear();
+			const credentials = AuthStorage.inMemory({
+				custom:
+					source === "stored key"
+						? { type: "api_key", key: key.replaceAll("$", "$$") }
+						: source === "stored env"
+							? { type: "api_key", key: "$CUSTOM_ROUTER_AUTH", env: { CUSTOM_ROUTER_AUTH: key } }
+							: {
+									type: "oauth",
+									access: source === "oauth access" ? key : "synthetic-access",
+									refresh: source === "oauth refresh" ? key : "synthetic-refresh",
+									expires: 0,
+								},
+			});
+			const directory = mkdtempSync(join(tmpdir(), "router-credentials-"));
+			try {
+				const modelsPath = join(directory, "models.json");
+				writeFileSync(
+					modelsPath,
+					JSON.stringify({
+						providers: {
+							openai: {
+								apiKey: source === "models key" ? key : "!never-execute-credential-command",
+								headers: {
+									"x-api-key":
+										source === "models header"
+											? key
+											: source === "models bearer token"
+												? `Bearer ${key}`
+												: "!never-execute-header-command",
+								},
+								modelOverrides: {
+									"gpt-4o": {
+										headers: { "x-auth-token": source === "model header" ? key : "synthetic-header" },
+									},
+								},
+							},
+						},
+					}),
+				);
+				const runtime = await ModelRuntime.create({
+					credentials,
+					modelsPath,
+					refreshOnCreate: false,
+					allowModelNetwork: false,
+				});
+				runtime.registerProvider("openai", {
+					apiKey: source === "extension key" ? key : "!never-execute-extension-command",
+					headers: { "x-api-key": source === "extension header" ? key : "synthetic-extension-header" },
+				});
+				if (source === "runtime override") await runtime.setRuntimeApiKey("custom", key, {});
+				const auth = vi.spyOn(runtime, "getAuth");
+				const read = vi.spyOn(credentials, "read");
+				const registry = new ModelRegistry(runtime);
+				const f = registeredFixture();
+				f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
+				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev" : "decision-test/chat");
+				f.args.state!.conversation[0]!.text = `Context ${key} end`;
+				const result = await f.call();
+				assert.equal(f.infer.mock.calls.length, 0);
+				assert.equal(f.transport.mock.calls.length, 0);
+				assert.equal(auth.mock.calls.length, 0);
+				assert.equal(read.mock.calls.length, 0);
+				assert.equal(command.mock.calls.length, 0);
+				assert.equal(spawn.mock.calls.length, 0);
+				f.noLaunch();
+				assert.ok("error" in result.details);
+				assert.match(result.details.error ?? "", /configured credential/);
+				assert.equal(JSON.stringify(result).includes(JSON.stringify(key).slice(1, -1)), false);
+			} finally {
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+	}
+}
+
+test("safe OAuth metadata routes without refreshing tokens or executing credential commands", async () => {
+	const command = vi.mocked(childProcess.execSync);
+	const spawn = vi.mocked(childProcess.spawnSync);
+	command.mockClear();
+	spawn.mockClear();
+	const credentials = AuthStorage.inMemory({
+		custom: {
+			type: "oauth",
+			access: "synthetic-access",
+			refresh: "synthetic-refresh",
+			expires: 0,
+			accountId: "known-account",
+			email: "user@example.test",
+		},
+		command: { type: "api_key", key: "!never-execute-secret-command" },
+	});
+	const runtime = await ModelRuntime.create({
+		credentials,
+		modelsPath: null,
+		refreshOnCreate: false,
+		allowModelNetwork: false,
+	});
+	const auth = vi.spyOn(runtime, "getAuth");
+	const registry = new ModelRegistry(runtime);
+	const f = registeredFixture();
+	f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
+	f.args.state!.conversation[0]!.text = "Review known-account for user@example.test";
+	const result = await f.call();
+	assert.equal(f.infer.mock.calls.length, 1);
+	assert.equal(f.transport.mock.calls.length, 0);
+	assert.ok("routerDecision" in result.details);
+	assert.deepEqual(result.details.routerDecision, { workflowType: "none", maxBudget: {} });
+	assert.equal(auth.mock.calls.length, 0);
+	assert.equal(command.mock.calls.length, 0);
+	assert.equal(spawn.mock.calls.length, 0);
+	f.noLaunch();
+});
+
+test("previously resolved command credentials are excluded without executing again", async () => {
+	const key = "synthetic-command-output";
+	const command = vi.mocked(childProcess.execSync).mockReturnValueOnce(key);
+	assert.equal(resolveConfigValueOrThrow("!synthetic-command", "test key"), key);
+	command.mockClear();
+	const credentials = AuthStorage.inMemory({ custom: { type: "api_key", key: "!synthetic-command" } });
+	const runtime = await ModelRuntime.create({
+		credentials,
+		modelsPath: null,
+		refreshOnCreate: false,
+		allowModelNetwork: false,
+	});
+	const registry = new ModelRegistry(runtime);
+	const f = registeredFixture();
+	f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
+	f.args.state!.literalRequest = `Review ${key}`;
+	const result = await f.call();
+	assert.equal(f.infer.mock.calls.length, 0);
+	assert.equal(f.transport.mock.calls.length, 0);
+	assert.ok("error" in result.details);
+	assert.match(result.details.error ?? "", /configured credential/);
+	assert.equal(command.mock.calls.length, 0);
+	f.noLaunch();
+});
+
+test("credential storage failures stop routing without exposing their diagnostics", async () => {
+	const f = registeredFixture();
+	f.ctx.modelRegistry!.containsConfiguredCredential = async () => {
+		throw new Error("synthetic-sensitive-store-diagnostic");
+	};
+	const result = await f.call();
+	assert.equal(f.infer.mock.calls.length, 0);
+	assert.equal(f.transport.mock.calls.length, 0);
+	assert.ok("error" in result.details);
+	assert.match(result.details.error ?? "", /could not check configured credentials/);
+	assert.equal(JSON.stringify(result).includes("synthetic-sensitive-store-diagnostic"), false);
+	f.noLaunch();
+});
+
+test("read-only auth storage screens raw credentials without executing commands", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "router-readonly-auth-"));
+	const command = vi.mocked(childProcess.execSync);
+	command.mockClear();
+	try {
+		const authPath = join(directory, "auth.json");
+		writeFileSync(
+			authPath,
+			JSON.stringify({
+				command: { type: "api_key", key: "!never-execute-credential-command" },
+				literal: { type: "api_key", key: "synthetic-readonly-key" },
+			}),
+		);
+		const runtime = await ModelRuntime.create({
+			credentials: new ReadOnlyAuthStorage(authPath),
+			modelsPath: null,
+			refreshOnCreate: false,
+			allowModelNetwork: false,
+		});
+		const registry = new ModelRegistry(runtime);
+		assert.equal(await registry.containsConfiguredCredential(JSON.stringify({ text: "Safe context" })), false);
+		assert.equal(
+			await registry.containsConfiguredCredential(JSON.stringify({ text: "synthetic-readonly-key" })),
+			true,
+		);
+		assert.equal(command.mock.calls.length, 0);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});

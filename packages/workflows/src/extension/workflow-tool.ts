@@ -136,6 +136,7 @@ export function makeExecuteWorkflowTool(
 			}
 			case "run": {
 				let acceptedRunId: string | undefined;
+				let approvedRoute: Awaited<ReturnType<typeof routeWorkflowLaunch>> | undefined;
 				try {
 					args = structuredClone(args);
 					// Do not turn a missing/failed initial resource load into a partial routing catalog.
@@ -155,6 +156,7 @@ export function makeExecuteWorkflowTool(
 						};
 					}
 					routed.assertCurrent();
+					approvedRoute = routed;
 					const result = await awaitRequest(
 						getRuntime().dispatch(
 							{ ...args, workflow: routed.proposedName, budget: decision.maxBudget },
@@ -175,11 +177,20 @@ export function makeExecuteWorkflowTool(
 					if (signal?.aborted) throw signal.reason ?? error;
 					// Once accepted, preserve the existing runtime error path rather than claim no launch.
 					if (acceptedRunId !== undefined) throw error;
+					// A setup error does not erase a valid decision, but a registry change does.
+					let routerDecision: NonNullable<typeof approvedRoute>["decision"] | undefined;
+					try {
+						approvedRoute?.assertCurrent();
+						routerDecision = approvedRoute?.decision;
+					} catch {
+						routerDecision = undefined;
+					}
 					return {
 						action: "run",
 						runId: "",
 						status: "failed",
 						stages: [],
+						...(routerDecision === undefined ? {} : { routerDecision }),
 						error:
 							error instanceof Error
 								? error.message

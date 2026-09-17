@@ -12,8 +12,9 @@
  */
 
 import assert from "node:assert/strict";
+import { createAssistantMessageEventStream } from "@bastani/pi-ai";
 import { Type } from "typebox";
-import { beforeEach, describe, test } from "vitest";
+import { afterEach, beforeEach, describe, test, vi } from "vitest";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import {
 	type ExtensionAPI,
@@ -27,6 +28,8 @@ import type { McpScopeSetPayload } from "../../packages/workflows/src/extension/
 import type { WorkflowToolResult } from "../../packages/workflows/src/extension/render-result.ts";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
 import type { StageAdapters } from "../../packages/workflows/src/runs/foreground/stage-runner.js";
+import { decisionMessage } from "../helpers/structured-output.js";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import { waitForRun } from "../support/helpers.ts";
 
 // ---------------------------------------------------------------------------
@@ -152,21 +155,61 @@ describe("MCP entrypoints — workflow tool execute", () => {
 	let emits: ScopeEmit[];
 	let toolExecute: (args: WorkflowToolArgs, ctx: PiExecuteContext) => Promise<unknown>;
 
+	let runtime: ReturnType<typeof buildTestRuntime>;
 	beforeEach(() => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "");
 		const { pi, emits: e } = makeMockPiWithEvents();
 		emits = e;
-		const runtime = buildTestRuntime(pi);
+		runtime = buildTestRuntime(pi);
 		toolExecute = makeExecuteWorkflowTool(runtime, () => undefined);
+	});
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.restoreAllMocks();
+	});
+
+	const runArgs = (): WorkflowToolArgs => ({
+		action: "run",
+		workflow: "mcp-restricted",
+		inputs: {},
+		state: workflowRouterState(),
+	});
+	const routerContext = () => workflowRouterContext("mcp-restricted");
+
+	// #3089: MCP scope and runtime admission remain untouched while routing is pending.
+	test("MCP and dispatch wait for one matching routing approval", async () => {
+		const ctx = routerContext();
+		const stream = createAssistantMessageEventStream();
+		const entered = Promise.withResolvers<void>();
+		const infer = vi.spyOn(ctx.modelRegistry!, "streamSimple").mockImplementation(() => {
+			entered.resolve();
+			return stream;
+		});
+		const dispatch = vi.spyOn(runtime, "dispatch");
+		const pending = toolExecute(runArgs(), ctx);
+		await entered.promise;
+		assert.deepEqual(emits, []);
+		assert.equal(dispatch.mock.calls.length, 0);
+		stream.push({
+			type: "done",
+			reason: "toolUse",
+			message: decisionMessage({ workflowType: "mcp-restricted", maxBudget: {} }),
+		});
+		const out = await pending;
+		await waitForToolResult(out);
+		assert.equal(infer.mock.calls.length, 1);
+		assert.equal(dispatch.mock.calls.length, 1);
+		assertScopeEmitSequence(emits);
 	});
 
 	test("tool execute emits mcp.scope.set (set then clear) when running mcp-restricted workflow", async () => {
-		const out = await toolExecute({ action: "run", workflow: "mcp-restricted", inputs: {} }, {});
+		const out = await toolExecute(runArgs(), routerContext());
 		await waitForToolResult(out);
 		assertScopeEmitSequence(emits);
 	});
 
 	test("set payload stageId is a non-empty string", async () => {
-		const out = await toolExecute({ action: "run", workflow: "mcp-restricted", inputs: {} }, {});
+		const out = await toolExecute(runArgs(), routerContext());
 		await waitForToolResult(out);
 		const setEmit = emits.find((e) => e.payload.allow !== null);
 		assert.equal(typeof setEmit!.payload.stageId, "string");
@@ -174,7 +217,7 @@ describe("MCP entrypoints — workflow tool execute", () => {
 	});
 
 	test("clear payload uses same stageId as set payload", async () => {
-		const out = await toolExecute({ action: "run", workflow: "mcp-restricted", inputs: {} }, {});
+		const out = await toolExecute(runArgs(), routerContext());
 		await waitForToolResult(out);
 		const setEmit = emits.find((e) => e.payload.allow !== null)!;
 		const clearEmit = emits.find((e) => e.payload.allow === null)!;
@@ -197,8 +240,11 @@ describe("MCP entrypoints — workflow tool execute", () => {
 		});
 		const execute = makeExecuteWorkflowTool(runtime, () => undefined);
 		// Should not throw, should complete
-		const result = await execute({ action: "run", workflow: "mcp-restricted", inputs: {} }, {});
-		assert.equal((result as { action: string }).action, "run");
+		const result = await execute(runArgs(), routerContext());
+		assert.equal(result.action, "run");
+		assert.ok("runId" in result && result.runId);
+		assert.ok("status" in result && result.status === "running");
+		await waitForToolResult(result);
 		// No events because pi.events absent
 	});
 });
