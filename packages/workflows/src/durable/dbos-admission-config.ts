@@ -9,12 +9,15 @@ function defaultDatabaseUrl(name: string): string {
 	const database = name.toLowerCase().replaceAll("-", "_").replaceAll(" ", "_").replace(/^\d/, "_$&");
 	const url = new URL("postgresql://localhost");
 	url.pathname = `/${database}_dbos_sys`;
-	url.hostname = process.env.PGHOST || "localhost";
+	const host = process.env.PGHOST || "localhost";
+	// pg query hosts preserve socket paths and avoid literal IPv6 authority brackets.
+	if (host.startsWith("/") || host.includes(":")) url.searchParams.set("host", host);
+	else url.hostname = host;
 	url.port = process.env.PGPORT || "5432";
-	url.username = process.env.PGUSER || "postgres";
-	url.password = process.env.PGPASSWORD || "dbos";
+	url.username = encodeURIComponent(process.env.PGUSER || "postgres");
+	url.password = encodeURIComponent(process.env.PGPASSWORD || "dbos");
 	url.searchParams.set("connect_timeout", process.env.PGCONNECT_TIMEOUT || "10");
-	url.searchParams.set("sslmode", process.env.PGSSLMODE || (url.hostname === "localhost" ? "disable" : "allow"));
+	url.searchParams.set("sslmode", process.env.PGSSLMODE || (host === "localhost" ? "disable" : "allow"));
 	return url.toString();
 }
 

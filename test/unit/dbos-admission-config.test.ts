@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { ensurePGDatabase } from "@dbos-inc/dbos-sdk/datasource";
+import { Client } from "pg";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { configureAdmissionDatabase } from "../../packages/workflows/src/durable/dbos-admission-config.js";
 import type { DbosConfiguration } from "../../packages/workflows/src/durable/dbos-sdk-handle.js";
@@ -60,13 +61,30 @@ test("failed database verification warns before launching the configured pool", 
 
 // #3072: explicit external endpoints win; these pools never open a socket.
 test("explicit endpoint overrides PG environment and provisions that same database", async () => {
-	vi.stubEnv("PGHOST", "ignored.invalid");
+	for (const [key, value] of Object.entries({
+		PGHOST: "/var/run/postgresql",
+		PGPORT: "15432",
+		PGUSER: "ignored-user",
+		PGPASSWORD: "ignored-password",
+		PGDATABASE: "ignored-database",
+		PGCONNECT_TIMEOUT: "7",
+		PGSSLMODE: "require",
+	}))
+		vi.stubEnv(key, value);
 	const systemDatabaseUrl = "postgresql://fixture:unused@127.0.0.1:1/explicit?connect_timeout=3&sslmode=disable";
 	const database = configureAdmissionDatabase(sdk, { ...config, systemDatabaseUrl });
 	const initial = configured();
 	assert.equal(initial.systemDatabaseUrl, systemDatabaseUrl);
 	assert.equal(initial.systemDatabasePool.options.connectionString, systemDatabaseUrl);
 	assert.equal(initial.systemDatabasePool.options.connectionTimeoutMillis, 3_000);
+	const client = new Client(initial.systemDatabasePool.options);
+	assert.equal(client.host, "127.0.0.1");
+	assert.equal(client.port, 1);
+	assert.equal(client.user, "fixture");
+	assert.equal(client.password, "unused");
+	assert.equal(client.database, "explicit");
+	assert.equal(client.ssl, false);
+	assert.equal(initial.systemDatabasePool.totalCount, 0);
 	assert.equal(vi.mocked(ensurePGDatabase).mock.calls.length, 0, "configuration does not provision");
 	await database.launch();
 	assert.equal(vi.mocked(ensurePGDatabase).mock.calls[0]?.[0].urlToEnsure, systemDatabaseUrl);
@@ -91,6 +109,38 @@ test("default endpoint preserves PG credentials, port, TLS and timeout", () => {
 	);
 	assert.equal(configured().systemDatabasePool.options.connectionTimeoutMillis, 7_000);
 });
+
+// #3072 / #3076 discussion_r4029126308: preserve PGHOST and credentials in the admission pool.
+// Constructing pg.Client parses the actual pool options without opening a connection.
+for (const host of ["::1", "/var/run/postgresql"]) {
+	test(`default endpoint preserves PostgreSQL host ${host} through the pg parser`, () => {
+		for (const [key, value] of Object.entries({
+			PGHOST: host,
+			PGPORT: "15432",
+			PGUSER: "fixture@user:/?#%",
+			PGPASSWORD: "p@ss/word:#?%",
+			PGCONNECT_TIMEOUT: "7",
+			PGSSLMODE: "require",
+		}))
+			vi.stubEnv(key, value);
+		configureAdmissionDatabase(sdk, config);
+		const pool = configured().systemDatabasePool;
+		// Do not let pg's environment fallback hide a missing serialized endpoint.
+		for (const key of ["PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGCONNECT_TIMEOUT", "PGSSLMODE"])
+			vi.stubEnv(key, undefined);
+		const client = new Client(pool.options);
+		assert.equal(client.host, host);
+		assert.equal(client.port, 15432);
+		assert.equal(client.user, "fixture@user:/?#%");
+		assert.equal(client.password, "p@ss/word:#?%");
+		assert.equal(client.database, "atomic_workflows_dbos_sys");
+		assert.ok(client.ssl);
+		assert.equal(pool.options.connectionTimeoutMillis, 7_000);
+		assert.equal(pool.totalCount, 0);
+		assert.equal(vi.mocked(ensurePGDatabase).mock.calls.length, 0);
+		assert.equal(sdk.launch.mock.calls.length, 0);
+	});
+}
 
 // #3072: failed-launch shutdown ends DBOS's custom pool. Retry replaces only that pool.
 test("launch after shutdown replaces the ended pool and checks readiness on the replacement", async () => {
