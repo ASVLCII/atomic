@@ -29,11 +29,20 @@ function fixture() {
 	const root = makeTempDirectory("atomic-pg-ownership-");
 	roots.push(root);
 	const data = join(root, "v18");
-	makeDirectorySync(data);
+	makeDirectorySync(data, { mode: 0o700 });
 	writeTextSync(join(data, "PG_VERSION"), "18\n");
+	makeDirectorySync(join(data, "global"));
+	writeTextSync(join(data, "global", "pg_control"), "AAAAAAAA");
 	writeTextSync(join(data, "postmaster.pid"), `${process.pid}\n${data}\n1\n5439\n`);
 	return { root, data };
 }
+const identityRow = (data: string) => ({
+	data_dir: data,
+	port: 5439,
+	host: "127.0.0.1",
+	started: "1",
+	system_identifier: "4702111234474983745",
+});
 afterEach(() => {
 	resetEmbeddedDbosPostgresForTests();
 	for (const root of roots.splice(0)) removeTempDirectory(root);
@@ -64,7 +73,7 @@ test("replaced data and malformed or displaced ownership evidence fail closed", 
 	assert.equal(readTextSync(path, "utf8"), "null");
 	assert.throws(() => inspectPostgresConsumers(root, metadata), /Invalid.*consumer/);
 	renameSync(data, `${data}.preserved`);
-	makeDirectorySync(data);
+	makeDirectorySync(data, { mode: 0o700 });
 	writeTextSync(join(data, "PG_VERSION"), "18\n");
 	assert.throws(() => managedPostgresMetadata(root, 18, false), /identity mismatch/);
 	assert.throws(() => managedPostgresMetadata(root, 18, true), /EEXIST/);
@@ -170,7 +179,8 @@ for (const abandon of [false, true]) {
 }
 
 test("managed attach registers a consumer and reattaches after orderly shutdown without reinitializing", async () => {
-	const { root } = fixture();
+	const { root, data } = fixture();
+	managedPostgresMetadata(root, 18, true);
 	const options = {
 		context: {
 			baseDir: root,
@@ -179,6 +189,7 @@ test("managed attach registers a consumer and reattaches after orderly shutdown 
 			},
 		},
 		isReachable: async () => true,
+		probeIdentity: async () => identityRow(data),
 	};
 	hooks.setEnsureOperation(() => hooks.ensureCluster(options));
 	await hooks.ensure();
@@ -266,7 +277,7 @@ test("missing managed data never triggers initdb over an existing identity", asy
 	const { root, data } = fixture();
 	managedPostgresMetadata(root, 18, true);
 	renameSync(data, `${data}.preserved`);
-	makeDirectorySync(data);
+	makeDirectorySync(data, { mode: 0o700 });
 	let commands = 0;
 	await assert.rejects(
 		hooks.ensureCluster({
@@ -287,7 +298,8 @@ test("missing managed data never triggers initdb over an existing identity", asy
 });
 
 test("shutdown during attachment waits for publication then releases the consumer", async () => {
-	const { root } = fixture();
+	const { root, data } = fixture();
+	managedPostgresMetadata(root, 18, true);
 	let proceed!: () => void;
 	const pending = new Promise<void>((resolve) => {
 		proceed = resolve;
@@ -300,9 +312,9 @@ test("shutdown during attachment waits for publication then releases the consume
 					throw new Error("must not initialize");
 				},
 			},
-			isReachable: async () => {
+			probeIdentity: async () => {
 				await pending;
-				return true;
+				return identityRow(data);
 			},
 		}),
 	);
