@@ -643,3 +643,81 @@ test("pause resume and block keep a pending prompt preview and answering while p
 	assert.deepEqual(visibleRootPendingInput(runs[0]!, runs), { hasPendingInput: false, affordance: undefined });
 	assert.equal(runs[0]!.stages[0]!.status, "paused");
 });
+
+test("awaiting-input boundary stages keep nested occurrences in the ambiguity count", () => {
+	const ROOT = "00000000-0000-4000-8000-000000000b01";
+	const CHILD = "00000000-0000-4000-8000-000000000b02";
+
+	const startNested = (target: ReturnType<typeof createStore>) => {
+		target.recordRunStart({
+			id: ROOT,
+			name: "parent-root",
+			inputs: {},
+			status: "running",
+			startedAt: 1,
+			stages: [
+				{
+					id: "fanout",
+					name: "fanout",
+					status: "running",
+					parentIds: [],
+					toolEvents: [],
+					workflowChildRun: { alias: "child", workflow: "hidden-child", runId: CHILD },
+				},
+			],
+		});
+		target.recordRunStart({
+			id: CHILD,
+			name: "hidden-child",
+			inputs: {},
+			status: "running",
+			startedAt: 2,
+			parentRunId: ROOT,
+			parentStageId: "fanout",
+			rootRunId: ROOT,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+	};
+
+	const assertRawStateUntouched = (target: ReturnType<typeof createStore>) => {
+		const before = structuredClone(target.snapshot());
+		const root = target.runs().find((run) => run.id === ROOT)!;
+		visibleRootPendingInput(root, target.runs());
+		pendingInputAffordance(root, target.runs());
+		assert.deepEqual(target.snapshot(), before);
+	};
+
+	const store = createStore();
+	startNested(store);
+	assert.equal(store.recordStagePendingPrompt(CHILD, "ask", primitive("child-prompt", "Child question?")), true);
+	assert.equal(store.runs().find((run) => run.id === ROOT)?.stages[0]?.status, "running");
+	const afterChild = store.runs();
+	const rootAfterChild = afterChild.find((run) => run.id === ROOT)!;
+	assert.deepEqual(pendingInputAffordance(rootAfterChild, afterChild)?.identity, [CHILD, "ask", "child-prompt"]);
+	assertRawStateUntouched(store);
+
+	assert.equal(store.recordStagePendingPrompt(ROOT, "fanout", primitive("root-prompt", "Root question?")), true);
+	const afterBoth = store.runs();
+	const rootAfterBoth = afterBoth.find((run) => run.id === ROOT)!;
+	assert.equal(rootAfterBoth.stages[0]?.status, "awaiting_input");
+	assert.equal(afterBoth.find((run) => run.id === CHILD)?.stages[0]?.pendingPrompt?.id, "child-prompt");
+	assert.equal(visibleRootPendingInput(rootAfterBoth, afterBoth).hasPendingInput, true);
+	assert.equal(pendingInputAffordance(rootAfterBoth, afterBoth), undefined);
+	assertRawStateUntouched(store);
+
+	assert.equal(store.resolveStagePendingPrompt(ROOT, "fanout", "root-prompt", true), true);
+	const afterResolve = store.runs();
+	const rootAfterResolve = afterResolve.find((run) => run.id === ROOT)!;
+	assert.deepEqual(pendingInputAffordance(rootAfterResolve, afterResolve)?.identity, [CHILD, "ask", "child-prompt"]);
+	assertRawStateUntouched(store);
+
+	const closed = createStore();
+	startNested(closed);
+	assert.equal(closed.recordStageAwaitingInput(ROOT, "fanout", true), true);
+	assert.equal(closed.recordStagePendingPrompt(CHILD, "ask", primitive("child-prompt", "Child question?")), true);
+	const closedRuns = closed.runs();
+	const closedRoot = closedRuns.find((run) => run.id === ROOT)!;
+	assert.equal(visibleRootPendingInput(closedRoot, closedRuns).hasPendingInput, true);
+	assert.equal(pendingInputAffordance(closedRoot, closedRuns), undefined);
+	assertRawStateUntouched(closed);
+});

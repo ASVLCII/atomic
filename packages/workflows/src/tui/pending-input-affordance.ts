@@ -171,7 +171,8 @@ function isQuitRun(run: RunSnapshot): boolean {
 /**
  * Apply the widget-specific liveness rule after canonical ownership has
  * already established a complete, acyclic chain to the visible run. Every
- * ownership hop must still cross a running workflow boundary.
+ * ownership hop must still cross a live workflow boundary (`running` or
+ * `awaiting_input`). Terminal, pending, paused, and blocked hops stay excluded.
  */
 function hasLiveAncestry(
 	candidate: RunSnapshot,
@@ -193,7 +194,7 @@ function hasLiveAncestry(
 			isTerminalOrBlockedRun(parent) ||
 			isQuitRun(parent) ||
 			boundary === undefined ||
-			boundary.status !== "running"
+			(boundary.status !== "running" && boundary.status !== "awaiting_input")
 		) {
 			return false;
 		}

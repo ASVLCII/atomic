@@ -1576,6 +1576,82 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		assert.match(resumedJoined, new RegExp(`Answer: /workflow connect ${quitId}`));
 	});
 
+	test("nested and boundary prompts in one root keep general guidance without a preview", () => {
+		const rootId = "00000000-0000-4000-8000-000000000c01";
+		const childId = "00000000-0000-4000-8000-000000000c02";
+		const nested = createStore();
+		nested.recordRunStart({
+			id: rootId,
+			name: "nested-root",
+			inputs: {},
+			status: "running",
+			startedAt: Date.now() - 5_000,
+			stages: [
+				{
+					id: "fanout",
+					name: "fanout",
+					status: "running",
+					parentIds: [],
+					toolEvents: [],
+					workflowChildRun: { alias: "child", workflow: "hidden-child", runId: childId },
+				},
+			],
+		});
+		nested.recordRunStart({
+			id: childId,
+			name: "hidden-child",
+			inputs: {},
+			status: "running",
+			startedAt: Date.now() - 4_000,
+			parentRunId: rootId,
+			parentStageId: "fanout",
+			rootRunId: rootId,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			nested.recordStagePendingPrompt(childId, "ask", {
+				id: "child-prompt",
+				kind: "confirm",
+				message: "Child question?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		assert.equal(
+			nested.recordStagePendingPrompt(rootId, "fanout", {
+				id: "root-prompt",
+				kind: "confirm",
+				message: "Root question?",
+				createdAt: 1,
+			}),
+			true,
+		);
+
+		for (const width of [80, 120]) {
+			for (const lines of [
+				renderWidgetLines(nested.snapshot(), width).map(stripAnsi),
+				buildThemedWidgetLines(nested.snapshot(), NULL_PI_THEME, width).map(stripAnsi),
+			]) {
+				const joined = lines.join("\n");
+				assert.match(lines[0] ?? "", /needs attention/);
+				assert.ok(joined.includes(statusIcon("awaiting_input")));
+				assert.ok(joined.includes(rootId));
+				assert.doesNotMatch(joined, /"Root question\?"/);
+				assert.doesNotMatch(joined, /"Child question\?"/);
+				assert.doesNotMatch(joined, /Answer: \/workflow connect/);
+				if (width === 120) assert.equal(lines.length, 4);
+				for (const line of lines) assert.equal(visibleWidth(line), width);
+			}
+		}
+
+		assert.equal(nested.resolveStagePendingPrompt(rootId, "fanout", "root-prompt", true), true);
+		const uniqueLines = renderWidgetLines(nested.snapshot(), 120).map(stripAnsi);
+		const uniqueJoined = uniqueLines.join("\n");
+		assert.equal(uniqueLines.length, 6);
+		assert.match(uniqueJoined, /"Child question\?"/);
+		assert.match(uniqueJoined, new RegExp(`Answer: /workflow connect ${rootId}`));
+	});
+
 	// #2529 / #3027: a truncated preview must stay plain in the unthemed entry point.
 	test("truncated previews keep the plain entry point free of terminal controls", () => {
 		const long = "Approve the generated migration before deployment? ".repeat(10);
