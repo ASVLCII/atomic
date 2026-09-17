@@ -208,6 +208,8 @@ const proseNames = new Set([
 	// PR #2982: PostgreSQL command and Windows executable-search environment variable, not exports.
 	"pg_ctl",
 	"PATH",
+	// Managed PostgreSQL port configuration is an environment variable, not a package-root export.
+	"ATOMIC_POSTGRES_PORT",
 	"openrouter",
 	"flex",
 	"undefined",
@@ -377,13 +379,7 @@ test("barrel export scanning ignores comments and imports", () => {
 	assert.deepEqual([...parseBarrelExports(probe, source).names], ["RealExport"]);
 });
 
-test("every identifier the coding-agent [Unreleased] changelog names resolves", async () => {
-	const rootExports = await import("../../packages/coding-agent/src/index.ts");
-	const runtimeExports = new Set(Object.keys(rootExports));
-	const barrelExports = collectBarrelExports(join(root, "packages/coding-agent/src/index.ts"));
-	const isExported = (name: string): boolean => runtimeExports.has(name) || barrelExports.has(name);
-	const block = unreleasedBlock("packages/coding-agent/CHANGELOG.md");
-
+function assertChangelogIdentifiersResolve(block: string, isExported: (name: string) => boolean): void {
 	for (const name of backtickedIdentifiers(block)) {
 		if (proseNames.has(name)) continue;
 		if (removedNames.has(name)) {
@@ -402,4 +398,29 @@ test("every identifier the coding-agent [Unreleased] changelog names resolves", 
 				`if it is ordinary prose.`,
 		);
 	}
+}
+
+// #3074: a documented configuration variable is not a package-root API export.
+test("changelog environment-variable prose does not exempt unknown or removed exports", () => {
+	assert.doesNotThrow(() => assertChangelogIdentifiersResolve("Supports `ATOMIC_POSTGRES_PORT`.", () => false));
+	for (const name of ["ATOMIC_POSTGRES_PORT_TYPO", "resolveUpstreamRequestModel"]) {
+		assert.throws(
+			() => assertChangelogIdentifiersResolve(`Added \`${name}\`.`, () => false),
+			/not exported from the package root/u,
+		);
+	}
+	assert.throws(
+		() => assertChangelogIdentifiersResolve(`Removed \`${deletedEnvName()}\`.`, () => true),
+		/still named in the package root exports/u,
+	);
+});
+
+test("every identifier the coding-agent [Unreleased] changelog names resolves", async () => {
+	const rootExports = await import("../../packages/coding-agent/src/index.ts");
+	const runtimeExports = new Set(Object.keys(rootExports));
+	const barrelExports = collectBarrelExports(join(root, "packages/coding-agent/src/index.ts"));
+	assertChangelogIdentifiersResolve(
+		unreleasedBlock("packages/coding-agent/CHANGELOG.md"),
+		(name) => runtimeExports.has(name) || barrelExports.has(name),
+	);
 });
