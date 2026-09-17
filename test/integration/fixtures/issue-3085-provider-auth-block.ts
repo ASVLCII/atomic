@@ -2,31 +2,26 @@
  * Isolated process-restart fixture for issue #3085.
  *
  * The parent integration test drives a fabricated rate-limit + expired-OAuth
- * block, persists mock DBOS state to disk, then spawns this file as a child.
- * The child hydrates an empty in-memory mirror from that file, asserts the
- * restored blocked/resumable metadata, resumes after simulated provider
- * recovery, and proves the completed prefix is not executed again.
+ * block through a real AgentSession, persists mock DBOS state to disk, then
+ * spawns this file as a child. The child hydrates an empty in-memory mirror
+ * from that file, asserts the restored blocked/resumable metadata, resumes
+ * after simulated provider recovery, and proves the completed prefix is not
+ * executed again.
+ *
+ * Resume still constructs a recovered AgentSession (primary 429, fallback,
+ * successful OAuth refresh). It must not import coding-agent `test/utilities.ts`
+ * or `src/index.ts`: those pull createCodingTools and dominate cold jiti.
+ * The session factory inlines a stub resource loader instead.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AssistantMessage, createAssistantMessageEventStream } from "@bastani/pi-ai/compat";
-import { AuthStorage } from "../../../packages/coding-agent/src/core/auth-storage.js";
-import { ModelRuntime } from "../../../packages/coding-agent/src/core/model-runtime.js";
-import { createAgentSession } from "../../../packages/coding-agent/src/core/sdk.js";
-import { SessionManager } from "../../../packages/coding-agent/src/core/session-manager.js";
-import { SettingsManager } from "../../../packages/coding-agent/src/core/settings-manager.js";
-import { createTestResourceLoader } from "../../../packages/coding-agent/test/utilities.js";
 import { workflow } from "../../../packages/workflows/src/authoring/workflow.js";
 import { DbosDurableBackend } from "../../../packages/workflows/src/durable/dbos-backend.js";
 import { setDurableBackend } from "../../../packages/workflows/src/durable/factory.js";
 import { createExtensionRuntime } from "../../../packages/workflows/src/extension/runtime.js";
 import { createJobTracker } from "../../../packages/workflows/src/runs/background/job-tracker.js";
-import type {
-	StageSessionCreateOptions,
-	StageSessionRuntime,
-} from "../../../packages/workflows/src/runs/foreground/stage-runner-types.js";
 import { effectiveRunStatus } from "../../../packages/workflows/src/shared/returned-run-status.js";
 import { createStore } from "../../../packages/workflows/src/shared/store.js";
 import { createRegistry } from "../../../packages/workflows/src/workflows/registry.js";
@@ -36,6 +31,7 @@ import {
 	restoreMockSdkState,
 	type SerializedMockDbosState,
 } from "../../unit/durable-dbos-backend-helpers.js";
+import { createIssue3085StageSession } from "./issue-3085-provider-auth-block-session.js";
 
 export const ISSUE_3085_WORKFLOW_NAME = "provider-auth-block-3085";
 export const ISSUE_3085_PERSIST_FILE = "persist.json";
@@ -56,72 +52,6 @@ export type Issue3085ResumeResult = {
 	readonly failureRecoverability?: string;
 	readonly resumable?: boolean;
 };
-
-const spec = {
-	id: "m",
-	name: "m",
-	reasoning: false,
-	input: ["text"] as ("text" | "image")[],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	contextWindow: 100_000,
-	maxTokens: 1000,
-};
-
-function message(
-	model: { api: AssistantMessage["api"]; provider: string; id: string },
-	extra: {
-		content?: AssistantMessage["content"];
-		stopReason?: AssistantMessage["stopReason"];
-		errorMessage?: string;
-	} = {},
-): AssistantMessage {
-	return {
-		role: "assistant",
-		content: extra.content ?? [{ type: "text", text: "ok" }],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: extra.stopReason ?? "stop",
-		timestamp: Date.now(),
-		...(extra.errorMessage === undefined ? {} : { errorMessage: extra.errorMessage }),
-	};
-}
-
-function response(
-	model: { api: AssistantMessage["api"]; provider: string; id: string },
-	extra: {
-		content?: AssistantMessage["content"];
-		stopReason?: AssistantMessage["stopReason"];
-		errorMessage?: string;
-	} = {},
-) {
-	const stream = createAssistantMessageEventStream();
-	const msg = message(model, extra);
-	stream.push({ type: "start", partial: msg });
-	if (msg.stopReason === "error") {
-		stream.push({ type: "error", reason: "error", error: msg });
-	} else {
-		stream.push({ type: "done", reason: "stop", message: msg });
-	}
-	stream.end(msg);
-	return stream;
-}
-
-function requestedProvider(model: unknown): string {
-	if (typeof model === "string") return model.split("/")[0] ?? "primary";
-	if (model !== null && typeof model === "object" && "provider" in model && typeof model.provider === "string") {
-		return model.provider;
-	}
-	return "primary";
-}
 
 export function prefixPath(dir: string): string {
 	return join(dir, ISSUE_3085_PREFIX_FILE);
@@ -158,68 +88,6 @@ export function createIssue3085Definition(dir: string) {
 			return {};
 		},
 	});
-}
-
-export async function createIssue3085StageSession(input: {
-	readonly dir: string;
-	readonly model: StageSessionCreateOptions["model"];
-	readonly fallbackModels?: StageSessionCreateOptions["fallbackModels"];
-	readonly recovered: boolean;
-}): Promise<StageSessionRuntime> {
-	const credentials = AuthStorage.inMemory({
-		probe: { type: "oauth", access: "fabricated", refresh: "fabricated", expires: 1 },
-		primary: { type: "api_key", key: "fabricated" },
-	});
-	const modelRuntime = await ModelRuntime.create({
-		credentials,
-		modelsPath: null,
-		refreshOnCreate: false,
-	});
-	modelRuntime.registerProvider("probe", {
-		api: "openai-completions",
-		baseUrl: "https://example.invalid",
-		oauth: {
-			name: "probe",
-			login: async () => {
-				throw new Error("not used");
-			},
-			refreshToken: async (credential) => {
-				if (!input.recovered) return new Promise(() => {});
-				return { ...credential, expires: Number.MAX_SAFE_INTEGER };
-			},
-			getApiKey: (credential) => credential.access,
-		},
-		models: [spec],
-		streamSimple: (model) => response(model),
-	});
-	modelRuntime.registerProvider("primary", {
-		api: "openai-completions",
-		baseUrl: "https://example.invalid",
-		apiKey: "fabricated",
-		models: [spec],
-		streamSimple: (model) =>
-			response(model, {
-				content: [],
-				stopReason: "error",
-				errorMessage: "429 rate limit exceeded",
-			}),
-	});
-	const sessionDir = join(input.dir, `stage-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-	mkdirSync(sessionDir, { recursive: true });
-	const { session } = await createAgentSession({
-		cwd: sessionDir,
-		agentDir: sessionDir,
-		modelRuntime,
-		model: modelRuntime.getModel(requestedProvider(input.model), "m")!,
-		fallbackModels: input.fallbackModels,
-		settingsManager: SettingsManager.inMemory({
-			retry: { enabled: true, maxRetries: 3, baseDelayMs: 2000, maxAgentDelayMs: 60_000 },
-			compaction: { enabled: false },
-		}),
-		sessionManager: SessionManager.create(sessionDir, join(sessionDir, "sessions")),
-		resourceLoader: createTestResourceLoader(),
-	});
-	return session as unknown as StageSessionRuntime;
 }
 
 export async function resumeIssue3085FromPersistedState(dir: string): Promise<Issue3085ResumeResult> {
@@ -290,7 +158,7 @@ export async function resumeIssue3085FromPersistedState(dir: string): Promise<Is
 
 const invokedDirectly = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 if (
-	(invokedDirectly || process.argv[1]?.includes("issue-3085-provider-auth-block") === true) &&
+	(invokedDirectly || process.argv[1]?.includes("issue-3085-provider-auth-block.ts") === true) &&
 	process.argv[2] === "resume"
 ) {
 	const dir = process.argv[3];

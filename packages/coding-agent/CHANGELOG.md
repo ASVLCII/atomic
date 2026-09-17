@@ -2,7 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Session, Workflow, and Intercom UUID selectors accept unique 8-character hexadecimal prefixes while preserving exact custom IDs and visibility boundaries ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
+
 ### Fixed
+
+- Stage-scoped durable workflow resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Explicit Intercom reply names and full session IDs keep their original identity through broker collision checks, unique UUID prefixes still canonicalize to the stored session ID, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Canonicalized Intercom UUID-prefix sends revalidate the original selector against the broker's current authorized sessions, so a newly visible same-prefix UUID, exact name, or custom ID refuses instead of delivering to the previously unique identity ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Prefix ambiguity refusals no longer include unauthorized or hidden session names when a canonicalized UUID-prefix send is rejected ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
 - Running Atomic inside a Herdr pane no longer leaves the pane unreported or labelled as another agent when Herdr's installed Pi integration is present. Herdr installs `herdr-agent-state.ts` into the legacy `~/.pi/agent/extensions` directory that Atomic also loads from, and Atomic used to stand its built-in reporter down as soon as that file loaded — but the installed asset reports itself as `pi`, so the pane ended up mislabelled or never updated at all. Inside a Herdr pane Atomic now skips that installed integration when loading extensions and reports the pane itself; outside a Herdr pane the file loads exactly as before. Nothing to configure, and the extra extension no longer needs to be disabled by hand ([#2416](https://github.com/bastani-inc/atomic/pull/2416) by [@makgunay](https://github.com/makgunay))
 - Request authentication now fails within 15 seconds of one credential-preparation attempt when refresh or derivation does not settle, including a fallback whose OAuth login has expired. Agent sessions reuse that request's resolved auth for transport setup instead of starting a second deadline. Timeout errors tell you to check the provider's credential source rather than to log in. Operator cancellation still aborts without fallback or an auth-block notice, and the bound does not apply to human-input waits, tool execution, or an already-opened model stream ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
