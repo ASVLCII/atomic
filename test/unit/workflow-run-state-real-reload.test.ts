@@ -475,7 +475,7 @@ test(
 		recordGenerationState(first, ids, callbackSettled);
 		const firstFactory = widget.calls.findLast((call) => call.factory !== undefined);
 		assert.ok(firstFactory?.factory, "the initial active tool-only run must mount the widget");
-		assert.equal(firstFactory.placement, "belowEditor");
+		assert.equal(firstFactory.placement, "aboveEditor");
 		assert.match(firstFactory.factory(undefined, undefined).render(120).join("\n"), /reload-tool · running/);
 
 		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
@@ -600,7 +600,7 @@ test.sequential(
 			assert.deepEqual(first.stageControlRegistry.forRun(launched.runId), []);
 			const initialWidget = widget.calls.slice(widgetCallStart).findLast((call) => call.factory !== undefined);
 			assert.ok(initialWidget?.factory, "run-start invalidation must mount the host widget before any stage exists");
-			assert.equal(initialWidget.placement, "belowEditor");
+			assert.equal(initialWidget.placement, "aboveEditor");
 			assert.match(initialWidget.factory(undefined, undefined).render(120).join("\n"), /BACKGROUND/);
 			emitReloadEvidence("agent-start", {
 				head: process.env.ATOMIC_RELOAD_EVIDENCE_HEAD,
@@ -667,7 +667,7 @@ test.sequential(
 			const replacementWidget = widget.calls
 				.slice(reloadWidgetCallStart)
 				.findLast((call) => call.factory !== undefined);
-			assert.ok(replacementWidget?.factory, "the host must remount the adopted active run below the editor");
+			assert.ok(replacementWidget?.factory, "the host must remount the adopted active run above the editor");
 			assert.match(replacementWidget.factory(undefined, undefined).render(120).join("\n"), /BACKGROUND/);
 			assert.deepEqual(replacementWidget.factory(undefined, undefined).render(60), [
 				" ▾  1 background · 1 ● · 1 tool",
@@ -896,3 +896,59 @@ test("every run-scoped singleton key carries an explicit version suffix", async 
 	assert.ok(childGuard >= 0 && childGuard < adoption, "factory must reject child sessions before adopting run state");
 	assert.ok(adoption < adapters, "factory must adopt host run state before building adapters");
 });
+
+test(
+	"repeated extension reload preserves pending input identity and answer clearing",
+	async () => {
+		const bus = createEventBus();
+		const widget = createWidgetUi();
+		const first = await evaluateWorkflowGraph();
+		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, { hasUI: true, ui: widget.ui });
+		const runId = "reload-hil-run";
+		first.store.recordRunStart({
+			id: runId,
+			name: "reload-hil",
+			inputs: {},
+			status: "running",
+			startedAt: 1,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			first.store.recordStagePendingPrompt(runId, "ask", {
+				id: "reload-prompt",
+				kind: "confirm",
+				message: "Keep this prompt through reload?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		const firstFactory = widget.calls.findLast((call) => call.factory !== undefined);
+		assert.ok(firstFactory?.factory);
+		assert.match(
+			firstFactory.factory(undefined, undefined).render(120).join("\n"),
+			/"Keep this prompt through reload\?"/,
+		);
+		assert.deepEqual(first.store.runs()[0]?.stages[0]?.pendingPrompt?.id, "reload-prompt");
+
+		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
+		const second = await evaluateWorkflowGraph();
+		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, { hasUI: true, ui: widget.ui });
+		assert.equal(second.store.runs()[0]?.id, runId);
+		assert.deepEqual(second.store.runs()[0]?.stages[0]?.pendingPrompt?.id, "reload-prompt");
+		const secondFactory = widget.calls.findLast((call) => call.factory !== undefined);
+		assert.ok(secondFactory?.factory);
+		assert.match(
+			secondFactory.factory(undefined, undefined).render(120).join("\n"),
+			/"Keep this prompt through reload\?"/,
+		);
+		assert.equal(second.store.resolveStagePendingPrompt(runId, "ask", "reload-prompt", true), true);
+		assert.equal(second.store.runs()[0]?.stages[0]?.pendingPrompt, undefined);
+		assert.doesNotMatch(
+			secondFactory.factory(undefined, undefined).render(120).join("\n"),
+			/Keep this prompt through reload/,
+		);
+	},
+	WORKFLOW_MODULE_GRAPH_RELOAD_TIMEOUT_MS,
+);

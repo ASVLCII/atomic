@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added live, bounded pending-input previews to the BACKGROUND widget, with per-workflow navigation and automatic clearing ([#2700](https://github.com/bastani-inc/atomic/pull/2700) by [@Shreyasd10](https://github.com/Shreyasd10)).
+
 ## [0.9.20-alpha.1] - 2026-09-14
 
 ### Fixed

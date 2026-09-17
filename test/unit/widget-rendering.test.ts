@@ -649,14 +649,33 @@ describe("renderWidgetLines — standard form", () => {
 		assert.ok(!joined.includes("contract-hil-nested-child"), "nested child run must be hidden");
 	});
 
-	test("surfaces a hidden nested child's awaiting-input (HiL) state on the top-level run", () => {
+	test("surfaces a reciprocally owned hidden nested child's awaiting-input state on the top-level run", () => {
 		const t = Date.now();
-		// Root is running and blocked on its imported composition; the actual HiL
-		// prompt is awaiting in the nested child run, which the widget hides.
-		const root = makeRun("root1111", "contract-hil-nested-root", "running", [], t - 3000);
+		const root = makeRun(
+			"root1111",
+			"contract-hil-nested-root",
+			"running",
+			[
+				makeStage("to-parent", "parent", "running", {
+					workflowChildRun: { alias: "parent", workflow: "contract-hil-nested-parent", runId: "parent22" },
+				}),
+			],
+			t - 3000,
+		);
 		const parent: RunSnapshot = {
-			...makeRun("parent22", "contract-hil-nested-parent", "running", [], t - 2000),
+			...makeRun(
+				"parent22",
+				"contract-hil-nested-parent",
+				"running",
+				[
+					makeStage("to-child", "child", "running", {
+						workflowChildRun: { alias: "child", workflow: "contract-hil-nested-child", runId: "child333" },
+					}),
+				],
+				t - 2000,
+			),
 			parentRunId: "root1111",
+			parentStageId: "to-parent",
 			rootRunId: "root1111",
 		};
 		const child: RunSnapshot = {
@@ -668,18 +687,27 @@ describe("renderWidgetLines — standard form", () => {
 				t - 1000,
 			),
 			parentRunId: "parent22",
+			parentStageId: "to-child",
 			rootRunId: "root1111",
 		};
+		child.stages[0]!.pendingPrompt = {
+			id: "nested-prompt",
+			kind: "confirm",
+			message: "Answer in the child workflow?",
+			createdAt: t - 1000,
+		};
 		const lines = renderWidgetLines(makeSnap([child, parent, root]), 120).map(stripAnsi);
+		const joined = lines.join("\n");
 		const header = lines[0]!;
-		// Only the root is listed, but its hidden descendant's awaiting state still
-		// raises the "needs attention" badge so the HiL prompt is discoverable.
 		assert.ok(header.includes("1 run"), `expected "1 run" subtitle, got: ${header}`);
 		assert.ok(
-			header.includes("↵ 1 needs attention (attach to workflow with `/workflow connect`)"),
+			header.includes("↵ 1 needs attention"),
 			`expected nested HiL to surface a needs-attention badge, got: ${header}`,
 		);
-		assert.ok(!lines.join("\n").includes("contract-hil-nested-child"), "nested child stays hidden");
+		assert.ok(joined.includes('"Answer in the child workflow?"'));
+		assert.ok(joined.includes(`/workflow connect ${root.id}`));
+		assert.ok(!joined.includes("contract-hil-nested-child"), "nested child stays hidden");
+		assert.ok(!joined.includes(child.id), "the hidden owner id is not the connect target");
 	});
 
 	test("count badges include stage-local awaiting input", () => {
@@ -1104,5 +1132,141 @@ describe("run identity rows", () => {
 				assert.ok(!lines.join("\n").includes("339e05a4"), "collapsed widget intentionally omits ids");
 			}
 		}
+	});
+});
+
+describe("renderWidgetLines — awaiting-input affordances", () => {
+	function awaitingRun(id: string, name: string, message: string, startedAt = Date.now() - 5_000): RunSnapshot {
+		const run = makeRun(id, name, "running", [makeStage("ask", "ask", "awaiting_input")], startedAt);
+		run.stages[0]!.pendingPrompt = {
+			id: `${id}-prompt`,
+			kind: "confirm",
+			message,
+			createdAt: startedAt,
+		};
+		return run;
+	}
+
+	test("eligible waiting rows preserve identity metadata and connect navigation", () => {
+		const runLevel = makeRun("run-level-card", "run-level", "running");
+		runLevel.pendingPrompt = {
+			id: "run-level-prompt",
+			kind: "confirm",
+			message: "Approve the run?",
+			createdAt: 1,
+		};
+		const stageLevel = awaitingRun("stage-level-card", "stage-level", "Approve the generated migration?");
+		const structured = makeRun("structured-card", "structured", "running", [
+			makeStage("gate", "gate", "awaiting_input"),
+		]);
+		structured.stages[0]!.inputRequest = {
+			id: "structured-card-request",
+			kind: "readiness_gate",
+			questions: [{ question: "Approve the readiness gate?", options: [] }],
+			createdAt: 1,
+		};
+
+		for (const [run, message] of [
+			[runLevel, "Approve the run?"],
+			[stageLevel, "Approve the generated migration?"],
+			[structured, "Approve the readiness gate?"],
+		] as const) {
+			const lines = renderWidgetLines(makeSnap([run]), 120).map(stripAnsi);
+			const joined = lines.join("\n");
+			assert.equal(lines.length, 6, "waiting cards add exactly two rows to the ordinary card");
+			assert.ok(joined.includes(`"${message}"`));
+			assert.ok(joined.includes(`Answer: /workflow connect ${run.id}`));
+			assert.doesNotMatch(joined, /F2 answer/);
+			assert.ok(joined.includes(statusIcon("awaiting_input")));
+			assert.ok(joined.includes(run.name));
+		}
+	});
+
+	test("mixed roots retain both unique previews and general needs-input guidance", () => {
+		const unique = awaitingRun("safe-root", "safe", "Approve safe?");
+		const form = makeRun("form-root", "form", "running", [
+			makeStage("ask", "ask", "awaiting_input", {
+				inputRequest: {
+					id: "form-request",
+					kind: "ask_user_question",
+					questions: [
+						{ question: "First field?", options: [] },
+						{ question: "Second field?", options: [] },
+					],
+					createdAt: 1,
+				},
+			}),
+		]);
+		const lines = renderWidgetLines(makeSnap([unique, form]), 180).map(stripAnsi);
+		const joined = lines.join("\n");
+		assert.ok(lines[0]!.includes("？ ↵ 2 needs attention (attach to workflow with `/workflow connect`)"));
+		assert.ok(joined.includes(`Answer: /workflow connect ${unique.id}`));
+		assert.ok(!joined.includes(`Answer: /workflow connect ${form.id}`));
+		assert.ok(!joined.includes("First field?"));
+	});
+
+	test("hostile prompt controls cannot escape plain or themed rendering", () => {
+		const run = awaitingRun("control-render", "control-render", "Approve\x1b[2J this\x1b]0;pwned\x07 release?");
+		const plain = renderWidgetLines(makeSnap([run]), 120).join("\n");
+		assert.ok(plain.includes('"Approve this release?"'));
+		assert.equal(plain.includes("\x1b"), false, "plain widget output must not contain ESC");
+		assert.equal(plain.includes("\x07"), false, "plain widget output must not contain BEL");
+		assert.ok(!plain.includes("[2J"));
+		assert.ok(!plain.includes("pwned"));
+
+		const themed = buildThemedWidgetLines(makeSnap([run]), NULL_PI_THEME, 120).join("\n");
+		const chromeStripped = stripAnsi(themed);
+		assert.ok(chromeStripped.includes('"Approve this release?"'));
+		assert.equal(chromeStripped.includes("\x1b"), false, "SGR-stripped themed output must not retain ESC");
+		assert.equal(themed.includes("\x07"), false, "themed widget output must not contain BEL");
+		assert.ok(!themed.includes("[2J"));
+		assert.ok(!themed.includes("pwned"));
+		assert.ok(themed.includes(hexToAnsi(deriveGraphTheme({}).info)));
+	});
+
+	test("preview rows obey cell width at the collapse boundary", () => {
+		const runId = "339e05a4-2289-408e-9076-d1a348f582ae";
+		const run = awaitingRun(
+			runId,
+			"width-aware-waiting",
+			"Approve this generated migration before deployment? This message is intentionally long enough to exercise cell truncation.\tAnd a tab.",
+		);
+		for (const width of [1, 27, 40, 79, 80, 81, 120]) {
+			const lines = renderWidgetLines(makeSnap([run]), width).map(stripAnsi);
+			for (const line of lines) {
+				assert.ok(visibleWidth(line) <= width, `line exceeds width ${width}: ${JSON.stringify(line)}`);
+			}
+			if (width < 80) {
+				assert.equal(lines.length, 1);
+				assert.ok(!lines.join("\n").includes("Approve this generated migration"));
+				assert.ok(!lines.join("\n").includes("/workflow connect"));
+			} else {
+				for (const line of lines) assert.equal(visibleWidth(line), width, `line must fill width ${width}`);
+				assert.ok(lines.join("\n").includes(`/workflow connect ${runId}`));
+			}
+		}
+
+		const cjk = awaitingRun("cjk-run", "unicode", "承認 é 確認 👍 ".repeat(20));
+		for (const width of [80, 81, 120]) {
+			const lines = renderWidgetLines(makeSnap([cjk]), width).map(stripAnsi);
+			for (const line of lines) assert.equal(visibleWidth(line), width);
+			assert.match(lines.find((line) => line.includes('"')) ?? "", /".*…"/u);
+		}
+	});
+
+	test("prompt rendering leaves descriptors drafts and answers unchanged", () => {
+		const run = awaitingRun("immutable-card", "immutable", "Approve the original?");
+		run.stages[0]!.pendingPrompt = {
+			id: "immutable-prompt",
+			kind: "input",
+			message: "Approve\x1b[2J the original?",
+			createdAt: 1,
+			initial: "draft-text",
+		};
+		const snap = makeSnap([run]);
+		const before = structuredClone(snap);
+		renderWidgetLines(snap, 120);
+		buildThemedWidgetLines(snap, NULL_PI_THEME, 80);
+		assert.deepEqual(snap, before);
 	});
 });

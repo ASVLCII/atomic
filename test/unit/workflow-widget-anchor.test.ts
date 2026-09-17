@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
-import type { RunStatus, StoreSnapshot } from "../../packages/workflows/src/shared/store-types.js";
+import type { RunStatus, StageSnapshot, StoreSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import { installStoreWidget, scrollStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 import { buildThemedWidgetLines, type WorkflowWidgetRowLayout } from "../../packages/workflows/src/tui/widget.js";
 import { WorkflowWidgetViewport } from "../../packages/workflows/src/tui/widget-viewport.js";
@@ -231,4 +231,82 @@ test("a shortened run boundary clamps the row offset without selecting the newly
 	assert.ok(f.render()[0]?.includes("duplicate name"));
 	f.viewport.scroll(-1);
 	assert.ok(f.render()[0]?.includes(uuid(0)));
+});
+
+test("prompt row insertion and removal preserve the scrolled workflow anchor", () => {
+	const f = rendererFixture();
+	f.scroll(8);
+	const visibleId = f
+		.render()
+		.join("\n")
+		.match(/00000000-0000-4000-8000-\d{12}/)?.[0];
+	assert.ok(visibleId);
+	const run = f.snapshot.runs.find((candidate) => candidate.id === visibleId)!;
+	run.status = "running";
+	const stages = run.stages as StageSnapshot[];
+	stages.length = 0;
+	stages.push({
+		id: "ask",
+		name: "ask",
+		status: "awaiting_input",
+		parentIds: [],
+		toolEvents: [],
+		pendingPrompt: { id: "prompt-12", kind: "confirm", message: "Approve insertion?", createdAt: now },
+	});
+	assert.ok(f.render().some((line) => line.includes(visibleId)));
+	assert.ok(f.render().some((line) => line.includes("Approve insertion?")));
+	stages.length = 0;
+	assert.ok(f.render().some((line) => line.includes(visibleId)));
+	assert.ok(!f.render().some((line) => line.includes("Approve insertion?")));
+});
+
+test("every prompt and navigation row remains reachable in a one-row viewport", () => {
+	const snapshot = {
+		version: 0,
+		notices: [],
+		runs: [
+			{
+				id: uuid(1),
+				name: "waiting",
+				status: "running" as RunStatus,
+				startedAt: now,
+				inputs: {},
+				stages: [
+					{
+						id: "ask",
+						name: "ask",
+						status: "awaiting_input" as const,
+						parentIds: [],
+						toolEvents: [],
+						pendingPrompt: {
+							id: "prompt-1",
+							kind: "confirm" as const,
+							message: "Approve the one-row prompt?",
+							createdAt: now,
+						},
+					},
+				],
+			},
+		],
+	} satisfies StoreSnapshot;
+	const layout: WorkflowWidgetRowLayout = { runs: [] };
+	const raw = buildThemedWidgetLines(snapshot, undefined, 120, now, layout);
+	assert.ok(raw.some((line) => line.includes("Approve the one-row prompt?")));
+	assert.ok(raw.some((line) => line.includes(`/workflow connect ${uuid(1)}`)));
+	assert.ok(layout.runs[0]);
+	assert.ok(layout.runs[0]!.end > layout.runs[0]!.start);
+	const viewport = new WorkflowWidgetViewport(
+		{ render: (width) => buildThemedWidgetLines(snapshot, undefined, width, now, layout) },
+		() => 9,
+		() => {},
+		() => layout.runs,
+	);
+	const native = nativeWorkflowViewport(viewport, () => 1);
+	const seen = new Set<string>();
+	for (let i = 0; i < raw.length; i++) {
+		seen.add(native.render(120)[0] ?? "");
+		viewport.scroll(1);
+	}
+	assert.ok([...seen].some((line) => line.includes("Approve the one-row prompt?")));
+	assert.ok([...seen].some((line) => line.includes(`/workflow connect ${uuid(1)}`)));
 });

@@ -10,7 +10,7 @@ import { beforeEach, describe, test } from "vitest";
 import { statusRuns } from "../../packages/workflows/src/runs/background/status.js";
 import type { Store } from "../../packages/workflows/src/shared/store.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
-import type { RunSnapshot, StageSnapshot } from "../../packages/workflows/src/shared/store-types.js";
+import type { PendingPrompt, RunSnapshot, StageSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import { installStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 
 // ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ describe("installStoreWidget", () => {
 		await Promise.resolve();
 		const mounted = widgetCalls.findLast((call) => call.factory !== undefined);
 		assert.ok(mounted?.factory);
-		assert.equal(mounted.opts?.placement, "belowEditor");
+		assert.equal(mounted.opts?.placement, "aboveEditor");
 		assert.match(mounted.factory(undefined, undefined).render(120).join("\n"), /publish-watcher · running/);
 		const rendersAfterHydration = renderRequests.count;
 
@@ -213,7 +213,7 @@ describe("installStoreWidget", () => {
 		assert.equal(factoryCalls.length, 1, "expected exactly one setWidget(factory) mount");
 		assert.equal(factoryCalls[0]!.key, "workflow.run");
 		assert.deepEqual(factoryCalls[0]!.opts, {
-			placement: "belowEditor",
+			placement: "aboveEditor",
 			scroll: { maxHeight: 10, maxHeightFraction: 1 / 3 },
 		});
 	});
@@ -270,6 +270,112 @@ describe("installStoreWidget", () => {
 		assert.equal(widgetCalls.length, callsAfterMount, "awaiting input must not remount the widget");
 		assert.ok(renderRequests.count > beforeRequests, "expected in-place repaint for awaiting input");
 		assert.match(component.render(120).join("\n"), /● 1 running\s+？ ↵ 1 needs attention/);
+	});
+
+	test("pending prompt transitions repaint the mounted widget without remounting", async () => {
+		const { pi, widgetCalls, renderRequests } = makeMockPi();
+		installStoreWidget(pi, storeInstance);
+		const run = makeRun("r1", "my-wf");
+		(run.stages as StageSnapshot[]).push(makeStage("s1", "ask"));
+		storeInstance.recordRunStart(run);
+		const mountCall = widgetCalls.findLast((c) => typeof c.factory === "function")!;
+		const component = mountCall.factory!(null, undefined) as { render(w: number): string[] };
+		const callsAfterMount = widgetCalls.length;
+		const prompt: PendingPrompt = {
+			id: "prompt-1",
+			kind: "confirm",
+			message: "Approve the deployment?",
+			createdAt: Date.now(),
+		};
+		const requestsBeforePrompt = renderRequests.count;
+		assert.equal(storeInstance.recordStagePendingPrompt("r1", "s1", prompt), true);
+		await Promise.resolve();
+		assert.equal(widgetCalls.length, callsAfterMount, "recording a prompt must not remount the widget");
+		assert.ok(renderRequests.count > requestsBeforePrompt, "prompt creation must request an in-place repaint");
+		const waiting = component.render(120).join("\n");
+		assert.match(waiting, /"Approve the deployment\?"/);
+		assert.match(waiting, /Answer: \/workflow connect r1/);
+		assert.doesNotMatch(waiting, /F2 answer|attach to workflow/);
+
+		const requestsBeforeResolution = renderRequests.count;
+		assert.equal(storeInstance.resolveStagePendingPrompt("r1", "s1", "prompt-1", true), true);
+		await Promise.resolve();
+		assert.equal(widgetCalls.length, callsAfterMount, "resolving a prompt must not remount the widget");
+		assert.ok(renderRequests.count > requestsBeforeResolution, "prompt resolution must request an in-place repaint");
+		assert.doesNotMatch(component.render(120).join("\n"), /Approve the deployment/);
+	});
+
+	test("answering one root leaves another root's preview intact", async () => {
+		const { pi, widgetCalls } = makeMockPi();
+		installStoreWidget(pi, storeInstance);
+		const first = makeRun("first-root", "first");
+		(first.stages as StageSnapshot[]).push(makeStage("ask", "ask"));
+		const second = makeRun("second-root", "second");
+		(second.stages as StageSnapshot[]).push(makeStage("ask", "ask"));
+		storeInstance.recordRunStart(first);
+		storeInstance.recordRunStart(second);
+		const component = widgetCalls.findLast((c) => typeof c.factory === "function")!.factory!(null, undefined) as {
+			render(w: number): string[];
+		};
+		assert.equal(
+			storeInstance.recordStagePendingPrompt("first-root", "ask", {
+				id: "first-prompt",
+				kind: "confirm",
+				message: "Answer first?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		assert.equal(
+			storeInstance.recordStagePendingPrompt("second-root", "ask", {
+				id: "second-prompt",
+				kind: "confirm",
+				message: "Answer second?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		const both = component.render(120).join("\n");
+		assert.match(both, /"Answer first\?"/);
+		assert.match(both, /"Answer second\?"/);
+		assert.equal(storeInstance.resolveStagePendingPrompt("first-root", "ask", "first-prompt", true), true);
+		await Promise.resolve();
+		const after = component.render(120).join("\n");
+		assert.doesNotMatch(after, /Answer first/);
+		assert.match(after, /"Answer second\?"/);
+		assert.match(after, /Answer: \/workflow connect second-root/);
+	});
+
+	test("display-equivalent prompt updates do not broadcast redundant renders", async () => {
+		const { pi, widgetCalls, renderRequests } = makeMockPi();
+		installStoreWidget(pi, storeInstance);
+		const run = makeRun("r1", "my-wf");
+		(run.stages as StageSnapshot[]).push(makeStage("s1", "ask"));
+		storeInstance.recordRunStart(run);
+		assert.equal(
+			storeInstance.recordStagePendingPrompt("r1", "s1", {
+				id: "prompt-1",
+				kind: "confirm",
+				message: "Approve the deployment?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		const waiting = widgetCalls.findLast((c) => typeof c.factory === "function")!.factory!(null, undefined)
+			.render(120)
+			.join("\n");
+		assert.match(waiting, /"Approve the deployment\?"/);
+		const requestsBeforeNotice = renderRequests.count;
+		storeInstance.recordNotice({
+			id: "hidden-notice",
+			level: "info",
+			message: "not rendered in the BACKGROUND widget",
+			createdAt: Date.now(),
+		});
+		await Promise.resolve();
+		assert.equal(renderRequests.count, requestsBeforeNotice, "display-equivalent store noise must not requestRender");
 	});
 
 	test("repaints the mounted widget in place when a run fails", async () => {

@@ -361,7 +361,7 @@ for (const route of ["native", "remote"])
 				}
 				editor.setText("draft");
 				f.tui.renderNow();
-				const widget = f.context.extensionWidgetsBelow.get("workflow.run");
+				const widget = f.context.extensionWidgetsAbove.get("workflow.run");
 				assert.ok(widget instanceof ScrollWidget);
 				f.terminal.input(scenario.bytes);
 				await new Promise<void>((resolve) => setImmediate(resolve));
@@ -461,7 +461,7 @@ test("workflow wheel uses actual clipped bounds, contains boundaries, preserves 
 		f.context.editor.setText("draft intact");
 		f.context.editorContainer.addChild(new Text("draft two\ndraft three", 0, 0));
 		f.tui.renderNow();
-		const widget = f.context.extensionWidgetsBelow.get("workflow.run");
+		const widget = f.context.extensionWidgetsAbove.get("workflow.run");
 		assert.ok(widget instanceof ScrollWidget);
 		const transcript = f.context.transcriptScrollView!;
 		const render = () => {
@@ -587,7 +587,7 @@ test("remote workflow adapter synchronizes full content, wheel, shortcuts and fr
 	};
 	try {
 		await settle();
-		const widget = f.context.extensionWidgetsBelow.get("workflow.run");
+		const widget = f.context.extensionWidgetsAbove.get("workflow.run");
 		assert.ok(widget instanceof ScrollWidget);
 		assert.equal(widget.maxHeight, 10);
 		const frame = messages.findLast((message) => message.type === "engine_custom_frame");
@@ -606,7 +606,7 @@ test("remote workflow adapter synchronizes full content, wheel, shortcuts and fr
 		await settle();
 		assert.equal(widget.maxHeight, 6);
 		assert.equal(widget.scrollTop, position + 1);
-		assert.equal(f.context.extensionWidgetsBelow.get("workflow.run"), widget);
+		assert.equal(f.context.extensionWidgetsAbove.get("workflow.run"), widget);
 		const before = widget.scrollTop;
 		f.terminal.input("\x1b[<65;2;2M");
 		await settle();

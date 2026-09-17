@@ -98,7 +98,7 @@ test("keeps the workflow live widget rendered in the production sticky dock", as
 		workflowStore.recordRunStart(makeRun("workflow-live", "workflow-live", BASE_NOW));
 		await Promise.resolve();
 		tui.renderNow();
-		const workflowComponent = context.extensionWidgetsBelow.get("workflow.run");
+		const workflowComponent = context.extensionWidgetsAbove.get("workflow.run");
 		if (!workflowComponent) throw new Error("workflow widget did not mount in the dock");
 		const initial = getLayoutFrame(tui);
 		const initialTranscript = initial.root.children[0];
@@ -109,11 +109,15 @@ test("keeps the workflow live widget rendered in the production sticky dock", as
 		expect(initialDock.rect.y + initialDock.rect.height).toBe(terminal.rows);
 		const initialDockLines = initial.lines.slice(initialDock.rect.y, initialDock.rect.y + initialDock.rect.height);
 		expect(initialDockLines.some((line) => line.includes("workflow-live"))).toBe(true);
-		expect(context.widgetContainerBelow.children).toContain(workflowComponent);
+		expect(context.widgetContainerAbove.children).toContain(workflowComponent);
+		expect(context.extensionWidgetsBelow.has("workflow.run")).toBe(false);
 		const footerIndex = initialDockLines.findIndex((line) => line.includes("footer"));
+		const editorIndex = initialDockLines.findIndex((line) => line.includes("editor"));
 		const workflowIndex = initialDockLines.findIndex((line) => line.includes("workflow-live"));
 		expect(footerIndex).toBeGreaterThanOrEqual(0);
-		expect(workflowIndex).toBeGreaterThan(footerIndex);
+		expect(workflowIndex).toBeGreaterThanOrEqual(0);
+		expect(workflowIndex).toBeLessThan(footerIndex);
+		if (editorIndex >= 0) expect(workflowIndex).toBeLessThan(editorIndex);
 		const initialWorkflowComponent = workflowComponent;
 
 		for (const elapsedMs of [1_000, 2_000]) {
@@ -127,7 +131,7 @@ test("keeps the workflow live widget rendered in the production sticky dock", as
 			expect(ticked.root.children[0]?.rect).toEqual(initialTranscript.rect);
 			expect(ticked.root.children[1]?.rect).toEqual(initialDock.rect);
 			expect(ticked.root.children[1]!.rect.y + ticked.root.children[1]!.rect.height).toBe(terminal.rows);
-			expect(context.extensionWidgetsBelow.get("workflow.run")).toBe(initialWorkflowComponent);
+			expect(context.extensionWidgetsAbove.get("workflow.run")).toBe(initialWorkflowComponent);
 			const tickedDockLines = ticked.lines.slice(
 				ticked.root.children[1]!.rect.y,
 				ticked.root.children[1]!.rect.y + ticked.root.children[1]!.rect.height,
@@ -151,7 +155,7 @@ test("many workflow runs leave the editor usable through narrow and short resize
 		for (let i = 0; i < 15; i++) store.recordRunStart(makeRun(`dock-${i}`, `dummy-${i}`, BASE_NOW + i));
 		await Promise.resolve();
 		tui.renderNow();
-		const mounted = context.extensionWidgetsBelow.get("workflow.run");
+		const mounted = context.extensionWidgetsAbove.get("workflow.run");
 		context.editor.setText("editor input retained");
 		for (const [width, rows] of [
 			[120, 40],
@@ -168,7 +172,7 @@ test("many workflow runs leave the editor usable through narrow and short resize
 			expect(frame.lines.length).toBeLessThanOrEqual(rows!);
 			expect(frame.lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
 			expect(frame.lines.some((line) => line.includes("editor input retained"))).toBe(true);
-			expect(context.extensionWidgetsBelow.get("workflow.run")).toBe(mounted);
+			expect(context.extensionWidgetsAbove.get("workflow.run")).toBe(mounted);
 			scrollStoreWidget(store, 1);
 			tui.renderNow();
 			expect(getLayoutFrame(tui).lines.some((line) => line.includes("editor input retained"))).toBe(true);
