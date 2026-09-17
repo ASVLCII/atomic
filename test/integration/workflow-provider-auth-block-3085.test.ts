@@ -22,7 +22,6 @@ import { moduleDir, removeTempDirectory, spawnSyncCollect } from "../helpers/run
 import { createMockSdk, serializeMockSdkState } from "../unit/durable-dbos-backend-helpers.js";
 import {
 	createIssue3085Definition,
-	createIssue3085StageSession,
 	ISSUE_3085_WORKFLOW_NAME,
 	type Issue3085PersistedState,
 	type Issue3085ResumeResult,
@@ -31,11 +30,12 @@ import {
 	readPrefix,
 	resultPath,
 } from "./fixtures/issue-3085-provider-auth-block.js";
+import { createIssue3085StageSession } from "./fixtures/issue-3085-provider-auth-block-session.js";
 
 /**
  * Structural: this case serializes durable workflow state, then spawns a real
- * Node child that hydrates and resumes through the coding-agent + workflows
- * TypeScript graph via jiti. Named and kept at the call site, per AGENTS.md.
+ * Node child that hydrates and resumes through the workflows TypeScript graph
+ * via jiti. Named and kept at the call site, per AGENTS.md.
  */
 const ISOLATED_PROCESS_RESTART_TIMEOUT_MS = 60_000;
 const RESUME_CHILD_TIMEOUT_MS = 45_000;
