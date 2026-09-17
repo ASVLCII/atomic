@@ -290,3 +290,56 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	assert.equal(getEventListeners(admissionSignal, "abort").length, 0);
 	assert.equal(dbosAdmissionContext.getStore(), undefined);
 });
+
+// #3077: a rejected pause must not poison every later resume of its retained owner.
+test("resume retries durable persistence after an admitted owner's pause fails", async () => {
+	const sdk = createMockSdk();
+	const persistenceFailure = new Error("control persistence unavailable");
+	let failPersistence = false;
+	const backend = new DbosDurableBackend({
+		...sdk,
+		recordStepOutput: async (...args) => {
+			if (failPersistence) throw persistenceFailure;
+			await sdk.recordStepOutput(...args);
+		},
+	});
+	setDurableBackend(backend);
+	const store = createStore();
+	const controls = createToolControlRegistry();
+	const entered = Promise.withResolvers<void>();
+	const proceed = Promise.withResolvers<void>();
+	const author = vi.fn(async () => ({}));
+	const runId = "failed-pause-retry";
+	const pending = run(
+		workflow({
+			name: runId,
+			description: "",
+			inputs: {},
+			outputs: {},
+			run: async (ctx) => {
+				entered.resolve();
+				await proceed.promise;
+				await ctx.tool("effect", {}, author);
+				return {};
+			},
+		}),
+		{},
+		{ runId, store, durableBackend: backend, toolControlRegistry: controls },
+	);
+	await entered.promise;
+	const owner = controls.runControl(runId);
+	assert.ok(owner);
+	failPersistence = true;
+	await assert.rejects(pauseRun(runId, { store, toolControlRegistry: controls }), /control persistence unavailable/);
+	proceed.resolve();
+	await assert.rejects(resumeRun(runId, { store, toolControlRegistry: controls }), /control persistence unavailable/);
+	assert.equal(owner.paused, true);
+	assert.equal(controls.runControl(runId), owner);
+	assert.equal(author.mock.calls.length, 0, "failed persistence cannot release author execution");
+	failPersistence = false;
+	assert.equal((await resumeRun(runId, { store, toolControlRegistry: controls })).ok, true);
+	await pending;
+	assert.equal(author.mock.calls.length, 1);
+	assert.equal(store.runs()[0]?.status, "completed");
+	assert.equal(controls.runControl(runId), undefined);
+});

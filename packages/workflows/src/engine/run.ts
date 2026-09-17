@@ -785,8 +785,12 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 				await pausePersistence;
 			} catch (error) {
 				// Release a held admission failure so the executor can publish it and retire.
-				if (admission.failed) scheduler.releaseRun();
-				throw error;
+				if (admission.failed) {
+					scheduler.releaseRun();
+					throw error;
+				}
+				// A failed pause must not poison an admitted owner's later resume.
+				// Keep its barrier held until the running transition below persists.
 			}
 			await persistRunControl("running");
 			ownController.signal.throwIfAborted();
