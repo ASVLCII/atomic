@@ -393,7 +393,10 @@ test("publish permissions, timeouts, runners, and OIDC are least privilege", asy
 	assert.match(register, /runs-on: ubuntu-latest/);
 	assert.match(register, /set \+x/);
 	assert.match(register, /::add-mask::/);
-	assert.match(register, /https%3A%2F%2Fatomic-version-adoption\.norin\.workers\.dev%2Fv1%2Fpublished-versions/);
+	assert.match(
+		register,
+		/https%3A%2F%2Fatomic-version-adoption\.bastani-atomic\.workers\.dev%2Fv1%2Fpublished-versions/,
+	);
 	assert.match(register, /--max-redirs 0/);
 	assert.doesNotMatch(register, /\s-L\s|curl -[^\n]*L/);
 	assert.match(register, /max_attempts=3/);

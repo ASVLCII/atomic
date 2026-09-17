@@ -763,8 +763,8 @@ jobs:
               process.exit(1);
             }
           ' || { echo "OIDC request URL is not a GitHub Actions token endpoint" >&2; exit 1; }
-          encoded_audience='https%3A%2F%2Fatomic-version-adoption.norin.workers.dev%2Fv1%2Fpublished-versions'
-          endpoint="https://atomic-version-adoption.norin.workers.dev/v1/published-versions?version=${VERSION}"
+          encoded_audience='https%3A%2F%2Fatomic-version-adoption.bastani-atomic.workers.dev%2Fv1%2Fpublished-versions'
+          endpoint="https://atomic-version-adoption.bastani-atomic.workers.dev/v1/published-versions?version=${VERSION}"
           attempt=1
           max_attempts=3
           while true; do

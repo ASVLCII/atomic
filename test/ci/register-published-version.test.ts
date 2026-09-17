@@ -10,8 +10,8 @@ import { jobBlock, readText } from "./workflow-text.js";
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const publishPath = join(root, ".github/workflows/publish.yml");
 const TOKEN = "oidc-secret-token-value";
-const AUDIENCE = "https%3A%2F%2Fatomic-version-adoption.norin.workers.dev%2Fv1%2Fpublished-versions";
-const ENDPOINT_HOST = "https://atomic-version-adoption.norin.workers.dev/v1/published-versions";
+const AUDIENCE = "https%3A%2F%2Fatomic-version-adoption.bastani-atomic.workers.dev%2Fv1%2Fpublished-versions";
+const ENDPOINT_HOST = "https://atomic-version-adoption.bastani-atomic.workers.dev/v1/published-versions";
 const OIDC_URL = "https://vstoken.actions.githubusercontent.com/_apis/oidc/token";
 
 let workspaces: string[] = [];

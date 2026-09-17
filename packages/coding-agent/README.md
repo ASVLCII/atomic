@@ -297,7 +297,7 @@ Atomic has two separate startup features:
 - **Update check:** checks whether a newer Atomic version exists. Disable it with `ATOMIC_SKIP_VERSION_CHECK=1` (`PI_SKIP_VERSION_CHECK=1` remains a legacy alias). Disabling update checks only turns off this check. The update check is independent of version-adoption telemetry.
 - **Version-adoption telemetry:** measures whether releases reach real interactive launches and which versions stay in use. The metric is version-adoption pings / first-interactive-launch pings, not installs, users, MAU, or retention. Repeated eligible launches on several machines overcount. Opt-outs, offline mode, and dropped best-effort requests undercount.
 
-  Atomic sends one GET to `https://atomic-version-adoption.norin.workers.dev/v1/version-adoption` with the running version as the `version` query parameter and the existing `atomic/<version> (<platform>; <runtime>; <arch>)` User-Agent. There is no request body, UUID, cookie, auth header, or user content.
+  Atomic sends one GET to `https://atomic-version-adoption.bastani-atomic.workers.dev/v1/version-adoption` with the running version as the `version` query parameter and the existing `atomic/<version> (<platform>; <runtime>; <arch>)` User-Agent. There is no request body, UUID, cookie, auth header, or user content.
 
   The ping fires only in interactive mode, and only on the first interactive launch with fresh settings (no recorded changelog version), or the first interactive launch after an update whose version has changelog entries. It does not fire on every launch, on npm install, on a reinstall that kept settings, or in `-p` / RPC modes.
 

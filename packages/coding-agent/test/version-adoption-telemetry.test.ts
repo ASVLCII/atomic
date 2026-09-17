@@ -1,18 +1,19 @@
+import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VERSION, VERSION_ADOPTION_ENDPOINT } from "../src/config.ts";
-import { SettingsManager } from "../src/core/settings-manager.ts";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
-import { getPiUserAgent } from "../src/utils/pi-user-agent.ts";
+import { afterEach, beforeEach, describe, it, vi } from "vitest";
+import { VERSION, VERSION_ADOPTION_ENDPOINT } from "../src/config.js";
+import { SettingsManager } from "../src/core/settings-manager.js";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { getPiUserAgent } from "../src/utils/pi-user-agent.js";
 
-const VERSION_ADOPTION_ORIGIN = "https://atomic-version-adoption.norin.workers.dev/v1/version-adoption";
+const VERSION_ADOPTION_ORIGIN = "https://atomic-version-adoption.bastani-atomic.workers.dev/v1/version-adoption";
 
 const changelogFixture = vi.hoisted(() => ({ path: "" }));
 
-vi.mock("../src/modes/interactive/interactive-mode-deps.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/modes/interactive/interactive-mode-deps.ts")>();
+vi.mock("../src/modes/interactive/interactive-mode-deps.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/modes/interactive/interactive-mode-deps.js")>();
 	return {
 		...actual,
 		getChangelogPath: () => changelogFixture.path || actual.getChangelogPath(),
@@ -98,7 +99,7 @@ afterEach(() => {
 describe("version-adoption telemetry", () => {
 	// #2498
 	it("exports VERSION_ADOPTION_ENDPOINT as the approved workers.dev origin", () => {
-		expect(VERSION_ADOPTION_ENDPOINT).toBe(VERSION_ADOPTION_ORIGIN);
+		assert.equal(VERSION_ADOPTION_ENDPOINT, VERSION_ADOPTION_ORIGIN);
 	});
 
 	it("ignores hostile endpoint environment variables after a fresh module load", async () => {
@@ -110,14 +111,14 @@ describe("version-adoption telemetry", () => {
 		vi.stubEnv("ATOMIC_TELEMETRY_URL", override);
 		vi.stubEnv("PI_TELEMETRY_URL", override);
 
-		vi.doUnmock("../src/modes/interactive/interactive-mode-deps.ts");
+		vi.doUnmock("../src/modes/interactive/interactive-mode-deps.js");
 		vi.resetModules();
 
-		const { VERSION_ADOPTION_ENDPOINT: reloadedEndpoint } = await import("../src/config.ts");
-		const { InteractiveMode: ReloadedInteractiveMode } = await import("../src/modes/interactive/interactive-mode.ts");
-		const { SettingsManager: ReloadedSettingsManager } = await import("../src/core/settings-manager.ts");
+		const { VERSION_ADOPTION_ENDPOINT: reloadedEndpoint } = await import("../src/config.js");
+		const { InteractiveMode: ReloadedInteractiveMode } = await import("../src/modes/interactive/interactive-mode.js");
+		const { SettingsManager: ReloadedSettingsManager } = await import("../src/core/settings-manager.js");
 
-		expect(reloadedEndpoint).toBe("https://atomic-version-adoption.norin.workers.dev/v1/version-adoption");
+		assert.equal(reloadedEndpoint, "https://atomic-version-adoption.bastani-atomic.workers.dev/v1/version-adoption");
 
 		const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 204 })));
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
@@ -129,36 +130,37 @@ describe("version-adoption telemetry", () => {
 		) => void;
 		fn.call({ settingsManager: ReloadedSettingsManager.inMemory() }, version);
 
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(fetchUrl(fetchMock.mock.calls[0]![0])).toBe(
+		assert.equal(fetchMock.mock.calls.length, 1);
+		assert.equal(
+			fetchUrl(fetchMock.mock.calls[0]![0]),
 			`${VERSION_ADOPTION_ORIGIN}?version=${encodeURIComponent(version)}`,
 		);
 	});
 
 	it("pings once on the first interactive launch with fresh settings", () => {
 		const host = freshHost();
-		expect(host.settingsManager.getLastChangelogVersion()).toBeUndefined();
-		expect(getChangelogForDisplay(host)).toBeUndefined();
-		expect(host.settingsManager.getLastChangelogVersion()).toBe(VERSION);
-		expect(host.reportInstallTelemetry).toHaveBeenCalledTimes(1);
-		expect(host.reportInstallTelemetry).toHaveBeenCalledWith(VERSION);
+		assert.equal(host.settingsManager.getLastChangelogVersion(), undefined);
+		assert.equal(getChangelogForDisplay(host), undefined);
+		assert.equal(host.settingsManager.getLastChangelogVersion(), VERSION);
+		assert.equal(host.reportInstallTelemetry.mock.calls.length, 1);
+		assert.ok(host.reportInstallTelemetry.mock.calls.some((args) => args.length === 1 && args[0] === VERSION));
 	});
 
 	it("does not ping when the same version is already recorded, including a reinstall that kept settings", () => {
 		const settings = SettingsManager.inMemory();
 		settings.setLastChangelogVersion(VERSION);
 		const host = freshHost(settings);
-		expect(getChangelogForDisplay(host)).toBeUndefined();
-		expect(host.reportInstallTelemetry).not.toHaveBeenCalled();
-		expect(host.settingsManager.getLastChangelogVersion()).toBe(VERSION);
+		assert.equal(getChangelogForDisplay(host), undefined);
+		assert.equal(host.reportInstallTelemetry.mock.calls.length, 0);
+		assert.equal(host.settingsManager.getLastChangelogVersion(), VERSION);
 	});
 
 	it("does not ping or record a version for a resumed session", () => {
 		const host = freshHost();
 		host.session.state.messages.push({ role: "user" });
-		expect(getChangelogForDisplay(host)).toBeUndefined();
-		expect(host.reportInstallTelemetry).not.toHaveBeenCalled();
-		expect(host.settingsManager.getLastChangelogVersion()).toBeUndefined();
+		assert.equal(getChangelogForDisplay(host), undefined);
+		assert.equal(host.reportInstallTelemetry.mock.calls.length, 0);
+		assert.equal(host.settingsManager.getLastChangelogVersion(), undefined);
 	});
 
 	it("pings once on the first interactive launch after an update with changelog entries", () => {
@@ -166,10 +168,10 @@ describe("version-adoption telemetry", () => {
 		const settings = SettingsManager.inMemory();
 		settings.setLastChangelogVersion("0.0.0-alpha.1");
 		const host = freshHost(settings);
-		expect(getChangelogForDisplay(host)).toBeTruthy();
-		expect(host.settingsManager.getLastChangelogVersion()).toBe(VERSION);
-		expect(host.reportInstallTelemetry).toHaveBeenCalledTimes(1);
-		expect(host.reportInstallTelemetry).toHaveBeenCalledWith(VERSION);
+		assert.ok(getChangelogForDisplay(host));
+		assert.equal(host.settingsManager.getLastChangelogVersion(), VERSION);
+		assert.equal(host.reportInstallTelemetry.mock.calls.length, 1);
+		assert.ok(host.reportInstallTelemetry.mock.calls.some((args) => args.length === 1 && args[0] === VERSION));
 	});
 
 	it("does not ping after an update whose version has no changelog section", () => {
@@ -177,9 +179,9 @@ describe("version-adoption telemetry", () => {
 		const settings = SettingsManager.inMemory();
 		settings.setLastChangelogVersion("0.0.0-alpha.1");
 		const host = freshHost(settings);
-		expect(getChangelogForDisplay(host)).toBeUndefined();
-		expect(host.reportInstallTelemetry).not.toHaveBeenCalled();
-		expect(host.settingsManager.getLastChangelogVersion()).toBe("0.0.0-alpha.1");
+		assert.equal(getChangelogForDisplay(host), undefined);
+		assert.equal(host.reportInstallTelemetry.mock.calls.length, 0);
+		assert.equal(host.settingsManager.getLastChangelogVersion(), "0.0.0-alpha.1");
 	});
 });
 
@@ -194,26 +196,29 @@ describe("version-adoption request shape", () => {
 		const version = "1.2.3+abc";
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, version);
 
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		assert.equal(fetchMock.mock.calls.length, 1);
 		const [input, init] = fetchMock.mock.calls[0]!;
 		const url = fetchUrl(input);
-		expect(url).toBe(`${VERSION_ADOPTION_ORIGIN}?version=${encodeURIComponent(version)}`);
-		expect(url).toBe("https://atomic-version-adoption.norin.workers.dev/v1/version-adoption?version=1.2.3%2Babc");
+		assert.equal(url, `${VERSION_ADOPTION_ORIGIN}?version=${encodeURIComponent(version)}`);
+		assert.equal(
+			url,
+			"https://atomic-version-adoption.bastani-atomic.workers.dev/v1/version-adoption?version=1.2.3%2Babc",
+		);
 
-		expect(init).toBeDefined();
-		expect(init?.headers).toEqual({ "User-Agent": getPiUserAgent(version) });
-		expect(init?.headers instanceof Headers).toBe(false);
-		expect(init).not.toHaveProperty("method");
-		expect(init).not.toHaveProperty("body");
-		expect(init).not.toHaveProperty("credentials");
-		expect(init?.signal).toBeInstanceOf(AbortSignal);
-		expect(AbortSignal.timeout).toHaveBeenCalledWith(5000);
-		expect(init?.signal?.aborted).toBe(false);
+		assert.notEqual(init, undefined);
+		assert.deepEqual(init?.headers, { "User-Agent": getPiUserAgent(version) });
+		assert.equal(init?.headers instanceof Headers, false);
+		assert.ok(!("method" in init!));
+		assert.ok(!("body" in init!));
+		assert.ok(!("credentials" in init!));
+		assert.ok(init?.signal instanceof AbortSignal);
+		assert.ok(vi.mocked(AbortSignal.timeout).mock.calls.some((args) => args.length === 1 && args[0] === 5000));
+		assert.equal(init?.signal?.aborted, false);
 
 		await vi.advanceTimersByTimeAsync(4999);
-		expect(init?.signal?.aborted).toBe(false);
+		assert.equal(init?.signal?.aborted, false);
 		await vi.advanceTimersByTimeAsync(1);
-		expect(init?.signal?.aborted).toBe(true);
+		assert.equal(init?.signal?.aborted, true);
 	});
 });
 
@@ -223,7 +228,7 @@ describe("version-adoption opt-outs", () => {
 		const fetchMock = vi.fn();
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }) }, VERSION);
-		expect(fetchMock).not.toHaveBeenCalled();
+		assert.equal(fetchMock.mock.calls.length, 0);
 	});
 
 	it.each(["0", "false", "no"] as const)("skips when ATOMIC_TELEMETRY=%s even if the setting is true", (value) => {
@@ -231,7 +236,7 @@ describe("version-adoption opt-outs", () => {
 		const fetchMock = vi.fn();
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION);
-		expect(fetchMock).not.toHaveBeenCalled();
+		assert.equal(fetchMock.mock.calls.length, 0);
 	});
 
 	it.each(["1", "true", "yes"] as const)("sends when ATOMIC_TELEMETRY=%s even if the setting is false", (value) => {
@@ -239,7 +244,7 @@ describe("version-adoption opt-outs", () => {
 		const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 204 })));
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }) }, VERSION);
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		assert.equal(fetchMock.mock.calls.length, 1);
 	});
 
 	it("honors PI_TELEMETRY as a legacy alias", () => {
@@ -247,7 +252,7 @@ describe("version-adoption opt-outs", () => {
 		const fetchMock = vi.fn();
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION);
-		expect(fetchMock).not.toHaveBeenCalled();
+		assert.equal(fetchMock.mock.calls.length, 0);
 	});
 
 	it("lets ATOMIC_TELEMETRY win when both telemetry env vars are set", () => {
@@ -257,12 +262,12 @@ describe("version-adoption opt-outs", () => {
 		vi.stubEnv("ATOMIC_TELEMETRY", "0");
 		vi.stubEnv("PI_TELEMETRY", "1");
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION);
-		expect(fetchMock).not.toHaveBeenCalled();
+		assert.equal(fetchMock.mock.calls.length, 0);
 
 		vi.stubEnv("ATOMIC_TELEMETRY", "1");
 		vi.stubEnv("PI_TELEMETRY", "0");
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }) }, VERSION);
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		assert.equal(fetchMock.mock.calls.length, 1);
 	});
 
 	it.each(["ATOMIC_OFFLINE", "PI_OFFLINE"] as const)("skips when %s=1 regardless of telemetry", (name) => {
@@ -271,13 +276,13 @@ describe("version-adoption opt-outs", () => {
 		const fetchMock = vi.fn();
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 		reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION);
-		expect(fetchMock).not.toHaveBeenCalled();
+		assert.equal(fetchMock.mock.calls.length, 0);
 	});
 
 	it("maps --offline onto ENV_OFFLINE=1 in main.ts", () => {
 		const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-		expect(main).toMatch(/args\.includes\("--offline"\)/);
-		expect(main).toMatch(/setEnvValue\(ENV_OFFLINE,\s*"1"\)/);
+		assert.match(main, /args\.includes\("--offline"\)/);
+		assert.match(main, /setEnvValue\(ENV_OFFLINE,\s*"1"\)/);
 	});
 });
 
@@ -295,14 +300,15 @@ describe("version-adoption nonblocking failure", () => {
 				}),
 		);
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
-		expect(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION)).not.toThrow();
-		expect(settled).toBe(false);
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(fetchUrl(fetchMock.mock.calls[0]![0])).toMatch(
-			/^https:\/\/atomic-version-adoption\.norin\.workers\.dev\//,
+		assert.doesNotThrow(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION));
+		assert.equal(settled, false);
+		assert.equal(fetchMock.mock.calls.length, 1);
+		assert.match(
+			fetchUrl(fetchMock.mock.calls[0]![0]),
+			/^https:\/\/atomic-version-adoption\.bastani-atomic\.workers\.dev\//,
 		);
-		expect(fetchUrl(fetchMock.mock.calls[0]![0])).not.toContain("registry.npmjs.org");
-		expect(fetchUrl(fetchMock.mock.calls[0]![0])).not.toContain("pi.dev");
+		assert.ok(!fetchUrl(fetchMock.mock.calls[0]![0]).includes("registry.npmjs.org"));
+		assert.ok(!fetchUrl(fetchMock.mock.calls[0]![0]).includes("pi.dev"));
 	});
 
 	it("swallows a rejected fetch without throwing, retrying, or leaking unhandled rejection", async () => {
@@ -314,11 +320,11 @@ describe("version-adoption nonblocking failure", () => {
 		try {
 			const fetchMock = vi.fn(() => Promise.reject(new Error("network down")));
 			vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
-			expect(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION)).not.toThrow();
+			assert.doesNotThrow(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION));
 			await Promise.resolve();
 			await Promise.resolve();
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-			expect(reasons).toEqual([]);
+			assert.equal(fetchMock.mock.calls.length, 1);
+			assert.deepEqual(reasons, []);
 		} finally {
 			process.off("unhandledRejection", onUnhandled);
 		}
@@ -350,12 +356,12 @@ describe("version-adoption nonblocking failure", () => {
 			vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 			vi.useFakeTimers();
 			installFakeTimerAbortTimeout();
-			expect(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION)).not.toThrow();
+			assert.doesNotThrow(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION));
 			await vi.advanceTimersByTimeAsync(5000);
 			await Promise.resolve();
 			await Promise.resolve();
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-			expect(reasons).toEqual([]);
+			assert.equal(fetchMock.mock.calls.length, 1);
+			assert.deepEqual(reasons, []);
 		} finally {
 			process.off("unhandledRejection", onUnhandled);
 		}
@@ -372,16 +378,15 @@ describe("version-adoption nonblocking failure", () => {
 			try {
 				const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status })));
 				vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
-				expect(() =>
-					reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION),
-				).not.toThrow();
+				assert.doesNotThrow(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION));
 				await Promise.resolve();
 				await Promise.resolve();
-				expect(fetchMock).toHaveBeenCalledTimes(1);
-				expect(fetchUrl(fetchMock.mock.calls[0]![0])).toBe(
+				assert.equal(fetchMock.mock.calls.length, 1);
+				assert.equal(
+					fetchUrl(fetchMock.mock.calls[0]![0]),
 					`${VERSION_ADOPTION_ORIGIN}?version=${encodeURIComponent(VERSION)}`,
 				);
-				expect(reasons).toEqual([]);
+				assert.deepEqual(reasons, []);
 			} finally {
 				process.off("unhandledRejection", onUnhandled);
 			}

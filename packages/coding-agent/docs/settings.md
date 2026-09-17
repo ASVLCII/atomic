@@ -156,7 +156,7 @@ Version-adoption telemetry measures whether releases reach real interactive laun
 
 `enableInstallTelemetry` controls this ping and Atomic's provider attribution headers; it does not control update checks. Atomic still fetches the npm registry latest package metadata at `https://registry.npmjs.org/@bastani/atomic/latest` unless update checks are disabled or offline mode is on.
 
-Atomic sends one GET to `https://atomic-version-adoption.norin.workers.dev/v1/version-adoption` with the running version as the `version` query parameter and the existing `atomic/<version> (<platform>; <runtime>; <arch>)` User-Agent. There is no request body, UUID, cookie, auth header, or user content.
+Atomic sends one GET to `https://atomic-version-adoption.bastani-atomic.workers.dev/v1/version-adoption` with the running version as the `version` query parameter and the existing `atomic/<version> (<platform>; <runtime>; <arch>)` User-Agent. There is no request body, UUID, cookie, auth header, or user content.
 
 The ping fires only in interactive mode, and only on:
 
