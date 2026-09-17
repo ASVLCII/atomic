@@ -54,11 +54,7 @@ export async function routeSubagentModel(input: {
 			"Subagent auto routing has no eligible model/effort pairs. Check configured providers and modelConstraints.",
 		);
 	const settings = { getRouterModel: () => ctx.getRouterModel() };
-	const router = resolveRouterModel({ settings, currentModel: ctx.model, modelRegistry: ctx.modelRegistry });
-	if (router.kind === "jev" && pairs.length > 255)
-		throw new Error(
-			`Subagent auto routing has ${pairs.length} eligible pairs, exceeding Jev's 255 Choice limit. Configure an ordinary routerModel or explicit modelConstraints; no candidates were hidden.`,
-		);
+	resolveRouterModel({ settings, currentModel: ctx.model, modelRegistry: ctx.modelRegistry });
 	let documents: { source: string; content: string }[];
 	try {
 		documents = await Promise.all(

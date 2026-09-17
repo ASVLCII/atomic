@@ -44,6 +44,7 @@
 - Managed PostgreSQL verifies server identity and SQL readiness, supports `ATOMIC_POSTGRES_PORT`, and shares an available actual port across sessions without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Custom models declared in `models.json` no longer generate automatic `-fast` siblings, preventing invalid choices such as `gpt-6-astra-slow-fast`. Built-in fast variants and `modelOverrides` remain supported.
 - Bedrock requests honor the configured provider retry count, including zero, so bounded router decisions do not make hidden SDK retry attempts ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
+- Jev structured decisions now handle choices above 255 options through bounded multi-request tournaments, including every candidate and comparing finalists without cross-batch probability ranking. Subagent auto routing supports large model/effort catalogs; workflow routing retains `none` and exact budgets. One shared deadline and fail-closed validation cover all rounds ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

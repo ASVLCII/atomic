@@ -8,6 +8,8 @@ import type { JsonObject } from "../tools/structured-output.ts";
 export interface StructuredChoiceQuestion {
 	readonly instructions: string;
 	readonly criteria: Readonly<Record<string, string>>;
+	/** Optional original option key kept available in the final Jev comparison, even if eliminated. */
+	readonly retainForFinal?: string;
 }
 
 export interface RouterModelSelectionOptions {
@@ -31,13 +33,13 @@ export interface StructuredOutputRequest<T extends TSchema> {
 	/** The normalized result contract. Use additionalProperties: false on closed objects. */
 	readonly schema: T;
 	readonly jev: {
-		/** All judgments run together. Conditional questions must describe their speculative premise. */
+		/** Independent judgments, packed together where possible. Conditional questions must describe their premise. */
 		readonly questions: Readonly<Record<string, StructuredChoiceQuestion>>;
 		/** Pure exact lookup/composition only. No inference, execution or authorization here. */
 		readonly decode: (choices: Readonly<Record<string, string>>) => Static<T>;
 	};
 	readonly signal?: AbortSignal;
-	/** Positive integer milliseconds, default 30 seconds. Covers auth, transport and body reading. */
+	/** Positive integer milliseconds, default 30 seconds. Covers all rounds, auth, transport and body reading. */
 	readonly timeoutMs?: number;
 	/** Ordinary-provider output bound, default 4096 tokens. */
 	readonly maxTokens?: number;

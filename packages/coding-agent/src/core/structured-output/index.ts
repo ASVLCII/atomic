@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, Model } from "@bastani/pi-ai";
 import type { Static, TSchema } from "typebox";
-import { Compile } from "typebox/compile";
+import { Check } from "typebox/value";
 import { raceWithAbortSignal } from "../../utils/abort.js";
 import {
 	createStructuredOutputTool,
@@ -133,7 +133,7 @@ async function inferChat<T extends TSchema>(
 	};
 }
 
-/** One bounded decision request. No agent/session, tool execution, repair, retry or inference fallback. */
+/** One bounded logical decision. No agent/session, tool execution, repair, retry or inference fallback. */
 export async function inferStructuredOutput<T extends TSchema>(
 	request: StructuredOutputRequest<T>,
 ): Promise<StructuredOutputResult<Static<T>>> {
@@ -159,6 +159,12 @@ export async function inferStructuredOutput<T extends TSchema>(
 				"Structured output questions require nonempty IDs, full instructions and described Choice candidates.",
 			);
 		}
+		if (
+			question.retainForFinal !== undefined &&
+			(typeof question.retainForFinal !== "string" || !Object.hasOwn(question.criteria, question.retainForFinal))
+		) {
+			throw new Error("Structured output retainForFinal must name an original Choice option.");
+		}
 	}
 	// Own immutable input data across awaits, including schema and candidates. The mapper is trusted code.
 	const snapshot = {
@@ -167,7 +173,6 @@ export async function inferStructuredOutput<T extends TSchema>(
 		schema: jsonSnapshot(request.schema),
 		jev: { questions, decode: request.jev.decode },
 	};
-	const validator = Compile(snapshot.schema);
 	const selected = request.model;
 	if (!selected || (selected.kind !== "chat" && selected.kind !== "jev")) {
 		throw new Error("Structured output requires an explicit concrete inference model.");
@@ -200,9 +205,10 @@ export async function inferStructuredOutput<T extends TSchema>(
 			controller.signal,
 		);
 		controller.signal.throwIfAborted();
+		// Interpret this one-shot schema: compiling large catalog unions can overflow the JS engine.
 		// Never coerce strings/numbers, strip unknown fields or turn null into omission/zero.
 		const value = jsonSnapshot(result.value);
-		if (!validator.Check(value))
+		if (!Check(snapshot.schema, value))
 			throw new Error(
 				"Invalid structured output: response does not match the decision schema. No repair request was made.",
 			);

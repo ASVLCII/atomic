@@ -229,7 +229,7 @@ export async function routeWorkflowLaunch(
 		schema,
 		jev: {
 			questions: {
-				workflow: { instructions: selectionInstructions, criteria },
+				workflow: { instructions: selectionInstructions, criteria, retainForFinal: "none" },
 				budget: {
 					instructions: budgetInstructions,
 					criteria: {

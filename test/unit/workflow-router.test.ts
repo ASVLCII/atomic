@@ -20,6 +20,7 @@ import { resolve_budget } from "../../packages/workflows/src/shared/budget.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { WorkflowBudget } from "../../packages/workflows/src/shared/types.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
+import { type JevFixtureRequest, jevFixtureResponse } from "../helpers/jev-tournament.js";
 import { decisionMessage, decisionModel, messageStream } from "../helpers/structured-output.js";
 import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 
@@ -599,21 +600,98 @@ test("a launch uses owned inputs rather than mutations made while inference is p
 	assert.equal(f.store.runs()[0]!.inputs.task, "Approved work");
 });
 
-test("Jev refuses a registry exceeding Choice capacity without truncation or inference", async () => {
-	const f = fixture();
+test("Jev overflowing registry retains none for final comparison and exact budget", async () => {
+	const f = fixture({ maxTokens: 0, maxCost: 0.123456789 });
 	let registry = f.runtime.registry;
 	for (let i = 0; i < 254; i++)
 		registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
 	f.replace(registry);
 	f.ctx.getRouterModel = () => "typesafe-ai/jev";
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
-	const fetch = vi.fn();
+	const seen = new Set<string>();
+	let round = 0;
+	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+		const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+		round++;
+		for (const q of Object.values(request.questions)) {
+			assert.ok(Object.keys(q.criteria).length <= 255);
+			for (const key of Object.keys(q.criteria)) seen.add(key);
+		}
+		const response = jevFixtureResponse(request, (keys, id) => {
+			if (id === "workflow") {
+				assert.ok(keys.includes("none"));
+				return "none";
+			}
+			return keys.find((key) => key !== "none")!;
+		});
+		for (const [id, answer] of Object.entries(response.answers)) {
+			if (id === "budget" || id === "workflow") continue;
+			const keys = Object.keys(answer.probabilities)
+				.filter((key) => key !== "none")
+				.slice(0, 3);
+			answer.probabilities = Object.fromEntries(
+				Object.keys(answer.probabilities).map((key) => [key, keys.includes(key) ? 1 / keys.length : 0]),
+			);
+		}
+		return Response.json(response);
+	});
 	vi.stubGlobal("fetch", fetch);
 	const result = await f.call();
-	assert.match("error" in result.details ? (result.details.error ?? "") : "", /255/);
-	assert.equal(fetch.mock.calls.length, 0);
+	assert.ok("routerDecision" in result.details);
+	assert.deepEqual(result.details.routerDecision, {
+		workflowType: "none",
+		maxBudget: { maxTokens: 0, maxCost: 0.123456789 },
+	});
+	assert.equal(seen.size, 258);
+	assert.ok(round > 1);
 	assert.equal(f.infer.mock.calls.length, 0);
 	f.noLaunch();
+});
+
+test("Jev overflowing registry launches the selected registered workflow once with exact budget", async () => {
+	const budget = { maxTokens: 321, maxCost: 0.123456789, maxDurationMs: 99999 };
+	const f = fixture(budget);
+	let registry = f.runtime.registry;
+	for (let i = 0; i < 254; i++)
+		registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
+	f.replace(registry);
+	assert.equal(f.runtime.registry.get("approved-change"), f.definition);
+	f.ctx.getRouterModel = () => "typesafe-ai/jev";
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	const seen = new Set<string>();
+	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+		const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+		for (const [id, question] of Object.entries(request.questions)) {
+			const keys = Object.keys(question.criteria);
+			assert.ok(keys.length <= 255);
+			if (id !== "budget")
+				keys.forEach((key) => {
+					seen.add(key);
+				});
+		}
+		if (request.questions.workflow) {
+			assert.ok(Object.hasOwn(request.questions.workflow.criteria, "none"));
+			assert.ok(Object.hasOwn(request.questions.workflow.criteria, "approved-change"));
+		}
+		return Response.json(
+			jevFixtureResponse(request, (keys) => (keys.includes("approved-change") ? "approved-change" : keys[0]!)),
+		);
+	});
+	vi.stubGlobal("fetch", fetch);
+	const result = await f.call();
+	assert.ok("routerDecision" in result.details);
+	assert.deepEqual(result.details.routerDecision, { workflowType: "approved-change", maxBudget: budget });
+	assert.ok(result.details.runId);
+	assert.deepEqual(f.jobs.runIds(), [result.details.runId]);
+	await f.jobs.get(result.details.runId)!.promise;
+	assert.equal(fetch.mock.calls.length, 2);
+	assert.equal(seen.size, 257);
+	assert.equal(f.infer.mock.calls.length, 0);
+	assert.equal(f.admissions.mock.calls.length, 1);
+	assert.equal(f.body.mock.calls.length, 1);
+	assert.equal(f.store.runs().length, 1);
+	assert.equal(f.jobs.runIds().length, 0);
+	assert.deepEqual(f.store.runs()[0]!.budget, { ...budget, warnAtPercent: 80 });
 });
 
 test("documentation paths alone are missing context, not usable documentation", async () => {
@@ -672,3 +750,39 @@ test("ordinary provider exceptions return no raw payload or decision and cause z
 	assert.equal(f.infer.mock.calls.length, 1);
 	f.noLaunch();
 });
+
+for (const failure of ["registry", "provider", "cancel"] as const) {
+	test(`overflow workflow ${failure} after reduction never launches`, async () => {
+		const f = fixture();
+		let registry = f.runtime.registry;
+		for (let i = 0; i < 254; i++)
+			registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
+		f.replace(registry);
+		f.ctx.getRouterModel = () => "typesafe-ai/jev";
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		const controller = new AbortController();
+		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+			const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+			if (request.questions.workflow) {
+				if (failure === "provider") return new Response("private", { status: 529 });
+				if (failure === "registry") f.replace();
+				else controller.abort();
+			}
+			return Response.json(
+				jevFixtureResponse(request, (keys) => (keys.includes("approved-change") ? "approved-change" : keys[0]!)),
+			);
+		});
+		vi.stubGlobal("fetch", fetch);
+		if (failure === "cancel") await assert.rejects(f.call(f.args, controller.signal), /cancel|abort/i);
+		else {
+			const result = await f.call(f.args, controller.signal);
+			assert.equal("routerDecision" in result.details, false);
+			assert.match(
+				"error" in result.details ? (result.details.error ?? "") : "",
+				failure === "registry" ? /registry changed/ : /HTTP 529/,
+			);
+		}
+		assert.ok(fetch.mock.calls.length > 1);
+		f.noLaunch();
+	});
+}

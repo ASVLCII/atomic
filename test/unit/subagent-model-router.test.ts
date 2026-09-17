@@ -16,6 +16,7 @@ import type { AgentConfig } from "../../packages/subagents/src/agents/agents.js"
 import { parseFrontmatter } from "../../packages/subagents/src/agents/frontmatter.js";
 import { routeSubagentModel } from "../../packages/subagents/src/runs/shared/model-router.js";
 import { parseModelConstraints } from "../../packages/subagents/src/shared/model-constraints.js";
+import { type JevFixtureRequest, jevFixtureResponse } from "../helpers/jev-tournament.js";
 import {
 	decisionMessage,
 	decisionModel,
@@ -320,20 +321,36 @@ test("Jev uses one Choice over complete pairs and deterministically maps the sel
 	await assert.rejects(f.route(), /choice|invalid|malformed/i);
 });
 
-test("Jev refuses over 255 pairs without silently shortlisting; ordinary router retains full catalog", async () => {
+test("Jev covers 1997 pairs without filtering; ordinary router retains full catalog", async () => {
 	const f = await fixture();
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(
-		Array.from({ length: 256 }, (_, index) => ({ ...decisionModel, id: `m${index}` })),
+		Array.from({ length: 1997 }, (_, index) => ({ ...decisionModel, id: `m${index}` })),
 	);
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-key");
 	f.ctx.getRouterModel = () => "";
-	await assert.rejects(f.route(), /256.*255.*routerModel/);
+	const seen = new Set<string>();
+	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+		const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+		for (const q of Object.values(request.questions)) {
+			assert.ok(Object.keys(q.criteria).length <= 255);
+			for (const key of Object.keys(q.criteria)) seen.add(key);
+		}
+		return Response.json(jevFixtureResponse(request));
+	});
+	vi.stubGlobal("fetch", fetch);
+	assert.equal((await f.route()).routerSelection.model, "decision-test/m0");
+	assert.equal(seen.size, 1997);
+	assert.ok(fetch.mock.calls.length > 1);
 	f.ctx.getRouterModel = () => "decision-test/chat";
 	f.infer.mockImplementation((_model, context) => {
-		assert.equal(JSON.parse(context.messages[0]!.content as string).state.catalog.length, 256);
+		assert.equal(JSON.parse(context.messages[0]!.content as string).state.catalog.length, 1997);
+		assert.ok(context.tools?.[0]);
+		assert.ok("anyOf" in context.tools[0].parameters);
+		assert.equal((context.tools[0].parameters.anyOf as object[]).length, 1997);
 		return messageStream(decisionMessage({ model: "decision-test/m255", effort: null }));
 	});
 	assert.equal((await f.route()).routerSelection.model, "decision-test/m255");
+	assert.equal(f.infer.mock.calls.length, 1);
 });
 
 test("configured credential text is rejected before inference", async () => {
@@ -363,3 +380,26 @@ test("router model precedence preserves chat fallback and rejects recursive or i
 	assert.equal(f.infer.mock.calls.length, 1);
 	assert.equal(f.ctx.model, decisionModel);
 });
+
+for (const failure of ["stale", "provider"] as const) {
+	test(`overflow subagent ${failure} fails before returning a route`, async () => {
+		const f = await fixture();
+		const catalog = vi
+			.spyOn(f.ctx.modelRegistry, "getAvailable")
+			.mockReturnValue(Array.from({ length: 256 }, (_, i) => ({ ...decisionModel, id: `m${i}` })));
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-key");
+		f.ctx.getRouterModel = () => "";
+		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+			const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+			if (request.questions.pair) {
+				if (failure === "provider") return new Response("private", { status: 422 });
+				catalog.mockReturnValue([]);
+			}
+			return Response.json(jevFixtureResponse(request));
+		});
+		vi.stubGlobal("fetch", fetch);
+		await assert.rejects(f.route(), failure === "stale" ? /no longer eligible/ : /HTTP 422/);
+		assert.ok(fetch.mock.calls.length > 1);
+		assert.equal(f.infer.mock.calls.length, 0);
+	});
+}

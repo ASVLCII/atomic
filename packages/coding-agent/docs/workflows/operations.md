@@ -155,7 +155,7 @@ Graph node cards show each model stage's effective model and thinking level abov
 
 ## Model-invoked launch routing
 
-Every model-tool `action: "run"` call, including calls that omit `action`, requires top-level `state`. Atomic makes one inference before workflow admission or execution. The state belongs to the tool call, not the workflow's `inputs` schema. Inspection and control actions do not route. User-issued `/workflow <name>` commands and programmatic `ctx.workflow(...)` composition bypass the router; workflow stages still cannot call the workflow tool to launch another workflow.
+Every model-tool `action: "run"` call, including calls that omit `action`, requires top-level `state`. Atomic makes one bounded logical routing decision before workflow admission or execution. The state belongs to the tool call, not the workflow's `inputs` schema. Inspection and control actions do not route. User-issued `/workflow <name>` commands and programmatic `ctx.workflow(...)` composition bypass the router; workflow stages still cannot call the workflow tool to launch another workflow.
 
 Prepare state before calling the tool:
 
@@ -177,7 +177,7 @@ Set `routerModel` in [settings.json](/settings#routermodel), not workflow extens
 
 A nonempty exact concrete `provider/model` selection wins. Otherwise a nonempty `TYPESAFE_AI_API_KEY` selects `typesafe-ai/jev`; without that key, Atomic uses the current chat model at invocation time. `"auto"`, unknown explicit selections, and malformed settings fail rather than silently selecting another provider. This setting selects only routing inference: it does not change the chat model, workflow stage models, or the `structured_output` tool. Setting the environment key is configuration, not proof of valid credentials or service access.
 
-The router makes one request with a 30-second inference deadline, without an agent loop, automatic inference retry, repair call or provider fallback. Jev submits workflow and budget Choice questions together, copying selected budget values exactly rather than generating or rounding numeric scores. Jev allows at most 255 workflow choices including `none`; if the catalog exceeds that limit, choose an ordinary router model rather than dropping workflows from the catalog.
+The router has one 30-second deadline for the whole decision, without an agent loop, automatic inference retry, repair call or provider fallback. Jev packs workflow and budget Choice questions together where context permits, preserving exact budget values rather than generating or rounding numbers. Catalogs above 255 choices use multiple tournament requests: every workflow participates, three candidates survive each batch, and finalists receive a shared comparison. `none` remains available in the final comparison even if eliminated earlier; overflow never forces a workflow launch. Large catalogs can increase latency and usage, and grouping can affect selection. State is never trimmed, and any batch failure prevents launch. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits) for estimated context packing and provider context errors.
 
 ### Read the decision
 
