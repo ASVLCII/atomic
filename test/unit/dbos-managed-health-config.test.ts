@@ -166,7 +166,7 @@ test.each(["acquisition", "timer"])("managed %s health preserves checkouts on 53
 		if (trigger === "timer") await vi.advanceTimersByTimeAsync(5_000);
 		else assert.equal(await local.health.check(), initialUrl);
 		assert.equal(probe.mock.calls.length, probesBefore + 1);
-		assert.equal(local.health.lastFailure, undefined);
+		assert.equal(local.health.lastFailure, refusal, "successful checks retain the latest failure for doctor");
 		held.release();
 		const next = await pool.connect();
 		try {

@@ -503,7 +503,7 @@ Dependency inspection is separate from run status and does not start a workflow 
 /workflow dependency recover
 ```
 
-The tool equivalents are `workflow({ action: "dependency", operation: "doctor" })` and `workflow({ action: "dependency", operation: "recover" })`. SDK integrations can use [`workflowDependency()`](/workflows/api-reference#workflowdependencyoperation).
+The tool equivalents are `workflow({ action: "dependency", operation: "doctor" })` and `workflow({ action: "dependency", operation: "recover" })`. SDK integrations can use [`workflowDependency()`](/workflows/api-reference#workflowdependency-operation).
 
 `status` and `doctor` perform read-only checks. For a managed cluster, the report identifies the actual host/port, trusted cluster and data-directory identity, PostgreSQL process identity, current JavaScript runtime, and PostgreSQL server version when available. `identityVerified: true` means SQL, data and process identity agreed during that check. The consumer list conservatively retains leases whose process may still be alive; it is not a count of running workflows. `lastFailure` retains the most recently observed failure, including runtime diagnostics, after successful checks until a newer failure replaces it. It is process-local history, not a shared or permanent incident log. Use `state`, not the presence of `lastFailure`, to determine whether the latest check succeeded.
 
@@ -511,7 +511,7 @@ The tool equivalents are `workflow({ action: "dependency", operation: "doctor" }
 
 Each request returns within a five-second response budget. `checking` or `recovering` means the existing operation continues in the background, not that it succeeded or was cancelled. Repeated calls join that operation. Use `/workflow dependency status` to check again rather than launching duplicate recovery or a replacement workflow.
 
-`recover` retries only an already registered managed cluster under its shared setup lock. It preserves data and ownership records, never runs `initdb` over existing data, never adopts an unregistered cluster, and never kills a listener to free a port. Identity mismatches require investigation, not deletion of `v18` or `v18.shared`. If runtime files or libraries are missing, repair the complete installation using [Configuring DBOS/Postgres](#configuring-dbospostgres), then retry recovery.
+`recover` retries only an already registered managed cluster under its shared setup lock. It preserves data and ownership records, never runs `initdb` over existing data, never adopts an unregistered cluster, and never kills a listener to free a port. Identity mismatches require investigation, not deletion of `v18` or `v18.shared`. If runtime files or libraries are missing, repair the complete installation using [Configuring DBOS/Postgres](#configuring-dbos/postgres), then retry recovery.
 
 With `DBOS_SYSTEM_DATABASE_URL`, every operation only checks that configured endpoint with a bounded query. Atomic does not restart it, choose another port, or provision a replacement. Correct its service, credentials or TLS settings yourself. A selected Docker fallback returns guidance for inspecting `dbos-db`; dependency recovery does not manage that container.
 
