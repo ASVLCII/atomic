@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the redundant `/feedback` prompt template. Use `/skill:feedback` to draft and submit feedback instead.
+
 ## [0.9.20-alpha.2] - 2026-09-15
 
 ### Added
