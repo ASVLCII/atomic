@@ -1,6 +1,7 @@
 import type { WorkflowFailureCode } from "./store-types.js";
 import {
 	WORKFLOW_AUTH_FAILURE_MESSAGE,
+	WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE,
 	WORKFLOW_FORBIDDEN_MODEL_CONFIG_MESSAGE,
 	WORKFLOW_INVALID_PROVIDER_CREDENTIALS_MESSAGE,
 	WORKFLOW_MISSING_API_KEY_FAILURE_MESSAGE,
@@ -74,6 +75,8 @@ const FORBIDDEN_CONFIG_CODES = new Set([
 	"invalid_model_config",
 	"model_access_denied",
 ]);
+
+const REQUEST_AUTH_TIMEOUT_PHRASES: readonly TokenMatch[] = [["request", "authentication", "timed", "out"]];
 
 const LOGIN_REQUIRED_PHRASES: readonly TokenMatch[] = [
 	["not", "logged", "in"],
@@ -198,6 +201,17 @@ export function authDecision(code: WorkflowFailureCode): WorkflowFailureDecision
 			recoverability: "recoverable",
 			disposition: "active_blocked",
 			userMessage: WORKFLOW_MISSING_API_KEY_FAILURE_MESSAGE,
+		};
+	}
+	if (code === "auth_timeout") {
+		return {
+			kind: "auth",
+			code,
+			retryable: true,
+			resumable: true,
+			recoverability: "recoverable",
+			disposition: "active_blocked",
+			userMessage: WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE,
 		};
 	}
 	return {
@@ -334,6 +348,7 @@ export function decisionFromMessageTokens(
 	if (hasAnyPhrase(tokens, RATE_LIMIT_PHRASES)) return rateLimitDecision("rate_limited", retryAfterMs);
 	if (hasInvalidApiKeyMessage(tokens)) return authDecision("invalid_api_key");
 	if (hasAnyPhrase(tokens, MISSING_API_KEY_PHRASES)) return authDecision("missing_api_key");
+	if (hasAnyPhrase(tokens, REQUEST_AUTH_TIMEOUT_PHRASES)) return authDecision("auth_timeout");
 	if (hasAnyPhrase(tokens, LOGIN_REQUIRED_PHRASES) || tokenNearAny(tokens, "oauth", AUTH_CONTEXT, 8))
 		return authDecision("login_required");
 	if (hasAnyPhrase(tokens, UNKNOWN_MODEL_PHRASES)) return terminalProviderConfigDecision("unknown_model");

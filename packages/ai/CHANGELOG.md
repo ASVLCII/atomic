@@ -1,8 +1,20 @@
 # Changelog
 
-This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at the audited Pi `main` sync point (`92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c`) lives in [earendil-works/pi](https://github.com/earendil-works/pi/blob/92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c/packages/ai/CHANGELOG.md).
+This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at the audited Pi `main` sync point (`6671c604766b3670ed95f405aa7856835d0ca702`) lives in [earendil-works/pi](https://github.com/earendil-works/pi/blob/6671c604766b3670ed95f405aa7856835d0ca702/packages/ai/CHANGELOG.md).
 
 ## [Unreleased]
+
+### Fixed
+
+- Request-auth preparation now times out after 15 seconds when OAuth refresh, credential-store reads, or auth derivation ignore cancellation, and late refresh results cannot overwrite stored credentials. The timeout diagnostic is source-neutral and does not instruct you to log in ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+
+## [0.9.20-alpha.3] - 2026-09-16
+
+### Fixed
+
+- Fixed OpenAI-compatible Responses errors to identify the actual provider instead of always labeling them as OpenAI errors ([#9298](https://github.com/earendil-works/pi/issues/9298)).
+- Fixed Amazon Bedrock one-hour cache writes being priced at the five-minute rate ([#9457](https://github.com/earendil-works/pi/issues/9457)).
+- Fixed Baseten requests to send session-affinity headers from `sessionId` for automatic prompt-cache routing ([#9629](https://github.com/earendil-works/pi/issues/9629)).
 
 ## [0.9.19] - 2026-09-13
 

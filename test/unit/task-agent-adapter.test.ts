@@ -211,10 +211,12 @@ for (const [label, policy, reason] of [
 	["owner foreground budget", { kind: "foreground" }, "elapsed"],
 ] satisfies Array<[string, WaitPolicy, string]>) {
 	test(`${label} releases observation while the same subagent completes later`, async () => {
+		const settled = deferred<SettlementReceipt>();
 		const owner = new AgentTaskHost({
 			scope: { kind: "session", sessionId: randomUUID() },
 			tasks: { wait: { kind: "automatic", agentBudgetMs: 1 } },
 			authorizeLaunch() {},
+			onTaskSettled: (_ref, receipt) => settled.resolve(receipt),
 		});
 		const result = deferred<TaskResult>();
 		let starts = 0;
@@ -248,6 +250,9 @@ for (const [label, policy, reason] of [
 			};
 			const terminal: TaskResult = { kind: "completed", output };
 			result.resolve(terminal);
+			const receipt = await settled.promise;
+			assert.equal(receipt.taskId, started.value.taskId);
+			assert.deepEqual(receipt.result, terminal);
 			assert.deepEqual(await owner.waitForTask(started.value.taskId), {
 				ok: true,
 				value: { kind: "settled", taskId: started.value.taskId, result: terminal },

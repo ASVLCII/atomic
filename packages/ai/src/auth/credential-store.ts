@@ -45,9 +45,10 @@ export class InMemoryCredentialStore implements CredentialStore {
 		return this.enqueue(
 			providerId,
 			async () => {
+				const signal = operationSignal(options?.signal);
 				const current = this.credentials.get(providerId);
-				const next = await fn(current);
-				options?.signal?.throwIfAborted();
+				const next = await raceWithAbortSignal(fn(current), signal);
+				signal.throwIfAborted();
 				if (next !== undefined) this.credentials.set(providerId, next);
 				return next ?? current;
 			},

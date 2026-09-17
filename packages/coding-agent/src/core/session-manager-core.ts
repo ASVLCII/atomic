@@ -1,6 +1,6 @@
 import type { ImageContent, Message, TextContent, Usage } from "@bastani/pi-ai/compat";
-import { existsSync, statSync } from "fs";
-import { resolve } from "path";
+import { existsSync, readdirSync, statSync } from "fs";
+import { join, resolve } from "path";
 import { APP_TITLE } from "../config.js";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import type { VerbatimCompactionDetails } from "./compaction/compaction-types.js";
@@ -30,8 +30,12 @@ import { getDefaultSessionDir, getDefaultSessionDirPath } from "./session-manage
 import {
 	ensureDirectory,
 	findMostRecentSession,
+	getSessionHeaderCwd,
+	isInternalHeader,
 	loadEntriesFromFile,
 	persistAppendedEntry,
+	readSessionHeader,
+	sessionCwdMatches,
 	writeSessionEntries,
 } from "./session-manager-storage.ts";
 import type {
@@ -510,6 +514,26 @@ export class SessionManager {
 	): SessionManager {
 		const forked = forkSessionFromFile(sourcePath, targetCwd, sessionDir, options);
 		return new SessionManager(forked.cwd, forked.sessionDir, forked.sessionFile, true);
+	}
+
+	/** Find an exact, non-internal session ID by reading headers, not transcripts. */
+	static findById(cwd: string, id: string, sessionDir?: string): string | undefined {
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
+		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const resolvedCwd = resolvePath(cwd);
+		try {
+			for (const file of readdirSync(dir)) {
+				if (!file.endsWith(".jsonl")) continue;
+				const path = join(dir, file);
+				const header = readSessionHeader(path);
+				if (header?.id !== id || isInternalHeader(header)) continue;
+				if (filterCwd && !sessionCwdMatches(getSessionHeaderCwd(header), resolvedCwd)) continue;
+				return path;
+			}
+		} catch {
+			// Discovery is best-effort, matching list().
+		}
+		return undefined;
 	}
 
 	/** List sessions for a directory. Internal (workflow) sessions are excluded unless `includeInternal: true`. */
