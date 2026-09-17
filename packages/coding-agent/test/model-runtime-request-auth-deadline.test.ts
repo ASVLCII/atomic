@@ -1,3 +1,4 @@
+import { AssistantMessageEventStream } from "@bastani/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
@@ -66,6 +67,7 @@ describe("ModelRuntime request-auth deadline", () => {
 			await vi.advanceTimersByTimeAsync(1);
 			expect(settled?.stopReason).toBe("error");
 			expect(settled?.errorMessage).toMatch(/authentication timed out/i);
+			expect(settled?.errorMessage).not.toMatch(/log in/i);
 		},
 	);
 
@@ -113,5 +115,133 @@ describe("ModelRuntime request-auth deadline", () => {
 
 		expect(result.stopReason).toBe("error");
 		expect(providerCalls).toBe(0);
+	});
+
+	it("reuses prepared request auth and still honors abort before dispatch (#3087)", async () => {
+		let resolveCalls = 0;
+		let providerCalls = 0;
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory({
+				"oauth-reuse": {
+					type: "oauth",
+					access: "valid-access",
+					refresh: "refresh-token",
+					expires: Number.MAX_SAFE_INTEGER,
+				},
+			}),
+			modelsPath: null,
+			refreshOnCreate: false,
+		});
+		const original = runtime.getRequestAuth.bind(runtime);
+		runtime.getRequestAuth = (async (model, overrides) => {
+			resolveCalls++;
+			return original(model, overrides);
+		}) as typeof runtime.getRequestAuth;
+		runtime.registerProvider("oauth-reuse", {
+			baseUrl: "https://example.test/v1",
+			api: "openai-completions",
+			oauth: {
+				name: "OAuth Reuse",
+				login: async () => ({ access: "a", refresh: "r", expires: Date.now() + 60_000 }),
+				refreshToken: async (credential) => credential,
+				getApiKey: (credential) => credential.access,
+			},
+			streamSimple: () => {
+				providerCalls++;
+				throw new Error("provider must not run");
+			},
+			models: [testModel("reuse-model")],
+		});
+		const model = runtime.getModel("oauth-reuse", "reuse-model");
+		expect(model).toBeDefined();
+		const resolution = await original(model!);
+		expect(resolution).toBeDefined();
+		resolveCalls = 0;
+
+		const controller = new AbortController();
+		controller.abort();
+		const result = await runtime.completeSimple(
+			model!,
+			{ messages: [] },
+			{
+				preparedRequestAuth: { resolution },
+				signal: controller.signal,
+			},
+		);
+		expect(result.stopReason).toBe("error");
+		expect(resolveCalls).toBe(0);
+		expect(providerCalls).toBe(0);
+	});
+
+	it("dispatches with prepared request auth without a second credential resolution (#3087)", async () => {
+		let resolveCalls = 0;
+		let providerCalls = 0;
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory({
+				"oauth-prepared": {
+					type: "oauth",
+					access: "valid-access",
+					refresh: "refresh-token",
+					expires: Number.MAX_SAFE_INTEGER,
+				},
+			}),
+			modelsPath: null,
+			refreshOnCreate: false,
+		});
+		const original = runtime.getRequestAuth.bind(runtime);
+		runtime.getRequestAuth = (async (model, overrides) => {
+			resolveCalls++;
+			return original(model, overrides);
+		}) as typeof runtime.getRequestAuth;
+		runtime.registerProvider("oauth-prepared", {
+			baseUrl: "https://example.test/v1",
+			api: "openai-completions",
+			oauth: {
+				name: "OAuth Prepared",
+				login: async () => ({ access: "a", refresh: "r", expires: Date.now() + 60_000 }),
+				refreshToken: async (credential) => credential,
+				getApiKey: (credential) => credential.access,
+			},
+			streamSimple: (model) => {
+				providerCalls++;
+				const stream = new AssistantMessageEventStream();
+				const msg = {
+					role: "assistant" as const,
+					content: [{ type: "text" as const, text: "ok" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop" as const,
+					timestamp: Date.now(),
+				};
+				stream.push({ type: "start", partial: msg });
+				stream.push({ type: "done", reason: "stop", message: msg });
+				stream.end(msg);
+				return stream;
+			},
+			models: [testModel("prepared-model")],
+		});
+		const model = runtime.getModel("oauth-prepared", "prepared-model");
+		expect(model).toBeDefined();
+		const resolution = await original(model!);
+		resolveCalls = 0;
+		const result = await runtime.completeSimple(
+			model!,
+			{ messages: [] },
+			{
+				preparedRequestAuth: { resolution },
+			},
+		);
+		expect(result.stopReason).toBe("stop");
+		expect(resolveCalls).toBe(0);
+		expect(providerCalls).toBe(1);
 	});
 });

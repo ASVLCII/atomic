@@ -196,6 +196,8 @@ const proseNames = new Set([
 	"web_search",
 	"repoName",
 	"query",
+	// PR #3082: Herdr's installed Pi integration reports the agent identity `pi`, not a package-root export.
+	"pi",
 	// Subagent tool/action names and targeting fields are not package-root exports.
 	"subagent",
 	"interrupt",

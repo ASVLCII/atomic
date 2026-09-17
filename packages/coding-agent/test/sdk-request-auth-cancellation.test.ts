@@ -15,6 +15,7 @@ import { createTestResourceLoader } from "./utilities.ts";
 // Issue #3085
 
 const REQUEST_AUTH_PREPARATION_TIMEOUT_MS = 15_000;
+const FIRST_AUTH_DELAY_MS = 14_000;
 const DEFAULT_AGENT_RETRY_BACKOFF_MS = 14_000;
 
 function deferred<T = void>() {
@@ -281,6 +282,7 @@ describe("createAgentSession request-auth cancellation", () => {
 		const all = diskErrors(f.manager);
 		expect(all).toHaveLength(5);
 		expect(all.at(-1)?.message.errorMessage).toMatch(/authentication timed out/i);
+		expect(all.at(-1)?.message.errorMessage).not.toMatch(/log in/i);
 		expect(f.calls()).toBe(0);
 	});
 
@@ -383,6 +385,7 @@ describe("createAgentSession request-auth cancellation", () => {
 		expect(turns).toBe(1);
 		expect(f.calls()).toBe(1);
 		expect(diskErrors(f.manager).at(-1)?.message.errorMessage).toMatch(/authentication timed out/i);
+		expect(diskErrors(f.manager).at(-1)?.message.errorMessage).not.toMatch(/log in/i);
 	});
 
 	it.each(["quiet", "streaming"] as const)("keeps a healthy %s stream open past the auth bound", async (mode) => {
@@ -540,5 +543,63 @@ describe("createAgentSession request-auth cancellation", () => {
 		expect(f.calls()).toBe(1);
 		expect(f.session.getLastAssistantText()).toBe("ok");
 		expect(diskErrors(f.manager)).toHaveLength(4);
+	});
+
+	it("reuses SDK request auth so a slow first resolution cannot start a second 15s deadline (#3087)", async () => {
+		const f = await fixture({
+			refresh: async (credential) => ({ ...credential, expires: Number.MAX_SAFE_INTEGER }),
+		});
+		const original = f.runtime.getRequestAuth.bind(f.runtime);
+		let authCalls = 0;
+		let allow = 1;
+		f.runtime.getRequestAuth = (async (model, overrides) => {
+			authCalls++;
+			if (authCalls > allow) return new Promise(() => {});
+			if (authCalls === 1) {
+				await new Promise((resolve) => setTimeout(resolve, FIRST_AUTH_DELAY_MS));
+			}
+			return original(model, overrides);
+		}) as typeof f.runtime.getRequestAuth;
+
+		vi.useFakeTimers();
+		let done = false;
+		const pending = f.session.prompt("go").finally(() => {
+			done = true;
+		});
+		await vi.advanceTimersByTimeAsync(FIRST_AUTH_DELAY_MS - 1);
+		expect(done).toBe(false);
+		expect(f.calls()).toBe(0);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(done).toBe(true);
+		await pending;
+		expect(authCalls).toBe(1);
+		expect(f.calls()).toBe(1);
+
+		allow = 2;
+		const second = f.session.prompt("again");
+		await vi.advanceTimersByTimeAsync(0);
+		await second;
+		expect(authCalls).toBe(2);
+		expect(f.calls()).toBe(2);
+	});
+
+	it("fails a never-settling first auth at 15s with no dispatch (#3085)", async () => {
+		const f = await fixture({
+			refresh: async () => new Promise(() => {}),
+		});
+		vi.useFakeTimers();
+		let done = false;
+		const pending = f.session.prompt("go").finally(() => {
+			done = true;
+		});
+		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS - 1);
+		expect(done).toBe(false);
+		expect(f.calls()).toBe(0);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(done).toBe(true);
+		await pending;
+		expect(f.calls()).toBe(0);
+		expect(diskErrors(f.manager).at(-1)?.message.errorMessage).toMatch(/authentication timed out/i);
+		expect(diskErrors(f.manager).at(-1)?.message.errorMessage).not.toMatch(/log in/i);
 	});
 });

@@ -5,28 +5,37 @@ import { join } from "node:path";
 import { setTimeout as realSleep } from "node:timers/promises";
 import { type AssistantMessage, createAssistantMessageEventStream } from "@bastani/pi-ai/compat";
 import { test, vi } from "vitest";
-import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.ts";
-import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.ts";
-import { createAgentSession } from "../../packages/coding-agent/src/core/sdk.ts";
-import { SessionManager } from "../../packages/coding-agent/src/core/session-manager.ts";
-import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.ts";
-import { createTestResourceLoader } from "../../packages/coding-agent/test/utilities.ts";
-import { workflow } from "../../packages/workflows/src/authoring/workflow.ts";
-import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.ts";
-import { setDurableBackend } from "../../packages/workflows/src/durable/factory.ts";
+import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.js";
+import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
+import { createAgentSession } from "../../packages/coding-agent/src/core/sdk.js";
+import { SessionManager } from "../../packages/coding-agent/src/core/session-manager.js";
+import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
+import { createTestResourceLoader } from "../../packages/coding-agent/test/utilities.js";
+import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
+import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
+import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import {
 	installWorkflowLifecycleNotifications,
 	LIFECYCLE_NOTICE_CUSTOM_TYPE,
-} from "../../packages/workflows/src/extension/lifecycle-notifications.ts";
-import { createExtensionRuntime, type ExtensionRuntimeOpts } from "../../packages/workflows/src/extension/runtime.ts";
-import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.ts";
-import type { StageSessionRuntime } from "../../packages/workflows/src/runs/foreground/stage-runner-types.ts";
-import { effectiveRunStatus } from "../../packages/workflows/src/shared/returned-run-status.ts";
-import { createStore } from "../../packages/workflows/src/shared/store.ts";
-import { createRegistry } from "../../packages/workflows/src/workflows/registry.ts";
-import { createMockSdk } from "./durable-dbos-backend-helpers.ts";
+} from "../../packages/workflows/src/extension/lifecycle-notifications.js";
+import { createExtensionRuntime, type ExtensionRuntimeOpts } from "../../packages/workflows/src/extension/runtime.js";
+import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
+import type { StageSessionRuntime } from "../../packages/workflows/src/runs/foreground/stage-runner-types.js";
+import { effectiveRunStatus } from "../../packages/workflows/src/shared/returned-run-status.js";
+import { createStore } from "../../packages/workflows/src/shared/store.js";
+import { WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE } from "../../packages/workflows/src/shared/workflow-failures.js";
+import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
+import { createMockSdk } from "./durable-dbos-backend-helpers.js";
 
-// Issue #3085
+// Issue #3085 / #3087
+
+/**
+ * Wall-clock slice per status poll. Fake time still covers retry/auth delays.
+ * 5ms × 60 (~300ms) was load-sensitive after durable resume (#3085/#3087).
+ */
+const RUN_STATUS_POLL_REAL_MS = 50;
+const RUN_STATUS_POLL_FAKE_MS = 1_000;
+const RUN_STATUS_POLL_ATTEMPTS = 60;
 
 const spec = {
 	id: "m",
@@ -219,20 +228,24 @@ test("fabricated provider exhaustion becomes blocked, durably discoverable, and 
 
 		for (
 			let i = 0;
-			i < 60 && effectiveRunStatus(store.runs().find((run) => run.id === startedRun.runId)!) !== "blocked";
+			i < RUN_STATUS_POLL_ATTEMPTS &&
+			effectiveRunStatus(store.runs().find((run) => run.id === startedRun.runId)!) !== "blocked";
 			i++
 		) {
-			await realSleep(5);
-			await vi.advanceTimersByTimeAsync(1000);
+			await realSleep(RUN_STATUS_POLL_REAL_MS);
+			await vi.advanceTimersByTimeAsync(RUN_STATUS_POLL_FAKE_MS);
 		}
 		const source = store.runs().find((run) => run.id === startedRun.runId);
 		assert.ok(source);
 		assert.equal(effectiveRunStatus(source), "blocked", JSON.stringify(source));
 		assert.equal(source.failureKind, "auth");
-		assert.equal(source.failureCode, "login_required");
+		assert.equal(source.failureCode, "auth_timeout");
 		assert.equal(source.failureDisposition, "active_blocked");
 		assert.equal(source.failureRecoverability, "recoverable");
 		assert.equal(source.resumable, true);
+		assert.equal(source.error, WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE);
+		assert.doesNotMatch(source.failureMessage ?? "", /log in/i);
+		assert.doesNotMatch(source.failureMessage ?? "", /\/login/);
 		assert.equal(prefix, 1);
 
 		const blocks = () => notices.filter((notice) => notice.details?.kind === "blocked");
@@ -276,9 +289,9 @@ test("fabricated provider exhaustion becomes blocked, durably discoverable, and 
 		const resuming = recoveryRuntime.resumeDurableWorkflow(source.id).then((result) => {
 			resumed = result;
 		});
-		for (let i = 0; i < 100 && resumed === undefined; i++) {
+		for (let i = 0; i < RUN_STATUS_POLL_ATTEMPTS && resumed === undefined; i++) {
 			vi.useRealTimers();
-			await realSleep(5);
+			await realSleep(RUN_STATUS_POLL_REAL_MS);
 			vi.useFakeTimers();
 			await vi.advanceTimersByTimeAsync(1);
 		}
@@ -290,11 +303,12 @@ test("fabricated provider exhaustion becomes blocked, durably discoverable, and 
 
 		for (
 			let i = 0;
-			i < 60 && effectiveRunStatus(restoredStore.runs().find((run) => run.id === resumedRun.runId)!) !== "completed";
+			i < RUN_STATUS_POLL_ATTEMPTS &&
+			effectiveRunStatus(restoredStore.runs().find((run) => run.id === resumedRun.runId)!) !== "completed";
 			i++
 		) {
-			await realSleep(5);
-			await vi.advanceTimersByTimeAsync(1000);
+			await realSleep(RUN_STATUS_POLL_REAL_MS);
+			await vi.advanceTimersByTimeAsync(RUN_STATUS_POLL_FAKE_MS);
 		}
 		const continuation = restoredStore.runs().find((run) => run.id === resumedRun.runId);
 		assert.ok(continuation);

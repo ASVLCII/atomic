@@ -127,7 +127,7 @@ test(
 			assert.ok(source);
 			assert.equal(effectiveRunStatus(source), "blocked", JSON.stringify(source));
 			assert.equal(source.failureKind, "auth");
-			assert.equal(source.failureCode, "login_required");
+			assert.equal(source.failureCode, "auth_timeout");
 			assert.equal(source.failureDisposition, "active_blocked");
 			assert.equal(source.failureRecoverability, "recoverable");
 			assert.equal(source.resumable, true);

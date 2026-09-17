@@ -515,7 +515,8 @@ describe("model fallback helpers", () => {
 		const failure = {
 			role: "assistant",
 			stopReason: "error",
-			errorMessage: "Request authentication timed out for openai-codex. Please log in to continue.",
+			errorMessage:
+				"Request authentication timed out for openai-codex. Check the provider's credential source and try again.",
 		};
 		assert.equal(isRetryableModelFailure(failure), true);
 		assert.equal(normalizeModelFailureSignal(failure).kind, "auth_on_candidate_provider");

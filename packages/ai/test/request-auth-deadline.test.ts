@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 import type { ApiKeyAuth, OAuthAuth, OAuthCredential, ProviderAuth } from "../src/auth/types.ts";
-import { createModels, type Provider, REQUEST_AUTH_PREPARATION_TIMEOUT_MS } from "../src/models.ts";
+import { createModels, type Provider, REQUEST_AUTH_PREPARATION_TIMEOUT_MS, requestAuthTimeoutMessage } from "../src/models.ts";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions, StreamOptions } from "../src/types.ts";
 import { AssistantMessageEventStream } from "../src/utils/event-stream.ts";
 
@@ -98,6 +98,12 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+function expectAuthTimeoutError(error: unknown, providerId = "p1"): void {
+	expect(error).toMatchObject({ name: "ModelsError", code: "auth" });
+	expect((error as Error).message).toBe(requestAuthTimeoutMessage(providerId));
+	expect((error as Error).message).not.toMatch(/log in/i);
+}
+
 describe("request-auth preparation deadline", () => {
 	it("settles a signal-ignoring OAuth refresh at 15_000ms, not 14_999ms", async () => {
 		vi.useFakeTimers();
@@ -130,7 +136,7 @@ describe("request-auth preparation deadline", () => {
 		expect(settled).toBeUndefined();
 
 		await vi.advanceTimersByTimeAsync(1);
-		expect(settled).toMatchObject({ name: "ModelsError", code: "auth" });
+		expectAuthTimeoutError(settled);
 		expect(await credentials.read("p1")).toEqual(expiredOAuth);
 	});
 
@@ -164,7 +170,8 @@ describe("request-auth preparation deadline", () => {
 
 		await vi.advanceTimersByTimeAsync(1);
 		expect(settled?.stopReason).toBe("error");
-		expect(settled?.errorMessage).toMatch(/authentication timed out/i);
+		expect(settled?.errorMessage).toBe(requestAuthTimeoutMessage("p1"));
+		expect(settled?.errorMessage).not.toMatch(/log in/i);
 		expect(calls).toHaveLength(0);
 	});
 
@@ -200,7 +207,7 @@ describe("request-auth preparation deadline", () => {
 		);
 
 		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS);
-		expect(settled).toMatchObject({ name: "ModelsError", code: "auth" });
+		expectAuthTimeoutError(settled);
 
 		finishRefresh?.({ type: "oauth", access: "stale", refresh: "r2", expires: Date.now() + 60_000 });
 		await Promise.resolve();
@@ -242,7 +249,7 @@ describe("request-auth preparation deadline", () => {
 		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS - 1);
 		expect(settled).toBeUndefined();
 		await vi.advanceTimersByTimeAsync(1);
-		expect(settled).toMatchObject({ name: "ModelsError", code: "auth" });
+		expectAuthTimeoutError(settled);
 	});
 
 	it("rejects already-aborted request auth without starting refresh", async () => {
@@ -290,5 +297,124 @@ describe("request-auth preparation deadline", () => {
 		expect(result.stopReason).toBe("stop");
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.options?.signal?.aborted).not.toBe(true);
+	});
+
+	it("times out a hung credential-store read with a source-neutral diagnostic (#3087)", async () => {
+		vi.useFakeTimers();
+		const credentials = new InMemoryCredentialStore();
+		credentials.read = async () => new Promise(() => {});
+		const calls: ProviderCall[] = [];
+		const models = createModels({ credentials });
+		models.setProvider(testProvider({ id: "p1", calls }));
+
+		const pending = models.getAuth("p1");
+		let settled: unknown;
+		void pending.then(
+			(value) => {
+				settled = value;
+			},
+			(error: unknown) => {
+				settled = error;
+			},
+		);
+
+		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS - 1);
+		expect(settled).toBeUndefined();
+		await vi.advanceTimersByTimeAsync(1);
+		expectAuthTimeoutError(settled);
+		expect(calls).toHaveLength(0);
+	});
+
+	it("times out a hung ambient resolver with a source-neutral diagnostic (#3087)", async () => {
+		vi.useFakeTimers();
+		const calls: ProviderCall[] = [];
+		const models = createModels();
+		models.setProvider(
+			testProvider({
+				id: "p1",
+				auth: {
+					apiKey: {
+						name: "Ambient",
+						resolve: async () => new Promise(() => {}),
+					},
+				},
+				calls,
+			}),
+		);
+
+		const pending = models.completeSimple(testModel("p1", "model-a"), context);
+		let settled: AssistantMessage | undefined;
+		void pending.then((message) => {
+			settled = message;
+		});
+
+		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS - 1);
+		expect(settled).toBeUndefined();
+		expect(calls).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(settled?.stopReason).toBe("error");
+		expect(settled?.errorMessage).toBe(requestAuthTimeoutMessage("p1"));
+		expect(settled?.errorMessage).not.toMatch(/log in/i);
+		expect(calls).toHaveLength(0);
+	});
+
+	it("times out a hung explicit API-key resolver without login guidance (#3087)", async () => {
+		vi.useFakeTimers();
+		const models = createModels();
+		models.setProvider(
+			testProvider({
+				id: "p1",
+				auth: {
+					apiKey: {
+						name: "Key",
+						resolve: async () => new Promise(() => {}),
+					},
+				},
+			}),
+		);
+
+		const pending = models.getAuth("p1", { apiKey: "explicit" });
+		let settled: unknown;
+		void pending.then(
+			(value) => {
+				settled = value;
+			},
+			(error: unknown) => {
+				settled = error;
+			},
+		);
+
+		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS);
+		expectAuthTimeoutError(settled);
+	});
+
+	it("times out a hung stored API-key resolver without dispatch (#3087)", async () => {
+		vi.useFakeTimers();
+		const credentials = new InMemoryCredentialStore();
+		await credentials.modify("p1", async () => ({ type: "api_key", key: "stored" }));
+		const calls: ProviderCall[] = [];
+		const models = createModels({ credentials });
+		models.setProvider(
+			testProvider({
+				id: "p1",
+				auth: {
+					apiKey: {
+						name: "Key",
+						resolve: async () => new Promise(() => {}),
+					},
+				},
+				calls,
+			}),
+		);
+
+		const pending = models.completeSimple(testModel("p1", "model-a"), context);
+		let settled: AssistantMessage | undefined;
+		void pending.then((message) => {
+			settled = message;
+		});
+		await vi.advanceTimersByTimeAsync(REQUEST_AUTH_PREPARATION_TIMEOUT_MS);
+		expect(settled?.stopReason).toBe("error");
+		expect(settled?.errorMessage).toBe(requestAuthTimeoutMessage("p1"));
+		expect(calls).toHaveLength(0);
 	});
 });

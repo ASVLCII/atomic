@@ -18,6 +18,11 @@ export type ModelsErrorCode = "model_source" | "model_validation" | "provider" |
 /** Bound for pre-transport request-auth work: credential read, OAuth refresh, and toAuth. */
 export const REQUEST_AUTH_PREPARATION_TIMEOUT_MS = 15_000;
 
+/** Source-neutral diagnostic when pre-transport request auth exceeds {@link REQUEST_AUTH_PREPARATION_TIMEOUT_MS}. */
+export function requestAuthTimeoutMessage(providerId: string): string {
+	return `Request authentication timed out for ${providerId}. Check the provider's credential source and try again.`;
+}
+
 export interface AuthResolutionOverrides {
 	apiKey?: string;
 	env?: ProviderEnv;
@@ -74,7 +79,7 @@ export function resolveProviderAuth(
 			if (timeout.signal.aborted && !caller.aborted) {
 				throw new ModelsError(
 					"auth",
-					`Request authentication timed out for ${provider.id}. Please log in to continue.`,
+					requestAuthTimeoutMessage(provider.id),
 				);
 			}
 			throw error;
