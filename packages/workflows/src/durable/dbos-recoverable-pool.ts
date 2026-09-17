@@ -85,7 +85,11 @@ export function createRecoverablePostgresPool(
 		try {
 			client = await physical.connect();
 		} catch (error) {
-			if (!closed && current === physical) {
+			// pg-pool's queue timeout is admission pressure, not a failed socket.
+			// It has no error code; new-client timeouts use a different message.
+			const admissionTimeout =
+				error instanceof Error && !("code" in error) && error.message === "timeout exceeded when trying to connect";
+			if (!admissionTimeout && !closed && current === physical) {
 				invalidate();
 				if (error instanceof Error) options.onConnectionError?.(error);
 			}
