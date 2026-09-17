@@ -151,6 +151,13 @@ for (const [endpoint, path, clientId, secret] of [
 		"public",
 		"PRIVATE_INTERPOLATED_CREDENTIAL",
 	],
+	// Regression for #3088: the credential remains sensitive without its configured prefix.
+	[
+		`https://example.com/access-\${RISK_TOKEN}/mcp`,
+		"/PRIVATE_INTERPOLATED_CREDENTIAL/authorize",
+		"public",
+		"PRIVATE_INTERPOLATED_CREDENTIAL",
+	],
 	["https://example.com/mcp", "/authorize", "mcp", ""],
 	["https://example.com/mcp", "/mcp/authorize", "public", ""],
 	["https://example.com/api/v2/my-service", "/api/v2/my-service/authorize", "my-service", ""],

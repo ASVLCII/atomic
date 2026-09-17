@@ -68,7 +68,8 @@ export function authorizationUrlContainsEndpointCredentials(url: URL, endpoint: 
 	const pathComponents = new URL(endpoint).pathname.split("/").filter((part) =>
 		!/^(?:[a-z]+(?:[-_][a-z]+)*|v\d+)$/.test(part) || substitutions.some((value) => part.includes(value)),
 	);
-	return endpointCredentialPattern(endpoint, pathComponents)?.test(url.href) ?? false;
+	// A discovered authorization URL may reuse a substitution without its literal prefix.
+	return endpointCredentialPattern(endpoint, [...pathComponents, ...substitutions])?.test(url.href) ?? false;
 }
 
 function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
