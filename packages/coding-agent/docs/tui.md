@@ -623,8 +623,8 @@ ctx.ui.setWidget("my-widget", (_tui, theme) => {
 ctx.ui.setWidget("my-widget", undefined);
 ```
 
-Hosts may clear extension widgets during a UI reset. A reactive extension that needs to keep a long-lived widget registration can observe `ctx.ui.onWidgetRelease(key, listener)` when available.
-The listener runs after the host removes that key, so the extension can reset local mount state and re-register on its next refresh. Ordinary content changes should continue to update the existing component with `requestRender()` rather than repeatedly calling `setWidget()`.
+Hosts may clear extension widgets during a UI reset, and `ctx.ui.setWidget(key, undefined)` is the same kind of host removal. A reactive extension that needs to keep a long-lived widget registration can observe `ctx.ui.onWidgetRelease(key, listener)` when available.
+The listener runs after the host removes that key, so the extension can reset local mount state and re-register on its next refresh. Replacing a widget with another factory is not a release. Ordinary content changes should continue to update the existing component with `requestRender()` rather than repeatedly calling `setWidget()`.
 
 #### Scrollable widgets
 

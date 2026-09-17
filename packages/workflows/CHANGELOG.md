@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+- The BACKGROUND panel stays mounted across top-level `/reload` while a run is still awaiting input; status and connect keep targeting the same pending prompt ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
