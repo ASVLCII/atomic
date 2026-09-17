@@ -28,6 +28,7 @@ Release tag push (`0.9.10` or `0.9.10-alpha.1`)
    │  published release
    ├─ publish-npm: tokenless OIDC publication, skipping existing versions
    ├─ publish-github-release: undraft only after npm succeeds
+   ├─ register-published-version: register the published version with a GitHub OIDC JWT
    └─ cleanup-draft-github-release: delete a draft when later work fails
 
 Manual dispatch on `main`
@@ -149,7 +150,11 @@ detection through `/etc/alpine-release`.
 
 A manual dispatch is available only for release recovery. It requires `tag` and accepts optional `source_ref`; when omitted, `source_ref` defaults to the tag. The integrity job always verifies the release tag itself. Native, smoke, and payload builds consume `source_ref`, matching pi's recovery model; payload metadata validation still requires the recovery source's package version to equal the release tag.
 
-For a workflow-only repair, dispatch with `--ref` selecting the reviewed branch containing the corrected workflow, supply the original `tag`, and omit `source_ref`. This executes the corrected workflow while building the unchanged tagged source. `source_ref` selects build inputs, not the workflow definition. Do not move the release tag to repair CI tooling.
+For a workflow-only repair of integrity, native, smoke, payload, npm, or GitHub Release jobs, dispatch with `--ref` selecting the reviewed branch containing the corrected workflow, supply the original `tag`, and omit `source_ref`. This executes the corrected workflow while building the unchanged tagged source. `source_ref` selects build inputs, not the workflow definition. Do not move the release tag to repair CI tooling.
+
+Published-version registration does not follow that branch-ref path. The Worker accepts `push` and `workflow_dispatch` only when the OIDC `ref`, `workflow_ref`, and `sub` equal `refs/tags/<version>` for that version. A dispatch from a repaired branch therefore mints `refs/heads/...` claims and the Worker returns a terminal HTTP 401, even if npm and GitHub publication succeed. That 401 is the trust contract, not a service outage. Do not broaden OIDC to accept branch refs.
+
+Registration recovery is rerunning the failed `register-published-version` job on a run whose ref is already the tag (the original tag push, or a dispatch whose `--ref` is the tag), or dispatching at the tag itself. A branch-ref dispatch cannot register. If the registration job YAML on the tag is wrong, fix it in a later tagged release rather than moving the tag.
 
 Concurrency is scoped per release tag and does not cancel an in-progress publication.
 
@@ -367,16 +372,20 @@ The npm job uses environment `npm-publish` with only `contents: read` and `id-to
 
 That order publishes native leaves first, then the native root, then `@bastani/pi-ai`, then the coding agent. A package version already present in the registry is logged and skipped, making recovery idempotent. Stable versions use `latest`; alpha versions use `next`. No static npm credential is configured. The first `@bastani/pi-ai` version cannot use trusted publishing until that package exists on npm.
 
+## Published-version registration
+
+After the GitHub Release is public, `register-published-version` requests a GitHub Actions OIDC token for audience `https://atomic-version-adoption.norin.workers.dev/v1/published-versions` and POSTs the exact integrity version. The job has `contents: read` and `id-token: write`, no environment, and does not mutate npm packages or GitHub Releases on failure. It parses `ACTIONS_ID_TOKEN_REQUEST_URL` as an HTTPS URL whose host is `actions.githubusercontent.com` or a subdomain of it, with no userinfo and no non-default port. That host is the runner-provided token acquisition endpoint; it is not assumed to equal the JWT issuer `https://token.actions.githubusercontent.com`. The Worker still verifies the minted JWT against GitHub's JWKS and the tag claims. Transport failures, including curl status `000`, are retried up to three times; authentication failures are terminal. The failed job can be rerun independently on a tag-ref run. A branch-ref recovery dispatch cannot satisfy registration OIDC claims.
+
 ## Permissions and time limits
 
-Repository-wide workflow permissions are read-only. Only draft staging, undrafting, and failed-draft cleanup receive `contents: write`. Only npm publication receives `id-token: write`; it never receives repository write permission. Every job has an explicit timeout.
+Repository-wide workflow permissions are read-only. Only draft staging, undrafting, and failed-draft cleanup receive `contents: write`. npm publication and published-version registration receive `id-token: write`; neither receives repository write permission. Registration has no GitHub environment. Failure of registration does not republish npm packages or mutate the GitHub Release. Every job has an explicit timeout.
 
 ## Workflow files
 
 | File | Trigger | Purpose |
 | --- | --- | --- |
 | `.github/workflows/test.yml` | pushes to `main`; every pull request | workspace tests and cross-platform release smoke |
-| `.github/workflows/publish.yml` | release tag push; manual recovery dispatch | verify, build, stage draft, publish npm, undraft, clean failed drafts |
+| `.github/workflows/publish.yml` | release tag push; manual recovery dispatch | verify, build, stage draft, publish npm, undraft, register the published version, clean failed drafts |
 | `.github/workflows/warm-toolchain-cache.yml` | manual dispatch (see gate above) | write the Zig and MSVC CRT cache keys into the default-branch scope |
 
 ## Repository-local release workflow gates
@@ -395,5 +404,5 @@ Both polling doors run through durable `ctx.tool` nodes, forward their `AbortSig
 2. Require the selected base's normal CI to pass.
 3. From a clean checkout, run `bun run scripts/cut-release.ts <version> --base <base> --push`.
 4. Inspect the single `Publish <version>` push run. Do not start a duplicate manual run during normal publication.
-5. If recovery is required, manually dispatch `publish.yml` with the original `tag`; set `source_ref` to the exact recovery ref whose package version still matches that tag.
+5. If publication recovery is required, manually dispatch `publish.yml` with the original `tag`; set `source_ref` to the exact recovery ref whose package version still matches that tag. If only registration failed, rerun that job on the tag-ref run, or dispatch with `--ref` equal to the tag. A branch-ref dispatch will 401 at registration.
 6. Confirm all eleven npm packages and the public GitHub Release exist with the expected dist-tag and assets.
