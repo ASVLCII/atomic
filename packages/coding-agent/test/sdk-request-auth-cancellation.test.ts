@@ -546,20 +546,24 @@ describe("createAgentSession request-auth cancellation", () => {
 	});
 
 	it("reuses SDK request auth so a slow first resolution cannot start a second 15s deadline (#3087)", async () => {
+		// Delay the real OAuth toAuth inside the resolver deadline. Wrapping getRequestAuth
+		// outside that bound would not prove a second derivation cannot acquire another 15s.
 		const f = await fixture({
 			refresh: async (credential) => ({ ...credential, expires: Number.MAX_SAFE_INTEGER }),
 		});
-		const original = f.runtime.getRequestAuth.bind(f.runtime);
-		let authCalls = 0;
+		const oauth = f.runtime.getProvider("probe")?.auth.oauth;
+		expect(oauth).toBeDefined();
+		const originalToAuth = oauth!.toAuth.bind(oauth);
+		let derivations = 0;
 		let allow = 1;
-		f.runtime.getRequestAuth = (async (model, overrides) => {
-			authCalls++;
-			if (authCalls > allow) return new Promise(() => {});
-			if (authCalls === 1) {
+		oauth!.toAuth = async (credential) => {
+			derivations++;
+			if (derivations > allow) return new Promise(() => {});
+			if (derivations === 1) {
 				await new Promise((resolve) => setTimeout(resolve, FIRST_AUTH_DELAY_MS));
 			}
-			return original(model, overrides);
-		}) as typeof f.runtime.getRequestAuth;
+			return originalToAuth(credential);
+		};
 
 		vi.useFakeTimers();
 		let done = false;
@@ -572,14 +576,14 @@ describe("createAgentSession request-auth cancellation", () => {
 		await vi.advanceTimersByTimeAsync(1);
 		expect(done).toBe(true);
 		await pending;
-		expect(authCalls).toBe(1);
+		expect(derivations).toBe(1);
 		expect(f.calls()).toBe(1);
 
 		allow = 2;
 		const second = f.session.prompt("again");
 		await vi.advanceTimersByTimeAsync(0);
 		await second;
-		expect(authCalls).toBe(2);
+		expect(derivations).toBe(2);
 		expect(f.calls()).toBe(2);
 	});
 
