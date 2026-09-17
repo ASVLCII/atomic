@@ -48,6 +48,7 @@ export interface ExtensionContextSource {
 	getContextUsage(): ContextUsage | undefined;
 	compact(options?: CompactOptions): void;
 	getSystemPrompt(): string;
+	getRouterModel?(): string;
 	getSkillCatalog?(): SkillCatalog;
 	getAgentTaskHost?(): import("../tasks/agent-adapter.js").AgentTaskHost;
 }
@@ -244,6 +245,11 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		compact: (options) => {
 			source.assertActive();
 			source.compact(options);
+		},
+		getRouterModel: () => {
+			source.assertActive();
+			if (!source.getRouterModel) throw new Error("Router settings are unavailable in this extension host.");
+			return source.getRouterModel();
 		},
 		getSystemPrompt: () => {
 			source.assertActive();

@@ -1,4 +1,8 @@
 import { type Static, Type } from "typebox";
+import { WorkflowBudgetSchema } from "./workflow-budget-schema.js";
+import { WorkflowRouterStateSchema } from "./workflow-router-schema.js";
+
+export { WorkflowBudgetSchema } from "./workflow-budget-schema.js";
 
 /**
  * Advertise the JSON value types accepted by workflow-answer responses.
@@ -28,21 +32,6 @@ const WorkflowResponseSchema = Type.Union(
 	},
 );
 
-/** Run-budget declaration accepted by config, authored workflows, and tool runs. */
-export const WorkflowBudgetSchema = Type.Object(
-	{
-		maxDurationMs: Type.Optional(
-			Type.Integer({ minimum: 0, description: "Maximum run duration in milliseconds; 0 disables it." }),
-		),
-		maxTokens: Type.Optional(Type.Integer({ minimum: 0, description: "Maximum charged tokens; 0 disables it." })),
-		maxCost: Type.Optional(Type.Number({ minimum: 0, description: "Maximum cost in USD; 0 disables it." })),
-		warnAtPercent: Type.Optional(
-			Type.Number({ minimum: 0, description: "Usage percentage at which to warn; 0 disables it." }),
-		),
-	},
-	{ additionalProperties: false, description: "Optional workflow run budget." },
-);
-
 export const WorkflowParametersSchema = Type.Object(
 	{
 		workflow: Type.Optional(
@@ -57,6 +46,7 @@ export const WorkflowParametersSchema = Type.Object(
 			}),
 		),
 		budget: Type.Optional(WorkflowBudgetSchema),
+		state: Type.Optional(WorkflowRouterStateSchema),
 		action: Type.Optional(
 			Type.Union(
 				[

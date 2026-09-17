@@ -1,4 +1,4 @@
-import type { Api, Model } from "@bastani/pi-ai";
+import type { Api, AssistantMessage, Model } from "@bastani/pi-ai";
 import type { Static, TSchema } from "typebox";
 import { Compile } from "typebox/compile";
 import { raceWithAbortSignal } from "../../utils/abort.js";
@@ -76,31 +76,40 @@ async function inferChat<T extends TSchema>(
 			? { ...model, compat: { ...(model as Model<"anthropic-messages">).compat, allowedFallbackModels: [] } }
 			: model;
 	const tool = createStructuredOutputTool({ schema: request.schema });
-	const response = await request.modelRegistry
-		.streamSimple(
-			decisionModel,
-			{
-				systemPrompt: `${STRUCTURED_DECISION_POLICY}\n\n${request.instructions}\n\nCall ${STRUCTURED_OUTPUT_TOOL_NAME} exactly once with the decision. Do not use prose or other tools.`,
-				messages: [{ role: "user", content: JSON.stringify({ state: request.state }), timestamp: Date.now() }],
-				tools: [
-					{
-						name: tool.name,
-						description: tool.description,
-						parameters: tool.parameters,
-						constrainedSampling: { type: "json_schema", strict: "prefer" },
-					},
-				],
-			},
-			{
-				signal,
-				timeoutMs,
-				maxRetries: 0,
-				transport: "sse",
-				toolChoice: "auto",
-				maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-			},
-		)
-		.result();
+	let response: AssistantMessage;
+	try {
+		response = await request.modelRegistry
+			.streamSimple(
+				decisionModel,
+				{
+					systemPrompt: `${STRUCTURED_DECISION_POLICY}\n\n${request.instructions}\n\nCall ${STRUCTURED_OUTPUT_TOOL_NAME} exactly once with the decision. Do not use prose or other tools.`,
+					messages: [{ role: "user", content: JSON.stringify({ state: request.state }), timestamp: Date.now() }],
+					tools: [
+						{
+							name: tool.name,
+							description: tool.description,
+							parameters: tool.parameters,
+							constrainedSampling: { type: "json_schema", strict: "prefer" },
+						},
+					],
+				},
+				{
+					signal,
+					timeoutMs,
+					maxRetries: 0,
+					transport: "sse",
+					toolChoice: "auto",
+					maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+				},
+			)
+			.result();
+	} catch {
+		signal.throwIfAborted();
+		// Provider exceptions can echo private state or credentials; do not retain their cause.
+		throw new Error(
+			"Structured output provider request failed. Check provider configuration and connectivity, then retry explicitly; no automatic retry was made.",
+		);
+	}
 	signal.throwIfAborted();
 	if (response.stopReason !== "toolUse") {
 		throw new Error(

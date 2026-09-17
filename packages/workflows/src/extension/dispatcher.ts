@@ -102,6 +102,7 @@ export interface DispatcherOpts {
 	signal?: AbortSignal;
 	/** Reports the exact detached identity before startup admission is awaited. */
 	onRunAccepted?: (runId: string) => void;
+	assertRoutingCurrent?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +188,8 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 				return failedRunResult(def.name, "", err instanceof Error ? err.message : String(err));
 			}
 
+			opts.signal?.throwIfAborted();
+			opts.assertRoutingCurrent?.();
 			const runId = crypto.randomUUID();
 			// D1/D10: derive the possible-stage set from the definition source at
 			// admission; a missing entry or scan failure is fine (undefined),

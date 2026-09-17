@@ -122,6 +122,31 @@ test("ordinary entrypoint uses configured provider/auth, complete state, one sch
 	);
 });
 
+for (const failure of ["synchronous throw", "result rejection"] as const) {
+	test(`ordinary provider ${failure} is private and never retried`, async () => {
+		const request = decisionRequest();
+		const dispatch = vi.fn(() => {
+			if (failure === "synchronous throw") throw new Error("private upstream payload mock-secret");
+			const stream = createAssistantMessageEventStream();
+			stream.result = async () => {
+				throw new Error("private upstream payload mock-secret");
+			};
+			return stream;
+		});
+		await assert.rejects(
+			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
+			(error: Error) => {
+				assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
+				assert.equal(error.cause, undefined);
+				assert.match(error.message, /provider.*failed/i);
+				assert.match(error.message, /retry explicitly/i);
+				return true;
+			},
+		);
+		assert.equal(dispatch.mock.calls.length, 1);
+	});
+}
+
 for (const args of [
 	{ route: "unregistered" },
 	{ route: "review", extra: true },
@@ -227,6 +252,38 @@ for (const status of [401, 422, 429, 529]) {
 		assert.equal(transport.mock.calls.length, 1);
 	});
 }
+
+test("Jev body reader failure is private and never retried or decoded", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-secret");
+	const transport = vi.fn(
+		async () =>
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode('{"private":'));
+					},
+					pull(controller) {
+						controller.error(new Error("private upstream payload mock-secret"));
+					},
+				}),
+			),
+	);
+	vi.stubGlobal("fetch", transport);
+	const request = decisionRequest();
+	const decode = vi.fn(request.jev.decode);
+	await assert.rejects(
+		inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
+		(error: Error) => {
+			assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
+			assert.equal(error.cause, undefined);
+			assert.match(error.message, /Jev.*failed/);
+			assert.match(error.message, /retry explicitly/);
+			return true;
+		},
+	);
+	assert.equal(transport.mock.calls.length, 1);
+	assert.equal(decode.mock.calls.length, 0);
+});
 
 for (const kind of [
 	"unknown-choice",
@@ -448,3 +505,67 @@ test("model/effort pairs use one Choice and one closed union, preserving null ve
 		assert.equal(transport.mock.calls.length, 1);
 	}
 });
+
+for (const provider of ["ordinary", "jev"] as const) {
+	for (const kind of ["cancel", "timeout"] as const) {
+		test(`${provider} transport rejection during ${kind} preserves the bounded failure`, async () => {
+			vi.useFakeTimers();
+			vi.stubEnv("TYPESAFE_AI_API_KEY", provider === "jev" ? "mock-key" : "");
+			const controller = new AbortController();
+			const started = Promise.withResolvers<void>();
+			const dispatch = vi.fn((_model, _context, options) => {
+				const stream = createAssistantMessageEventStream();
+				stream.result = () =>
+					new Promise((_resolve, reject) => {
+						options.signal.addEventListener(
+							"abort",
+							() => reject(new Error("private upstream payload mock-secret")),
+							{ once: true },
+						);
+						started.resolve();
+					});
+				return stream;
+			});
+			const transport = vi.fn(
+				async (_url, init) =>
+					new Response(
+						new ReadableStream({
+							start(reader) {
+								init.signal.addEventListener(
+									"abort",
+									() => reader.error(new Error("private upstream payload mock-secret")),
+									{ once: true },
+								);
+							},
+							pull() {
+								started.resolve();
+							},
+						}),
+					),
+			);
+			vi.stubGlobal("fetch", transport);
+			const request = decisionRequest();
+			const decode = vi.fn(request.jev.decode);
+			const pending = inferRouterDecision({
+				...request,
+				settings: SettingsManager.inMemory(),
+				modelRegistry: { ...request.modelRegistry, streamSimple: dispatch },
+				jev: { ...request.jev, decode },
+				signal: controller.signal,
+				timeoutMs: 50,
+			});
+			const rejected = assert.rejects(pending, (error: Error) => {
+				assert.match(error.message, kind === "cancel" ? /cancelled/ : /timed out/);
+				assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
+				return true;
+			});
+			await started.promise;
+			if (kind === "cancel") controller.abort();
+			else await vi.advanceTimersByTimeAsync(50);
+			await rejected;
+			await vi.advanceTimersByTimeAsync(0);
+			assert.equal(dispatch.mock.calls.length + transport.mock.calls.length, 1);
+			assert.equal(decode.mock.calls.length, 0);
+		});
+	}
+}

@@ -32,6 +32,7 @@ import { renderStatusList } from "../tui/status-list.js";
 import { truncateToWidth } from "../tui/text-helpers.js";
 import { renderWorkflowList } from "../tui/workflow-list.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
+import type { WorkflowRouterOutput } from "./workflow-router.js";
 import type { WorkflowRunStatusFilter, WorkflowRunStatusSummary } from "./workflow-status-summary.js";
 import { getWorkflowStatusRenderRuns } from "./workflow-status-summary.js";
 
@@ -100,6 +101,8 @@ type GetResult = {
 };
 type RunResult = {
 	action: "run";
+	/** Validated routing decision; absent on inference/validation failure. */
+	routerDecision?: WorkflowRouterOutput;
 	name?: string;
 	runId: string;
 	status: string;
@@ -403,6 +406,8 @@ export function renderResult(result: WorkflowRegisteredToolResult | null | undef
 
 		case "run": {
 			const r = result as RunResult;
+			if (r.status === "not_launched")
+				return renderNotice("WORKFLOW ROUTE", r.message ?? "No workflow launched.", opts, themed);
 			if (partial) return renderNotice("WORKFLOW RUN", `${r.runId}: ${r.status} (in progress…)`, opts, themed);
 			if (r.status === "failed" && !r.runId) {
 				// Not-found path — render the error verbatim, no fake runId banner.

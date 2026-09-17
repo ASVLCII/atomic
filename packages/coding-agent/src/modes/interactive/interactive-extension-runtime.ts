@@ -63,6 +63,7 @@ InteractiveModeBase.prototype.setupExtensionShortcuts = function (
 			})();
 		},
 		getSystemPrompt: () => this.session.systemPrompt,
+		getRouterModel: () => this.session.settingsManager.getRouterModel(),
 	});
 
 	// Set up the extension shortcut handler on the default editor

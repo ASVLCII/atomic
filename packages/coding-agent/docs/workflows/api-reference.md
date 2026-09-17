@@ -7,6 +7,43 @@ description: "Exhaustive workflow, stage, and context contracts."
 
 Use this reference while authoring definitions or integrating the workflow SDK programmatically. For a continuous first workflow, start with [Custom Workflow Authoring](/workflows/authoring).
 
+## Model-tool launch contract
+
+The model-facing `workflow` tool is distinct from the `workflow(spec)` authoring function below. Explicit `action: "run"` and omitted-action tool calls require this top-level `state`, separate from workflow inputs:
+
+```typescript
+interface WorkflowRouterState {
+  literalRequest: string;
+  intent: string;
+  conversation: Array<{ role: string; text: string }>;
+  constraints: string[];
+  executionPreference: "inline" | "workflow" | "unspecified";
+  documents: Array<{ source: string; content: string }>;
+  userBudget?: {
+    limits: WorkflowBudget;
+    provenance: string;
+  };
+}
+
+interface WorkflowBudget {
+  maxDurationMs?: number;
+  maxTokens?: number;
+  maxCost?: number;
+  warnAtPercent?: number;
+}
+
+interface WorkflowRouterOutput {
+  workflowType: string; // "none" or an exact name from the effective registry
+  maxBudget: WorkflowBudget;
+}
+```
+
+State strings must be nonempty, with at least one conversation entry and one document containing actual text. `constraints` may be empty. `userBudget.provenance` quotes the user's instruction; `limits` preserves its exact numbers. The optional tool `budget` must match those limits. Budget objects reject unknown properties; duration and tokens are nonnegative integers, cost and warning percentage are nonnegative numbers. Omitted fields inherit, while zero disables only its field. The normalized router output has exactly the two required properties shown above and reuses the canonical budget contract.
+
+The tool's JSON content and structured details expose a validated `routerDecision: WorkflowRouterOutput`. Matching selections retain normal launch `runId` and `status` metadata. `none` and different-workflow selections return `action: "run"`, `status: "not_launched"`, `runId: ""`, the decision and actionable `message`. `none` tells the caller to perform the task inline within existing authorization, not to report it complete or launch a fallback. A different selection requires fresh inputs/state for an explicit new call. Provider or validation failure does not fabricate a decision.
+
+Atomic supplies all effective registered workflow identities, descriptions, input contracts and inherited budgets in one bounded inference. It revalidates the registry before admission; a stale decision cannot launch a changed or removed definition. User-issued `/workflow` commands and authored `ctx.workflow(...)` composition bypass this gate. Inspection/control actions are unaffected, and workflow-stage tool restrictions remain enforced. See [Model-invoked launch routing](/workflows/operations#model-invoked-launch-routing) for a complete call, model selection, reload and error handling.
+
 ## The `workflow()` definition
 
 Use `workflow(spec)` to author a workflow. It validates the schema maps, normalizes or infers the name, and returns a frozen `WorkflowDefinition` for export, discovery, and `ctx.workflow(...)` composition.
@@ -284,6 +321,8 @@ type WorkflowRunChildArgs<TInputs extends WorkflowInputValues = WorkflowInputVal
 ```
 
 Executes an imported workflow definition behind a tracked parent boundary. The type system requires `inputs` when the child has required inputs, while `stageName` defaults to `workflow:<workflow-name>`.
+
+This programmatic composition does not invoke the model-tool launch router and does not require routing `state`.
 
 ```typescript
 const child = await ctx.workflow(sharedResearch, {

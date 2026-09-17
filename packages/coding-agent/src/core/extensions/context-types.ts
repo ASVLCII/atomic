@@ -225,6 +225,8 @@ export interface ExtensionContext {
 	getSystemPrompt(): string;
 	/** Current loader-owned skill candidates and exact selector resolver. */
 	getSkillCatalog?(): SkillCatalog;
+	/** Current routing-only inference setting from the owning session. Does not change the chat model. */
+	getRouterModel(): string;
 }
 
 /**

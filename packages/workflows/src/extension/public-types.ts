@@ -1,6 +1,7 @@
 import type {
 	CreateAgentSessionOptions,
 	DefaultResourceLoaderInheritanceSnapshot,
+	ModelRegistry,
 	WorkflowActivityPublisher,
 } from "@bastani/atomic";
 import type { Api, Model } from "@bastani/pi-ai/compat";
@@ -11,6 +12,8 @@ import type { WorkflowBudget, WorkflowInputValues } from "../shared/types.js";
 import type { WidgetFactory } from "../tui/store-widget-installer.js";
 import type { RenderResultOpts, WorkflowRegisteredToolResult } from "./render-result.js";
 import type { PiUISurface } from "./wiring.js";
+
+import type { WorkflowRouterState } from "./workflow-router-schema.js";
 
 type SessionManager = PersistenceSessionManager & { getSessionId?: () => string };
 
@@ -64,7 +67,7 @@ export interface PiCommandOptions {
 
 export type PiRuntimeModel = Model<Api>;
 
-export interface PiRuntimeModelRegistry {
+export interface PiRuntimeModelRegistry extends Partial<Pick<ModelRegistry, "getAll" | "streamSimple">> {
 	getAvailable(): PiRuntimeModel[];
 }
 
@@ -116,6 +119,7 @@ export interface PiToolOpts<TArgs, TDetails> {
 }
 
 export interface PiExecuteContext extends PiModelContext {
+	getRouterModel?: () => string;
 	sessionId?: string;
 	ui?: PiUISurface;
 	hasUI?: boolean;
@@ -208,6 +212,8 @@ export interface ExtensionAPI {
 export interface WorkflowToolArgs {
 	workflow?: string;
 	inputs?: WorkflowInputValues;
+	/** Required context for model-tool launches, not workflow definition inputs. */
+	state?: WorkflowRouterState;
 	/** Per-run budget override for action "run". */
 	budget?: WorkflowBudget;
 	action?:

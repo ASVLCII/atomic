@@ -104,7 +104,15 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<un
 	try {
 		while (true) {
 			signal.throwIfAborted();
-			const part = await reader.read();
+			let part: Awaited<ReturnType<typeof reader.read>>;
+			try {
+				part = await reader.read();
+			} catch {
+				signal.throwIfAborted();
+				throw new Error(
+					"Jev response reading failed. Check connectivity and retry explicitly; no automatic retry was made.",
+				);
+			}
 			if (part.done) break;
 			bytes += part.value.byteLength;
 			if (bytes > MAX_RESPONSE_BYTES) {

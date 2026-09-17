@@ -19,6 +19,7 @@ import { killAllRuns } from "../../packages/workflows/src/runs/background/status
 import type { StageSessionRuntime } from "../../packages/workflows/src/runs/foreground/stage-runner-types.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
 import { testRunId } from "../helpers/run-id.js";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 
 const originalCwd = process.cwd();
 const originalAgentDir = process.env.ATOMIC_CODING_AGENT_DIR;
@@ -106,6 +107,10 @@ function createHarness(overrides: Partial<ExtensionAPI> = {}): Harness {
 		commands,
 		messages,
 		async execute(args, ctx = { hasUI: false } as PiExecuteContext) {
+			if ((args.action ?? "run") === "run") {
+				args = { ...args, state: workflowRouterState(args.budget) };
+				ctx = { ...workflowRouterContext(args.workflow ?? "", args.budget), ...ctx };
+			}
 			const result = await tool!.execute("reload-matrix-call", args, undefined, undefined, ctx);
 			return result.details;
 		},

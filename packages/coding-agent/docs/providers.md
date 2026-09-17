@@ -479,9 +479,9 @@ For router-mode discovery, load/unload management, and Hugging Face downloads wi
 
 ## TypeSafe Jev
 
-`typesafe-ai/jev` is a built-in structured-decision provider, not a chat or tool-calling model. It is available through [SDK structured decisions](/sdk/structured-decisions), not `/model`, chat `--model`, or child execution model fields. SDK integrations can inspect its supported capabilities with `getStructuredOutputProviders()`.
+`typesafe-ai/jev` is a built-in structured-decision provider, not a chat or tool-calling model. It is available for [workflow launch routing](/workflows/operations#model-invoked-launch-routing) and [SDK structured decisions](/sdk/structured-decisions), not `/model`, chat `--model`, or child execution model fields. SDK integrations can inspect its supported capabilities with `getStructuredOutputProviders()`.
 
-Set `TYPESAFE_AI_API_KEY` in Atomic's process environment. The adapter uses that variable only, not `/login`, `auth.json`, or `models.json`. Do not put the key in a prompt or decision state. For prerequisite routing, a nonempty key selects Jev when `routerModel` is empty; an explicit concrete setting takes precedence. General SDK structured-output requests select their inference model explicitly. This setup does not activate workflow or subagent routing or change the `structured_output` tool's model.
+Set `TYPESAFE_AI_API_KEY` in Atomic's process environment. The adapter uses that variable only, not `/login`, `auth.json`, or `models.json`. Do not put the key in a prompt or decision state. For prerequisite routing, a nonempty key selects Jev when `routerModel` is empty; an explicit concrete setting takes precedence. General SDK structured-output requests select their inference model explicitly. This setup does not enable subagent auto routing or change the `structured_output` tool's model. User-issued `/workflow` commands bypass launch routing.
 
 Atomic sends `POST https://api.typesafe.ai/v1/systemone` with wire model `jev-latest`, Bearer authentication, shared state and typed Choice questions. It does not send OpenAI chat-completion requests or ask Jev to generate arbitrary JSON Schema. There are no automatic inference retries. A Choice supports at most 255 options; larger sets fail without dropping candidates. Select an ordinary structured-output model for larger sets.
 

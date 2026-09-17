@@ -12,6 +12,7 @@ import { formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.j
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
 import { raceWorkflowRequestAbort } from "./workflow-request-abort.js";
+import { routeWorkflowLaunch, WORKFLOW_INLINE_GUIDANCE } from "./workflow-router.js";
 import { buildWorkflowStatusListing, setWorkflowStatusRenderRuns } from "./workflow-status-summary.js";
 import {
 	isResolvedRunId,
@@ -134,10 +135,57 @@ export function makeExecuteWorkflowTool(
 				return awaitRequest(getRuntime().dispatch(args, { policy, signal }));
 			}
 			case "run": {
-				await ensureWorkflowResourcesVisible();
-				// A tool launch is the agent's own action: it is attributed as such and
-				// the tool result already reports the run, so it raises no chat notice.
-				return awaitRequest(getRuntime().dispatch(args, { policy, origin: "agent", signal, onRunAccepted }));
+				let acceptedRunId: string | undefined;
+				try {
+					args = structuredClone(args);
+					// Do not turn a missing/failed initial resource load into a partial routing catalog.
+					await awaitRequest(Promise.resolve(ensureWorkflowResourcesLoaded()));
+					const routed = await routeWorkflowLaunch(args, ctx, getRuntime, signal);
+					const { decision } = routed;
+					if (decision.workflowType === "none" || decision.workflowType !== routed.proposedName) {
+						return {
+							action: "run",
+							runId: "",
+							status: "not_launched",
+							routerDecision: decision,
+							message:
+								decision.workflowType === "none"
+									? WORKFLOW_INLINE_GUIDANCE
+									: `Router selected "${decision.workflowType}" instead. No workflow was launched. Inspect its inputs and prepare fresh state for an explicit new call; do not reuse or remap the proposed workflow's inputs automatically.`,
+						};
+					}
+					routed.assertCurrent();
+					const result = await awaitRequest(
+						getRuntime().dispatch(
+							{ ...args, workflow: routed.proposedName, budget: decision.maxBudget },
+							{
+								policy,
+								origin: "agent",
+								signal,
+								assertRoutingCurrent: routed.assertCurrent,
+								onRunAccepted: (id) => {
+									acceptedRunId = id;
+									onRunAccepted?.(id);
+								},
+							},
+						),
+					);
+					return result.action === "run" ? { ...result, routerDecision: decision } : result;
+				} catch (error) {
+					if (signal?.aborted) throw signal.reason ?? error;
+					// Once accepted, preserve the existing runtime error path rather than claim no launch.
+					if (acceptedRunId !== undefined) throw error;
+					return {
+						action: "run",
+						runId: "",
+						status: "failed",
+						stages: [],
+						error:
+							error instanceof Error
+								? error.message
+								: "Workflow routing failed. No workflow was launched; retry explicitly.",
+					};
+				}
 			}
 			case "dependency": {
 				const operation = args.operation ?? "status";

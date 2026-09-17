@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { WORKFLOW_STAGE_SUBAGENT_GUARD_ENV } from "@bastani/atomic";
 import { afterEach, beforeEach, describe, test } from "vitest";
+import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import factory, { type ExtensionAPI, type PiCommandOptions } from "../../packages/workflows/src/extension/index.js";
@@ -12,7 +13,9 @@ import {
 } from "../../packages/workflows/src/extension/workflow-run-control-command.js";
 import { makeExecuteWorkflowTool } from "../../packages/workflows/src/extension/workflow-tool.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
+import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
 import { testRunId } from "../helpers/run-id.js";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 
 const previousWorkflowStageSubagentGuard = process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV];
 
@@ -319,9 +322,20 @@ describe("workflow lazy-startup review follow-up fixes", () => {
 	test("workflow tool named run re-resolves runtime after lazy discovery", async () => {
 		let ensureCalls = 0;
 		let registryLoaded = false;
+		const emptyRegistry = createRegistry();
+		const loadedRegistry = createRegistry([
+			workflow({
+				name: "lazy model run",
+				description: "Lazy discovery fixture",
+				inputs: {},
+				outputs: {},
+				run: async () => ({}),
+			}),
+		]);
 		const runtimeForCurrentRegistry = (): ExtensionRuntime => {
 			const canSeeLazyWorkflow = registryLoaded;
 			return {
+				registry: canSeeLazyWorkflow ? loadedRegistry : emptyRegistry,
 				dispatch: async (): Promise<WorkflowToolResult> =>
 					canSeeLazyWorkflow
 						? {
@@ -350,9 +364,10 @@ describe("workflow lazy-startup review follow-up fixes", () => {
 			},
 		);
 
-		const result = await handler({ action: "run", workflow: "lazy model run", inputs: {} }, {
-			model: { provider: "fake", id: "model" },
-		} as never);
+		const result = await handler(
+			{ action: "run", workflow: "lazy model run", inputs: {}, state: workflowRouterState() },
+			workflowRouterContext("lazy-model-run"),
+		);
 
 		assert.equal(ensureCalls, 1);
 		assert.equal(result.action, "run");

@@ -25,6 +25,39 @@ describe("AgentSession dynamic tool registration", () => {
 		}
 	});
 
+	// #3089: routers must use the owning session's live settings, including in-memory overrides.
+	it("exposes current session router settings without changing the chat model", async () => {
+		const settingsManager = SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" });
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+			extensionFactories: [() => {}],
+		});
+		await resourceLoader.reload();
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(),
+			resourceLoader,
+		});
+		try {
+			await session.bindExtensions({});
+			const context = session.extensionRunner.createContext();
+			const model = context.model;
+			expect(context.getRouterModel()).toBe("typesafe-ai/jev");
+			settingsManager.applyOverrides({ routerModel: "anthropic/claude-sonnet-4-5" });
+			expect(context.getRouterModel()).toBe("anthropic/claude-sonnet-4-5");
+			expect(context.model).toBe(model);
+			settingsManager.applyOverrides({ routerModel: "auto" });
+			expect(() => context.getRouterModel()).toThrow("Invalid routerModel");
+		} finally {
+			session.dispose();
+		}
+	});
+
 	it("refreshes tool registry when tools are registered after initialization", async () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
 		const sessionManager = SessionManager.inMemory();

@@ -31,6 +31,7 @@ import { createStore, store as workflowStore } from "../../packages/workflows/sr
 import type { WorkflowSerializableValue } from "../../packages/workflows/src/shared/types.js";
 import { classifyWorkflowFailure } from "../../packages/workflows/src/shared/workflow-failures.js";
 import { sleep } from "../helpers/runtime.js";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import { lifecycleConfig } from "./workflow-lifecycle-parent-reconciliation-support.js";
 
 interface PersistedEntry {
@@ -115,7 +116,7 @@ describe("interactive durable tool failure lifecycle", () => {
 		});
 		assert.ok(registeredTool);
 		const interactiveTool = registeredTool;
-		const interactiveContext: PiExecuteContext = { hasUI: true };
+		const interactiveContext: PiExecuteContext = { ...workflowRouterContext(definition.normalizedName), hasUI: true };
 		let runId = "";
 		let admissionContext: Context | undefined;
 		let providerContext: Context | undefined;
@@ -169,6 +170,7 @@ describe("interactive durable tool failure lifecycle", () => {
 					{
 						action: "run",
 						workflow: "post-admission-tool-failure",
+						state: workflowRouterState(),
 					},
 					{ id: "workflow-call-post-admission" },
 				),
