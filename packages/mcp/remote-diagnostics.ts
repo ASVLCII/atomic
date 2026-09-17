@@ -4,7 +4,27 @@ import { isJSONRPCErrorResponse, type JSONRPCErrorResponse } from "@modelcontext
 
 function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
 	const url = new URL(endpoint);
-	const secrets = [url.username, url.password, ...url.searchParams.values(), url.hash.slice(1)];
+	// searchParams decodes escapes and '+'; retain the wire values as well.
+	const rawSecrets = [
+		url.username,
+		url.password,
+		url.hash.slice(1),
+		...url.search.slice(1).split("&").map((part) => (part.includes("=") ? part.slice(part.indexOf("=") + 1) : "")),
+	];
+	const secrets = new Set([...rawSecrets, ...url.searchParams.values()]);
+	for (const raw of rawSecrets) {
+		try {
+			secrets.add(decodeURIComponent(raw));
+		} catch {
+			// A URL may legally contain a literal percent sign.
+		}
+	}
+	// Bound expansion to one encoding pass, covering URI and form serializers.
+	const representations = new Set(secrets);
+	for (const secret of secrets) {
+		representations.add(encodeURIComponent(secret));
+		representations.add(new URLSearchParams({ value: secret }).toString().slice(6));
+	}
 	// Also hide discovered OAuth/SSE URLs, which need not equal the configured endpoint.
 	message = message.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
 		if (preserveSafeUrls) {
@@ -17,16 +37,17 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 		}
 		return "[redacted URL]";
 	});
-	for (const secret of secrets) {
-		if (!secret) continue;
-		message = message.replaceAll(secret, "[redacted]");
-		try {
-			message = message.replaceAll(decodeURIComponent(secret), "[redacted]");
-		} catch {
-			// A URL may legally contain a literal percent sign.
-		}
-	}
-	return message;
+	const patterns = [...representations]
+		.filter(Boolean)
+		.sort((a, b) => b.length - a.length)
+		.map((secret) =>
+			secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%[\da-f]{2}/gi, (encodedByte) =>
+				encodedByte.replace(/[a-f]/gi, (hex) => `[${hex.toUpperCase()}${hex.toLowerCase()}]`),
+			),
+		);
+	// Match escapes case-insensitively, not token text; replace once so shorter
+	// secrets cannot corrupt another representation or the redaction marker.
+	return patterns.length ? message.replace(new RegExp(patterns.join("|"), "g"), "[redacted]") : message;
 }
 
 /** SDK errors may retain request URLs in messages, causes and EventSource events. */

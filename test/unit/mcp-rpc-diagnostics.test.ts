@@ -230,3 +230,91 @@ test.each(["code", "message", "data"])(
 		}
 	},
 );
+
+// Regression for #3088: relative request targets retain encoded tokens, unlike searchParams.values().
+test.each(["RISK%2FSECRET%2BKEY", "%52ISK%2fSECRET%2bKEY", "RISK+SECRET%2BKEY", "RISK%20SECRET%25KEY", "RISK%SECRET"])(
+	"MCP Node RPC errors redact raw and decoded query representations of %s",
+	async (token) => {
+		const paths: string[] = [];
+		const decoded = new URLSearchParams(`token=${token}`).get("token")!;
+		const forms = [
+			...new Set([
+				token,
+				decoded,
+				encodeURIComponent(decoded),
+				new URLSearchParams({ token: decoded }).toString().slice(6),
+				encodeURIComponent(decoded).replace(/%[\da-f]{2}/gi, (encodedByte) => encodedByte.toLowerCase()),
+			]),
+		];
+		let fail = false;
+		const server = createServer(async (request, response) => {
+			paths.push(request.url ?? "");
+			let raw = "";
+			for await (const chunk of request) raw += chunk;
+			const message = raw ? JSON.parse(raw) : {};
+			response.setHeader("Content-Type", "application/json");
+			if (!("id" in message)) {
+				response.writeHead(202).end();
+				return;
+			}
+			response.end(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: message.id,
+					...(fail
+						? {
+								error: {
+									code: -32603,
+									message: `Rejected request ${request.url}; ${forms.join("; ")}`,
+									data: {
+										requestTarget: request.url,
+										nested: forms.map((form) => ({ [form]: form })),
+										retryable: false,
+									},
+								},
+							}
+						: {
+								result:
+									message.method === "initialize"
+										? {
+												protocolVersion: "2025-03-26",
+												capabilities: { tools: {} },
+												serverInfo: { name: "encoded", version: "1" },
+											}
+										: { content: [{ type: "text", text: request.url }] },
+							}),
+				}),
+			);
+		});
+		server.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		const address = server.address();
+		assert.ok(address && typeof address !== "string");
+		const target = `/mcp?token=${token}&flag=0&flag=`;
+		const endpoint = `http://127.0.0.1:${address.port}${target}`;
+		const client = new Client({ name: "encoded", version: "1" });
+		try {
+			await client.connect(protectRemoteTransport(new StreamableHTTPClientTransport(new URL(endpoint)), endpoint));
+			assert.deepEqual(await client.callTool({ name: "echo" }), { content: [{ type: "text", text: target }] });
+			fail = true;
+			await assert.rejects(client.callTool({ name: "echo" }, undefined, { timeout: 500 }), (error: unknown) => {
+				assert.ok(error instanceof McpError);
+				assert.equal(error.code, -32603);
+				for (const form of forms)
+					assert.ok(!inspect(error, { depth: null, showHidden: true }).includes(form), form);
+				assert.deepEqual(error.data, {
+					requestTarget: "/mcp?token=[redacted]&flag=[redacted]&flag=",
+					nested: forms.map(() => ({ "[redacted]": "[redacted]" })),
+					retryable: false,
+				});
+				return true;
+			});
+			assert.ok(paths.length > 0);
+			assert.ok(paths.every((path) => path === target));
+		} finally {
+			await client.close();
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	},
+);
