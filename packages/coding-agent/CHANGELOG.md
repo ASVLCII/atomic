@@ -16,6 +16,25 @@
 
 - Prefix ambiguity refusals no longer include unauthorized or hidden session names when a canonicalized UUID-prefix send is rejected ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
+- Running Atomic inside a Herdr pane no longer leaves the pane unreported or labelled as another agent when Herdr's installed Pi integration is present. Herdr installs `herdr-agent-state.ts` into the legacy `~/.pi/agent/extensions` directory that Atomic also loads from, and Atomic used to stand its built-in reporter down as soon as that file loaded — but the installed asset reports itself as `pi`, so the pane ended up mislabelled or never updated at all. Inside a Herdr pane Atomic now skips that installed integration when loading extensions and reports the pane itself; outside a Herdr pane the file loads exactly as before. Nothing to configure, and the extra extension no longer needs to be disabled by hand ([#2416](https://github.com/bastani-inc/atomic/pull/2416) by [@makgunay](https://github.com/makgunay))
+
+## [0.9.20-alpha.3] - 2026-09-16
+
+### Fixed
+
+- Fixed compaction statistics mixing authoritative provider token counts with heuristic region estimates, which could produce incorrect/negative percentReduction. Statistics now use symmetric heuristic estimates (region + explicit tail) while preserving the authoritative tokensBefore for budgeting and display ([#2052](https://github.com/bastani-inc/atomic/issues/2052)).
+- Standalone installations include PostgreSQL library aliases and reject unusable database runtimes before installing or upgrading. macOS and Linux packaging validates the transitive dependencies required for PostgreSQL startup and workflow database operation. A server left running by an older installation no longer hides an incomplete runtime. npm hydration preserves safe ordered alias chains ([#3073](https://github.com/bastani-inc/atomic/issues/3073)).
+- Local clipboard failures now report platform-specific remedies instead of falling back to an unverified OSC 52 write. Fullscreen selection displays the diagnostic for five seconds; SSH and Mosh retain OSC 52 support.
+- Exported missing extension hook event and result types from the public package entrypoint.
+
+### Added
+
+- Added `compat.allowedFallbackModels` configuration for Anthropic-compatible models, including complete target pricing and `[]` to disable inherited fallbacks.
+
+### Changed
+
+- Exact `--session-id` lookup and fork-target collision checks read session headers instead of scanning transcripts, while keeping internal workflow sessions hidden.
+
 ## [0.9.20-alpha.2] - 2026-09-15
 
 ### Fixed
