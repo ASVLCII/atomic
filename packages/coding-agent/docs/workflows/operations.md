@@ -52,9 +52,9 @@ The rendered card shape at the 80-column breakpoint is:
 │   ●  d4e5f6a1-77b2-4c31-9e0a-2f1c8b4d6e5f                                    │
 │     build-check · chain · 0/2 · 12m                                          │
 │                                                                              │
-│   ？  8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44                                    │
+│   ？  8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44                                   │
 │     review-and-merge · single · 0/1 · 12m                                    │
-│     "Approve the generated migration before deployment?"                      │
+│     "Approve the generated migration before deployment?"                     │
 │     Answer: /workflow connect 8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44           │
 ```
 

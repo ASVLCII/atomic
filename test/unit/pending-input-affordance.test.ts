@@ -3,6 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { runIndicatorStatus } from "../../packages/workflows/src/shared/run-indicator-status.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { RunSnapshot, StageSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import {
@@ -550,4 +551,57 @@ test("sanitizePromptDisplay well-forms unpaired surrogates and treats NEL as whi
 	const raw = structuredClone(run);
 	pendingInputAffordance(run, [run]);
 	assert.deepEqual(run, raw);
+});
+
+test("pause resume and block keep a pending prompt preview and answering while paused clears it", () => {
+	const store = createStore();
+	store.recordRunStart({
+		id: "pause-owner",
+		name: "pausable",
+		inputs: {},
+		status: "running",
+		startedAt: 1_000,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(store.recordStagePendingPrompt("pause-owner", "ask", primitive("pp", "Approve while paused?")), true);
+
+	const assertPreview = () => {
+		const runs = store.runs();
+		assert.equal(runIndicatorStatus(runs[0]!, runs), "awaiting_input");
+		assert.equal(visibleRootPendingInput(runs[0]!, runs).hasPendingInput, true);
+		assert.equal(pendingInputAffordance(runs[0]!, runs)?.message, "Approve while paused?");
+		assert.deepEqual(pendingInputAffordance(runs[0]!, runs)?.identity, ["pause-owner", "ask", "pp"]);
+	};
+
+	assert.equal(store.recordStagePaused("pause-owner", "ask"), true);
+	const paused = store.runs()[0]!.stages[0]!;
+	assert.equal(paused.status, "paused");
+	assert.equal(paused.awaitingInputSince, undefined);
+	assert.equal(paused.pendingPrompt?.id, "pp");
+	assertPreview();
+
+	assert.equal(store.recordStageResumed("pause-owner", "ask"), true);
+	assertPreview();
+
+	assert.equal(store.recordStageBlocked("pause-owner", "ask", "other"), true);
+	assertPreview();
+
+	const answering = createStore();
+	answering.recordRunStart({
+		id: "pause-owner",
+		name: "pausable",
+		inputs: {},
+		status: "running",
+		startedAt: 1_000,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(
+		answering.recordStagePendingPrompt("pause-owner", "ask", primitive("pp", "Approve while paused?")),
+		true,
+	);
+	assert.equal(answering.recordStagePaused("pause-owner", "ask"), true);
+	assert.equal(answering.resolveStagePendingPrompt("pause-owner", "ask", "pp", true), true);
+	const runs = answering.runs();
+	assert.deepEqual(visibleRootPendingInput(runs[0]!, runs), { hasPendingInput: false, affordance: undefined });
+	assert.equal(runs[0]!.stages[0]!.status, "paused");
 });

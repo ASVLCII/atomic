@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { Container, Text, TuiMainScreen } from "@earendil-works/pi-tui";
 import { test } from "vitest";
+import { RecordingTerminal } from "../../packages/coding-agent/test/helpers/interactive-fullscreen-layout.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { RunStatus, StageSnapshot, StoreSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import { installStoreWidget, scrollStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 import { buildThemedWidgetLines, type WorkflowWidgetRowLayout } from "../../packages/workflows/src/tui/widget.js";
 import { WorkflowWidgetViewport } from "../../packages/workflows/src/tui/widget-viewport.js";
+import { sleep } from "../helpers/runtime.js";
 import { nativeWorkflowViewport } from "../helpers/workflow-native-viewport.js";
 
 const now = Date.now();
@@ -309,4 +312,99 @@ test("every prompt and navigation row remains reachable in a one-row viewport", 
 	}
 	assert.ok([...seen].some((line) => line.includes("Approve the one-row prompt?")));
 	assert.ok([...seen].some((line) => line.includes(`/workflow connect ${uuid(1)}`)));
+});
+
+test("below-editor pending input growth stays a differential redraw", async () => {
+	const NOW = Date.now();
+	const runId = "00000000-0000-4000-8000-000000000042";
+	// These clears are the #1109 screen+scrollback wipe.
+	const SCREEN_CLEAR = "\u001b[2J";
+	const SCROLLBACK_CLEAR = "\u001b[3J";
+	const geometries: Array<[rows: number, footerRows: number, historyRows: number]> = [
+		[24, 8, 60],
+		[26, 20, 60],
+		[40, 4, 10],
+		[9, 2, 60],
+	];
+
+	for (const [rows, footerRows, historyRows] of geometries) {
+		const store = createStore();
+		store.recordRunStart({
+			id: runId,
+			name: "release-docs",
+			inputs: {},
+			status: "running",
+			startedAt: NOW - 5_000,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		const snapshot = () => ({ runs: store.runs(), notices: [] as const, version: 0 });
+		const widgetLines = () => buildThemedWidgetLines(snapshot(), undefined, 110, NOW);
+		const terminal = new RecordingTerminal();
+		terminal.columns = 110;
+		terminal.rows = rows;
+		const tui = new TuiMainScreen(terminal, false, "/tmp");
+		try {
+			const chat = new Container();
+			for (let index = 0; index < historyRows; index += 1) {
+				chat.addChild(new Text(`history ${index}`, 0, 0));
+			}
+			tui.addChild(chat);
+			const footer = new Container();
+			for (let index = 0; index < footerRows; index += 1) {
+				footer.addChild(new Text(`footer ${index}`, 0, 0));
+			}
+			footer.addChild({
+				render: (width: number) => buildThemedWidgetLines(snapshot(), undefined, width, NOW),
+				invalidate() {},
+			});
+			tui.addChild(footer);
+			tui.requestRender();
+			await sleep(50);
+			assert.equal(widgetLines().length, 4, `${rows}/${footerRows}/${historyRows} idle height`);
+
+			terminal.writes.length = 0;
+			assert.equal(
+				store.recordStagePendingPrompt(runId, "ask", {
+					id: "p1",
+					kind: "confirm",
+					message: "Approve the generated migration before deployment?",
+					createdAt: NOW,
+				}),
+				true,
+			);
+			tui.requestRender();
+			await sleep(60);
+			assert.equal(widgetLines().length, 6, `${rows}/${footerRows}/${historyRows} waiting height`);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCREEN_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} prompt appear screen clears`,
+			);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCROLLBACK_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} prompt appear scrollback clears`,
+			);
+			assert.equal(terminal.writes.length, 1, `${rows}/${footerRows}/${historyRows} prompt appear writes`);
+
+			terminal.writes.length = 0;
+			assert.equal(store.resolveStagePendingPrompt(runId, "ask", "p1", true), true);
+			tui.requestRender();
+			await sleep(60);
+			assert.equal(widgetLines().length, 4, `${rows}/${footerRows}/${historyRows} resolved height`);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCREEN_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} answer screen clears`,
+			);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCROLLBACK_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} answer scrollback clears`,
+			);
+			assert.equal(terminal.writes.length, 1, `${rows}/${footerRows}/${historyRows} answer writes`);
+		} finally {
+			tui.stop();
+		}
+	}
 });
