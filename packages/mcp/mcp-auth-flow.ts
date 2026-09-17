@@ -25,7 +25,7 @@ import {
 import { McpSessionCleanupBarrier } from "./session-cleanup-barrier.js"
 import type { ServerEntry } from "./types.js"
 import { resolveServerUrl } from "./utils.js"
-import { sanitizeRemoteError } from "./remote-diagnostics.js"
+import { authorizationUrlContainsEndpointCredentials, sanitizeRemoteError } from "./remote-diagnostics.js"
 
 export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 
@@ -243,7 +243,8 @@ async function performAuthentication(
         "client_id", "scope", "response_type", "code_challenge", "code_challenge_method", "state", "redirect_uri",
       ])
       const sensitive = url.username || url.password || url.hash ||
-        [...url.searchParams.keys()].some((key) => !publicParameters.has(key))
+        [...url.searchParams.keys()].some((key) => !publicParameters.has(key)) ||
+        authorizationUrlContainsEndpointCredentials(url, serverUrl)
       throw new Error(sensitive
         ? "Could not open browser. Check your default browser and retry MCP authentication."
         : `Could not open browser. Please open this URL manually: ${started.authorizationUrl}`)

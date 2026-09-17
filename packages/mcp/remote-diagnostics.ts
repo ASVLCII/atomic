@@ -20,7 +20,7 @@ function secretRepresentations(rawSecrets: string[], decodedSecrets: Iterable<st
 	return representations;
 }
 
-function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
+function endpointCredentialPattern(endpoint: string): RegExp | undefined {
 	const url = new URL(endpoint);
 	// searchParams decodes escapes and '+'; retain the wire values as well.
 	const representations = secretRepresentations([
@@ -33,18 +33,6 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 		...url.pathname.split("/"),
 		...url.search.slice(1).split("&").map((part) => part.split("=")[0]!),
 	], url.searchParams.keys());
-	// Also hide discovered OAuth/SSE URLs, which need not equal the configured endpoint.
-	message = message.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
-		if (preserveSafeUrls) {
-			try {
-				const candidate = new URL(match);
-				if (!candidate.username && !candidate.password && !candidate.search && !candidate.hash) return match;
-			} catch {
-				// Malformed diagnostic URLs may still contain credentials.
-			}
-		}
-		return "[redacted URL]";
-	});
 	const patterns = [...new Set([...representations, ...pathRepresentations])]
 		.filter(Boolean)
 		.sort((a, b) => b.length - a.length)
@@ -58,7 +46,29 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 		});
 	// Match escapes case-insensitively, not token text; replace once so shorter
 	// secrets cannot corrupt another representation or the redaction marker.
-	return patterns.length ? message.replace(new RegExp(patterns.join("|"), "gu"), "[redacted]") : message;
+	return patterns.length ? new RegExp(patterns.join("|"), "gu") : undefined;
+}
+
+/** Requested OAuth instructions may contain ordinary parameters, but not configured credentials. */
+export function authorizationUrlContainsEndpointCredentials(url: URL, endpoint: string): boolean {
+	return endpointCredentialPattern(endpoint)?.test(url.href) ?? false;
+}
+
+function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
+	// Also hide discovered OAuth/SSE URLs, which need not equal the configured endpoint.
+	message = message.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
+		if (preserveSafeUrls) {
+			try {
+				const candidate = new URL(match);
+				if (!candidate.username && !candidate.password && !candidate.search && !candidate.hash) return match;
+			} catch {
+				// Malformed diagnostic URLs may still contain credentials.
+			}
+		}
+		return "[redacted URL]";
+	});
+	const pattern = endpointCredentialPattern(endpoint);
+	return pattern ? message.replace(pattern, "[redacted]") : message;
 }
 
 /** SDK errors may retain request URLs in messages, causes and EventSource events. */

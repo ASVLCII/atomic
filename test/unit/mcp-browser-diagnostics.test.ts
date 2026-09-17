@@ -103,3 +103,40 @@ test("MCP browser failure withholds SDK resource credentials", async () => {
 		removeTempDirectory(dir);
 	}
 });
+
+// Regression for #3088: standard OAuth fields must not expose configured credentials.
+test("MCP browser failure withholds configured credential overlap", async () => {
+	const dir = makeTempDirectory("mcp-browser-overlap-");
+	vi.stubEnv("MCP_OAUTH_DIR", dir);
+	browser.open.mockRejectedValue(new Error("PRIVATE_CAUSE"));
+	try {
+		for (const [endpoint, authorizationPath, state] of [
+			["https://example.com/PRIVATE_PATH_TOKEN/mcp", "/PRIVATE_PATH_TOKEN/authorize", "ordinary-state"],
+			["https://example.com/PRIVATE%2fPATH/mcp", "/PRIVATE%2FPATH/authorize", "ordinary-state"],
+			["https://example.com/PRIVATE%2FPATH/mcp", "/authorize", "PRIVATE/PATH"],
+			["https://example.com/mcp?PRIVATE_KEY=", "/authorize", "PRIVATE_KEY"],
+			["https://example.com/mcp?key=PRIVATE+VALUE", "/authorize", "PRIVATE VALUE"],
+		]) {
+			const { authorizationUrl } = await startAuthorization("https://example.com", {
+				clientInformation: { client_id: "public" },
+				redirectUrl: "http://127.0.0.1:19823/callback",
+				state,
+			});
+			authorizationUrl.pathname = authorizationPath!;
+			browser.url = authorizationUrl.href;
+			assert.equal((await startAuth("manual", endpoint!)).authorizationUrl, browser.url);
+			await assert.rejects(authenticate("browser", endpoint!), (error: Error) => {
+				assert.equal(
+					error.message,
+					"Could not open browser. Check your default browser and retry MCP authentication.",
+				);
+				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE|https:/);
+				return true;
+			});
+			assert.equal(browser.open.mock.lastCall?.[0], browser.url);
+		}
+	} finally {
+		await shutdownOAuth();
+		removeTempDirectory(dir);
+	}
+});
