@@ -131,9 +131,29 @@ let ensured: Promise<void> | undefined;
 let consumer: PostgresConsumerLease | undefined;
 let initializing = false;
 let health: PostgresHealth | undefined;
+let lastFailure: Error | undefined;
+
+export function embeddedPostgresLastFailure(): Error | undefined {
+	return health?.lastFailure ?? lastFailure;
+}
 
 export function embeddedPostgresHealth(): PostgresHealth | undefined {
 	return health;
+}
+
+/** Explicit repair only for an existing registered cluster, never initial provisioning. */
+export async function recoverEmbeddedPostgres(
+	context: EmbeddedPostgresRunContext,
+	metadata: ManagedPostgresMetadata,
+): Promise<void> {
+	if (activeCluster && !activeCluster.shared)
+		throw new EmbeddedPostgresCleanupPendingError([], "Managed Postgres cleanup is still pending.");
+	// Detach only the old native handle; a published server is never signaled.
+	activeCluster?.lease.release();
+	activeCluster = undefined;
+	await ensureCluster({ context, recovery: metadata });
+	// Subsequent provisioning must health-check the published recovery, not treat it as failed startup.
+	ensured ??= Promise.resolve();
 }
 
 /** Start once, then verify the live shared identity on subsequent requests. */
@@ -151,6 +171,7 @@ export function ensureEmbeddedDbosPostgres(): Promise<void> {
 	ensured ??= ensureOperation()
 		.catch((error: unknown) => {
 			ensured = undefined;
+			lastFailure = error instanceof Error ? error : new Error(String(error));
 			throw error;
 		})
 		.finally(() => {
@@ -676,6 +697,8 @@ type PackageResolver = (specifier: string) => string;
 type PackageImporter = (specifier: string) => Promise<Partial<EmbeddedPostgresBinaries>>;
 
 interface EmbeddedPostgresLoadOptions {
+	/** Inspection must not repair executable permissions. */
+	readonly readOnly?: boolean;
 	readonly host?: EmbeddedPostgresHost;
 	readonly runtimeDirectory?: string;
 	readonly moduleUrl?: string;
@@ -683,7 +706,11 @@ interface EmbeddedPostgresLoadOptions {
 	readonly importPackage?: PackageImporter;
 }
 
-function binariesFromDirectory(runtimeDirectory: string, platform: NodeJS.Platform): EmbeddedPostgresBinaries {
+function binariesFromDirectory(
+	runtimeDirectory: string,
+	platform: NodeJS.Platform,
+	readOnly = false,
+): EmbeddedPostgresBinaries {
 	const executableSuffix = platform === "win32" ? ".exe" : "";
 	const binaries = {
 		pg_ctl: join(runtimeDirectory, "bin", `pg_ctl${executableSuffix}`),
@@ -692,7 +719,7 @@ function binariesFromDirectory(runtimeDirectory: string, platform: NodeJS.Platfo
 	};
 	for (const [name, binary] of Object.entries(binaries)) {
 		if (!existsSync(binary)) throw new Error(`missing bin/${name}${executableSuffix}`);
-		ensureExecutable(binary);
+		if (!readOnly) ensureExecutable(binary);
 	}
 	return binaries;
 }
@@ -788,7 +815,7 @@ export async function loadEmbeddedPostgresBinaries(
 			}
 		}
 		try {
-			return binariesFromDirectory(candidate.path, host.platform);
+			return binariesFromDirectory(candidate.path, host.platform, options.readOnly);
 		} catch (error) {
 			searched[searched.length - 1] += ` (${error instanceof Error ? error.message : String(error)})`;
 		}
@@ -803,7 +830,7 @@ export async function loadEmbeddedPostgresBinaries(
 			const legacy = resolvePackageManifest(target.npmPackageName, resolvePackage);
 			if (legacy.manifest !== undefined) {
 				try {
-					return binariesFromDirectory(join(dirname(legacy.manifest), "native"), host.platform);
+					return binariesFromDirectory(join(dirname(legacy.manifest), "native"), host.platform, options.readOnly);
 				} catch {
 					// Nonstandard/older wrappers retain their existing import API below.
 				}
@@ -816,7 +843,8 @@ export async function loadEmbeddedPostgresBinaries(
 				throw new Error("package did not export pg_ctl/initdb paths");
 			}
 			const postgres = join(dirname(binaries.pg_ctl), host.platform === "win32" ? "postgres.exe" : "postgres");
-			for (const binary of [binaries.pg_ctl, binaries.initdb, postgres]) ensureExecutable(binary);
+			if (!options.readOnly)
+				for (const binary of [binaries.pg_ctl, binaries.initdb, postgres]) ensureExecutable(binary);
 			return { pg_ctl: binaries.pg_ctl, initdb: binaries.initdb, postgres };
 		} catch (error) {
 			searched[searched.length - 1] += ` (${error instanceof Error ? error.message : String(error)})`;
@@ -1228,6 +1256,7 @@ export const embeddedPostgresTestHooks = {
 export function resetEmbeddedDbosPostgresForTests(): void {
 	void health?.stop();
 	health = undefined;
+	lastFailure = undefined;
 	ensured = undefined;
 	actualPort = EMBEDDED_PORT;
 	consumer?.release();

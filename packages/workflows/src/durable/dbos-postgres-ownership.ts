@@ -158,6 +158,7 @@ export function inspectPostgresConsumers(
 	baseDir: string,
 	metadata: ManagedPostgresMetadata,
 	isProcessAlive: (pid: number) => boolean = processIsAlive,
+	prune = true,
 ): readonly PostgresConsumer[] {
 	const registry = postgresOwnershipDirectory(baseDir, metadata.major);
 	trustedPath(registry, true);
@@ -180,7 +181,7 @@ export function inspectPostgresConsumers(
 				throw new Error(`Invalid managed Postgres consumer record: ${path}`);
 			}
 			if (isProcessAlive(record.pid)) consumers.push(record);
-			else if (readFileSync(path, "utf8") === contents) rmSync(path);
+			else if (prune && readFileSync(path, "utf8") === contents) rmSync(path);
 		} catch (error) {
 			// Orderly exit can unlink a consumer after directory enumeration.
 			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;

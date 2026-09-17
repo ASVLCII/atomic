@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added `workflowDependency()`, `/workflow dependency` and the workflow tool's `dependency` action for bounded database inspection and registered managed-cluster recovery, with actual port, verified identity, runtime versions, consumers and safe guidance. External database endpoints receive query-only checks ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+
 ### Fixed
 
 - After DBOS initialization, bound database-dependent root admission to 10 seconds and stop cancelled admission writes from retrying or starting workflow code later. Unavailable admission skips database cleanup, preserving the failure diagnostic and run identity even when PostgreSQL stops answering. Database readiness lost during admission is rechecked before the next admission without switching existing durable runs to memory. First-time provisioning and initialization are outside this bound ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).

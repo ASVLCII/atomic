@@ -26,6 +26,7 @@ test("health loss invalidates before a single shared recovery and reconnects", a
 	]);
 	assert.equal(recoveries, 1);
 	assert.deepEqual(events, ["invalidate", "recover"]);
+	assert.match(health.lastFailure?.message ?? "", /live health check/);
 	await health.stop();
 });
 
@@ -51,6 +52,8 @@ test("exhausted recovery probes for return without restarting forever", async ()
 	assert.deepEqual(waits, [250, 500]);
 	healthy = true;
 	assert.equal(await health.check(), "managed");
+	// #3074: doctor retains the last outage diagnostic after successful recovery.
+	assert.equal(health.lastFailure?.message, "owned restart failed");
 	await health.stop();
 });
 

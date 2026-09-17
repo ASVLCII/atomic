@@ -86,13 +86,14 @@ export interface PostgresIdentityRow {
 	host: string;
 	started: string;
 	system_identifier: string;
+	server_version?: string;
 }
 export type PostgresIdentityProbe = (port: number) => Promise<PostgresIdentityRow | undefined>;
 
 export const POSTGRES_IDENTITY_SQL = `SELECT current_setting('data_directory') AS data_dir,
 	inet_server_port() AS port, host(inet_server_addr()) AS host,
 	floor(extract(epoch FROM pg_postmaster_start_time()))::text AS started,
-	system_identifier::text FROM pg_control_system()`;
+	system_identifier::text, current_setting('server_version') AS server_version FROM pg_control_system()`;
 
 export async function probePostgresIdentity(port: number): Promise<PostgresIdentityRow | undefined> {
 	const client = new Client({

@@ -1,5 +1,6 @@
 import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
+import { workflowDependency } from "../sdk-surface.js";
 import { renderInputsSchema } from "../shared/render-inputs-schema.js";
 import { resolveRunIndicatorStatuses } from "../shared/run-indicator-status.js";
 import { schemaIsRequired } from "../shared/schema-introspection.js";
@@ -59,7 +60,7 @@ export function registerWorkflowSlashCommand(
 		"workflow",
 		{
 			description:
-				"Run or inspect Atomic workflows. Usage: /workflow <name> [key=value…] | /workflow [list|status|connect|attach|quit|pause|resume|inputs|reload] [args]",
+				"Run or inspect Atomic workflows. Usage: /workflow <name> [key=value…] | /workflow [list|status|dependency|connect|attach|quit|pause|resume|inputs|reload] [args]",
 			handler: (args, ctx) => workflowSlashHandler(args, ctx, pi, deps),
 			getArgumentCompletions: (
 				partial: string,
@@ -176,6 +177,15 @@ async function workflowSlashHandler(
 			runs: visibleRuns,
 			indicatorStatuses: resolveRunIndicatorStatuses(visibleRuns, capturedRuns),
 		});
+		return;
+	}
+	if (subcommand === "dependency") {
+		const operation = parts[1] ?? "status";
+		if (parts.length > 2 || (operation !== "status" && operation !== "doctor" && operation !== "recover")) {
+			return fail("Usage: /workflow dependency [status|doctor|recover]");
+		}
+		const report = await workflowDependency(operation);
+		emitWorkflowCommandOutput(pi, JSON.stringify(report, null, 2), { command: "dependency" });
 		return;
 	}
 	if (subcommand === "reload") {

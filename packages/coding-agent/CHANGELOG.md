@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+
 ### Fixed
 
 - Fixed compaction statistics mixing authoritative provider token counts with heuristic region estimates, which could produce incorrect/negative percentReduction. Statistics now use symmetric heuristic estimates (region + explicit tail) while preserving the authoritative tokensBefore for budgeting and display ([#2052](https://github.com/bastani-inc/atomic/issues/2052)).

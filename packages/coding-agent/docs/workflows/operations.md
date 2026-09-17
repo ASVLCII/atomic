@@ -71,6 +71,7 @@ The workflow tool action surface is:
 - inspection: `status`, `stages`, `stage`, `transcript`
 - prompt response: `answer`; run control: `pause`, `quit`, `resume`; free-form stage communication: ordinary Intercom `send`/live `ask` to `workflow:<rootRunId>/<segment>[/<segment>...]` path targets, including `*` and `**` globs
 - rediscovery: `reload`
+- database diagnostics: `dependency` with `operation: "status"`, `"doctor"`, or `"recover"`
 
 Every registered `workflow` tool call has one hard two-minute wall-clock deadline at the shared public tool boundary. The deadline covers request handling through the returned result; for background `run` and `resume`, it therefore covers startup/resume admission and acknowledgement only, not the workflow execution that continues after acknowledgement. A deadline returns one structured result:
 
@@ -146,6 +147,7 @@ Graph node cards show each model stage's effective model and thinking level abov
 /workflow pause [run-id|--all]
 /workflow status [run-id]
 /workflow status --all
+/workflow dependency [status|doctor|recover]
 /workflow quit <run-id|--all>
 /workflow resume <run-id> [stage-id-or-name] [message]
 /workflows [full-workflow-uuid]
@@ -490,6 +492,30 @@ If embedded provisioning fails without leaving retained-process cleanup pending,
 Within one Atomic process, DBOS writes stay ordered per durable root workflow. A slow or stalled write for one root does not block an independent top-level workflow from persisting its registration, reaching startup admission, or recording later checkpoints. Nested workflows share their durable root's write order. Process shutdown and explicit lifecycle drains still wait for every root.
 
 When sessions race to resume the same paused or crashed workflow, a durable first-writer-wins claim and revalidation of the observed metadata generation decide one winner. A stale request cannot claim a newer running generation; it reports that the workflow changed while resume was pending.
+
+### Inspecting and recovering the workflow database
+
+Dependency inspection is separate from run status and does not start a workflow or initialize a database:
+
+```text
+/workflow dependency                  # defaults to status
+/workflow dependency doctor
+/workflow dependency recover
+```
+
+The tool equivalents are `workflow({ action: "dependency", operation: "doctor" })` and `workflow({ action: "dependency", operation: "recover" })`. SDK integrations can use [`workflowDependency()`](/workflows/api-reference#workflowdependencyoperation).
+
+`status` and `doctor` perform read-only checks. For a managed cluster, the report identifies the actual host/port, trusted cluster and data-directory identity, PostgreSQL process identity, current JavaScript runtime, and PostgreSQL server version when available. `identityVerified: true` means SQL, data and process identity agreed during that check. The consumer list conservatively retains leases whose process may still be alive; it is not a count of running workflows. `lastFailure` is process-local history, not a shared or permanent incident log, and can remain present after recovery.
+
+`doctor` also checks the installed PostgreSQL 18 executables with one-second `--version` probes and reports the executable path and version under `runtime.installation`. Missing libraries or an incompatible runtime produce `unavailable` and a diagnostic. These checks do not repair links or permissions. `status` skips them, so it can inspect an existing healthy server even when local runtime files need repair.
+
+Each request returns within a five-second response budget. `checking` or `recovering` means the existing operation continues in the background, not that it succeeded or was cancelled. Repeated calls join that operation. Use `/workflow dependency status` to check again rather than launching duplicate recovery or a replacement workflow.
+
+`recover` retries only an already registered managed cluster under its shared setup lock. It preserves data and ownership records, never runs `initdb` over existing data, never adopts an unregistered cluster, and never kills a listener to free a port. Identity mismatches require investigation, not deletion of `v18` or `v18.shared`. If runtime files or libraries are missing, repair the complete installation using [Configuring DBOS/Postgres](#configuring-dbospostgres), then retry recovery.
+
+With `DBOS_SYSTEM_DATABASE_URL`, every operation only checks that configured endpoint with a bounded query. Atomic does not restart it, choose another port, or provision a replacement. Correct its service, credentials or TLS settings yourself. A selected Docker fallback returns guidance for inspecting `dbos-db`; dependency recovery does not manage that container.
+
+Once the dependency is ready, inspect `/workflow status <full-run-uuid>` and explicitly resume the same ID when eligible. Database recovery itself never resumes workflow execution or proves an uncheckpointed external effect succeeded. Keep the original Atomic process open for a retained failed-admission retry. Existing pause and quit acknowledgements remain immediate during admission; inspect run status for later database settlement errors.
 
 ### How it works
 

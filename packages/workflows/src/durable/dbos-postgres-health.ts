@@ -91,7 +91,6 @@ export class PostgresHealth {
 		if (this.available && this.available.identity !== identity.identity) this.invalidate();
 		this.available = identity;
 		this.attempts = 0;
-		this.failure = undefined;
 		return identity.url;
 	}
 
@@ -106,6 +105,9 @@ export class PostgresHealth {
 			if (!(error instanceof Error && "code" in error && error.code === "53300")) this.invalidate();
 			throw error;
 		}
+		// Retain the most recent outage for doctor even after automatic recovery succeeds.
+		if (this.attempts === 0)
+			this.failure = new DbosDependencyError("Managed PostgreSQL failed its live health check.");
 		this.invalidate();
 		while (!this.stopped && this.attempts < RECOVERY_ATTEMPTS) {
 			const attempt = this.attempts++;

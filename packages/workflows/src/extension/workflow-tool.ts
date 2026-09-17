@@ -1,6 +1,7 @@
 import { getSupportedThinkingLevels } from "@bastani/pi-ai/compat";
 import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
+import { workflowDependency } from "../sdk-surface.js";
 import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
 import { store } from "../shared/store.js";
 import type { WorkflowExecutionPolicy } from "../shared/types.js";
@@ -132,6 +133,10 @@ export function makeExecuteWorkflowTool(
 				// A tool launch is the agent's own action: it is attributed as such and
 				// the tool result already reports the run, so it raises no chat notice.
 				return awaitRequest(getRuntime().dispatch(args, { policy, origin: "agent", signal, onRunAccepted }));
+			}
+			case "dependency": {
+				const operation = args.operation ?? "status";
+				return { action, operation, report: await awaitRequest(workflowDependency(operation)) };
 			}
 			case "status": {
 				const target = args.runId;
