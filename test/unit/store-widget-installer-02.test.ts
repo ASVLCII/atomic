@@ -970,4 +970,62 @@ describe("installStoreWidget", () => {
 		);
 		assert.equal(widgets.has("workflow.run"), true);
 	});
+
+	test("self-clearing the widget does not remount or loop", async () => {
+		// #2529: setWidget(undefined) now notifies onWidgetRelease, so the
+		// controller's own unmount re-enters handleWidgetRelease while mounted.
+		const calls: SetWidgetCall[] = [];
+		const releaseListeners = new Map<string, Set<() => void>>();
+		const ui = {
+			setWidget(key: string, factory: SetWidgetCall["factory"], opts?: { placement?: string }): void {
+				calls.push({ key, factory, opts });
+				if (factory === undefined) {
+					for (const listener of [...(releaseListeners.get(key) ?? [])]) listener();
+				}
+			},
+			requestRender(): void {},
+			onWidgetRelease(key: string, listener: () => void): () => void {
+				const listeners = releaseListeners.get(key) ?? new Set<() => void>();
+				listeners.add(listener);
+				releaseListeners.set(key, listeners);
+				return () => listeners.delete(listener);
+			},
+		};
+		const workflowStore = createStore();
+		installStoreWidget({ ui }, workflowStore);
+		workflowStore.recordRunStart(makeRun("r1", "my-wf"));
+		await Promise.resolve();
+
+		assert.equal(calls.filter((call) => call.factory !== undefined).length, 1);
+		assert.equal(releaseListeners.get("workflow.run")?.size, 1);
+
+		assert.equal(workflowStore.removeRun("r1"), true);
+		await Promise.resolve();
+		const lengthAfterFirstDrain = calls.length;
+		await Promise.resolve();
+
+		const lastMountIndex = calls.findLastIndex((call) => call.factory !== undefined);
+		assert.ok(lastMountIndex >= 0);
+		const afterLastMount = calls.slice(lastMountIndex + 1);
+		assert.equal(
+			afterLastMount.filter((call) => call.factory === undefined).length,
+			1,
+			"exactly one undefined call after the last mount",
+		);
+		assert.equal(
+			afterLastMount.some((call) => call.factory !== undefined),
+			false,
+			"no factory call after that undefined call",
+		);
+		assert.equal(calls.length, lengthAfterFirstDrain, "second drain must not add widget calls");
+		assert.equal(releaseListeners.get("workflow.run")?.size, 1);
+
+		workflowStore.recordRunStart(makeRun("r2", "next-wf"));
+		await Promise.resolve();
+		assert.equal(
+			calls.filter((call) => call.factory !== undefined).length,
+			2,
+			"exactly one additional factory mount",
+		);
+	});
 });
