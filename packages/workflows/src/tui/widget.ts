@@ -405,7 +405,10 @@ function renderAwaitingPromptLine(message: string, bodyWidth: number, theme: Gra
 	// truncateToWidth is ANSI-aware, so untrusted prompt bytes must be
 	// control-stripped at this sink even if the projection already sanitized.
 	const clipped = truncateToWidth(sanitizePromptDisplay(message), messageBudget, ELLIPSIS);
-	const row = `${indent}"${clipped}"`;
+	// pi-tui wraps the ellipsis in SGR resets. Unthemed preview rows must
+	// keep that renderer chrome out of the documented plain entry point.
+	const preview = theme === undefined ? clipped.replace(/\x1b\[[0-9;]*m/g, "") : clipped;
+	const row = `${indent}"${preview}"`;
 	return theme === undefined ? row : `${hexToAnsi(theme.info)}${row}${RESET}`;
 }
 

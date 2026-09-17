@@ -1571,4 +1571,23 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		assert.match(resumedJoined, /"Continue after quitting\?"/);
 		assert.match(resumedJoined, new RegExp(`Answer: /workflow connect ${quitId}`));
 	});
+
+	// #2529 / #3027: a truncated preview must stay plain in the unthemed entry point.
+	test("truncated previews keep the plain entry point free of terminal controls", () => {
+		const long = "Approve the generated migration before deployment? ".repeat(10);
+		const run = awaitingRun("truncated-preview", "truncated-preview", long);
+		for (const width of [80, 96, 120]) {
+			const plain = renderWidgetLines(makeSnap([run]), width);
+			const promptRow = plain.find((line) => line.includes('"Approve the generated migration'));
+			assert.ok(promptRow, `missing preview row at ${width}`);
+			assert.equal(visibleWidth(promptRow), width, `preview row must fill ${width}`);
+			assert.equal(
+				promptRow.includes("\x1b"),
+				false,
+				`plain preview row contains ESC at ${width}: ${JSON.stringify(promptRow)}`,
+			);
+			assert.ok(promptRow.includes("…"), `preview must be truncated at ${width}`);
+			assert.ok(!promptRow.includes(long), `full prompt must not fit at ${width}`);
+		}
+	});
 });
