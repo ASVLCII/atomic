@@ -5,19 +5,21 @@ import { bunExecutable, makeTempDirectory, removeTempDirectory, spawnProcess } f
 
 // Real initdb + PostgreSQL + DBOS child per case. Startup, outage and shutdown are structural work.
 const REAL_POSTGRES_OUTAGE_TIMEOUT_MS = 120_000;
-for (const [phase, action] of [
-	["admission", "observe"],
-	["admission", "pause"],
-	["admission", "quit"],
-	["checkpoint", "quit"],
+for (const [phase, action, barrier] of [
+	["admission", "observe", "immediate"],
+	["admission", "pause", "immediate"],
+	["admission", "quit", "immediate"],
+	["admission", "pause", "connected"],
+	["admission", "quit", "connected"],
+	["checkpoint", "quit", "immediate"],
 ] as const) {
 	// #3072/#3074: never connect these fault injectors to an inherited database.
 	test(
-		`real PostgreSQL ${phase} loss: bounded ${action} preserves completed work without late admission`,
+		`real PostgreSQL ${phase} loss (${barrier}): bounded ${action} preserves completed work without late admission`,
 		async () => {
 			const home = makeTempDirectory("atomic-owned-workflow-outage-");
 			const child = spawnProcess(
-				[bunExecutable(), "test/fixtures/workflow-postgres-real-outage.ts", home, phase, action],
+				[bunExecutable(), "test/fixtures/workflow-postgres-real-outage.ts", home, phase, action, barrier],
 				{
 					env: {
 						...process.env,

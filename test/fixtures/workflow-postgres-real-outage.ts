@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:net";
+import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { configureDbosDurableBackend, DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
@@ -23,7 +23,7 @@ import { store } from "../../packages/workflows/src/shared/store.js";
 import { INTERACTIVE_WORKFLOW_POLICY } from "../../packages/workflows/src/shared/types.js";
 import { readText, sleep } from "../helpers/runtime.js";
 
-const [home, phase, action] = process.argv.slice(2);
+const [home, phase, action, barrier] = process.argv.slice(2);
 assert.ok(home && (phase === "admission" || phase === "checkpoint"));
 assert.ok(action === "pause" || action === "quit" || action === "observe");
 assert.notEqual(
@@ -89,10 +89,27 @@ async function until(predicate: () => boolean, label: string) {
 		await sleep(20);
 	}
 }
+// A TCP accept proves the real DBOS admission has left the deferred startup turn.
+// This owned listener deliberately withholds the PostgreSQL handshake until control returns.
+const sockets = new Set<Socket>();
+let connected = false;
+const sink = createServer((socket) => {
+	sockets.add(socket);
+	socket.once("close", () => sockets.delete(socket));
+	connected = true;
+});
+async function closeSink() {
+	if (!sink.listening) return;
+	const closed = new Promise<void>((resolve, reject) =>
+		sink.close((error) => (error ? reject(error) : resolve())),
+	);
+	for (const socket of sockets) socket.destroy();
+	await closed;
+}
 // Cleanup runs before the outer process timeout, including when a DBOS await stalls.
 const FIXTURE_DEADLINE_MS = 95_000;
 const interrupted = () => {
-	void stop().finally(() => process.exit(2));
+	void closeSink().then(stop).finally(() => process.exit(2));
 };
 const watchdog = setTimeout(interrupted, FIXTURE_DEADLINE_MS);
 process.once("SIGTERM", interrupted);
@@ -143,6 +160,13 @@ try {
 	});
 	const runtime = createExtensionRuntime({ definitions: [definition], store });
 	if (phase === "admission") await stop();
+	if (barrier === "connected") {
+		assert.equal(phase, "admission");
+		await new Promise<void>((resolve, reject) => {
+			sink.once("error", reject);
+			sink.listen(port, "127.0.0.1", resolve);
+		});
+	}
 	const { runId } = runDetached(definition, {}, { store });
 	const job = jobTracker.get(runId);
 	assert.ok(job);
@@ -160,6 +184,11 @@ try {
 		await new Promise<void>((resolve) => setImmediate(resolve));
 	} else {
 		assert.equal(completedCalls, 0);
+	}
+	if (barrier === "connected") {
+		await until(() => connected, "actual DBOS admission never connected to the owned outage listener");
+		assert.equal(jobTracker.get(runId), job, "control must target an outstanding admission");
+		assert.equal(completedCalls, 0, "author work must not precede database admission");
 	}
 	const before = performance.now();
 	if (action === "observe") {
@@ -193,6 +222,7 @@ try {
 		}
 	}
 	await sleep(200);
+	await closeSink();
 	await start();
 	if (phase === "admission" && action === "quit") {
 		await job.promise;
@@ -232,6 +262,7 @@ try {
 } catch (error) {
 	failure = error instanceof Error ? error : new Error(String(error));
 } finally {
+	await closeSink();
 	await stop();
 	clearTimeout(watchdog);
 }

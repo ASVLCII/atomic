@@ -68,9 +68,10 @@ export class RealPostgresClient {
 		readonly home: string,
 		port: number,
 		extra: Record<string, string> = {},
+		fixture = "real-postgres-client.ts",
 	) {
 		assert.notEqual(process.getuid?.(), 0, "Run disposable managed cluster tests as an unprivileged account");
-		this.child = spawnProcess([bunExecutable(), join(import.meta.dirname, "../fixtures/real-postgres-client.ts")], {
+		this.child = spawnProcess([bunExecutable(), join(import.meta.dirname, "../fixtures", fixture)], {
 			env: {
 				...process.env,
 				HOME: home,
@@ -144,8 +145,8 @@ export class RealPostgresClient {
 export class RealPostgresHome {
 	readonly path = makeTempDirectory("atomic-real-postgres-");
 	readonly clients: RealPostgresClient[] = [];
-	client(port: number, extra?: Record<string, string>) {
-		const client = new RealPostgresClient(this.path, port, extra);
+	client(port: number, extra?: Record<string, string>, fixture?: string) {
+		const client = new RealPostgresClient(this.path, port, extra, fixture);
 		this.clients.push(client);
 		return client;
 	}
