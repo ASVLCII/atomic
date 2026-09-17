@@ -102,7 +102,8 @@ export class PostgresHealth {
 		} catch (error) {
 			// Identity/authentication failures are not permission to restart anything.
 			this.failure = error instanceof Error ? error : new Error(String(error));
-			this.invalidate();
+			// A refused monitoring connection does not imply existing sockets are unhealthy.
+			if (!(error instanceof Error && "code" in error && error.code === "53300")) this.invalidate();
 			throw error;
 		}
 		this.invalidate();

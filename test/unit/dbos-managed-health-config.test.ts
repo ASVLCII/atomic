@@ -26,6 +26,7 @@ afterEach(async () => {
 	await local.health?.stop();
 	local.health = undefined;
 	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 
 // #3074: reconnect the SDK's existing pool reference, not a newly launched executor.
@@ -96,4 +97,89 @@ test("cancelling admission during shared recovery cannot return a late usable cl
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	assert.deepEqual(releaseClient.mock.calls, [[true]]);
 	await pool.end();
+});
+
+// Real pg-pool bookkeeping; replace only the socket boundary.
+class SocketlessClient extends Client {
+	destroyed = false;
+	override connect(): Promise<Client>;
+	override connect(callback: (error: Error | null, client: Client) => void): void;
+	override connect(callback?: (error: Error | null, client: Client) => void): Promise<Client> | undefined {
+		if (callback) queueMicrotask(() => callback(null, this));
+		else return Promise.resolve(this);
+	}
+	override end(): Promise<void>;
+	override end(callback: () => void): void;
+	override end(callback?: () => void): Promise<void> | undefined {
+		this.destroyed = true;
+		if (callback) queueMicrotask(callback);
+		else return Promise.resolve();
+	}
+	override query: Client["query"] = (() => {
+		assert.equal(this.destroyed, false, "healthy checkout must remain usable");
+		return Promise.resolve({ command: "SELECT", rowCount: 1, oid: 0, fields: [], rows: [{ value: 1 }] });
+	}) as Client["query"];
+}
+
+// #3074 R1: managed health must not evict transactions/LISTEN clients on capacity pressure.
+test.each(["acquisition", "timer"])("managed %s health preserves checkouts on 53300", async (trigger) => {
+	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+	const refusal = Object.assign(new Error("sorry, too many clients already"), { code: "53300" });
+	let pressure = false;
+	const probe = vi.fn(async () => {
+		if (pressure) throw refusal;
+		return { url: initialUrl, identity: "same-server" };
+	});
+	const recover = vi.fn(async () => {
+		throw new Error("capacity refusal must not restart PostgreSQL");
+	});
+	local.health = new PostgresHealth({ probe, recover });
+	const physicalPools = new Set<Pool>();
+	const nativeConnect = Pool.prototype.connect;
+	vi.spyOn(Pool.prototype, "connect").mockImplementation(function (this: Pool) {
+		physicalPools.add(this);
+		Object.assign(this, { Client: SocketlessClient });
+		return Reflect.apply(nativeConnect, this, []);
+	} as Pool["connect"]);
+	const end = vi.spyOn(Pool.prototype, "end");
+	const sdk = { setConfig: vi.fn<(config: DbosConfiguration) => void>(), launch: vi.fn(async () => {}) };
+	const database = configureAdmissionDatabase(sdk, config);
+	const pool = sdk.setConfig.mock.calls[0][0].systemDatabasePool!;
+	const consumerError = vi.fn();
+	pool.on("error", consumerError);
+	const held = await pool.connect();
+	held.on("error", consumerError);
+	try {
+		await database.launch();
+		pressure = true;
+		const probesBeforeFailure = probe.mock.calls.length;
+		if (trigger === "timer") await vi.advanceTimersByTimeAsync(5_000);
+		else await assert.rejects(pool.connect(), (error) => error === refusal);
+		assert.equal(probe.mock.calls.length, probesBeforeFailure + 1);
+		assert.equal(local.health.lastFailure, refusal);
+		assert.equal(end.mock.calls.length, 0, "capacity refusal must not retire the physical pool");
+		assert.equal(consumerError.mock.calls.length, 0);
+		assert.equal(pool.totalCount, 1);
+		assert.deepEqual((await held.query("SELECT 1 AS value")).rows, [{ value: 1 }]);
+		pressure = false;
+		const probesBefore = probe.mock.calls.length;
+		if (trigger === "timer") await vi.advanceTimersByTimeAsync(5_000);
+		else assert.equal(await local.health.check(), initialUrl);
+		assert.equal(probe.mock.calls.length, probesBefore + 1);
+		assert.equal(local.health.lastFailure, undefined);
+		held.release();
+		const next = await pool.connect();
+		try {
+			assert.equal(next, held, "existing connection remains reusable");
+			assert.equal(physicalPools.size, 1, "health refusal must not rotate pools");
+			assert.equal(recover.mock.calls.length, 0);
+			assert.equal(sdk.launch.mock.calls.length, 1);
+			assert.equal(sdk.setConfig.mock.calls.length, 1);
+		} finally {
+			next.release();
+		}
+	} finally {
+		held.release();
+		await pool.end();
+	}
 });
