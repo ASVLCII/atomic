@@ -11,6 +11,7 @@ import { createWorkflowExtensionRuntimeState } from "../../packages/workflows/sr
 import factory from "../../packages/workflows/src/extension/index.js";
 import type {
 	PiCommandOptions,
+	PiExecuteContext,
 	PiToolOpts,
 	WorkflowResourceInfo,
 	WorkflowToolArgs,
@@ -86,6 +87,7 @@ async function fixture() {
 		state,
 		execute,
 		admissions,
+		registryNames: () => state.runtimeProxy.registry.names(),
 		setResources: (next: readonly WorkflowResourceInfo[]) => {
 			resources = next;
 		},
@@ -107,7 +109,13 @@ type CapturedState = {
 };
 type CapturedRequest = { state: CapturedState; questions: Record<string, { criteria: Record<string, string> }> };
 
-async function inspectRoutes(f: Awaited<ReturnType<typeof fixture>>, proposed: string) {
+type RoutingHarness = {
+	execute: (args: WorkflowToolArgs, ctx: PiExecuteContext) => Promise<WorkflowRegisteredToolResult>;
+	registryNames: () => readonly string[];
+	noAdmission: () => void;
+};
+
+async function inspectRoutes(f: RoutingHarness, proposed: string) {
 	const ctx = workflowRouterContext("none");
 	let ordinaryState: CapturedState | undefined;
 	let choices: string[] = [];
@@ -122,7 +130,7 @@ async function inspectRoutes(f: Awaited<ReturnType<typeof fixture>>, proposed: s
 	assert.equal(ordinary.action, "run");
 	assert.equal(ordinary.status, "not_launched", ordinary.error);
 	assert.ok(ordinaryState);
-	const expected = ["none", ...f.state.runtimeProxy.registry.names()];
+	const expected = ["none", ...f.registryNames()];
 	assert.deepEqual(choices, expected);
 	assert.deepEqual(
 		ordinaryState.workflows.map((item) => item.name),
@@ -162,11 +170,13 @@ async function inspectRoutes(f: Awaited<ReturnType<typeof fixture>>, proposed: s
 	assert.ok(jev);
 	assert.deepEqual(Object.keys(jev.questions.workflow!.criteria), expected);
 	assert.deepEqual(jev.state.workflows, ordinaryState.workflows);
+	for (const workflow of ordinaryState.workflows)
+		assert.ok(jev.questions.workflow!.criteria[workflow.name]!.includes(workflow.description));
 	f.noAdmission();
 	return ordinaryState;
 }
 
-test("effective builtin, project, user and package overrides have identical schema, context and Jev candidates", async () => {
+test("all six effective discovery sources and overrides have identical schema, context and Jev candidates", async () => {
 	const f = await fixture();
 	const builtin = f.state.runtimeProxy.registry.names()[0]!;
 	assert.ok(builtin);
@@ -182,12 +192,45 @@ test("effective builtin, project, user and package overrides have identical sche
 		builtin,
 		"Project replacement for builtin",
 	);
+	const settingsProjectPath = join(f.project, "configured/project.ts");
+	const settingsGlobalPath = join(f.user, "configured/global.ts");
+	const settingsGlobalShadowedPath = join(f.user, "configured/shadowed.ts");
+	await definition(settingsProjectPath, "settings-project-route", "Settings project wins", "configuredProject");
+	await definition(settingsGlobalPath, "settings-global-route", "Settings global wins", "configuredGlobal");
+	await definition(settingsGlobalShadowedPath, "project-route", "Shadowed settings global contract", "shadowed");
+	await definition(
+		join(f.project, ".atomic/workflows/settings-shadowed.ts"),
+		"settings-project-route",
+		"Shadowed project-local contract",
+		"shadowed",
+	);
+	await definition(
+		join(f.user, "workflows/settings-shadowed.ts"),
+		"settings-global-route",
+		"Shadowed user-global contract",
+		"shadowed",
+	);
+	const projectConfig = join(f.project, ".atomic/extensions/workflow/config.json");
+	const globalConfig = join(f.user, "extensions/workflow/config.json");
+	await mkdir(dirname(projectConfig), { recursive: true });
+	await mkdir(dirname(globalConfig), { recursive: true });
+	await writeFile(projectConfig, JSON.stringify({ workflows: { configured: { path: settingsProjectPath } } }));
+	await writeFile(
+		globalConfig,
+		JSON.stringify({
+			workflows: {
+				configuredGlobal: { path: settingsGlobalPath },
+				shadowed: { path: settingsGlobalShadowedPath },
+			},
+		}),
+	);
 	f.setResources([{ path: packagePath, enabled: true }]);
 	const reload = await f.execute({ action: "reload" }, {});
 	assert.equal(reload.action, "reload");
 	assert.equal(reload.outcome, "applied");
 	const kinds = new Set<string>(f.state.discoveryRef.current!.sources.map((source) => source.kind));
-	for (const kind of ["project-local", "user-global", "package", "bundled"]) assert.ok(kinds.has(kind), kind);
+	for (const kind of ["settings-project", "project-local", "settings-global", "user-global", "package", "bundled"])
+		assert.ok(kinds.has(kind), kind);
 	const captured = await inspectRoutes(f, "project-route");
 	assert.equal(captured.workflows.filter((item) => item.name === "project-route").length, 1);
 	assert.equal(captured.workflows.find((item) => item.name === "project-route")!.description, "Project contract wins");
@@ -197,6 +240,21 @@ test("effective builtin, project, user and package overrides have identical sche
 	);
 	for (const name of ["project-route", "user-route", "package-route"])
 		assert.ok(captured.workflows.some((item) => item.name === name));
+	for (const [name, kind, description, input] of [
+		["settings-project-route", "settings-project", "Settings project wins", "configuredProject"],
+		["settings-global-route", "settings-global", "Settings global wins", "configuredGlobal"],
+		["project-route", "project-local", "Project contract wins", "task"],
+	]) {
+		assert.equal(f.state.discoveryRef.current!.sources.find((source) => source.id === name)!.kind, kind);
+		const matches = captured.workflows.filter((item) => item.name === name);
+		assert.equal(matches.length, 1);
+		assert.equal(matches[0]!.description, description);
+		assert.deepEqual(Object.keys(matches[0]!.inputs), [input]);
+	}
+	assert.equal(
+		captured.workflows.some((item) => item.description.startsWith("Shadowed")),
+		false,
+	);
 });
 
 test("file authoring, removal, rename and same-name edits refresh actual choices and input contracts together", async () => {
@@ -304,52 +362,107 @@ test("overlapping in-flight decisions cannot launch a removed or same-name chang
 	f.noAdmission();
 });
 
-test("user /workflow reload publishes newly authored choices to the registered model tool", async () => {
-	const f = await fixture();
-	const commands = new Map<string, PiCommandOptions>();
-	let tool: PiToolOpts<WorkflowToolArgs, WorkflowRegisteredToolResult> | undefined;
-	factory({
-		disableAsyncDiscovery: true,
-		registerCommand: (name, options) => {
-			commands.set(name, options);
-		},
-		registerTool: (options) => {
-			tool = options as unknown as PiToolOpts<WorkflowToolArgs, WorkflowRegisteredToolResult>;
-		},
-		on: () => {},
-		ui: { setWidget: () => {} },
-	});
-	assert.ok(tool);
-	const command = commands.get("workflow");
-	assert.ok(command);
-	await definition(
-		join(f.project, ".atomic/workflows/slash-authored.ts"),
-		"slash-authored-route",
-		"Slash reload contract",
-	);
-	await command.handler("reload", { hasUI: false, ui: { notify: () => {} } });
-	const ctx = workflowRouterContext("none");
-	let seen = false;
-	ctx.modelRegistry!.streamSimple = (_model, context) => {
-		const state = JSON.parse(context.messages[0]!.content as string).state as CapturedState;
-		assert.ok(
-			state.workflows.some(
-				(item) => item.name === "slash-authored-route" && item.description === "Slash reload contract",
+for (const mutation of ["add", "remove", "rename", "same-name replacement"] as const) {
+	test(`user /workflow reload publishes ${mutation} and rejects in-flight approvals at the registered tool`, async () => {
+		const f = await fixture();
+		const path = join(f.project, ".atomic/workflows/slash-changing.ts");
+		await definition(join(f.project, ".atomic/workflows/slash-stable.ts"), "slash-stable", "Stable contract");
+		if (mutation !== "add") await definition(path, "slash-changing", "Old slash contract");
+		const commands = new Map<string, PiCommandOptions>();
+		let registeredTool: PiToolOpts<WorkflowToolArgs, WorkflowRegisteredToolResult> | undefined;
+		factory({
+			disableAsyncDiscovery: true,
+			registerCommand: (name, options) => {
+				commands.set(name, options);
+			},
+			registerTool: (options) => {
+				registeredTool = options as unknown as PiToolOpts<WorkflowToolArgs, WorkflowRegisteredToolResult>;
+			},
+			on: () => {},
+			ui: { setWidget: () => {} },
+		});
+		assert.ok(registeredTool);
+		const tool = registeredTool;
+		const command = commands.get("workflow");
+		assert.ok(command);
+		const reload = () => command.handler("reload", { hasUI: false, ui: { notify: () => {} } });
+		const listNames = async () => {
+			const result = await tool.execute("list", { action: "list" }, undefined, undefined, {});
+			assert.equal(result.details.action, "list");
+			assert.ok("items" in result.details);
+			return result.details.items.map((item) => item.name);
+		};
+		await reload();
+		let currentNames = await listNames();
+		const routing: RoutingHarness = {
+			execute: async (args, ctx) => (await tool.execute("inspect-route", args, undefined, undefined, ctx)).details,
+			registryNames: () => currentNames,
+			noAdmission: f.noAdmission,
+		};
+		const before = await inspectRoutes(routing, "slash-stable");
+		assert.equal(currentNames.includes("slash-changing"), mutation !== "add");
+		// Hold overlapping approvals for the changed target and an unchanged definition.
+		// Both must be invalidated by the slash command's registry publication.
+		const targets = mutation === "add" ? ["slash-stable"] : ["slash-changing", "slash-stable"];
+		const streams = targets.map(() => createAssistantMessageEventStream());
+		const entered = Promise.withResolvers<void>();
+		const snapshots: CapturedState[] = [];
+		const ctx = workflowRouterContext("none");
+		ctx.modelRegistry!.streamSimple = (_model, context) => {
+			snapshots.push(JSON.parse(context.messages[0]!.content as string).state as CapturedState);
+			if (snapshots.length === targets.length) entered.resolve();
+			return streams[snapshots.length - 1]!;
+		};
+		const pending = targets.map((workflow) =>
+			tool.execute(
+				"stale-route",
+				{ workflow, inputs: { task: "approved" }, state: workflowRouterState() },
+				undefined,
+				undefined,
+				ctx,
 			),
 		);
-		seen = true;
-		return messageStream(decisionMessage({ workflowType: "none", maxBudget: {} }));
-	};
-	const result = await tool.execute(
-		"slash-reload-route",
-		{ workflow: "slash-authored-route", inputs: { task: "approved" }, state: workflowRouterState() },
-		undefined,
-		undefined,
-		ctx,
-	);
-	assert.equal(result.details.action, "run");
-	assert.ok("routerDecision" in result.details);
-	assert.deepEqual(result.details.routerDecision, { workflowType: "none", maxBudget: {} });
-	assert.equal(seen, true);
-	f.noAdmission();
-});
+		await entered.promise;
+		f.noAdmission();
+		if (mutation === "remove") await unlink(path);
+		else
+			await definition(
+				path,
+				mutation === "rename" ? "slash-renamed" : "slash-changing",
+				"New slash contract",
+				"replacement",
+			);
+		await reload();
+		currentNames = await listNames();
+		const after = await inspectRoutes(routing, "slash-stable");
+		const selected = mutation === "rename" ? "slash-renamed" : "slash-changing";
+		if (mutation === "remove") assert.equal(currentNames.includes(selected), false);
+		else {
+			const current = after.workflows.find((item) => item.name === selected)!;
+			assert.equal(current.description, "New slash contract");
+			assert.deepEqual(Object.keys(current.inputs), ["replacement"]);
+		}
+		if (mutation === "rename") assert.equal(currentNames.includes("slash-changing"), false);
+		for (const snapshot of snapshots) assert.deepEqual(snapshot.workflows, before.workflows);
+		streams.forEach((stream, index) => {
+			stream.push({
+				type: "done",
+				reason: "toolUse",
+				message: decisionMessage({ workflowType: targets[index]!, maxBudget: {} }),
+			});
+		});
+		for (const result of await Promise.all(pending)) {
+			assert.equal(result.details.action, "run");
+			assert.equal(result.details.status, "failed");
+			assert.match("error" in result.details ? (result.details.error ?? "") : "", /registry changed/);
+			assert.equal("routerDecision" in result.details, false);
+			const visible = JSON.parse(result.content[0]!.text as string);
+			assert.equal(visible.runId, "");
+			assert.equal(visible.status, "failed");
+			assert.equal("routerDecision" in visible, false);
+			assert.match(visible.error, /retry explicitly with fresh state/);
+		}
+		assert.equal(snapshots.length, targets.length, "no automatic rerouting");
+		f.noAdmission();
+	});
+}

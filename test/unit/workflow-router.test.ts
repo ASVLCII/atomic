@@ -160,6 +160,13 @@ test("matching selection waits for approval, preserves launch metadata and recei
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, { workflowType: "approved-change", maxBudget: {} });
 	assert.ok(result.details.runId);
+	assert.equal(result.content[0]!.type, "text");
+	const visible = JSON.parse(result.content[0]!.text as string);
+	assert.deepEqual(visible, result.details);
+	assert.deepEqual(visible.routerDecision, { workflowType: "approved-change", maxBudget: {} });
+	assert.equal(visible.action, "run");
+	assert.equal(visible.runId, result.details.runId);
+	assert.equal(visible.status, "running");
 	await f.jobs.get(result.details.runId)!.promise;
 	assert.equal(f.body.mock.calls.length, 1);
 	assert.ok(f.admissions.mock.calls.length > 0);
@@ -175,6 +182,16 @@ test("different selection returns its decision without stale-input execution", a
 	assert.equal(result.details.routerDecision?.workflowType, "review-only");
 	assert.equal(result.details.status, "not_launched");
 	assert.match(result.details.message ?? "", /prepare fresh state/);
+	assert.equal(result.content[0]!.type, "text");
+	assert.deepEqual(JSON.parse(result.content[0]!.text as string), {
+		action: "run",
+		runId: "",
+		status: "not_launched",
+		routerDecision: { workflowType: "review-only", maxBudget: {} },
+		message:
+			'Router selected "review-only" instead. No workflow was launched. Inspect its inputs and prepare fresh state for an explicit new call; do not reuse or remap the proposed workflow\'s inputs automatically.',
+	});
+	assert.equal(f.infer.mock.calls.length, 1);
 	f.noLaunch();
 });
 
@@ -227,6 +244,10 @@ for (const budget of [
 		const result = await f.call();
 		assert.ok("routerDecision" in result.details);
 		assert.deepEqual(result.details.routerDecision?.maxBudget, budget);
+		assert.deepEqual(JSON.parse(result.content[0]!.text as string).routerDecision, {
+			workflowType: "approved-change",
+			maxBudget: budget,
+		});
 		await f.jobs.get(result.details.runId)!.promise;
 		const expected = resolve_budget({ config: { maxCost: 1.25 }, definition: f.definition.budget, run: budget });
 		assert.deepEqual(f.store.runs()[0]!.budget, { ...expected });
