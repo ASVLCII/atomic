@@ -83,6 +83,7 @@ export type WorkflowFailureRecoverability = "recoverable" | "non_recoverable" | 
 export type WorkflowFailureDisposition = "active_blocked" | "terminal_killed" | "terminal_failed";
 export type WorkflowFailureCode =
 	| "login_required"
+	| "auth_timeout"
 	| "missing_api_key"
 	| "invalid_api_key"
 	| "forbidden_config"

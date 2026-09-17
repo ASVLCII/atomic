@@ -338,6 +338,7 @@ test("publish graph stages a draft before npm and undrafts last", async () => {
 		"stage-github-release",
 		"publish-npm",
 		"publish-github-release",
+		"register-published-version",
 		"cleanup-draft-github-release",
 	]) {
 		assert.match(workflow, new RegExp(`^  ${job}:$`, "mu"));
@@ -354,13 +355,18 @@ test("publish graph stages a draft before npm and undrafts last", async () => {
 		/needs: \[integrity, stage-github-release\]/,
 	);
 	assert.match(
-		jobBlock(workflow, "publish-github-release", "cleanup-draft-github-release"),
+		jobBlock(workflow, "publish-github-release", "register-published-version"),
 		/needs: \[stage-github-release, publish-npm\][\s\S]*--draft=false/,
+	);
+	assert.match(
+		jobBlock(workflow, "register-published-version", "cleanup-draft-github-release"),
+		/needs: \[integrity, publish-github-release\]/,
 	);
 	assert.match(
 		jobBlock(workflow, "cleanup-draft-github-release"),
 		/always\(\).*needs\.stage-github-release\.result != 'skipped'.*needs\.publish-npm\.result != 'success'/,
 	);
+	assert.doesNotMatch(jobBlock(workflow, "cleanup-draft-github-release"), /register-published-version/);
 });
 
 test("publish permissions, timeouts, runners, and OIDC are least privilege", async () => {
@@ -374,14 +380,38 @@ test("publish permissions, timeouts, runners, and OIDC are least privilege", asy
 	assert.match(npm, /npm view .*@\$VERSION.*already exists; skipping/s);
 	for (const writeJob of [
 		jobBlock(workflow, "stage-github-release", "publish-npm"),
-		jobBlock(workflow, "publish-github-release", "cleanup-draft-github-release"),
+		jobBlock(workflow, "publish-github-release", "register-published-version"),
 		jobBlock(workflow, "cleanup-draft-github-release"),
 	]) {
 		assert.match(writeJob, /contents: write/);
 		assert.match(writeJob, /GH_REPO: \$\{\{ github\.repository \}\}/);
 		assert.doesNotMatch(writeJob, /id-token: write|npm publish/);
 	}
-	assert.equal([...workflow.matchAll(/^ {4}timeout-minutes:/gmu)].length, 10);
+	const register = jobBlock(workflow, "register-published-version", "cleanup-draft-github-release");
+	assert.match(register, /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write/);
+	assert.doesNotMatch(register, /contents: write|environment:/);
+	assert.match(register, /runs-on: ubuntu-latest/);
+	assert.match(register, /set \+x/);
+	assert.match(register, /::add-mask::/);
+	assert.match(
+		register,
+		/https%3A%2F%2Fatomic-version-adoption\.bastani-atomic\.workers\.dev%2Fv1%2Fpublished-versions/,
+	);
+	assert.match(register, /--max-redirs 0/);
+	assert.doesNotMatch(register, /\s-L\s|curl -[^\n]*L/);
+	assert.match(register, /max_attempts=3/);
+	assert.match(register, /oidc_code=000/);
+	assert.match(register, /http_code=000/);
+	assert.match(register, /type == "string"/);
+	assert.match(register, /OIDC token acquisition failed/);
+	assert.doesNotMatch(register, /curl --fail/);
+	assert.match(register, /needs\.integrity\.outputs\.version/);
+	assert.match(register, /set -euo pipefail/);
+	assert.match(register, /new URL/);
+	assert.match(register, /actions\.githubusercontent\.com/);
+	assert.match(register, /OIDC request URL is not a GitHub Actions token endpoint/);
+	assert.doesNotMatch(register, /\[\[ "\$request_url" == https:\/\/\* \]\]/);
+	assert.equal([...workflow.matchAll(/^ {4}timeout-minutes:/gmu)].length, 11);
 	assert.match(workflow, /blacksmith-4vcpu-ubuntu-2404-arm/);
 	assert.match(workflow, /macos-26-intel/);
 	assert.match(workflow, /blacksmith-6vcpu-macos-26/);
@@ -977,17 +1007,23 @@ test("Blacksmith runners are used everywhere they are supported", async () => {
 			hosted.push(...jobRunners(`${file} ${name}`, job).filter((runner) => !runner.startsWith("blacksmith-")));
 		}
 	}
-	// Only two jobs may stay GitHub-hosted, and each for a reason that a future
+	// Only these jobs may stay GitHub-hosted, each for a reason a future
 	// "move everything to Blacksmith" pass must not quietly undo:
 	//   macos-26-intel - Blacksmith macOS is Apple Silicon only, so this is the
 	//     only runner that can produce the darwin x64 native binding.
-	//   ubuntu-latest  - npm trusted publishing rejects self-hosted runners, and
-	//     Blacksmith registers through GitHub's org-level registration API.
-	assert.deepEqual(hosted.sort(), ["macos-26-intel", "ubuntu-latest"]);
+	//   ubuntu-latest  - GitHub OIDC (npm trusted publishing and published-version
+	//     registration) rejects self-hosted runners, and Blacksmith registers
+	//     through GitHub's org-level registration API.
+	assert.deepEqual(hosted.sort(), ["macos-26-intel", "ubuntu-latest", "ubuntu-latest"]);
 	assert.match(publish, /# Blacksmith macOS is Apple Silicon only[^\n]*\n\s+- \{ runner: macos-26-intel/u);
 	assert.match(publish, /npm trusted publishing rejects self-hosted runners[\s\S]{0,160}?runs-on: ubuntu-latest/u);
-	// ubuntu-latest is only ever acceptable on the OIDC publish job.
 	assert.equal(jobBlock(publish, "publish-npm", "publish-github-release").includes("runs-on: ubuntu-latest"), true);
+	assert.equal(
+		jobBlock(publish, "register-published-version", "cleanup-draft-github-release").includes(
+			"runs-on: ubuntu-latest",
+		),
+		true,
+	);
 });
 
 /**

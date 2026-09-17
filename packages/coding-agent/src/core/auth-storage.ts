@@ -6,6 +6,7 @@
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@bastani/pi-ai";
 import { join } from "path";
 import { getAgentConfigPaths, getAgentDir } from "../config.js";
+import { raceWithAbortSignal } from "../utils/abort.js";
 import { stripBom } from "../utils/text.ts";
 import {
 	type AuthStorageBackend,
@@ -79,7 +80,8 @@ export class AuthStorage implements CredentialStore {
 		return this.data[provider];
 	}
 
-	async read(provider: string): Promise<Credential | undefined> {
+	async read(provider: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
+		options?.signal?.throwIfAborted();
 		const credential = this.data[provider];
 		if (credential?.type !== "api_key") return credential;
 		if (credential.key === undefined) return credential;
@@ -89,11 +91,17 @@ export class AuthStorage implements CredentialStore {
 	async modify(
 		provider: string,
 		fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+		options?: AuthOperationOptions,
 	): Promise<Credential | undefined> {
+		const signal = options?.signal;
+		signal?.throwIfAborted();
 		let persistedData: AuthStorageData | undefined;
-		const result = await this.storage.withLockAsync(async (content) => {
+		const operation = this.storage.withLockAsync(async (content) => {
+			signal?.throwIfAborted();
 			const currentData = this.parseStorageData(content);
-			const next = await fn(currentData[provider]);
+			const pending = fn(currentData[provider]);
+			const next = signal === undefined ? await pending : await raceWithAbortSignal(pending, signal);
+			signal?.throwIfAborted();
 			if (next === undefined) {
 				persistedData = currentData;
 				return { result: currentData[provider] };
@@ -103,6 +111,7 @@ export class AuthStorage implements CredentialStore {
 			persistedData = merged;
 			return { result: next, next: JSON.stringify(merged, null, 2) };
 		});
+		const result = signal === undefined ? await operation : await raceWithAbortSignal(operation, signal);
 		if (persistedData) this.data = persistedData;
 		return result;
 	}
@@ -124,7 +133,8 @@ export class AuthStorage implements CredentialStore {
 	}
 
 	/** List credential metadata without resolving configured key values. */
-	async list(): Promise<readonly CredentialInfo[]> {
+	async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
+		options?.signal?.throwIfAborted();
 		return Object.entries(this.data).map(([providerId, credential]) => ({ providerId, type: credential.type }));
 	}
 }

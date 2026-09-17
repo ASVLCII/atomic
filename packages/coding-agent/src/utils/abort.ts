@@ -10,11 +10,37 @@ export function operationSignal(signal?: AbortSignal): AbortSignal {
  * observe the abandoned promise so a later rejection is always handled.
  */
 export function raceWithAbortSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-	if (signal.aborted)
-		return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+	const abortError = () => signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+	if (signal.aborted) {
+		void operation.catch(() => {});
+		return Promise.reject(abortError());
+	}
+
 	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+		let settled = false;
+		const cleanup = () => signal.removeEventListener("abort", onAbort);
+		const onAbort = () => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(abortError());
+		};
+
 		signal.addEventListener("abort", onAbort, { once: true });
-		operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+		void operation.then(
+			(value) => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				resolve(value);
+			},
+			(error: unknown) => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				reject(error);
+			},
+		);
+		if (signal.aborted) onAbort();
 	});
 }

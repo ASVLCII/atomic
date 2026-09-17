@@ -159,7 +159,9 @@ export function assertPayloadPreservesFastRoute(
 		conflicts.push(`model (expected "${fastRoute.upstreamModelId}", got ${JSON.stringify(record.model)})`);
 	}
 	if (record.service_tier !== fastRoute.serviceTier) {
-		conflicts.push(`service_tier (expected ${JSON.stringify(fastRoute.serviceTier)}, got ${JSON.stringify(record.service_tier)})`);
+		conflicts.push(
+			`service_tier (expected ${JSON.stringify(fastRoute.serviceTier)}, got ${JSON.stringify(record.service_tier)})`,
+		);
 	}
 	if (conflicts.length === 0) return;
 	throw new Error(

@@ -1,6 +1,6 @@
 # @bastani/pi-ai
 
-Bastani-branded fork of [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) from [earendil-works/pi](https://github.com/earendil-works/pi). Originally forked at **v0.84.2** (`914cf1472e715297caa30db4b9535d534a9eb718`); upstream Pi AI fixes and the generated image catalog are synced through [`92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c`](https://github.com/earendil-works/pi/commit/92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c), the audited Pi `main` sync point. `@bastani/pi-ai` publishes at the same version as Atomic. `npm run build` refreshes the models.dev catalog, same as upstream.
+Bastani-branded fork of [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) from [earendil-works/pi](https://github.com/earendil-works/pi). Originally forked at **v0.84.2** (`914cf1472e715297caa30db4b9535d534a9eb718`); upstream Pi AI fixes and the generated image catalog are synced through [`6671c604766b3670ed95f405aa7856835d0ca702`](https://github.com/earendil-works/pi/commit/6671c604766b3670ed95f405aa7856835d0ca702), the audited Pi `main` sync point. `@bastani/pi-ai` publishes at the same version as Atomic. `npm run build` refreshes the models.dev catalog, same as upstream.
 
 The public API is a drop-in replacement: install `@bastani/pi-ai` and import from `@bastani/pi-ai` instead of `@earendil-works/pi-ai`. See [NOTICE.md](NOTICE.md). This package lives in the Atomic monorepo and publishes from `.github/workflows/publish.yml`. The first npm version must be published by hand so trusted publishing can be attached.
 
@@ -1576,6 +1576,8 @@ Built-in login and refresh flows are private provider implementations. Use provi
 Provider notes:
 
 **OpenAI Codex**: Requires a ChatGPT Plus or Pro subscription. Provides access to GPT-5.x Codex models with extended context windows and reasoning capabilities. The library automatically handles session-based prompt caching when `sessionId` is provided in stream options unless `cacheRetention` is `"none"`. You can set `transport` in stream options to `"sse"`, `"websocket"`, or `"auto"` for Codex Responses transport selection. When using WebSocket with a `sessionId` and cache retention enabled, connections are reused per session and expire after 5 minutes of inactivity.
+
+Call `cleanupSessionResources(sessionId)` when finished with a Codex session so its pooled WebSocket connection does not keep the process alive. Import it from `@bastani/pi-ai`.
 
 **Azure OpenAI (Responses)**: Uses the Responses API only. Set `AZURE_OPENAI_API_KEY` and either `AZURE_OPENAI_BASE_URL` or `AZURE_OPENAI_RESOURCE_NAME`. `AZURE_OPENAI_BASE_URL` supports both `https://<resource>.openai.azure.com` and `https://<resource>.cognitiveservices.azure.com`; root endpoints are normalized to `.../openai/v1` automatically. Use `AZURE_OPENAI_API_VERSION` (defaults to `v1`) to override the API version if needed. Deployment names are treated as model IDs by default, override with `azureDeploymentName` or `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` using comma-separated `model-id=deployment` pairs (for example `gpt-4o-mini=my-deployment,gpt-4o=prod`). Legacy deployment-based URLs are intentionally unsupported.
 

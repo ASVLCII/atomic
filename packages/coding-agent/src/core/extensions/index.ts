@@ -130,6 +130,7 @@ export type {
 	MarkdownTransformer,
 	// Events - Message
 	MessageEndEvent,
+	MessageEndEventResult,
 	MessageRenderer,
 	MessageRenderOptions,
 	MessageStartEvent,
@@ -187,6 +188,7 @@ export type {
 	SubagentChildPolicy,
 	SubagentIntercomIdentity,
 	TerminalInputHandler,
+	ThinkingLevelSelectEvent,
 	// Events - Tool
 	ToolCallEvent,
 	ToolCallEventResult,
