@@ -18,7 +18,8 @@ import { logger } from "./logger.ts";
 import { McpOAuthProvider } from "./mcp-oauth-provider.js";
 import { supportsOAuth } from "./mcp-auth-flow.js";
 import { registerSamplingHandler, type ServerSamplingConfig } from "./sampling-handler.ts";
-import { interpolateEnvRecord, resolveBearerToken, resolveConfigPath } from "./utils.js";
+import { interpolateEnvRecord, resolveServerUrl, resolveBearerToken, resolveConfigPath } from "./utils.js";
+import { protectRemoteTransport } from "./remote-diagnostics.js";
 
 interface ServerConnection {
   client: Client;
@@ -96,7 +97,7 @@ export class McpServerManager {
         cwd: resolveConfigPath(definition.cwd),
         stderr: definition.debug ? "inherit" : "ignore",
       });
-    } else if (definition.url) {
+    } else if (definition.url !== undefined) {
       // HTTP transport with fallback
       transport = await this.createHttpTransport(definition, name);
     } else {
@@ -164,7 +165,8 @@ export class McpServerManager {
     definition: ServerDefinition, 
     serverName: string
   ): Promise<Transport> {
-    const url = new URL(definition.url!);
+    const resolvedUrl = resolveServerUrl(definition.url!);
+    const url = new URL(resolvedUrl);
     
     // Build headers first (including any bearer token)
     const headers = resolveHeaders(definition.headers) ?? {};
@@ -192,7 +194,7 @@ export class McpServerManager {
       };
       authProvider = new McpOAuthProvider(
         serverName,
-        definition.url!,
+        resolvedUrl,
         oauthConfig,
         {
           onRedirect: async (_authUrl) => {
@@ -203,10 +205,10 @@ export class McpServerManager {
     }
     
     // Try StreamableHTTP first (modern MCP servers)
-    const streamableTransport = new StreamableHTTPClientTransport(url, { 
+    const streamableTransport = protectRemoteTransport(new StreamableHTTPClientTransport(url, {
       requestInit,
       authProvider,
-    });
+    }), resolvedUrl);
     
     try {
       // Create a test client to verify the transport works
@@ -217,7 +219,7 @@ export class McpServerManager {
       await streamableTransport.close().catch(() => {});
       
       // StreamableHTTP works - create fresh transport for actual use
-      return new StreamableHTTPClientTransport(url, { requestInit, authProvider });
+      return protectRemoteTransport(new StreamableHTTPClientTransport(url, { requestInit, authProvider }), resolvedUrl);
     } catch (error) {
       // StreamableHTTP failed, close and try SSE fallback
       await streamableTransport.close().catch(() => {});
@@ -228,7 +230,7 @@ export class McpServerManager {
       }
       
       // SSE is the legacy transport
-      return new SSEClientTransport(url, { requestInit, authProvider });
+      return protectRemoteTransport(new SSEClientTransport(url, { requestInit, authProvider }), resolvedUrl);
     }
   }
   
