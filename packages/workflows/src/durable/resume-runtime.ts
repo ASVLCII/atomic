@@ -26,7 +26,7 @@ import {
 } from "../runs/foreground/executor-child-helpers.js";
 import { resolveAndValidateInputs } from "../runs/foreground/executor-inputs.js";
 import type { RunOpts } from "../runs/foreground/executor-types.js";
-import { isFullRunId, malformedRunIdMessage } from "../shared/run-id.js";
+import { isFullRunId, resolveRunIdTarget } from "../shared/run-id.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import type { WorkflowDefinition, WorkflowInputValues } from "../shared/types.js";
 import type { WorkflowRegistry } from "../workflows/registry.js";
@@ -86,18 +86,23 @@ export async function prepareDurableResume(
 }
 
 /**
- * Resolve a current DBOS catalog entry by its full run id.
+ * Resolve a current DBOS catalog entry by full run id or unique 8-hex prefix.
  *
  * The durable `workflowId` is the live run id, so it takes the same strict
- * contract: a full UUID or nothing. A malformed target is reported separately
- * from an absent one.
+ * contract. Malformed and ambiguous targets are reported separately from an
+ * absent one.
  */
 export function resolveDurableEntry(
 	workflowId: string,
 	catalog: readonly ResumableWorkflowEntry[],
-): ResumableWorkflowEntry | { kind: "malformed"; message: string } | undefined {
-	if (!isFullRunId(workflowId)) return { kind: "malformed", message: malformedRunIdMessage(workflowId) };
-	return catalog.find((entry) => entry.workflowId === workflowId);
+): ResumableWorkflowEntry | { kind: "malformed" | "ambiguous"; message: string } | undefined {
+	const resolution = resolveRunIdTarget(
+		workflowId,
+		catalog.map((entry) => entry.workflowId),
+	);
+	if (resolution.kind === "not_found") return undefined;
+	if (resolution.kind === "malformed" || resolution.kind === "ambiguous") return resolution;
+	return catalog.find((entry) => entry.workflowId === resolution.runId);
 }
 
 /** Resume by DBOS workflow id and replay current persisted checkpoints. */
@@ -108,8 +113,23 @@ export async function resumeDurableWorkflow(
 ): Promise<ResumeDurableResult> {
 	deps.signal?.throwIfAborted();
 	const backend = deps.durableBackend ?? getDurableBackend();
-	if (!isFullRunId(workflowId))
-		return { ok: false, reason: "not_registered", message: malformedRunIdMessage(workflowId) };
+	const knownCatalog = catalog ?? backend.listResumableWorkflows();
+	const target = resolveRunIdTarget(
+		workflowId,
+		knownCatalog.map((entry) => entry.workflowId),
+	);
+	if (target.kind === "malformed" || target.kind === "ambiguous") {
+		return { ok: false, reason: "not_registered", message: target.message };
+	}
+	if (target.kind === "not_found") {
+		// A retained failed admission may not yet be in the resumable catalog.
+		// Only an explicit full identity can enter recovery without a catalog match.
+		if (!isFullRunId(workflowId)) {
+			return { ok: false, reason: "not_registered", message: `No resumable workflow found for id: ${workflowId}` };
+		}
+	} else {
+		workflowId = target.runId;
+	}
 	const recovering = backend.isAdmissionUnavailable?.(workflowId) || backend.isCheckpointUnavailable?.(workflowId);
 	if (recovering && hasActiveLiveRun(deps.baseRunOpts.store, workflowId)) {
 		return alreadyRunningResult(

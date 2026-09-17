@@ -122,3 +122,22 @@ export function seedMockCheckpoint(
 	const envelope = encodeCheckpoint(current);
 	sdk.state.steps.set(`${workflowId}:checkpoint:${cp.checkpointId}`, envelope);
 }
+
+export type SerializedMockDbosState = {
+	readonly workflows: ReadonlyArray<readonly [string, DbosWorkflowInfo]>;
+	readonly steps: ReadonlyArray<readonly [string, WorkflowSerializableValue]>;
+};
+
+export function serializeMockSdkState(sdk: ReturnType<typeof createMockSdk>): SerializedMockDbosState {
+	return {
+		workflows: [...sdk.state.workflows.entries()],
+		steps: [...sdk.state.steps.entries()],
+	};
+}
+
+export function restoreMockSdkState(sdk: ReturnType<typeof createMockSdk>, snapshot: SerializedMockDbosState): void {
+	sdk.state.workflows.clear();
+	sdk.state.steps.clear();
+	for (const [id, info] of snapshot.workflows) sdk.state.workflows.set(id, info);
+	for (const [key, output] of snapshot.steps) sdk.state.steps.set(key, output);
+}

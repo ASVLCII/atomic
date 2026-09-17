@@ -35,12 +35,14 @@ const bedrockMock = vi.hoisted(() => ({
 const openaiMock = vi.hoisted(() => ({
 	// Default parsed body; individual tests may override before invoking.
 	parsedBody: { error: "blocked by gateway WAF" } as unknown,
+	statuslessError: undefined as Error | undefined,
 }));
 
 vi.mock("openai", () => {
 	function throwingCreate() {
 		const promise = Promise.resolve(undefined) as unknown as { withResponse: () => Promise<never> };
 		promise.withResponse = async () => {
+			if (openaiMock.statuslessError) throw openaiMock.statuslessError;
 			throw new FakeAPIError(403, openaiMock.parsedBody);
 		};
 		return promise;
@@ -135,6 +137,7 @@ async function drainResult(stream: {
 describe("provider error body passthrough (per-tier regression)", () => {
 	beforeEach(() => {
 		openaiMock.parsedBody = { error: "blocked by gateway WAF" };
+		openaiMock.statuslessError = undefined;
 	});
 
 	it("openai-completions (body-blind text) surfaces status + body", async () => {
@@ -169,6 +172,24 @@ describe("provider error body passthrough (per-tier regression)", () => {
 		expect(output.stopReason).toBe("error");
 		expect(output.errorMessage).toContain("OpenAI API error (403)");
 		expect(output.errorMessage).toContain("blocked by gateway WAF");
+	});
+
+	it.each(["openrouter", "Custom-Provider"])("attributes Responses HTTP errors to %s", async (provider) => {
+		// Regression for upstream #9298: exercise the provider catch path.
+		const output = await drainResult(
+			streamOpenAIResponses({ ...responsesModel, provider }, context, { apiKey: "test" }),
+		);
+		expect(output.stopReason).toBe("error");
+		expect(output.errorMessage).toContain(`${provider} API error (403)`);
+		expect(output.errorMessage).toContain("blocked by gateway WAF");
+	});
+
+	it("preserves statusless Responses errors without adding a provider prefix", async () => {
+		openaiMock.statuslessError = new Error("connection failed");
+		const output = await drainResult(
+			streamOpenAIResponses({ ...responsesModel, provider: "custom" }, context, { apiKey: "test" }),
+		);
+		expect(output.errorMessage).toBe("connection failed");
 	});
 
 	it("bedrock (body-blind) surfaces the gateway body instead of Unknown: UnknownError", async () => {

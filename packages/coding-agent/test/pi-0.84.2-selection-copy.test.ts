@@ -15,8 +15,8 @@ vi.mock("../src/utils/clipboard.ts", () => clipboardMocks);
  * Upstream #8110 (`4caa3c44`): selection copy must go through the host
  * clipboard and report the honest outcome. The old bare-OSC-52 path flashed
  * "Copied!" unconditionally even on terminals whose clipboard never received
- * the text, so Atomic injects `copySelection` into pi-tui's fullscreen
- * renderer and returns false whenever `copyToClipboard` rejects.
+ * the text. Atomic adapts pi-tui's fullscreen copy route to preserve the
+ * host diagnostic while retaining the boolean success contract.
  */
 const TRANSCRIPT_LINE = "alpha bravo charlie";
 
@@ -28,7 +28,10 @@ function sgr(button: number, column: number, row: number, release = false): stri
 const PRESS = 0;
 const MOTION = 32;
 
-function createFixture(): { tui: TuiAltScreen; terminal: RecordingTerminal } {
+function createFixture(copySelection?: (text: string) => Promise<boolean | string>): {
+	tui: TuiAltScreen;
+	terminal: RecordingTerminal;
+} {
 	const terminal = new RecordingTerminal();
 	terminal.columns = 60;
 	terminal.rows = 12;
@@ -36,6 +39,7 @@ function createFixture(): { tui: TuiAltScreen; terminal: RecordingTerminal } {
 		showHardwareCursor: false,
 		logDirectory: tmpdir(),
 		terminal,
+		copySelection,
 	});
 	tui.setLayoutRoot(
 		new VStack([
@@ -77,6 +81,7 @@ afterEach(() => {
 test("8110-selection-copy-reports-failure", async () => {
 	clipboardMocks.copyToClipboard.mockRejectedValue(new Error("no clipboard available"));
 	const fixture = createFixture();
+	const flash = vi.spyOn(fixture.tui, "flash");
 	try {
 		dragSelect(fixture);
 		await flushCopy();
@@ -84,8 +89,9 @@ test("8110-selection-copy-reports-failure", async () => {
 
 		expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith("alpha");
 		const screen = renderedScreen(fixture.tui);
-		expect(screen).toContain("Copy failed");
+		expect(screen).toContain("no clipboard available");
 		expect(screen).not.toContain("Copied!");
+		expect(flash).toHaveBeenCalledWith("no clipboard available", 5000);
 		// The host path owns the write: no bare OSC 52 fallback may flash a
 		// false success next to the honest failure message.
 		expect(fixture.terminal.writes.join("")).not.toMatch(/\x1b\]52;c;/);
@@ -109,3 +115,25 @@ test("a successful host copy flashes Copied without writing OSC 52", async () =>
 		fixture.tui.stop();
 	}
 });
+
+test.each([true, false, "backend unavailable"] as const)(
+	"copy callback %s keeps boolean return and notification contract",
+	async (result) => {
+		const fixture = createFixture(async () => result);
+		try {
+			const flash = vi.spyOn(fixture.tui, "flash");
+			const copy = Reflect.get(fixture.tui, "copyTextToClipboard") as (text: string) => Promise<boolean>;
+			expect(await copy.call(fixture.tui, "alpha")).toBe(result === true);
+			expect(flash).toHaveBeenCalledWith(
+				result === true ? "Copied!" : result === false ? "Copy failed" : result,
+				result === true ? undefined : 5000,
+			);
+			fixture.tui.renderNow();
+			expect(renderedScreen(fixture.tui)).toContain(
+				result === true ? "Copied!" : result === false ? "Copy failed" : result,
+			);
+		} finally {
+			fixture.tui.stop();
+		}
+	},
+);

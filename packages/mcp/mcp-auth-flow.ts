@@ -24,12 +24,15 @@ import {
 } from "./mcp-auth.js"
 import { McpSessionCleanupBarrier } from "./session-cleanup-barrier.js"
 import type { ServerEntry } from "./types.js"
+import { resolveServerUrl } from "./utils.js"
+import { sanitizeRemoteError } from "./remote-diagnostics.js"
 
 export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 
 interface PendingTransport {
   readonly serverName: string
   readonly transport: StreamableHTTPClientTransport
+  readonly serverUrl: string
   readonly oauthState?: string
 }
 
@@ -113,6 +116,7 @@ async function startAuthAttempt(
   owner?: PendingAuthentication,
 ): Promise<StartedAuth> {
   assertActive(owner)
+  serverUrl = resolveServerUrl(serverUrl)
   const config = definition ? extractOAuthConfig(definition) : {}
   const storedAuth = getAuthForUrl(serverName, serverUrl)
   if (storedAuth?.clientInfo && !storedAuth.tokens && !config.clientId) {
@@ -129,7 +133,9 @@ async function startAuthAttempt(
   }
   if (config.grantType === "client_credentials") {
     const authProvider = new McpOAuthProvider(serverName, serverUrl, config, providerCallbacks)
-    const result = await runSdkAuth(authProvider, { serverUrl })
+    const result = await runSdkAuth(authProvider, { serverUrl }).catch((error) => {
+      throw sanitizeRemoteError(error, serverUrl)
+    })
     assertActive(owner)
     if (result !== "AUTHORIZED") throw new UnauthorizedError("Failed to authorize")
     return { authorizationUrl: "" }
@@ -148,7 +154,9 @@ async function startAuthAttempt(
   })
 
   try {
-    const result = await runSdkAuth(authProvider, { serverUrl })
+    const result = await runSdkAuth(authProvider, { serverUrl }).catch((error) => {
+      throw sanitizeRemoteError(error, serverUrl)
+    })
     assertActive(owner)
     if (result === "AUTHORIZED") {
       clearOwnedOAuthState(serverName, oauthState)
@@ -157,6 +165,7 @@ async function startAuthAttempt(
     if (!capturedUrl) throw new UnauthorizedError("OAuth authorization URL was not provided")
     const pendingTransport = {
       serverName,
+      serverUrl,
       transport: new StreamableHTTPClientTransport(new URL(serverUrl), { authProvider }),
       oauthState,
     }
@@ -188,6 +197,8 @@ async function completePendingTransport(
   try {
     await pending.transport.finishAuth(authorizationCode)
     return "authenticated"
+  } catch (error) {
+    throw sanitizeRemoteError(error, pending.serverUrl)
   } finally {
     await retireTransport(serverName, pending)
   }
@@ -223,12 +234,11 @@ async function performAuthentication(
     try {
       await open(started.authorizationUrl)
       assertActive(owner)
-    } catch (error) {
+    } catch {
       assertActive(owner)
-      throw new Error(
-        `Could not open browser. Please open this URL manually: ${started.authorizationUrl}`,
-        { cause: error },
-      )
+      // Intentional manual-login instructions must retain the exact SDK URL, including
+      // any credentials. Do not apply diagnostic redaction or attach the opener error.
+      throw new Error(`Could not open browser. Please open this URL manually: ${started.authorizationUrl}`)
     }
 
     const code = await callbackPromise
@@ -315,6 +325,7 @@ export async function getValidToken(
   serverName: string,
   serverUrl: string,
 ): Promise<StoredTokens | null> {
+  serverUrl = resolveServerUrl(serverUrl)
   const entry = getAuthForUrl(serverName, serverUrl)
   if (!entry?.tokens) return null
   const expired = isTokenExpired(serverName)
@@ -335,7 +346,7 @@ export async function getValidToken(
       if (result !== "AUTHORIZED") return null
       return getAuthForUrl(serverName, serverUrl)?.tokens ?? null
     } catch (error) {
-      console.error(`MCP Auth: Token refresh failed for ${serverName}`, { error })
+      console.error(`MCP Auth: Token refresh failed for ${serverName}`, { error: sanitizeRemoteError(error, serverUrl) })
       return null
     }
   }
