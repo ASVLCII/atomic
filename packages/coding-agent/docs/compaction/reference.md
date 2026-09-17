@@ -81,6 +81,8 @@ A successful run appends the existing pi-style `type:"compaction"` entry shape:
 }
 ```
 
+The entry's `tokensBefore` is the provider-aware whole-context count used for budgeting and the Compacted from display. `details.stats.tokensBefore`, `tokensAfter`, and `percentReduction` are heuristic estimates of the compactable region plus the kept tail. Those stats can differ from the entry count, and `percentReduction` is negative when the reconstructed estimate is larger. The display count is not stored again under `details.tokensBefore`.
+
 `details.rung` is one of `"planned"` (a model ranked the lines — the session model **or** a borrowed fallback, including silent partial recovery), `"extension"` (a `session_before_compact` override), or `"fresh"` (the compactable conversation was discarded and a new context window started). `details.plannerModel` is present **only** when a borrowed fallback model ranked the lines:
 
 ```json

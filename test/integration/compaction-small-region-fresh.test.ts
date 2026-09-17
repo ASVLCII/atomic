@@ -35,8 +35,8 @@ test("a load-bearing small region reaches fresh without invoking any planner", a
 test("a load-bearing small region drops an oversized protected tail", async () => {
 	const stream = scriptedStream({ default: [{ text: "1,5\n" }] });
 	const result = await runVerbatimCompaction(
-		// A tail far larger than the tiny region and the hard limit alike.
-		preparation({ region: smallRegion(), tokensBefore: 500_000 }),
+		// Independent registered tail larger than the tiny region and the 1_000-token window.
+		preparation({ region: smallRegion(), tokensBefore: 500_000, keptTailTokens: 499_840 }),
 		testModel({ contextWindow: 1_000 }),
 		runRequest({ streamFn: stream.streamFn, urgency: "load_bearing" }),
 	);

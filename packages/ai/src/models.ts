@@ -34,7 +34,12 @@ import type {
 } from "./types.ts";
 import { operationSignal, raceWithAbortSignal } from "./utils/abort.ts";
 
-export { ModelsError, type ModelsErrorCode } from "./auth/resolve.ts";
+export {
+	ModelsError,
+	type ModelsErrorCode,
+	REQUEST_AUTH_PREPARATION_TIMEOUT_MS,
+	requestAuthTimeoutMessage,
+} from "./auth/resolve.ts";
 
 export interface ModelsPublication {
 	/** Provider-selected persisted catalog. Omit to leave storage unchanged; null deletes it. */

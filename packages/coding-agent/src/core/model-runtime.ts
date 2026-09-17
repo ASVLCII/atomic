@@ -22,7 +22,6 @@ import {
 	type ModelsDeferredFetchOptions,
 	type ModelsRefreshOptions,
 	type ModelsRefreshResult,
-	type ModelsSimpleStreamOptions,
 	type ModelsStore,
 	type MutableModels,
 	type Provider,
@@ -74,7 +73,7 @@ export type { CreateModelRuntimeOptions, ModelRuntimeAuthOverrides } from "./mod
 import { mergeConfiguredAuthHeaders } from "./model-runtime-auth.ts";
 import { configureBuiltinProviders } from "./model-runtime-providers.ts";
 import { canRestoreUnknownModel as canRestoreUnknownModelProvider } from "./model-runtime-restoration.ts";
-import { ModelRuntimeStreaming } from "./model-runtime-streaming.ts";
+import { type ModelRuntimeSimpleStreamOptions, ModelRuntimeStreaming } from "./model-runtime-streaming.ts";
 import type { CreateModelRuntimeOptions, ModelRuntimeAuthOverrides } from "./model-runtime-types.ts";
 
 export type CredentialSynchronizationOperation =
@@ -787,11 +786,19 @@ export class ModelRuntime implements Models {
 		return this.streaming.complete(model, context, options);
 	}
 
-	streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream {
+	streamSimple(
+		model: Model<Api>,
+		context: Context,
+		options?: ModelRuntimeSimpleStreamOptions,
+	): AssistantMessageEventStream {
 		return this.streaming.streamSimple(model, context, options);
 	}
 
-	completeSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): Promise<AssistantMessage> {
+	completeSimple(
+		model: Model<Api>,
+		context: Context,
+		options?: ModelRuntimeSimpleStreamOptions,
+	): Promise<AssistantMessage> {
 		return this.streaming.completeSimple(model, context, options);
 	}
 

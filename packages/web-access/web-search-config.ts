@@ -10,7 +10,6 @@ import { isPerplexityAvailable } from "./perplexity.js";
 import type { SearchProvider, ResolvedSearchProvider } from "./gemini-search.js";
 
 const WEB_SEARCH_CONFIG_PATH = getUserConfigPaths("web-search.json")[0] ?? join(homedir(), CONFIG_DIR_NAME, "web-search.json");
-const WEB_SEARCH_CONFIG_READ_PATH = findReadableConfigPath();
 const MAX_CURATOR_TIMEOUT_SECONDS = 600;
 const DEFAULT_CURATOR_TIMEOUT_SECONDS = 20;
 
@@ -43,13 +42,16 @@ export interface CuratorBootstrap {
 }
 
 export function loadConfig(): WebSearchConfig {
-	if (!existsSync(WEB_SEARCH_CONFIG_READ_PATH)) return {};
-	const raw = readFileSync(WEB_SEARCH_CONFIG_READ_PATH, "utf-8");
+	// Resolve the readable path on every call: saveConfig always writes the
+	// Atomic path, which must win over a legacy file that existed at startup.
+	const configPath = findReadableConfigPath();
+	if (!existsSync(configPath)) return {};
+	const raw = readFileSync(configPath, "utf-8");
 	try {
 		return JSON.parse(raw) as WebSearchConfig;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		throw new Error(`Failed to parse ${WEB_SEARCH_CONFIG_READ_PATH}: ${message}`);
+		throw new Error(`Failed to parse ${configPath}: ${message}`);
 	}
 }
 

@@ -58,6 +58,11 @@ interface TuiAltScreenScrollToEndIndicatorInternals {
 	handleScrollToEndIndicatorMouseEvent(event: unknown): boolean;
 }
 
+/** pi-tui 0.85.1's private copy route only understands boolean callbacks. */
+interface TuiAltScreenClipboardInternals {
+	copyTextToClipboard(text: string): Promise<boolean>;
+}
+
 interface TuiAltScreenSelectionInternals {
 	selectionAnchor?: unknown;
 	selectionFocus?: unknown;
@@ -117,22 +122,19 @@ export interface InteractiveTuiOptions {
 	/** Handle an unconsumed overlay input before replaying it to the viewport. */
 	onOverlayUnhandledInput?: (data: string) => boolean;
 	/**
-	 * Copy selected text to the system clipboard; resolve false when the host
-	 * clipboard never received it. Defaults to Atomic's `copyToClipboard` with
-	 * its platform fallbacks, so pi-tui flashes "Copy failed" on a terminal
-	 * whose clipboard stayed untouched (upstream #8110) instead of the old
-	 * unconditional "Copied!". Injectable so hosts and tests observe the write.
+	 * Copy selected text; return true on success, false or a diagnostic on failure.
+	 * Defaults to Atomic's clipboard implementation and platform diagnostics.
 	 */
-	copySelection?: (text: string) => Promise<boolean>;
+	copySelection?: (text: string) => Promise<boolean | string>;
 }
 
 /** The default selection-copy route: Atomic's host clipboard write. */
-async function copySelectionToHostClipboard(text: string): Promise<boolean> {
+async function copySelectionToHostClipboard(text: string): Promise<boolean | string> {
 	try {
 		await copyToClipboard(text);
 		return true;
-	} catch {
-		return false;
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
 	}
 }
 
@@ -327,10 +329,23 @@ class AtomicTuiAltScreen extends TuiAltScreen {
 		options: ConstructorParameters<typeof TuiAltScreen>[3],
 		viewportInputGate?: ViewportInputGate,
 		onOverlayUnhandledInput?: (data: string) => boolean,
+		copySelection: NonNullable<InteractiveTuiOptions["copySelection"]> = copySelectionToHostClipboard,
 	) {
 		super(terminal, showHardwareCursor, logDirectory, options);
 		if (viewportInputGate) viewportInputGates.set(this, viewportInputGate);
 		if (onOverlayUnhandledInput) overlayUnhandledInputHandlers.set(this, onOverlayUnhandledInput);
+		// Adapt the private route rather than returning a truthy error string to
+		// pi-tui 0.85.1. Both keyboard and mouse selection use this same door.
+		const clipboardRoute = this as unknown as TuiAltScreenClipboardInternals;
+		clipboardRoute.copyTextToClipboard = async (text) => {
+			const result = await copySelection(text);
+			const copied = result === true;
+			this.flash(
+				copied ? "Copied!" : typeof result === "string" ? result : "Copy failed",
+				copied ? undefined : 5000,
+			);
+			return copied;
+		};
 		// pi-tui 0.84.2 added `shouldDeferViewportInputToOverlay()`, which drops
 		// viewport keys and wheel reports while an overlay holds focus (upstream
 		// #7894). Atomic's gate offers that input to the focused overlay first and
@@ -607,10 +622,10 @@ export function createFullscreenTui(options: InteractiveTuiOptions): TuiAltScree
 				}),
 			onRightClickPaste: options.onRightClickPaste,
 			copyOnSelect: options.copyOnSelect,
-			copySelection: options.copySelection ?? copySelectionToHostClipboard,
 		},
 		options.shouldHandleViewportInput,
 		options.onOverlayUnhandledInput,
+		options.copySelection,
 	);
 }
 

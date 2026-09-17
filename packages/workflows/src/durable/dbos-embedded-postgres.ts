@@ -34,6 +34,7 @@ import {
 	readdirSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	renameSync,
 	rmdirSync,
 	rmSync,
@@ -43,7 +44,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir, uptime } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import type { RetainedPostgres, RetainedPostgresSpawnOptions } from "@bastani/atomic-natives";
 import {
 	cleanupAbandonedRuntimeStages,
@@ -57,7 +58,7 @@ import {
 	type EmbeddedPostgresHost,
 	resolveEmbeddedPostgresTarget,
 } from "./dbos-embedded-postgres-targets.js";
-import { commandFailureDetail, delay, tcpReachable } from "./local-command.js";
+import { commandFailureDetail, delay, runLocalCommand, tcpReachable } from "./local-command.js";
 
 const EMBEDDED_HOST = "127.0.0.1";
 const EMBEDDED_PORT = 5439;
@@ -119,9 +120,15 @@ export function ensureEmbeddedDbosPostgres(): Promise<void> {
 }
 
 async function ensure(): Promise<void> {
-	if (await tcpReachable(EMBEDDED_HOST, EMBEDDED_PORT)) return;
 	const loaded = await loadEmbeddedPostgresBinaries();
 	hydrateBinaryLibraryLinks(loaded.pg_ctl);
+	// An older server listening on the shared port must not hide a broken installation.
+	for (const binary of [loaded.postgres, loaded.pg_ctl, loaded.initdb]) {
+		const result = await runLocalCommand(binary, ["--version"]);
+		if (result.exitCode !== 0)
+			throw new Error(`incomplete PostgreSQL runtime: ${binary} --version failed: ${commandFailureDetail(result)}`);
+	}
+	if (await tcpReachable(EMBEDDED_HOST, EMBEDDED_PORT)) return;
 	const context = await resolveEmbeddedRunContext();
 	const root = context.baseDir;
 	const dataDir = join(root, `v${EMBEDDED_PG_MAJOR}`);
@@ -332,31 +339,106 @@ export function hydrateBinaryLibraryLinks(
 	let manifest: readonly { readonly source: string; readonly target: string }[];
 	try {
 		manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as typeof manifest;
-	} catch {
-		return;
+	} catch (cause) {
+		throw new Error(`incomplete PostgreSQL runtime: invalid ${manifestPath}`, { cause });
+	}
+	if (
+		!Array.isArray(manifest) ||
+		manifest.some(
+			(link) =>
+				link === null || typeof link !== "object" || !safeLibraryPath(link.source) || !safeLibraryPath(link.target),
+		)
+	) {
+		throw new Error(`incomplete PostgreSQL runtime: invalid aliases in ${manifestPath}`);
 	}
 	const firstSource = manifest[0]?.source;
 	if (
-		firstSource !== undefined &&
+		firstSource?.startsWith("native/") &&
 		!existsSync(join(manifestRoot, firstSource)) &&
 		existsSync(join(dirname(manifestRoot), firstSource))
 	) {
 		manifestRoot = dirname(manifestRoot);
 	}
-	for (const { source, target } of manifest) {
-		const absoluteSource = join(manifestRoot, source);
+	const canonicalRoot = realpathSync(manifestRoot);
+	const targets = new Map<string, string>();
+	const plannedSources = new Map<string, string>();
+	const plans = manifest.map(({ source, target }) => {
+		const sourcePath = join(manifestRoot, source);
+		// An earlier manifest entry can supply this source without writing it yet.
+		const absoluteSource = lstatSync(sourcePath, { throwIfNoEntry: false })
+			? sourcePath
+			: (plannedSources.get(source) ?? sourcePath);
 		const absoluteTarget = join(manifestRoot, target);
-		if (existsSync(absoluteTarget) || !existsSync(absoluteSource)) continue;
+		try {
+			for (const path of [absoluteSource, dirname(absoluteTarget)]) {
+				const contained = relative(canonicalRoot, realpathSync(path));
+				if (
+					isAbsolute(contained) ||
+					contained === ".." ||
+					contained.startsWith("../") ||
+					contained.startsWith("..\\")
+				)
+					throw new Error(`alias escapes runtime: ${target}`);
+			}
+			if (!statSync(absoluteSource).isFile()) throw new Error(`invalid source: ${source}`);
+			if (targets.has(target) && targets.get(target) !== source) throw new Error(`conflicting alias: ${target}`);
+			targets.set(target, source);
+			if (lstatSync(absoluteTarget, { throwIfNoEntry: false }) && !existsSync(absoluteTarget))
+				throw new Error(`dangling alias target: ${target}`);
+			if (existsSync(absoluteTarget)) {
+				const contained = relative(canonicalRoot, realpathSync(absoluteTarget));
+				if (
+					isAbsolute(contained) ||
+					contained === ".." ||
+					contained.startsWith("../") ||
+					contained.startsWith("..\\") ||
+					!statSync(absoluteTarget).isFile() ||
+					!readFileSync(absoluteTarget).equals(readFileSync(absoluteSource))
+				)
+					throw new Error(`invalid alias target: ${target}`);
+			}
+		} catch (cause) {
+			throw new Error(`incomplete PostgreSQL runtime: ${source} -> ${target}`, { cause });
+		}
+		plannedSources.set(target, absoluteSource);
+		return { absoluteSource, absoluteTarget };
+	});
+	for (const { absoluteSource, absoluteTarget } of plans) {
+		// A previous entry may have created this filesystem-equivalent target
+		// since planning (case folding, Unicode normalization, or a link callback).
+		if (lstatSync(absoluteTarget, { throwIfNoEntry: false })) {
+			const contained = relative(canonicalRoot, realpathSync(absoluteTarget));
+			if (
+				isAbsolute(contained) ||
+				contained === ".." ||
+				contained.startsWith("../") ||
+				contained.startsWith("..\\") ||
+				!statSync(absoluteTarget).isFile() ||
+				!readFileSync(absoluteTarget).equals(readFileSync(absoluteSource))
+			)
+				throw new Error(`incomplete PostgreSQL runtime: invalid alias target: ${absoluteTarget}`);
+			continue;
+		}
 		try {
 			createLink(relative(dirname(absoluteTarget), absoluteSource), absoluteTarget);
 		} catch {
 			try {
 				copyFile(absoluteSource, absoluteTarget);
-			} catch {
-				// Missing optional libraries surface as an initdb/Postgres failure with detail.
+			} catch (cause) {
+				throw new Error(`incomplete PostgreSQL runtime: cannot materialize ${absoluteTarget}`, { cause });
 			}
 		}
 	}
+}
+
+function safeLibraryPath(path: string): boolean {
+	return (
+		typeof path === "string" &&
+		path.length > 0 &&
+		!path.startsWith("/") &&
+		!/[\\:\u0000]/u.test(path) &&
+		!path.split("/").some((part) => part === ".." || part === "." || part === "")
+	);
 }
 
 type PackageResolver = (specifier: string) => string;
