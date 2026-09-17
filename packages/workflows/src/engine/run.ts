@@ -1,7 +1,12 @@
 import { type DurableWorkflowBackend, pendingStageMessagesForDurableRun } from "../durable/backend.js";
 import type { DurableChildInvocation } from "../durable/boundary-topology.js";
 import { createDurableChildWorkflowPrimitive } from "../durable/child-primitive.js";
-import { boundedAdmission, dbosAdmissionContext, isDbosDependencyError } from "../durable/dbos-admission.js";
+import {
+	boundedAdmission,
+	DBOS_ADMISSION_TIMEOUT_MS,
+	dbosAdmissionContext,
+	isDbosDependencyError,
+} from "../durable/dbos-admission.js";
 import { getDurableBackend } from "../durable/factory.js";
 import { inheritedRunElapsedMs, priorRunAccounting, recordRunTimingCheckpoint } from "../durable/run-timing.js";
 import { ScopedDurableBackend } from "../durable/scoped-backend.js";
@@ -760,7 +765,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		controlAttempt?.abort(new Error("Workflow control superseded"));
 		const attempt = new AbortController();
 		controlAttempt = attempt;
-		// A local barrier must remain operable independently of the 10s admission budget.
+		// Pause acknowledges promptly; resume must confirm multiple database round trips before release.
 		const CONTROL_PERSISTENCE_TIMEOUT_MS = 500;
 		try {
 			await boundedAdmission(
@@ -783,7 +788,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 						await durableBackend.flush(runId);
 					}),
 				AbortSignal.any([ownController.signal, attempt.signal]),
-				CONTROL_PERSISTENCE_TIMEOUT_MS,
+				status === "paused" ? CONTROL_PERSISTENCE_TIMEOUT_MS : DBOS_ADMISSION_TIMEOUT_MS,
 			);
 			attempt.signal.throwIfAborted();
 			activeStore.recordRunExecutionState(runId, {

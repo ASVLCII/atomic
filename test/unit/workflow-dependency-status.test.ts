@@ -334,7 +334,7 @@ test("outage controls are bounded, persistence is truthful, and recovery release
 		await pause;
 		assert.equal(store.runs()[0]!.controlPersistence, "observed");
 		const resume = assert.rejects(resumeRun("control-owner", { store, toolControlRegistry }), /database/i);
-		await vi.advanceTimersByTimeAsync(500);
+		await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
 		await resume;
 		assert.equal(store.runs()[0]!.status, "paused");
 		assert.equal(store.runs()[0]!.phase, "blocked_dependency");
@@ -355,6 +355,96 @@ test("outage controls are bounded, persistence is truthful, and recovery release
 		stalled.resolve();
 		body.resolve();
 		await toolControlRegistry.runControl("control-owner")?.resume();
+		await pending;
+	}
+});
+
+// #3072: healthy remote database round trips must not inherit the pause acknowledgement deadline.
+test("explicit resume confirms durability on a healthy database with 100ms round trips", async () => {
+	vi.useFakeTimers();
+	const sdk = createMockSdk();
+	const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 100));
+	const backend = new DbosDurableBackend({
+		...sdk,
+		startWorkflow: async (...args) => {
+			await delay();
+			return sdk.startWorkflow(...args);
+		},
+		listStepRecords: async (...args) => {
+			await delay();
+			return sdk.listStepRecords(...args);
+		},
+		recordStepOutput: async (...args) => {
+			await delay();
+			return sdk.recordStepOutput(...args);
+		},
+		resumeWorkflow: async (...args) => {
+			await delay();
+			return sdk.resumeWorkflow(...args);
+		},
+		retrieveWorkflow: async (...args) => {
+			await delay();
+			return sdk.retrieveWorkflow(...args);
+		},
+	});
+	const store = createStore();
+	const toolControlRegistry = createToolControlRegistry();
+	const controller = new AbortController();
+	const entered = Promise.withResolvers<void>();
+	const body = Promise.withResolvers<void>();
+	const runId = "slow-healthy";
+	let effects = 0;
+	const pending = run(
+		workflow({
+			name: runId,
+			description: "",
+			inputs: {},
+			outputs: {},
+			run: async (ctx) => {
+				entered.resolve();
+				await body.promise;
+				await ctx.tool("after", {}, async () => ++effects);
+				return {};
+			},
+		}),
+		{},
+		{ runId, store, toolControlRegistry, durableBackend: backend, signal: controller.signal },
+	);
+	try {
+		await vi.advanceTimersByTimeAsync(3_000);
+		await entered.promise;
+		const owner = toolControlRegistry.runControl(runId);
+		assert.ok(owner);
+		const pause = pauseRun(runId, { store, toolControlRegistry });
+		await vi.advanceTimersByTimeAsync(500);
+		assert.equal((await pause).ok, true);
+		assert.equal(store.runs()[0]!.status, "paused");
+		await vi.advanceTimersByTimeAsync(3_000);
+		const resume = resumeRun(runId, { store, toolControlRegistry });
+		// Observe rejection immediately so a regression does not leak an unhandled rejection.
+		const confirmed = resume.then(
+			(result) => ({ result }),
+			(error: unknown) => ({ error }),
+		);
+		await vi.advanceTimersByTimeAsync(3_000);
+		const outcome = await confirmed;
+		assert.ok(!("error" in outcome), `healthy resume failed: ${"error" in outcome ? outcome.error : ""}`);
+		assert.equal(outcome.result.ok, true);
+		assert.equal(toolControlRegistry.runControl(runId), owner);
+		assert.equal(store.runs()[0]!.status, "running");
+		assert.equal(store.runs()[0]!.controlPersistence, "durable");
+		assert.equal(store.runs()[0]!.dependencyError, undefined);
+		body.resolve();
+		await vi.advanceTimersByTimeAsync(3_000);
+		assert.equal((await pending).status, "completed");
+		assert.equal(effects, 1);
+		assert.equal(backend.getWorkflow(runId)?.status, "completed");
+		assert.deepEqual([...sdk.state.workflows.keys()], [runId]);
+		assert.deepEqual(sdk.state.cancels, []);
+	} finally {
+		controller.abort();
+		body.resolve();
+		await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
 		await pending;
 	}
 });
