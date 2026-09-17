@@ -10,7 +10,8 @@ import {
 } from "../../packages/coding-agent/test/helpers/interactive-fullscreen-layout.js";
 import factory from "../../packages/workflows/src/extension/extension-factory.js";
 import type { ExtensionAPI } from "../../packages/workflows/src/extension/public-types.js";
-import { store } from "../../packages/workflows/src/shared/store.js";
+import { createStore, store } from "../../packages/workflows/src/shared/store.js";
+import { installStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 
 // #3015: a multiline editor can leave only one painted widget row at 80x9.
 test("registered workflow shortcuts reach every run in a clipped dock without stealing the editor", async () => {
@@ -116,6 +117,75 @@ test("registered workflow shortcuts reach every run in a clipped dock without st
 		assert.equal(editor.getText(), draft);
 	} finally {
 		for (const id of ids) store.removeRun(id);
+		fixture.resolveTheme();
+		await fixture.initPromise;
+		tui.stop();
+		fixture.restoreOffline();
+	}
+});
+
+test("pending input preserves editor focus draft and frame bounds", async () => {
+	const fixture = createProductionFullscreenContext({ columns: 80, rows: 9 });
+	const { context, tui, terminal } = fixture;
+	const local = createStore();
+	const dispose = installStoreWidget({ ui: context.createExtensionUIContext() as never }, local);
+	try {
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const editor = new CustomEditor(tui, getEditorTheme(), new KeybindingsManager());
+		context.editorContainer.clear();
+		context.editorContainer.addChild(editor);
+		context.editor = editor;
+		context.defaultEditor = editor;
+		tui.setFocus(editor);
+		const runId = "00000000-0000-4000-8000-000000000042";
+		local.recordRunStart({
+			id: runId,
+			name: "waiting-root",
+			status: "running",
+			inputs: {},
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+			startedAt: 1_700_000_000_000,
+		});
+		assert.equal(
+			local.recordStagePendingPrompt(runId, "ask", {
+				id: "prompt-42",
+				kind: "confirm",
+				message: "Approve the pending-input prompt?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		const draft = Array.from({ length: 8 }, (_, i) => `focus-draft-${i}`).join("\n");
+		editor.setText(draft);
+		const mounted = context.extensionWidgetsBelow.get("workflow.run");
+		assert.ok(mounted);
+		for (const [width, height] of [
+			[80, 9],
+			[27, 8],
+			[120, 40],
+			[80, 12],
+		]) {
+			terminal.resize(width!, height!);
+			tui.renderNow();
+			const frame = getLayoutFrame(tui);
+			assert.ok(frame.lines.every((line) => visibleWidth(line) <= terminal.columns));
+			assert.ok(frame.lines.length <= terminal.rows);
+			assert.equal(editor.getText(), draft);
+			assert.equal(tui.getFocusedComponent(), editor);
+			assert.equal(context.extensionWidgetsBelow.get("workflow.run"), mounted);
+			assert.equal(context.extensionWidgetsAbove.has("workflow.run"), false);
+			if (width! >= 80) {
+				const widgetIndex = frame.lines.findIndex((line) => line.includes(runId) || line.includes("BACKGROUND"));
+				const editorIndex = frame.lines.findIndex((line) => line.includes("focus-draft"));
+				assert.ok(widgetIndex >= 0, `pending-input card must paint at ${width}x${height}`);
+				if (editorIndex >= 0) {
+					assert.ok(widgetIndex > editorIndex, "pending-input card must paint below the editor");
+				}
+			}
+		}
+	} finally {
+		dispose();
 		fixture.resolveTheme();
 		await fixture.initPromise;
 		tui.stop();

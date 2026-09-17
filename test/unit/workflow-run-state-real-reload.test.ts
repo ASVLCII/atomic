@@ -88,20 +88,37 @@ interface WidgetCall {
 	readonly placement?: string;
 }
 
-function createWidgetUi(): { readonly ui: object; readonly calls: WidgetCall[]; readonly renders: { count: number } } {
+function createWidgetUi(): {
+	readonly ui: object;
+	readonly calls: WidgetCall[];
+	readonly renders: { count: number };
+} {
 	const calls: WidgetCall[] = [];
 	const renders = { count: 0 };
+	const releaseListeners = new Map<string, Set<() => void>>();
 	return {
 		calls,
 		renders,
 		ui: {
 			setWidget(key: string, factory: WidgetCall["factory"], options?: { readonly placement?: string }): void {
 				calls.push({ key, factory, placement: options?.placement });
+				if (factory === undefined) {
+					for (const listener of [...(releaseListeners.get(key) ?? [])]) listener();
+				}
 			},
 			requestRender(): void {
 				renders.count += 1;
 			},
 			notify(): void {},
+			onWidgetRelease(key: string, listener: () => void): () => void {
+				const listeners = releaseListeners.get(key) ?? new Set<() => void>();
+				listeners.add(listener);
+				releaseListeners.set(key, listeners);
+				return () => {
+					listeners.delete(listener);
+					if (listeners.size === 0) releaseListeners.delete(key);
+				};
+			},
 		},
 	};
 }
@@ -896,3 +913,106 @@ test("every run-scoped singleton key carries an explicit version suffix", async 
 	assert.ok(childGuard >= 0 && childGuard < adoption, "factory must reject child sessions before adopting run state");
 	assert.ok(adoption < adapters, "factory must adopt host run state before building adapters");
 });
+
+test(
+	"repeated extension reload preserves pending input identity and answer clearing",
+	async () => {
+		const bus = createEventBus();
+		const widget = createWidgetUi();
+		const first = await evaluateWorkflowGraph();
+		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, { hasUI: true, ui: widget.ui });
+		const runId = "reload-hil-run";
+		first.store.recordRunStart({
+			id: runId,
+			name: "reload-hil",
+			inputs: {},
+			status: "running",
+			startedAt: 1,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			first.store.recordStagePendingPrompt(runId, "ask", {
+				id: "reload-prompt",
+				kind: "confirm",
+				message: "Keep this prompt through reload?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		const firstFactory = widget.calls.findLast((call) => call.factory !== undefined);
+		assert.ok(firstFactory?.factory);
+		assert.match(
+			firstFactory.factory(undefined, undefined).render(120).join("\n"),
+			/"Keep this prompt through reload\?"/,
+		);
+		assert.deepEqual(first.store.runs()[0]?.stages[0]?.pendingPrompt?.id, "reload-prompt");
+
+		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
+		const second = await evaluateWorkflowGraph();
+		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, { hasUI: true, ui: widget.ui });
+		assert.equal(second.store.runs()[0]?.id, runId);
+		assert.deepEqual(second.store.runs()[0]?.stages[0]?.pendingPrompt?.id, "reload-prompt");
+		const secondFactory = widget.calls.findLast((call) => call.factory !== undefined);
+		assert.ok(secondFactory?.factory);
+		assert.match(
+			secondFactory.factory(undefined, undefined).render(120).join("\n"),
+			/"Keep this prompt through reload\?"/,
+		);
+		assert.equal(second.store.resolveStagePendingPrompt(runId, "ask", "reload-prompt", true), true);
+		assert.equal(second.store.runs()[0]?.stages[0]?.pendingPrompt, undefined);
+		assert.doesNotMatch(
+			secondFactory.factory(undefined, undefined).render(120).join("\n"),
+			/Keep this prompt through reload/,
+		);
+	},
+	WORKFLOW_MODULE_GRAPH_RELOAD_TIMEOUT_MS,
+);
+
+test(
+	"transactional /reload remounts pending input after predecessor shutdown",
+	async () => {
+		const bus = createEventBus();
+		const widget = createWidgetUi();
+		const first = await evaluateWorkflowGraph();
+		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, { hasUI: true, ui: widget.ui });
+		const runId = "reload-hil-run-tx";
+		first.store.recordRunStart({
+			id: runId,
+			name: "reload-hil",
+			inputs: {},
+			status: "running",
+			startedAt: 1,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			first.store.recordStagePendingPrompt(runId, "ask", {
+				id: "reload-prompt",
+				kind: "confirm",
+				message: "Keep this prompt through reload?",
+				createdAt: 1,
+			}),
+			true,
+		);
+
+		const second = await evaluateWorkflowGraph();
+		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, { hasUI: true, ui: widget.ui });
+		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
+		await Promise.resolve();
+
+		assert.equal(second.store.runs()[0]?.id, runId);
+		assert.deepEqual(second.store.runs()[0]?.stages[0]?.pendingPrompt?.id, "reload-prompt");
+		const mounted = widget.calls.findLast((call) => call.factory !== undefined);
+		assert.ok(mounted?.factory, "successor must still own a factory after predecessor dispose");
+		assert.notEqual(
+			widget.calls.at(-1)?.factory,
+			undefined,
+			"the last host widget call must remount, not leave the key cleared",
+		);
+		assert.match(mounted.factory(undefined, undefined).render(120).join("\n"), /"Keep this prompt through reload\?"/);
+	},
+	WORKFLOW_MODULE_GRAPH_RELOAD_TIMEOUT_MS,
+);

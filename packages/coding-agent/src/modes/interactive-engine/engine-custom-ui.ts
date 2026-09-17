@@ -121,7 +121,10 @@ export class EngineCustomUiService {
 	): void {
 		const previous = this.widgetIds.get(key);
 		if (previous) this.disposeComponent(previous, false, false);
-		if (!factory) return;
+		if (!factory) {
+			this.notifyWidgetRelease(key);
+			return;
+		}
 		const componentId = `remote_widget_${++this.nextId}`;
 		this.widgetIds.set(key, componentId);
 		const terminal = new RemoteTerminal(() => this.send({ type: "engine_custom_invalidate", componentId }));

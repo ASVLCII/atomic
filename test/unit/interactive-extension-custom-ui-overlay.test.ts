@@ -276,3 +276,85 @@ test("clearExtensionWidgets and resetExtensionUI reattach a live below-editor wi
 	assert.equal(mode.extensionWidgetsBelow.has("test.widget"), true);
 	controller.dispose();
 });
+
+test("predecessor setWidget(undefined) remounts a live successor below-editor widget", () => {
+	// #2529: transactional `/reload` starts the successor, then shuts the predecessor down.
+	const scheduled: Array<() => void> = [];
+	const mode = Object.assign(Object.create(InteractiveModeBase.prototype), {
+		extensionWidgetsAbove: new Map(),
+		extensionWidgetsBelow: new Map(),
+		widgetReleaseListeners: new Map(),
+		renderWidgets: () => {},
+		ui: { hideOverlay: () => {}, requestRender: () => {} },
+		clearExtensionTerminalInputListeners: () => {},
+		setExtensionFooter: () => {},
+		setExtensionHeader: () => {},
+		footerDataProvider: { clearExtensionStatuses: () => {} },
+		footer: { invalidate: () => {} },
+		autocompleteProviderWrappers: [],
+		setCustomEditorComponent: () => {},
+		setupAutocompleteProvider: () => {},
+		defaultEditor: { onExtensionShortcut: undefined },
+		interactiveEngineShortcutHandler: () => false,
+		updateTerminalTitle: () => {},
+		workingMessage: undefined,
+		workingVisible: true,
+		setWorkingIndicator: () => {},
+		loadingAnimation: undefined,
+		chatContainer: { children: [] },
+		streamingComponent: undefined,
+		setHiddenThinkingLabel: () => {},
+	});
+	const snapshot = { visible: true };
+	const install = () =>
+		installReactiveWidget({
+			ui: {
+				setWidget: (key, factory, options) => {
+					const hostFactory =
+						factory === undefined
+							? undefined
+							: (
+									tui: TUI,
+									theme: Parameters<NonNullable<typeof factory>>[1],
+								): Component & { dispose?(): void } => {
+									const component = factory(tui, theme);
+									return {
+										render: (width) => component.render(width),
+										invalidate: component.invalidate ?? (() => {}),
+										...(component.dispose ? { dispose: () => component.dispose?.() } : {}),
+									};
+								};
+					InteractiveModeBase.prototype.setExtensionWidget.call(mode, key, hostFactory, options);
+				},
+				onWidgetRelease: (key, listener) =>
+					InteractiveModeBase.prototype.onExtensionWidgetRelease.call(mode, key, listener),
+			},
+			key: "test.widget",
+			placement: "belowEditor",
+			scheduler: { queueMicrotask: (handler: () => void) => scheduled.push(handler) },
+			getSnapshot: () => snapshot,
+			getPreviewLines: (current) => (current.visible ? ["running"] : []),
+			render: () => ["running"],
+		});
+	const predecessor = install();
+	while (scheduled.length > 0) scheduled.shift()!();
+	assert.equal(mode.extensionWidgetsBelow.has("test.widget"), true);
+
+	const successor = install();
+	while (scheduled.length > 0) scheduled.shift()!();
+	assert.equal(mode.extensionWidgetsBelow.has("test.widget"), true);
+
+	predecessor.dispose();
+	assert.equal(
+		mode.extensionWidgetsBelow.has("test.widget"),
+		false,
+		"transactional /reload shuts the predecessor down after the successor mounted",
+	);
+	while (scheduled.length > 0) scheduled.shift()!();
+	assert.equal(
+		mode.extensionWidgetsBelow.has("test.widget"),
+		true,
+		"the successor must remount after predecessor setWidget(undefined)",
+	);
+	successor.dispose();
+});

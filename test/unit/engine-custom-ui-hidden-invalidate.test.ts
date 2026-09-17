@@ -164,6 +164,26 @@ test("widget release listeners distinguish replacement from host disposal", asyn
 	service.dispose();
 });
 
+test("setWidget(undefined) notifies remaining release listeners", async () => {
+	// #2529: predecessor dispose after successor mount must look like a host release.
+	const lines: string[] = [];
+	const service = new EngineCustomUiService((line) => lines.push(line), new KeybindingsManager());
+	let releases = 0;
+	service.onWidgetRelease("test.widget", () => {
+		releases++;
+	});
+	const factory = () => stubComponent();
+	service.setWidget("test.widget", factory, "belowEditor");
+	await sleep(0);
+	service.setWidget("test.widget", factory, "belowEditor");
+	await sleep(0);
+	assert.equal(releases, 0, "replacing a widget must not look like a host release");
+
+	service.setWidget("test.widget", undefined, "belowEditor");
+	assert.equal(releases, 1, "clearing the key must notify controllers that still own it");
+	service.dispose();
+});
+
 test("full teardown does not release or resurrect widget mounts", async () => {
 	const lines: string[] = [];
 	const service = new EngineCustomUiService((line) => lines.push(line), new KeybindingsManager());

@@ -37,6 +37,8 @@ Below 80 columns the widget remains a single count line, truncated to fit when n
 
 The panel's stage progress includes recursively nested child workflows and updates as new stages appear. The numerator counts completed, failed, and skipped stages; the denominator counts all currently materialized stages, not future work. Expanded children replace their workflow boundary rather than counting both, and durable tool nodes are not stages. A failed, skipped, missing, or invalid child expansion keeps its boundary summary. `single`/`chain` follows this same stage count.
 
+The persistent `BACKGROUND` panel mounts below the editor. Eligibility for a live prompt preview is per visible root, not global. When that root has exactly one displayable pending question, the waiting card adds one quoted, terminal-control-stripped, cell-bounded preview and `Answer: /workflow connect <full-visible-root-UUID>`. Connect with the full UUID shown on that row. Nested prompts keep their real owner run, stage, and prompt identity while the command still targets the visible root. Multiple pending questions in the same root, missing descriptors, empty sanitized text, multi-question questionnaires, and unproven nested ownership keep the ordinary needs-attention guidance instead of picking a preview. A mixed panel can show one root's unique preview next to another root's general guidance. Previews update and clear live as prompts are answered or cancelled. They stay out of the transcript and parent-model context. `workflowNotifications.notifyOn` is unchanged, and existing graph, stage-chat, and `workflow answer` paths remain available. F2 still opens the active workflow; it does not select every waiting row. Below 80 columns the widget stays a single collapsed count line and omits prompt text and connect commands.
+
 For chat surfaces such as workflow status, run detail, dispatch confirmation, and the run picker, a full id wraps onto continuation rows when the card is narrower than the id. Pending-stage targets in run detail use the same rule: the exact address wraps instead of being ellipsized, and narrow status cards wrap the canonical stage ID or drop its display-name decoration rather than rendering a partial ID. The renderer keeps the card border closed at its minimum layout width, while terminals below that floor — including sub-30-column terminals — can hard-clip the box. An awaiting-input attribution banner is titled `AWAITING INPUT` and contains the same two identity rows — `？` plus the full run id, then the workflow name and optional metadata — while the existing prompt question and options remain below it in the normal prompt UI.
 
 The `/workflow connect` run picker shows five runs at a time; use the arrow keys or mouse wheel to scroll through additional retained runs.
@@ -49,6 +51,11 @@ The rendered card shape at the 80-column breakpoint is:
 │                                                                              │
 │   ●  d4e5f6a1-77b2-4c31-9e0a-2f1c8b4d6e5f                                    │
 │     build-check · chain · 0/2 · 12m                                          │
+│                                                                              │
+│   ？  8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44                                   │
+│     review-and-merge · single · 0/1 · 12m                                    │
+│     "Approve the generated migration before deployment?"                     │
+│     Answer: /workflow connect 8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44           │
 ```
 
 Below the breakpoint the same run set is represented by the collapsed count line, for example ` ▾  4 background · 2 ● · 1 quit`; a tool-only run adds its live count, for example ` ▾  1 background · 1 ● · 1 tool`.
@@ -415,6 +422,8 @@ Configure lifecycle behavior with `workflowNotifications.enabled` (default `true
 Human input is runtime-only: call `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, `ctx.ui.editor`, or `ctx.ui.custom<T>` when the workflow needs a decision. No builder-level declaration is required or supported.
 
 Human-in-the-loop prompts from `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, `ctx.ui.editor`, and `ctx.ui.custom<T>` appear as awaiting-input nodes in the workflow UI/graph viewer, not as ordinary chat modals. Workflow definitions do not declare HIL; runtime `ctx.ui.*` calls create prompt nodes. If the prompt lives inside an imported child workflow, it still appears in the same expanded parent graph so the user can focus and answer it without switching to a separate child status entry. When the attached stage has a pending prompt, its attribution banner is headed `AWAITING INPUT` and shows the full run id in a two-row identity block; the question and its options continue through the existing prompt UI below the banner.
+
+When the below-editor `BACKGROUND` panel can prove exactly one displayable pending question for a visible root, it also shows that question as a one-line preview with `/workflow connect <full-run-id>`. Multiple or unavailable questions keep the existing needs-attention guidance. Answer in the connected graph, attached stage chat, or with `workflow answer`; the panel itself does not answer, restrict, or remove any of those paths.
 
 Use `/workflow connect <run-id>` (or F2), then press Enter on the focused node or click a graph node to focus and open or attach it for local answers. Custom widget prompts mount inside the attached stage chat and must be completed interactively with the widget's `done(value)` callback.
 

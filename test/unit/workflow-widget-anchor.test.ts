@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { Container, Text, TuiMainScreen } from "@earendil-works/pi-tui";
 import { test } from "vitest";
+import { RecordingTerminal } from "../../packages/coding-agent/test/helpers/interactive-fullscreen-layout.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
-import type { RunStatus, StoreSnapshot } from "../../packages/workflows/src/shared/store-types.js";
+import type { RunStatus, StageSnapshot, StoreSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import { installStoreWidget, scrollStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 import { buildThemedWidgetLines, type WorkflowWidgetRowLayout } from "../../packages/workflows/src/tui/widget.js";
 import { WorkflowWidgetViewport } from "../../packages/workflows/src/tui/widget-viewport.js";
+import { sleep } from "../helpers/runtime.js";
 import { nativeWorkflowViewport } from "../helpers/workflow-native-viewport.js";
 
 const now = Date.now();
@@ -231,4 +234,285 @@ test("a shortened run boundary clamps the row offset without selecting the newly
 	assert.ok(f.render()[0]?.includes("duplicate name"));
 	f.viewport.scroll(-1);
 	assert.ok(f.render()[0]?.includes(uuid(0)));
+});
+
+test("prompt row insertion and removal preserve the scrolled workflow anchor", () => {
+	const f = rendererFixture();
+	f.scroll(8);
+	const visibleId = f
+		.render()
+		.join("\n")
+		.match(/00000000-0000-4000-8000-\d{12}/)?.[0];
+	assert.ok(visibleId);
+	const run = f.snapshot.runs.find((candidate) => candidate.id === visibleId)!;
+	run.status = "running";
+	const stages = run.stages as StageSnapshot[];
+	stages.length = 0;
+	stages.push({
+		id: "ask",
+		name: "ask",
+		status: "awaiting_input",
+		parentIds: [],
+		toolEvents: [],
+		pendingPrompt: { id: "prompt-12", kind: "confirm", message: "Approve insertion?", createdAt: now },
+	});
+	assert.ok(f.render().some((line) => line.includes(visibleId)));
+	assert.ok(f.render().some((line) => line.includes("Approve insertion?")));
+	stages.length = 0;
+	assert.ok(f.render().some((line) => line.includes(visibleId)));
+	assert.ok(!f.render().some((line) => line.includes("Approve insertion?")));
+});
+
+test("every prompt and navigation row remains reachable in a one-row viewport", () => {
+	const snapshot = {
+		version: 0,
+		notices: [],
+		runs: [
+			{
+				id: uuid(1),
+				name: "waiting",
+				status: "running" as RunStatus,
+				startedAt: now,
+				inputs: {},
+				stages: [
+					{
+						id: "ask",
+						name: "ask",
+						status: "awaiting_input" as const,
+						parentIds: [],
+						toolEvents: [],
+						pendingPrompt: {
+							id: "prompt-1",
+							kind: "confirm" as const,
+							message: "Approve the one-row prompt?",
+							createdAt: now,
+						},
+					},
+				],
+			},
+		],
+	} satisfies StoreSnapshot;
+	const layout: WorkflowWidgetRowLayout = { runs: [] };
+	const raw = buildThemedWidgetLines(snapshot, undefined, 120, now, layout);
+	assert.ok(raw.some((line) => line.includes("Approve the one-row prompt?")));
+	assert.ok(raw.some((line) => line.includes(`/workflow connect ${uuid(1)}`)));
+	assert.ok(layout.runs[0]);
+	assert.ok(layout.runs[0]!.end > layout.runs[0]!.start);
+	const viewport = new WorkflowWidgetViewport(
+		{ render: (width) => buildThemedWidgetLines(snapshot, undefined, width, now, layout) },
+		() => 9,
+		() => {},
+		() => layout.runs,
+	);
+	const native = nativeWorkflowViewport(viewport, () => 1);
+	const seen = new Set<string>();
+	for (let i = 0; i < raw.length; i++) {
+		seen.add(native.render(120)[0] ?? "");
+		viewport.scroll(1);
+	}
+	assert.ok([...seen].some((line) => line.includes("Approve the one-row prompt?")));
+	assert.ok([...seen].some((line) => line.includes(`/workflow connect ${uuid(1)}`)));
+});
+
+test("multi-root prompt and connect pairs stay inside their owning layout ranges", () => {
+	const subsets: Array<{ awaiting: readonly number[]; rows: number }> = [
+		{ awaiting: [], rows: 10 },
+		{ awaiting: [1], rows: 12 },
+		{ awaiting: [2], rows: 12 },
+		{ awaiting: [1, 3], rows: 14 },
+		{ awaiting: [1, 2, 3], rows: 16 },
+	];
+	for (const { awaiting, rows } of subsets) {
+		const waiting = new Set(awaiting);
+		const snapshot = {
+			version: 0,
+			notices: [],
+			runs: [1, 2, 3].map((index) => ({
+				id: uuid(index),
+				name: `root-${index}`,
+				status: "running" as RunStatus,
+				startedAt: now + index,
+				inputs: {},
+				stages: waiting.has(index)
+					? [
+							{
+								id: "ask",
+								name: "ask",
+								status: "awaiting_input" as const,
+								parentIds: [],
+								toolEvents: [],
+								pendingPrompt: {
+									id: `prompt-${index}`,
+									kind: "confirm" as const,
+									message: `Approve root ${index}?`,
+									createdAt: now,
+								},
+							},
+						]
+					: [],
+			})),
+		} satisfies StoreSnapshot;
+		const layout: WorkflowWidgetRowLayout = { runs: [] };
+		const lines = buildThemedWidgetLines(snapshot, undefined, 120, now, layout);
+		assert.equal(lines.length, rows, `awaiting ${awaiting.join(",") || "none"}`);
+		assert.equal(layout.runs.length, 3);
+		assert.deepEqual(
+			layout.runs.map((run) => run.id),
+			[uuid(3), uuid(2), uuid(1)],
+		);
+		for (let i = 1; i < layout.runs.length; i++) {
+			assert.ok(layout.runs[i]!.start > layout.runs[i - 1]!.start);
+			assert.ok(layout.runs[i]!.start >= layout.runs[i - 1]!.end);
+		}
+
+		const answerOwners = new Map<number, string>();
+		for (const range of layout.runs) {
+			const card = lines.slice(range.start, range.end);
+			const index = Number(range.id.slice(-1));
+			const prompt = `Approve root ${index}?`;
+			const connect = `Answer: /workflow connect ${range.id}`;
+			assert.equal(
+				card.some((line) => line.includes(range.id)),
+				true,
+				range.id,
+			);
+			const actionRows = card.filter(
+				(line) => line.includes(`"${prompt}"`) || line.includes("Answer: /workflow connect"),
+			);
+			if (waiting.has(index)) {
+				assert.equal(actionRows.length, 2, range.id);
+				assert.equal(
+					card.some((line) => line.includes(`"${prompt}"`)),
+					true,
+					range.id,
+				);
+				assert.equal(
+					card.some((line) => line.includes(connect)),
+					true,
+					range.id,
+				);
+			} else {
+				assert.equal(actionRows.length, 0, range.id);
+				assert.equal(
+					card.some((line) => line.includes('"')),
+					false,
+					range.id,
+				);
+				assert.equal(
+					card.some((line) => line.includes("Answer: /workflow connect")),
+					false,
+					range.id,
+				);
+			}
+			for (const [lineIndex, line] of card.entries()) {
+				if (!line.includes("Answer: /workflow connect")) continue;
+				const absolute = range.start + lineIndex;
+				assert.equal(answerOwners.has(absolute), false, `answer row ${absolute} reused`);
+				answerOwners.set(absolute, range.id);
+			}
+		}
+		assert.equal(answerOwners.size, awaiting.length);
+		for (const [absolute, ownerId] of answerOwners) {
+			const owners = layout.runs.filter((range) => absolute >= range.start && absolute < range.end);
+			assert.deepEqual(
+				owners.map((range) => range.id),
+				[ownerId],
+			);
+		}
+	}
+});
+
+test("below-editor pending input growth stays a differential redraw", async () => {
+	const NOW = Date.now();
+	const runId = "00000000-0000-4000-8000-000000000042";
+	// These clears are the #1109 screen+scrollback wipe.
+	const SCREEN_CLEAR = "\u001b[2J";
+	const SCROLLBACK_CLEAR = "\u001b[3J";
+	const geometries: Array<[rows: number, footerRows: number, historyRows: number]> = [
+		[24, 8, 60],
+		[26, 20, 60],
+		[40, 4, 10],
+		[9, 2, 60],
+	];
+
+	for (const [rows, footerRows, historyRows] of geometries) {
+		const store = createStore();
+		store.recordRunStart({
+			id: runId,
+			name: "release-docs",
+			inputs: {},
+			status: "running",
+			startedAt: NOW - 5_000,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		const snapshot = () => ({ runs: store.runs(), notices: [] as const, version: 0 });
+		const widgetLines = () => buildThemedWidgetLines(snapshot(), undefined, 110, NOW);
+		const terminal = new RecordingTerminal();
+		terminal.columns = 110;
+		terminal.rows = rows;
+		const tui = new TuiMainScreen(terminal, false, "/tmp");
+		try {
+			const chat = new Container();
+			for (let index = 0; index < historyRows; index += 1) {
+				chat.addChild(new Text(`history ${index}`, 0, 0));
+			}
+			tui.addChild(chat);
+			const footer = new Container();
+			for (let index = 0; index < footerRows; index += 1) {
+				footer.addChild(new Text(`footer ${index}`, 0, 0));
+			}
+			footer.addChild({
+				render: (width: number) => buildThemedWidgetLines(snapshot(), undefined, width, NOW),
+				invalidate() {},
+			});
+			tui.addChild(footer);
+			tui.requestRender();
+			await sleep(50);
+			assert.equal(widgetLines().length, 4, `${rows}/${footerRows}/${historyRows} idle height`);
+
+			terminal.writes.length = 0;
+			assert.equal(
+				store.recordStagePendingPrompt(runId, "ask", {
+					id: "p1",
+					kind: "confirm",
+					message: "Approve the generated migration before deployment?",
+					createdAt: NOW,
+				}),
+				true,
+			);
+			tui.requestRender();
+			await sleep(60);
+			assert.equal(widgetLines().length, 6, `${rows}/${footerRows}/${historyRows} waiting height`);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCREEN_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} prompt appear screen clears`,
+			);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCROLLBACK_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} prompt appear scrollback clears`,
+			);
+			assert.equal(terminal.writes.length, 1, `${rows}/${footerRows}/${historyRows} prompt appear writes`);
+
+			terminal.writes.length = 0;
+			assert.equal(store.resolveStagePendingPrompt(runId, "ask", "p1", true), true);
+			tui.requestRender();
+			await sleep(60);
+			assert.equal(widgetLines().length, 4, `${rows}/${footerRows}/${historyRows} resolved height`);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCREEN_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} answer screen clears`,
+			);
+			assert.equal(
+				terminal.writes.filter((data) => data.includes(SCROLLBACK_CLEAR)).length,
+				0,
+				`${rows}/${footerRows}/${historyRows} answer scrollback clears`,
+			);
+			assert.equal(terminal.writes.length, 1, `${rows}/${footerRows}/${historyRows} answer writes`);
+		} finally {
+			tui.stop();
+		}
+	}
 });

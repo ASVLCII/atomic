@@ -7,6 +7,7 @@
  *  - One compact rounded card per run:
  *      title: `<status glyph>  <full id>`
  *      row 1: `<name> · <dim mode · progress · live tool nodes · duration>`
+ *      awaiting-input cards add one quoted prompt row and one connect hint.
  *  - Collapsed single-line form below 80 cells:
  *      `▾  N background · X ●` in dim+warning.
  *
@@ -33,11 +34,16 @@ import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import type { RunSnapshot, StageSnapshot, StoreSnapshot } from "../shared/store-types.js";
 import { elapsedRunMs } from "../shared/timing.js";
 import type { FlatBandBadge } from "./chat-surface.js";
-import { renderRoundedBoxLines } from "./chat-surface.js";
+import { ELLIPSIS, renderRoundedBoxLines } from "./chat-surface.js";
 import { hexToAnsi, RESET } from "./color-utils.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { deriveGraphTheme } from "./graph-theme.js";
-import { renderRunIdentityRows } from "./run-identity-rows.js";
+import {
+	type PendingInputAffordance,
+	pendingInputAffordance,
+	sanitizePromptDisplay,
+} from "./pending-input-affordance.js";
+import { renderRunIdentityRows, wrapIdentifierLines } from "./run-identity-rows.js";
 import { statusColor, statusIcon } from "./status-helpers.js";
 import type { PiTheme } from "./store-widget-installer.js";
 import { truncateToWidth, visibleWidth } from "./text-helpers.js";
@@ -393,6 +399,59 @@ function plainRunLines(
 	});
 }
 
+function renderAwaitingPromptLine(message: string, bodyWidth: number, theme: GraphTheme | undefined): string {
+	const indent = " ".repeat(5);
+	const messageBudget = Math.max(1, bodyWidth - visibleWidth(indent) - 2);
+	// truncateToWidth is ANSI-aware, so untrusted prompt bytes must be
+	// control-stripped at this sink even if the projection already sanitized.
+	const clipped = truncateToWidth(sanitizePromptDisplay(message), messageBudget, ELLIPSIS);
+	// pi-tui wraps the ellipsis in SGR resets. Unthemed preview rows must
+	// keep that renderer chrome out of the documented plain entry point.
+	const preview = theme === undefined ? clipped.replace(/\x1b\[[0-9;]*m/g, "") : clipped;
+	const row = `${indent}"${preview}"`;
+	return theme === undefined ? row : `${hexToAnsi(theme.info)}${row}${RESET}`;
+}
+
+function renderAwaitingActionLines(visibleRunId: string, bodyWidth: number, theme: GraphTheme | undefined): string[] {
+	const prefix = "     Answer: /workflow connect ";
+	const rows = wrapIdentifierLines(visibleRunId, bodyWidth, prefix, "      ");
+	return rows.map((row) => {
+		const text = `${row.prefix}${row.chunk}`;
+		return theme === undefined ? text : `${hexToAnsi(theme.info)}${text}${RESET}`;
+	});
+}
+
+function awaitingRunLines(
+	run: RunSnapshot,
+	now: number,
+	theme: GraphTheme | undefined,
+	allRuns: readonly RunSnapshot[],
+	affordance: PendingInputAffordance,
+	bodyWidth: number,
+	expandGraph: ReturnType<typeof createWorkflowGraphExpander>,
+): string[] {
+	const resolveBoundarySegments: WorkflowBoundarySegmentsResolver = (runId) =>
+		workflowBoundarySegments(allRuns, runId);
+	const meta = metaLine(run, expandGraph, now, runMetaWidth(run, bodyWidth + 2), resolveBoundarySegments);
+	const identity = renderRunIdentityRows({
+		runId: run.id,
+		name: run.name,
+		meta,
+		glyph: statusGlyph(run, allRuns),
+		...(theme
+			? {
+					glyphColor: statusFg(run, theme, allRuns),
+					metaColor: effectiveRunStatus(run) === "running" ? theme.textMuted : theme.dim,
+					theme,
+				}
+			: {}),
+		width: bodyWidth,
+	});
+	identity.push(renderAwaitingPromptLine(affordance.message, bodyWidth, theme));
+	identity.push(...renderAwaitingActionLines(affordance.visibleRunId, bodyWidth, theme));
+	return identity;
+}
+
 // ---------------------------------------------------------------------------
 // Collapsed (< 80 cell) form
 // ---------------------------------------------------------------------------
@@ -493,12 +552,17 @@ export function buildThemedWidgetLines(
 	const title = `BACKGROUND  ${subtitle}${badges ? `  ${badges}` : ""}`;
 	const body: string[] = [];
 	const expandGraph = createWorkflowGraphExpander(snap);
+	const bodyWidth = Math.max(2, width - 2);
 
 	for (let i = 0; i < display.length; i++) {
 		const run = display[i]!;
-		const runLines = themed
-			? themedRunLines(run, now, graphTheme, snap.runs, width, expandGraph)
-			: plainRunLines(run, now, snap.runs, width, expandGraph);
+		const affordance = pendingInputAffordance(run, snap.runs);
+		const runLines =
+			!isQuitRun(run) && affordance !== undefined
+				? awaitingRunLines(run, now, themed ? graphTheme : undefined, snap.runs, affordance, bodyWidth, expandGraph)
+				: themed
+					? themedRunLines(run, now, graphTheme, snap.runs, width, expandGraph)
+					: plainRunLines(run, now, snap.runs, width, expandGraph);
 		body.push(...runLines);
 		layout?.runs.push({
 			id: run.id,

@@ -195,6 +195,7 @@ InteractiveModeBase.prototype.setExtensionWidget = function (
 
 	if (content === undefined) {
 		this.renderWidgets();
+		this.notifyExtensionWidgetRelease(key);
 		return;
 	}
 
