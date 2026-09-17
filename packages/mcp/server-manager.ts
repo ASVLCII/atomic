@@ -19,6 +19,7 @@ import { McpOAuthProvider } from "./mcp-oauth-provider.js";
 import { supportsOAuth } from "./mcp-auth-flow.js";
 import { registerSamplingHandler, type ServerSamplingConfig } from "./sampling-handler.ts";
 import { interpolateEnvRecord, resolveServerUrl, resolveBearerToken, resolveConfigPath } from "./utils.js";
+import { protectRemoteTransport } from "./remote-diagnostics.js";
 
 interface ServerConnection {
   client: Client;
@@ -204,10 +205,10 @@ export class McpServerManager {
     }
     
     // Try StreamableHTTP first (modern MCP servers)
-    const streamableTransport = new StreamableHTTPClientTransport(url, { 
+    const streamableTransport = protectRemoteTransport(new StreamableHTTPClientTransport(url, {
       requestInit,
       authProvider,
-    });
+    }), resolvedUrl);
     
     try {
       // Create a test client to verify the transport works
@@ -218,7 +219,7 @@ export class McpServerManager {
       await streamableTransport.close().catch(() => {});
       
       // StreamableHTTP works - create fresh transport for actual use
-      return new StreamableHTTPClientTransport(url, { requestInit, authProvider });
+      return protectRemoteTransport(new StreamableHTTPClientTransport(url, { requestInit, authProvider }), resolvedUrl);
     } catch (error) {
       // StreamableHTTP failed, close and try SSE fallback
       await streamableTransport.close().catch(() => {});
@@ -229,7 +230,7 @@ export class McpServerManager {
       }
       
       // SSE is the legacy transport
-      return new SSEClientTransport(url, { requestInit, authProvider });
+      return protectRemoteTransport(new SSEClientTransport(url, { requestInit, authProvider }), resolvedUrl);
     }
   }
   

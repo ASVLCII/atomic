@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { inspect } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { afterEach, test, vi } from "vitest";
 import { loadMcpConfig } from "../../packages/mcp/config.js";
 import { getAuthForUrl, saveAuthEntry } from "../../packages/mcp/mcp-auth.js";
-import { getValidToken, startAuth } from "../../packages/mcp/mcp-auth-flow.js";
+import { completeAuth, getValidToken, shutdownOAuth, startAuth } from "../../packages/mcp/mcp-auth-flow.js";
 import { computeServerHash, isServerCacheValid } from "../../packages/mcp/metadata-cache.js";
 import { McpServerManager } from "../../packages/mcp/server-manager.js";
 import { resolveServerUrl } from "../../packages/mcp/utils.js";
@@ -285,4 +286,142 @@ test("MCP URL resolution preserves valid HTTP(S) text and existing sequential su
 	vi.stubEnv("MCP_3088_ORIGIN", "https://example.com/$env:MCP_3088_SUFFIX");
 	vi.stubEnv("MCP_3088_SUFFIX", "mcp");
 	assert.equal(resolveServerUrl(`\${MCP_3088_ORIGIN}`), "https://example.com/mcp");
+});
+
+// Regression for #3088: Node's real fetch/EventSource SDK errors retain URL credentials.
+test("MCP Node SDK connection errors do not expose resolved endpoint secrets", async () => {
+	const endpoint = "http://user:SDK_PASSWORD@127.0.0.1:1/mcp?token=SDK_QUERY";
+	vi.stubEnv("MCP_3088_SECRET", endpoint);
+	const manager = new McpServerManager();
+	try {
+		for (const url of [`\${MCP_3088_SECRET}`, "$env:MCP_3088_SECRET", endpoint]) {
+			assert.equal(resolveServerUrl(url), endpoint);
+			await assert.rejects(manager.connect("secret", { url, auth: false }), (error: Error) => {
+				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /SDK_PASSWORD|SDK_QUERY/);
+				assert.equal("cause" in error, false);
+				assert.equal("event" in error, false);
+				assert.match(error.message, /SSE error/);
+				return true;
+			});
+			assert.equal(manager.getConnection("secret"), undefined);
+		}
+	} finally {
+		await manager.closeAll();
+	}
+});
+
+// Regression for #3088: real SDK OAuth errors can echo endpoints in response descriptions.
+test("MCP OAuth start, completion and refresh diagnostics hide endpoint secrets", async () => {
+	const dir = makeTempDirectory("mcp-url-auth-errors-");
+	vi.stubEnv("MCP_OAUTH_DIR", dir);
+	let origin = "";
+	const server = createServer((request, response) => {
+		response.setHeader("Content-Type", "application/json");
+		if (request.url?.includes("oauth-protected-resource")) {
+			response.end(JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }));
+		} else if (request.url?.includes("oauth-authorization-server")) {
+			response.end(
+				JSON.stringify({
+					issuer: origin,
+					authorization_endpoint: `${origin}/authorize`,
+					token_endpoint: `${origin}/token`,
+					response_types_supported: ["code"],
+					code_challenge_methods_supported: ["S256"],
+					grant_types_supported: ["authorization_code", "client_credentials", "refresh_token"],
+				}),
+			);
+		} else if (request.url === "/token") {
+			response
+				.writeHead(400)
+				.end(JSON.stringify({ error: "invalid_request", error_description: `${origin}/mcp?token=OAUTH_QUERY` }));
+		} else response.writeHead(404).end("{}");
+	});
+	server.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const address = server.address();
+	assert.ok(address && typeof address !== "string");
+	origin = `http://127.0.0.1:${address.port}`;
+	const endpoint = `${origin}/mcp?token=OAUTH_QUERY`;
+	vi.stubEnv("MCP_3088_SECRET", endpoint);
+	const safeError = (error: Error) => {
+		assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /OAUTH_QUERY/);
+		assert.equal("cause" in error, false);
+		return true;
+	};
+	try {
+		await assert.rejects(
+			startAuth("start", `\${MCP_3088_SECRET}`, {
+				oauth: { grantType: "client_credentials", clientId: "fixture", clientSecret: "fixture" },
+			}),
+			safeError,
+		);
+		await startAuth("complete", endpoint, { oauth: { clientId: "fixture" } });
+		await assert.rejects(completeAuth("complete", "code"), safeError);
+		saveAuthEntry(
+			"refresh",
+			{
+				clientInfo: { clientId: "fixture" },
+				tokens: { accessToken: "expired", refreshToken: "refresh", expiresAt: 1 },
+			},
+			endpoint,
+		);
+		const logs = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			assert.equal(await getValidToken("refresh", endpoint), null);
+			assert.ok(logs.mock.calls.length > 0);
+			assert.doesNotMatch(inspect(logs.mock.calls, { depth: null, showHidden: true }), /OAUTH_QUERY/);
+		} finally {
+			logs.mockRestore();
+		}
+	} finally {
+		await shutdownOAuth();
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		removeTempDirectory(dir);
+	}
+});
+
+// Regression for #3088: protect post-connect HTTP rejections AND client.onerror events.
+test("MCP HTTP request errors redact endpoint tokens without losing status codes", async () => {
+	const servers: McpServer[] = [];
+	let fail = false;
+	let endpoint = "";
+	const server = createServer(async (request, response) => {
+		if (fail) {
+			response.writeHead(500).end(`Request failed at ${endpoint}`);
+			return;
+		}
+		const mcp = new McpServer({ name: "diagnostics", version: "1" });
+		servers.push(mcp);
+		mcp.registerTool("hello", {}, async () => ({ content: [] }));
+		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+		await mcp.connect(transport);
+		await transport.handleRequest(request, response);
+	});
+	server.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const address = server.address();
+	assert.ok(address && typeof address !== "string");
+	endpoint = `http://127.0.0.1:${address.port}/mcp?token=HTTP_SECRET&token=SECOND_SECRET`;
+	const manager = new McpServerManager();
+	try {
+		const connection = await manager.connect("http-error", { url: endpoint, auth: false });
+		const events: Error[] = [];
+		connection.client.onerror = (error) => events.push(error);
+		fail = true;
+		await assert.rejects(connection.client.callTool({ name: "hello" }), (error: Error) => {
+			assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /HTTP_SECRET|SECOND_SECRET/);
+			assert.ok("code" in error && error.code === 500);
+			assert.equal("cause" in error, false);
+			return true;
+		});
+		assert.ok(events.length > 0);
+		assert.doesNotMatch(inspect(events, { depth: null, showHidden: true }), /HTTP_SECRET|SECOND_SECRET/);
+		assert.ok(events.some((error) => "code" in error && error.code === 500));
+	} finally {
+		await manager.closeAll();
+		await Promise.all(servers.map((mcp) => mcp.close()));
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
 });
