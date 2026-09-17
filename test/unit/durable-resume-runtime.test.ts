@@ -58,22 +58,25 @@ describe("resolveDurableEntry", () => {
 		assert.equal(r!.workflowId, fullId);
 	});
 
-	test("rejects a unique prefix and accepts the full id", async () => {
+	test("accepts a unique 8-hex prefix and the full id", async () => {
 		const fullId = testRunId("wf-aaa-001");
-		const malformed = resolveDurableEntry(fullId.slice(0, 8), catalog);
-		assert.ok(malformed && "kind" in malformed && malformed.kind === "malformed");
-		assert.match(malformed.message, /full 36-character UUID/);
+		// Regression: #2603 — durable workflow selectors support unique UUID prefixes.
+		const prefixed = resolveDurableEntry(fullId.slice(0, 8), catalog);
+		assert.ok(prefixed && !("kind" in prefixed));
+		assert.equal(prefixed.workflowId, fullId);
 		const exact = resolveDurableEntry(fullId, catalog);
 		assert.ok(exact && !("kind" in exact));
 		assert.equal(exact.workflowId, fullId);
 	});
 
-	test("rejects a shared prefix while full ids remain independently addressable", async () => {
+	test("reports a shared prefix as ambiguous while full ids remain independently addressable", async () => {
 		const firstId = testRunId("ambiguous-first");
 		const secondId = `${firstId.slice(0, 8)}-${testRunId("ambiguous-second").slice(9)}`;
 		const sharedCatalog = [makeEntry(firstId, "alpha", "running"), makeEntry(secondId, "beta", "paused")];
-		const malformed = resolveDurableEntry(firstId.slice(0, 8), sharedCatalog);
-		assert.ok(malformed && "kind" in malformed && malformed.kind === "malformed");
+		// Regression: #2603 — durable catalog collisions never resolve by insertion order.
+		const ambiguous = resolveDurableEntry(firstId.slice(0, 8), sharedCatalog);
+		assert.ok(ambiguous && "kind" in ambiguous && ambiguous.kind === "ambiguous");
+		assert.match(ambiguous.message, /Use the full UUID/);
 		const first = resolveDurableEntry(firstId, sharedCatalog);
 		const second = resolveDurableEntry(secondId, sharedCatalog);
 		assert.ok(first && !("kind" in first));
@@ -142,7 +145,7 @@ describe("resumeDurableWorkflow", () => {
 		assert.equal(result.reason, "not_registered");
 	});
 
-	test("rejects a unique prefix before exact-id loadability checks", async () => {
+	test("resolves a unique prefix before exact-id loadability checks", async () => {
 		class ExactOnlyLoadableBackend extends InMemoryDurableBackend {
 			override isWorkflowLoadable(workflowId: string): boolean {
 				return this.getWorkflow(workflowId) !== undefined;
@@ -161,9 +164,9 @@ describe("resumeDurableWorkflow", () => {
 
 		const result = await resumeDurableWorkflow(fullId.slice(0, 8), { ...deps(), durableBackend: exactBackend });
 
-		assert.equal(result.ok, false);
-		assert.equal(result.reason, "not_registered");
-		assert.match(result.message, /full 36-character UUID/);
+		// Regression: #2603 — downstream backend checks receive the resolved full UUID.
+		assert.equal(result.ok, true);
+		if (result.ok) assert.equal(result.workflowId, fullId);
 	});
 
 	test("rejects a shared prefix while full workflow ids remain independently addressable", async () => {
@@ -188,7 +191,10 @@ describe("resumeDurableWorkflow", () => {
 		const result = await resumeDurableWorkflow(firstId.slice(0, 8), deps());
 		assert.equal(result.ok, false);
 		assert.equal(result.reason, "not_registered");
-		assert.match(result.message, /full 36-character UUID/);
+		// Regression: #2603 — the ambiguity error exposes both authoritative matches.
+		assert.match(result.message, /ambiguous/);
+		assert.match(result.message, new RegExp(firstId));
+		assert.match(result.message, new RegExp(secondId));
 		const first = resolveDurableEntry(firstId, backend.listResumableWorkflows());
 		const second = resolveDurableEntry(secondId, backend.listResumableWorkflows());
 		assert.ok(first && !("kind" in first));
@@ -278,6 +284,51 @@ describe("resumeDurableWorkflow", () => {
 		assert.equal(result.ok, true);
 		assert.equal(resolvedCwd, "/persisted/project");
 		await jobs.get(workflowId)?.promise;
+	});
+
+	test("rediscovers a same-cwd workflow instead of using the cached registry definition", async () => {
+		// Issue #3085
+		const workflowId = testRunId("wf-same-cwd");
+		const sessionCwd = process.cwd();
+		const ran: string[] = [];
+		const cached = workflow({
+			name: "resumable-pipeline",
+			description: "cached",
+			inputs: { topic: Type.String() },
+			outputs: { done: Type.Optional(Type.Boolean()) },
+			run: async () => {
+				ran.push("cached");
+				return { done: true };
+			},
+		}) as unknown as WorkflowDefinition;
+		const fresh = workflow({
+			name: "resumable-pipeline",
+			description: "fresh",
+			inputs: { topic: Type.String() },
+			outputs: { done: Type.Optional(Type.Boolean()) },
+			run: async () => {
+				ran.push("fresh");
+				return { done: true };
+			},
+		}) as unknown as WorkflowDefinition;
+		backend.registerWorkflow({
+			workflowId,
+			name: "resumable-pipeline",
+			inputs: { topic: "data" },
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+			invocationCwd: sessionCwd,
+		});
+		const result = await resumeDurableWorkflow(workflowId, {
+			...deps(),
+			registry: makeRegistryWith(cached),
+			baseRunOpts: { ...deps().baseRunOpts, cwd: sessionCwd },
+			resolveDefinition: async () => fresh,
+		});
+		assert.equal(result.ok, true, JSON.stringify(result));
+		await jobs.get(workflowId)?.promise;
+		assert.deepEqual(ran, ["fresh"]);
 	});
 
 	test("returns invalid_inputs when cached inputs fail schema validation", async () => {

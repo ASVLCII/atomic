@@ -73,6 +73,9 @@ beforeEach(() => {
 	vi.stubEnv("SSH_CONNECTION", "");
 	vi.stubEnv("SSH_CLIENT", "");
 	vi.stubEnv("MOSH_CONNECTION", "");
+	vi.stubEnv("TERMUX_VERSION", "");
+	vi.stubEnv("WAYLAND_DISPLAY", "");
+	vi.stubEnv("DISPLAY", "");
 	stdoutWrites = [];
 	nativeResolved = false;
 	mocks.clipboard.setText.mockReset();
@@ -142,7 +145,8 @@ describe("copyToClipboard", () => {
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
-	test("uses OSC 52 fallback when native and shell tools fail", async () => {
+	test.each(["SSH_CONNECTION", "SSH_CLIENT", "MOSH_CONNECTION"])("remote %s retains OSC 52 fallback", async (key) => {
+		vi.stubEnv(key, "remote");
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
 		mockedExecSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
@@ -154,12 +158,13 @@ describe("copyToClipboard", () => {
 	});
 
 	test("does not emit oversized OSC 52 payloads", async () => {
+		vi.stubEnv("SSH_CONNECTION", "remote");
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
 		mockedExecSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
 		});
 
-		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Failed to copy to clipboard");
+		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Clipboard unavailable");
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
@@ -197,15 +202,46 @@ describe("copyToClipboard", () => {
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
-	test("falls through to OSC 52 when failed wl-copy has no X11 display", async () => {
+	test("rejects failed local wl-copy without emitting OSC 52", async () => {
 		mockedPlatform.mockReturnValue("linux");
 		mocks.isWaylandSession.mockReturnValue(true);
 		vi.stubEnv("WAYLAND_DISPLAY", "wayland-1");
 		mockWlCopyExit(1);
 		mockedExecSync.mockReturnValue(Buffer.alloc(0));
 
-		await copyToClipboard("hello");
-
-		expect(osc52Writes()).toHaveLength(1);
+		await expect(copyToClipboard("hello")).rejects.toThrow(
+			"Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access",
+		);
+		expect(osc52Writes()).toHaveLength(0);
 	});
+
+	test.each([
+		["darwin", "", "", "", "Clipboard unavailable"],
+		["win32", "", "", "", "Clipboard unavailable"],
+		["linux", "1", "wayland-1", ":0", "Clipboard unavailable: install the Termux:API app and `termux-api` package"],
+		[
+			"linux",
+			"",
+			"wayland-1",
+			":0",
+			"Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access",
+		],
+		["linux", "", "", ":0", "Clipboard unavailable: install `xclip` or `xsel`, or check X11 access"],
+		["linux", "", "", "", "Clipboard unavailable: no Wayland or X11 display detected"],
+	] as const)(
+		"local %s failure reports backend guidance (%s %s %s)",
+		async (os, termux, wayland, display, message) => {
+			mockedPlatform.mockReturnValue(os);
+			vi.stubEnv("TERMUX_VERSION", termux);
+			vi.stubEnv("WAYLAND_DISPLAY", wayland);
+			vi.stubEnv("DISPLAY", display);
+			mocks.isWaylandSession.mockReturnValue(Boolean(wayland));
+			mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
+			mockedExecSync.mockImplementation(() => {
+				throw new Error("backend failed");
+			});
+			await expect(copyToClipboard("hello")).rejects.toThrow(message);
+			expect(osc52Writes()).toHaveLength(0);
+		},
+	);
 });

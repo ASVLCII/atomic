@@ -410,12 +410,33 @@ By default, Atomic sends per-tool `eager_input_streaming: true`. If a proxy or A
 | `enforcesPreservedThinkingBinding` | Whether the model rejects a thinking block replayed behind a changed conversation prefix. Default: `false`. When `true`, Atomic sends the `thinking-binding-controls-2026-08-01` beta header and `prefix_mismatch_behavior: "drop_block"`.  |
 | `supportsMidConvoEffort` | Whether the exact Claude model transport supports per-turn effort system messages. Atomic persists native effort levels and sends `drop_block` when enabled. Default: `false`. |
 | `supportsForcedToolChoice`        | Whether the model accepts forced tool use (`tool_choice` `any` or a named tool). Default: `true`. When `false`, Atomic rejects a forced choice with an error rather than sending a request the model refuses. `auto` and `none` are never altered.  |
+| `allowedFallbackModels` | Ordered server-side fallback targets, at most three, each with nonempty `provider` and `model` strings and complete `cost` metadata. Costs require `input`, `output`, `cacheRead`, and `cacheWrite`; optional tiers require the same rates plus `inputTokensAbove`. Set `[]` to disable inherited fallbacks. |
 
 `supportsMidConvoEffort` and `enforcesPreservedThinkingBinding` compose rather than replace one another. The former is restricted to exact provider/model transports that accept effort-only system messages and adds the two per-turn-effort betas. It also enables `drop_block`, because historical effort changes can invalidate a signed prefix. The latter remains a separate Atomic compatibility flag for transports that enforce preserved-thinking prefixes but do not accept effort-only messages. Do not enable `supportsMidConvoEffort` for an API that merely imitates the Messages shape.
 
 `supportsForcedToolChoice` and `supportsTemperature` also exist on the Amazon Bedrock and OpenAI-compatible completions `compat` objects, with the same meanings and the same `true` defaults. Unlike the two preserved-thinking flags, which describe Anthropic's first-party endpoint, these describe the **model**, so Atomic applies them to every mirror that reaches it rather than only to `provider: "anthropic"`.
 
 On the completions adapter, `supportsTemperature: false` also strips `temperature`, `top_p`, and `top_k` out of `samplingParams`. That merge is documented as last-wins so its keys override the named request fields, which means it would otherwise reopen exactly the parameters the model rejects. The strip runs after the merge, so it also covers a model-level `samplingParams` default, and it removes only those three keys — every other custom key you pass still overrides as before.
+
+### Server-side fallback configuration
+
+Set `compat.allowedFallbackModels` at provider level, on a custom model, or in `modelOverrides`. A supplied array replaces inherited targets rather than appending to them. For example, disable built-in fallbacks for one model in `models.json`:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "modelOverrides": {
+        "claude-fable-5-1": {
+          "compat": { "allowedFallbackModels": [] }
+        }
+      }
+    }
+  }
+}
+```
+
+To enable a target, use an entry such as `{ "provider": "anthropic", "model": "claude-opus-5", "cost": { "input": 5, "output": 25, "cacheRead": 0.5, "cacheWrite": 6.25 } }`. Verify the provider's current rates and supported fallback targets before configuring them. Atomic sends the model names in array order and uses matching provider/model cost metadata to account for the serving model.
 
 ### Forced tool use on Claude Fable 5.1
 

@@ -8,6 +8,7 @@ import { describe, test } from "vitest";
 import {
 	classifyWorkflowFailure,
 	WORKFLOW_AUTH_FAILURE_MESSAGE,
+	WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE,
 	WORKFLOW_INVALID_PROVIDER_CREDENTIALS_MESSAGE,
 	WORKFLOW_UNKNOWN_MODEL_MESSAGE,
 } from "../../packages/workflows/src/shared/workflow-failures.js";
@@ -175,6 +176,38 @@ describe("classifyWorkflowFailure", () => {
 		const failure = classifyWorkflowFailure(new Error("OAuth callback metadata parse failed"));
 		assert.equal(failure.kind, "unknown");
 		assert.equal(failure.userMessage, "OAuth callback metadata parse failed");
+	});
+
+	test("classifies request-auth preparation timeout as recoverable auth_timeout (#3085/#3087)", () => {
+		const message =
+			"Request authentication timed out for openai-codex. Check the provider's credential source and try again.";
+		for (const error of [
+			{ role: "assistant", stopReason: "error", errorMessage: message },
+			{ name: "ModelsError", code: "auth", message },
+			new Error(message),
+		]) {
+			const failure = classifyWorkflowFailure(error);
+			assert.equal(failure.kind, "auth");
+			assert.equal(failure.code, "auth_timeout");
+			assert.equal(failure.recoverability, "recoverable");
+			assert.equal(failure.disposition, "active_blocked");
+			assert.equal(failure.resumable, true);
+			assert.equal(failure.retryable, true);
+			assert.equal(failure.userMessage, WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE);
+			assert.doesNotMatch(failure.userMessage, /\/login/);
+			assert.doesNotMatch(failure.userMessage, /log in/i);
+		}
+	});
+
+	test("keeps generic auth ModelsError as login_required when it is not a request-auth timeout (#3087)", () => {
+		const failure = classifyWorkflowFailure({
+			name: "ModelsError",
+			code: "auth",
+			message: "Credential store read failed for openai-codex",
+		});
+		assert.equal(failure.kind, "auth");
+		assert.equal(failure.code, "login_required");
+		assert.equal(failure.userMessage, WORKFLOW_AUTH_FAILURE_MESSAGE);
 	});
 
 	test("classifies git subprocess timeouts without treating them as repository setup errors", () => {

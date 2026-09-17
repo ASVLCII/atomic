@@ -21,6 +21,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Keep ready embedded PostgreSQL running when its starter exits or reloads, retain shared cluster identity and consumer leases outside installation directories, and preserve the original provider's cleanup across bundle reloads ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Verify managed PostgreSQL SQL/data/process identity before attachment, support `ATOMIC_POSTGRES_PORT`, and atomically share the actual port after bounded start/bind retries without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+
+### Added
+
+- Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

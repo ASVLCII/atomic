@@ -127,7 +127,7 @@ Pi-specific files are the write targets for imported or shared global servers wh
 | `args` | Command arguments |
 | `env` | Environment variables; supports `${VAR}` and `$env:VAR` interpolation |
 | `cwd` | Working directory; supports `${VAR}`, `$env:VAR`, and `~` expansion |
-| `url` | HTTP endpoint (StreamableHTTP with SSE fallback) |
+| `url` | HTTP(S) endpoint (StreamableHTTP with SSE fallback); supports `${VAR}` and `$env:VAR` interpolation. Unset variables become empty strings; an empty or invalid resolved endpoint is rejected before connecting. |
 | `headers` | HTTP headers; supports `${VAR}` and `$env:VAR` interpolation |
 | `auth` | `"bearer"` or `"oauth"` |
 | `oauth.grantType` | `"authorization_code"` (default) or `"client_credentials"` for non-interactive machine auth |
