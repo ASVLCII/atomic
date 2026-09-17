@@ -4,6 +4,10 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 ## [Unreleased]
 
+### Fixed
+
+- Request-auth preparation now times out after 15 seconds when OAuth refresh, credential-store reads, or auth derivation ignore cancellation, and late refresh results cannot overwrite stored credentials. The timeout diagnostic is source-neutral and does not instruct you to log in ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+
 ## [0.9.20-alpha.3] - 2026-09-16
 
 ### Fixed

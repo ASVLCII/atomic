@@ -1,4 +1,4 @@
-import type { CredentialStore, ModelsStore } from "@bastani/pi-ai";
+import type { AuthOperationOptions, CredentialStore, ModelsStore } from "@bastani/pi-ai";
 
 export interface CreateModelRuntimeOptions {
 	/** Credential storage. Defaults to the file at authPath. */
@@ -16,7 +16,7 @@ export interface CreateModelRuntimeOptions {
 	catalogBaseUrl?: string;
 }
 
-export interface ModelRuntimeAuthOverrides {
+export interface ModelRuntimeAuthOverrides extends AuthOperationOptions {
 	apiKey?: string;
 	env?: Record<string, string>;
 	/** Require this much remaining OAuth-token validity; defaults to five minutes. */
