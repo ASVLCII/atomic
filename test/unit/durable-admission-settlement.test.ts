@@ -71,6 +71,9 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	const deadline = exit.endsWith("deadline");
 	const unavailable = deadline || exit.endsWith("dependency");
 	const rejected = exit.endsWith("rejection");
+	const recovered = paused && unavailable;
+	let admissionAttempts = 0;
+	let bodyCalls = 0;
 	let armed = false;
 	let control: Promise<unknown> | undefined;
 	let admissionSignal: AbortSignal | undefined;
@@ -85,6 +88,7 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	const backend = new DbosDurableBackend({
 		...sdk,
 		startWorkflow: async (...args) => {
+			admissionAttempts++;
 			await gate();
 			await sdk.startWorkflow(...args);
 		},
@@ -142,6 +146,8 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		inputs: {},
 		outputs: {},
 		run: async (ctx) => {
+			if (recovered) assert.equal(controls.runControl(runId), owner, "retry retains the same executor");
+			bodyCalls++;
 			await ctx.tool("effect", {}, author);
 			return {};
 		},
@@ -177,6 +183,7 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		(error: unknown) => error,
 	);
 	await entered.promise;
+	const owner = controls.runControl(runId);
 	if (exit === "cancel-before" || exit === "continuation-cancel-before") caller.abort(new Error("user cancelled"));
 	if (exit === "quit-before" || exit === "quit-before-then-kill" || (continuation && quit)) {
 		control = quitRun(runId, { store, toolControlRegistry: controls }).catch((error: unknown) => error);
@@ -204,11 +211,26 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		assert.equal(store.runs()[0]?.status, "paused");
 		assert.equal(backend.getWorkflow(runId)?.status, "paused");
 		assert.ok(controls.runControl(runId), "failed pause retains its initialization owner until resume");
-		await assert.rejects(resumeRun(runId, { store, toolControlRegistry: controls }), (error: Error) => {
-			if (rejected) assert.equal(error, rejection);
-			else assert.ok(error instanceof DbosDependencyError);
-			return true;
-		});
+		if (rejected) {
+			await assert.rejects(
+				resumeRun(runId, { store, toolControlRegistry: controls }),
+				(error) => error === rejection,
+			);
+		} else {
+			// #3078: explicit concurrent resumes retry the retained owner, not a replacement executor.
+			assert.equal(controls.runControl(runId), owner);
+			assert.equal(backend.isAdmissionUnavailable(runId), true);
+			assert.equal(bodyCalls, 0);
+			armed = false;
+			release.resolve();
+			await vi.advanceTimersByTimeAsync(0);
+			assert.equal(admissionAttempts, 1, "recovery alone must not retry a paused owner");
+			const results = await Promise.all([
+				resumeRun(runId, { store, toolControlRegistry: controls }),
+				resumeRun(runId, { store, toolControlRegistry: controls }),
+			]);
+			assert.ok(results.every((result) => result.ok));
+		}
 	}
 	if (exit === "pause") {
 		await control;
@@ -236,11 +258,26 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		assert.equal(controlResult.ok, true);
 	}
 	const cancelled = exit.includes("cancel");
-	const status = cancelled ? "cancelled" : quit ? "paused" : unavailable || rejected ? "failed" : "completed";
+	const status = cancelled
+		? "cancelled"
+		: quit
+			? "paused"
+			: recovered
+				? "completed"
+				: unavailable || rejected
+					? "failed"
+					: "completed";
 	assert.equal(backend.getWorkflow(runId)?.status, status);
 	assert.equal(store.runs()[0]?.status, cancelled || exit === "quit-before-then-kill" ? "killed" : status);
-	assert.equal(backend.isAdmissionUnavailable(runId), unavailable);
+	assert.equal(backend.isAdmissionUnavailable(runId), unavailable && !recovered);
 	assert.equal(author.mock.calls.length, status === "completed" ? 1 : 0);
+	if (recovered) {
+		assert.equal(bodyCalls, 1);
+		assert.equal(admissionAttempts, 2, "concurrent resumes share a single readmission");
+		assert.deepEqual([...sdk.state.workflows.keys()], [runId]);
+		assert.equal(store.runs()[0]?.error, undefined);
+		assert.equal(store.runs()[0]?.dependencyError, undefined);
+	}
 	assert.deepEqual(sdk.state.cancels, exit === "cancel-after" || exit === "continuation-cancel-before" ? [runId] : []);
 	if (quit) {
 		assert.equal(backend.getWorkflow(runId)?.resumable, continuation);
@@ -263,7 +300,7 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 	if (exit === "continuation-cancel-before") {
 		assert.equal(backend.getWorkflow(runId)?.completedCheckpoints, 1);
 	}
-	if (unavailable && !quit)
+	if (unavailable && !quit && !recovered)
 		assert.equal(
 			backend.getWorkflow(runId)?.resumable,
 			true,
@@ -279,7 +316,7 @@ test.each(exits)("admission exit matrix: %s", async (exit) => {
 		await shutdownDbos();
 		assert.equal(shutdown.mock.calls.length, 1);
 	}
-	if (!unavailable && !rejected && exit !== "cancel-before") {
+	if (recovered || (!unavailable && !rejected && exit !== "cancel-before")) {
 		const fresh = new DbosDurableBackend(sdk);
 		await fresh.hydrateWorkflow(runId);
 		assert.equal(fresh.getWorkflow(runId)?.status, status, "authoritative metadata agrees with local settlement");
