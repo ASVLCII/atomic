@@ -215,6 +215,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	private admissionUnavailable = false;
 	private readonly unavailableAdmissions = new Set<string>();
 	private readonly unavailableCheckpoints = new Set<string>();
+	private readonly pendingRecoveryAdmissions = new Set<string>();
 	private readonly admissionMetadataAttempted = new Set<string>();
 	private readonly admissionSettlements = new Map<string, Promise<void>>();
 	private readonly admissionRecoveries = new Map<string, Promise<void>>();
@@ -246,6 +247,9 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	}
 	isCheckpointUnavailable(workflowId: string): boolean {
 		return this.unavailableCheckpoints.has(workflowId);
+	}
+	isWorkflowRecoveryPending(workflowId: string): boolean {
+		return this.pendingRecoveryAdmissions.has(workflowId);
 	}
 
 	settleWorkflowAdmission(workflowId: string): Promise<void> {
@@ -300,6 +304,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 			this.admissionUnavailable = false;
 			this.unavailableAdmissions.delete(workflowId);
 			this.unavailableCheckpoints.delete(workflowId);
+			this.pendingRecoveryAdmissions.delete(workflowId);
 		} catch (error) {
 			if (isDbosDependencyError(error)) {
 				this.admissionMetadataAttempted.delete(workflowId);
@@ -624,6 +629,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		this.current.delete(workflowId);
 		this.locallyRegistered.delete(workflowId);
 		this.unavailableCheckpoints.delete(workflowId);
+		this.pendingRecoveryAdmissions.delete(workflowId);
 		this.admissionSettlements.delete(workflowId);
 		this.promptReservations.delete(workflowId);
 		await this.mem.deleteWorkflow(workflowId);
@@ -679,6 +685,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		this.writeQueues.clear();
 		this.writeErrors.clear();
 		this.unavailableCheckpoints.clear();
+		this.pendingRecoveryAdmissions.clear();
 	}
 
 	async flush(workflowId?: string): Promise<void> {
@@ -784,6 +791,9 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 						);
 					}
 					admissionSignal.throwIfAborted();
+					// Definition/input validation can still refuse resume after reconciliation.
+					// Retain the same-ID route until an executor is successfully admitted.
+					if (this.getWorkflow(workflowId)?.status === "blocked") this.pendingRecoveryAdmissions.add(workflowId);
 					this.locallyRegistered.delete(workflowId);
 					this.unavailableAdmissions.delete(workflowId);
 					this.unavailableCheckpoints.delete(workflowId);
@@ -872,6 +882,7 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 	private async suppressWorkflow(workflowId: string): Promise<void> {
 		this.invalid.add(workflowId);
 		this.current.delete(workflowId);
+		this.pendingRecoveryAdmissions.delete(workflowId);
 		this.promptReservations.delete(workflowId);
 		await this.mem.deleteWorkflow(workflowId);
 	}

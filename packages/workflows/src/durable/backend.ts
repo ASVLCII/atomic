@@ -97,6 +97,8 @@ export interface DurableWorkflowBackend {
 	isAdmissionUnavailable?(workflowId: string): boolean;
 	/** Whether an awaited checkpoint failed on database availability; performs no I/O. */
 	isCheckpointUnavailable?(workflowId: string): boolean;
+	/** Whether reconciliation succeeded but the same-ID executor has not been readmitted; performs no I/O. */
+	isWorkflowRecoveryPending?(workflowId: string): boolean;
 	/** Await this identity's bounded admission, retaining its rejection until a new attempt. */
 	settleWorkflowAdmission?(workflowId: string): Promise<void>;
 	/** Whether bounded registration is pending or retains a failed settlement. */

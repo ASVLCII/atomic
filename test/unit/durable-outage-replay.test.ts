@@ -118,75 +118,97 @@ test("concurrent explicit resumes reconcile incomplete admission and execute one
 	}
 });
 
+// #3072/#3074: reconciliation must survive a refused public resume without becoming a new-ID continuation.
 for (const checkpointFailure of [false, true]) {
-	test(`public workflow tool resumes an unavailable root under the same ID: checkpoint=${checkpointFailure}`, async () => {
-		const sdk = createMockSdk();
-		let unavailable = true;
-		const backend = new DbosDurableBackend({
-			...sdk,
-			async startWorkflow(...args) {
-				if (unavailable && !checkpointFailure) throw new DbosDependencyError();
-				await sdk.startWorkflow(...args);
-			},
-			async recordStepOutput(id, step, value) {
-				if (!sdk.state.steps.has(`${id}:checkpoint:${step}`)) await sdk.recordStepOutput(id, step, value);
-				if (
-					checkpointFailure &&
-					unavailable &&
-					typeof value === "object" &&
-					value !== null &&
-					"kind" in value &&
-					value.kind === "tool"
-				)
-					throw new DbosDependencyError("checkpoint response lost");
-			},
+	for (const missingDefinition of [false, true]) {
+		test(`public workflow tool resumes an unavailable root under the same ID: checkpoint=${checkpointFailure}, missing definition=${missingDefinition}`, async () => {
+			const sdk = createMockSdk();
+			let unavailable = true;
+			const backend = new DbosDurableBackend({
+				...sdk,
+				async startWorkflow(...args) {
+					if (unavailable && !checkpointFailure) throw new DbosDependencyError();
+					await sdk.startWorkflow(...args);
+				},
+				async recordStepOutput(id, step, value) {
+					if (!sdk.state.steps.has(`${id}:checkpoint:${step}`)) await sdk.recordStepOutput(id, step, value);
+					if (
+						checkpointFailure &&
+						unavailable &&
+						typeof value === "object" &&
+						value !== null &&
+						"kind" in value &&
+						value.kind === "tool"
+					)
+						throw new DbosDependencyError("checkpoint response lost");
+				},
+			});
+			setDurableBackend(backend);
+			const id = testRunId("unavailable-tool-resume");
+			let executions = 0;
+			let effects = 0;
+			const finish = Promise.withResolvers<void>();
+			const definition = workflow({
+				name: "unavailable-tool-resume",
+				description: "",
+				inputs: {},
+				outputs: {},
+				run: async (ctx) => {
+					executions++;
+					const receipt = await ctx.tool("recovered-effect", {}, async () => {
+						effects++;
+						return "receipt";
+					});
+					assert.equal(receipt, "receipt");
+					await finish.promise;
+					return {};
+				},
+			});
+			try {
+				assert.equal((await run(definition, {}, { runId: id })).status, "failed");
+				assert.equal(store.runs().find((candidate) => candidate.id === id)?.status, "failed");
+				assert.equal(executions, checkpointFailure ? 1 : 0);
+				unavailable = false;
+				if (missingDefinition) {
+					const executeWithoutDefinition = makeExecuteWorkflowTool(createExtensionRuntime(), () => undefined);
+					const rejected = await executeWithoutDefinition({ action: "resume", runId: id }, {} as never);
+					assert.equal(rejected.action, "resume");
+					if (rejected.action !== "resume") assert.fail("expected resume result");
+					assert.equal(rejected.status, "noop");
+					assert.match(rejected.message ?? "", /Workflow definition not found/);
+					assert.equal(executions, checkpointFailure ? 1 : 0, "missing definition must not execute a body");
+					assert.equal(backend.isAdmissionUnavailable(id), false);
+					assert.equal(backend.isCheckpointUnavailable(id), false);
+					assert.equal(backend.getWorkflow(id)?.status, "blocked");
+					assert.equal(backend.isWorkflowRecoveryPending(id), true);
+				}
+				const execute = makeExecuteWorkflowTool(
+					createExtensionRuntime({ definitions: [definition] }),
+					() => undefined,
+				);
+				const resumed = await execute({ action: "resume", runId: id }, {} as never);
+				assert.equal(resumed.action, "resume");
+				if (resumed.action !== "resume") assert.fail("expected resume result");
+				assert.equal(resumed.status, "running", resumed.message);
+				assert.equal(resumed.runId, id);
+				assert.equal(executions, checkpointFailure ? 2 : 1);
+				assert.deepEqual([...sdk.state.workflows.keys()], [id]);
+				assert.equal(
+					backend.isWorkflowRecoveryPending(id),
+					false,
+					"successful admission consumes recovery routing",
+				);
+				finish.resolve();
+				await jobTracker.get(id)?.promise;
+				const completed = store.runs().find((candidate) => candidate.id === id);
+				assert.equal(completed?.status, "completed", JSON.stringify(completed));
+				assert.equal(executions, checkpointFailure ? 2 : 1);
+				assert.equal(effects, 1, "committed effect must not run again");
+			} finally {
+				finish.resolve();
+				await jobTracker.get(id)?.promise;
+				store.removeRun(id);
+			}
 		});
-		setDurableBackend(backend);
-		const id = testRunId("unavailable-tool-resume");
-		let executions = 0;
-		let effects = 0;
-		const finish = Promise.withResolvers<void>();
-		const definition = workflow({
-			name: "unavailable-tool-resume",
-			description: "",
-			inputs: {},
-			outputs: {},
-			run: async (ctx) => {
-				executions++;
-				await ctx.tool("recovered-effect", {}, async () => {
-					effects++;
-					return "receipt";
-				});
-				await finish.promise;
-				return {};
-			},
-		});
-		try {
-			assert.equal((await run(definition, {}, { runId: id })).status, "failed");
-			assert.equal(store.runs().find((candidate) => candidate.id === id)?.status, "failed");
-			assert.equal(executions, checkpointFailure ? 1 : 0);
-			unavailable = false;
-			const execute = makeExecuteWorkflowTool(
-				createExtensionRuntime({ definitions: [definition] }),
-				() => undefined,
-			);
-			const resumed = await execute({ action: "resume", runId: id }, {} as never);
-			assert.equal(resumed.action, "resume");
-			if (resumed.action !== "resume") assert.fail("expected resume result");
-			assert.equal(resumed.status, "running", resumed.message);
-			assert.equal(resumed.runId, id);
-			assert.equal(executions, checkpointFailure ? 2 : 1);
-			assert.deepEqual([...sdk.state.workflows.keys()], [id]);
-			finish.resolve();
-			await jobTracker.get(id)?.promise;
-			const completed = store.runs().find((candidate) => candidate.id === id);
-			assert.equal(completed?.status, "completed", JSON.stringify(completed));
-			assert.equal(executions, checkpointFailure ? 2 : 1);
-			assert.equal(effects, 1, "committed effect must not run again");
-		} finally {
-			finish.resolve();
-			await jobTracker.get(id)?.promise;
-			store.removeRun(id);
-		}
-	});
+	}
 }
