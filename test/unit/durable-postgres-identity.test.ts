@@ -189,7 +189,7 @@ test("an exited bind-race child is cleaned before a verified alternate start", a
 	assert.ok(managedPostgresMetadata(f.root, 18, false).server);
 });
 
-test("SQL identity rejects foreign data, port, address, start time and system identifier", async () => {
+test("SQL identity rejects foreign data, port, address, pidfile start time and system identifier with field diagnostics", async () => {
 	const f = fixture();
 	const port = await availablePostgresPort(0);
 	f.pidfile(port);
@@ -202,23 +202,28 @@ test("SQL identity rejects foreign data, port, address, start time and system id
 	]) {
 		await assert.rejects(
 			verifyPostgresIdentity(f.metadata, port, process.pid, async () => ({ ...f.row(port), ...change })),
-			/identity mismatch/,
+			(error: Error) => {
+				assert.match(error.message, /identity mismatch/);
+				assert.ok(error.message.includes(`sql.${Object.keys(change)[0]}: expected `), error.message);
+				assert.match(error.message, /observed /);
+				return true;
+			},
 		);
 	}
 	await assert.rejects(
 		verifyPostgresIdentity(f.metadata, port, process.pid + 1, async () => f.row(port)),
-		/identity mismatch/,
+		/process.pid: expected \d+, observed \d+/,
 	);
 	await assert.rejects(
 		verifyPostgresIdentity(f.metadata, port, null, async () => f.row(port)),
-		/identity mismatch/,
+		/process.pid: expected null, observed \d+/,
 	);
 	await assert.rejects(
 		verifyPostgresIdentity(f.metadata, port, process.pid, async () => {
 			f.pidfile(port, 2);
 			return f.row(port);
 		}),
-		/identity mismatch/,
+		/process.after.started: expected 1, observed 2/,
 	);
 });
 

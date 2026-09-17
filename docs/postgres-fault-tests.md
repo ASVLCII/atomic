@@ -8,7 +8,7 @@ there are no platform skips or environment opt-in gates.
 ```sh
 npm ci --ignore-scripts
 npm run build
-npm run test:integration -- test/integration/postgres-real-isolation.test.ts test/integration/postgres-real-dependency-failure.test.ts test/integration/workflow-postgres-real-outage.test.ts test/integration/postgres-managed-dbos-recovery.test.ts
+npm run test:integration -- test/integration/postgres-real-isolation.test.ts test/integration/postgres-real-dependency-failure.test.ts test/integration/workflow-postgres-real-outage.test.ts test/integration/postgres-managed-dbos-recovery.test.ts test/integration/postgres-real-identity.test.ts
 ```
 
 Run as an unprivileged account. The fixtures reject UID 0 because production root
@@ -46,6 +46,12 @@ not disappearance of every PID file in the directory: automatic recovery may alr
 have written the replacement's PID file. Managed recovery failures include elapsed
 shutdown timing and the disposable server's log. A focused identity regression also
 covers shutdown during the health probe, before the elected starter checks readiness.
+SQL identity also has a deterministic second-boundary regression in a disposable
+server. It shadows the SQL start-time function to return pidfile time plus one second,
+then executes the production identity query. This models PostgreSQL's distinct
+startup timestamps without relying on startup timing. Verification compares the
+server-read pidfile epoch with the locally observed pidfile epoch, not the separately
+sampled SQL start time. Identity refusals report expected and observed fields.
 
 The tests are discovered by the existing integration project on Linux and Windows.
 They do not change the CI matrix, worker parallelism or default test budget. Named
