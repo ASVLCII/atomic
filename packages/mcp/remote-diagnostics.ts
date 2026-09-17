@@ -2,16 +2,8 @@ import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { isJSONRPCErrorResponse, type JSONRPCErrorResponse } from "@modelcontextprotocol/sdk/types.js";
 
-function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
-	const url = new URL(endpoint);
-	// searchParams decodes escapes and '+'; retain the wire values as well.
-	const rawSecrets = [
-		url.username,
-		url.password,
-		url.hash.slice(1),
-		...url.search.slice(1).split("&").map((part) => (part.includes("=") ? part.slice(part.indexOf("=") + 1) : "")),
-	];
-	const secrets = new Set([...rawSecrets, ...url.searchParams.values()]);
+function secretRepresentations(rawSecrets: string[], decodedSecrets: Iterable<string> = []): Set<string> {
+	const secrets = new Set([...rawSecrets, ...decodedSecrets]);
 	for (const raw of rawSecrets) {
 		try {
 			secrets.add(decodeURIComponent(raw));
@@ -25,6 +17,19 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 		representations.add(encodeURIComponent(secret));
 		representations.add(new URLSearchParams({ value: secret }).toString().slice(6));
 	}
+	return representations;
+}
+
+function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
+	const url = new URL(endpoint);
+	// searchParams decodes escapes and '+'; retain the wire values as well.
+	const representations = secretRepresentations([
+		url.username,
+		url.password,
+		url.hash.slice(1),
+		...url.search.slice(1).split("&").map((part) => (part.includes("=") ? part.slice(part.indexOf("=") + 1) : "")),
+	], url.searchParams.values());
+	const pathRepresentations = secretRepresentations(url.pathname.split("/"));
 	// Also hide discovered OAuth/SSE URLs, which need not equal the configured endpoint.
 	message = message.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
 		if (preserveSafeUrls) {
@@ -37,17 +42,20 @@ function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrl
 		}
 		return "[redacted URL]";
 	});
-	const patterns = [...representations]
+	const patterns = [...new Set([...representations, ...pathRepresentations])]
 		.filter(Boolean)
 		.sort((a, b) => b.length - a.length)
-		.map((secret) =>
-			secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%[\da-f]{2}/gi, (encodedByte) =>
+		.map((secret) => {
+			const pattern = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%[\da-f]{2}/gi, (encodedByte) =>
 				encodedByte.replace(/[a-f]/gi, (hex) => `[${hex.toUpperCase()}${hex.toLowerCase()}]`),
-			),
-		);
+			);
+			// Paths can be short/common words: redact diagnostic tokens, not substrings
+			// of ordinary words. No component (including literal 'mcp') is exempt.
+			return representations.has(secret) ? pattern : `(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`;
+		});
 	// Match escapes case-insensitively, not token text; replace once so shorter
 	// secrets cannot corrupt another representation or the redaction marker.
-	return patterns.length ? message.replace(new RegExp(patterns.join("|"), "g"), "[redacted]") : message;
+	return patterns.length ? message.replace(new RegExp(patterns.join("|"), "gu"), "[redacted]") : message;
 }
 
 /** SDK errors may retain request URLs in messages, causes and EventSource events. */

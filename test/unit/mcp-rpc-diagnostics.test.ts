@@ -151,10 +151,15 @@ test("MCP diagnostic boundary preserves success identity and optional or zero er
 });
 
 // Regression for #3088: permitted tokens must not rename JSON-RPC protocol fields.
-test.each(["code", "message", "data"])("MCP error envelope survives a %s token collision", (token) => {
+test.each(
+	["code", "message", "data"].flatMap((token) => [
+		{ token, target: `/mcp?token=${token}` },
+		{ token, target: `/${token}` },
+	]),
+)("MCP error envelope survives a $target token collision", ({ token, target }) => {
 	const transport = protectRemoteTransport<Transport>(
 		{ start: async () => {}, send: async () => {}, close: async () => {} },
-		`https://example.com/mcp?token=${token}`,
+		`https://example.com${target}`,
 	);
 	let received: JSONRPCMessage | undefined;
 	transport.onmessage = (message) => {
@@ -303,13 +308,101 @@ test.each(["RISK%2FSECRET%2BKEY", "%52ISK%2fSECRET%2bKEY", "RISK+SECRET%2BKEY", 
 				for (const form of forms)
 					assert.ok(!inspect(error, { depth: null, showHidden: true }).includes(form), form);
 				assert.deepEqual(error.data, {
-					requestTarget: "/mcp?token=[redacted]&flag=[redacted]&flag=",
+					requestTarget: "/[redacted]?token=[redacted]&flag=[redacted]&flag=",
 					nested: forms.map(() => ({ "[redacted]": "[redacted]" })),
 					retryable: false,
 				});
 				return true;
 			});
 			assert.ok(paths.length > 0);
+			assert.ok(paths.every((path) => path === target));
+		} finally {
+			await client.close();
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	},
+);
+
+// Regression for #3088: every path component may be a credential, including common words.
+test.each(["PATH_SECRET", "%50ATH%2fSECRET%2bKEY", "mcp", "s", "code", "message", "data"])(
+	"MCP Node path diagnostics redact %s without changing requests or successful content",
+	async (token) => {
+		const paths: string[] = [];
+		const decoded = decodeURIComponent(token);
+		const forms = [...new Set([token, decoded, encodeURIComponent(decoded)])];
+		let fail = false;
+		let endpoint = "";
+		const server = createServer(async (request, response) => {
+			paths.push(request.url ?? "");
+			let raw = "";
+			for await (const chunk of request) raw += chunk;
+			const message = raw ? JSON.parse(raw) : {};
+			response.setHeader("Content-Type", "application/json");
+			if (!("id" in message)) {
+				response.writeHead(202).end();
+				return;
+			}
+			response.end(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: message.id,
+					...(fail
+						? {
+								error: {
+									code: -32603,
+									message: `Unable to process tools; ${endpoint}; ${request.url}; ${forms.join("; ")}`,
+									data: {
+										requestTarget: request.url,
+										nested: forms.map((form) => ({ [form]: form })),
+										detail: "messages decoded successfully",
+									},
+								},
+							}
+						: {
+								result:
+									message.method === "initialize"
+										? {
+												protocolVersion: "2025-03-26",
+												capabilities: { tools: {} },
+												serverInfo: { name: "path", version: "1" },
+											}
+										: { content: [{ type: "text", text: endpoint }] },
+							}),
+				}),
+			);
+		});
+		server.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		const address = server.address();
+		assert.ok(address && typeof address !== "string");
+		const target = token === "PATH_SECRET" ? `/mcp/s/${token}/mcp` : `/${token}`;
+		const safeTarget = target
+			.split("/")
+			.map((component) => (component ? "[redacted]" : ""))
+			.join("/");
+		endpoint = `http://127.0.0.1:${address.port}${target}`;
+		const client = new Client({ name: "path", version: "1" });
+		try {
+			await client.connect(protectRemoteTransport(new StreamableHTTPClientTransport(new URL(endpoint)), endpoint));
+			assert.deepEqual(await client.callTool({ name: "echo" }), { content: [{ type: "text", text: endpoint }] });
+			fail = true;
+			const checkError = (error: unknown) => {
+				assert.ok(error instanceof McpError);
+				assert.equal(error.code, -32603);
+				assert.equal(
+					error.message,
+					`MCP error -32603: Unable to process tools; http://127.0.0.1:${address.port}${safeTarget}; ${safeTarget}; ${forms.map(() => "[redacted]").join("; ")}`,
+				);
+				assert.deepEqual(error.data, {
+					requestTarget: safeTarget,
+					nested: forms.map(() => ({ "[redacted]": "[redacted]" })),
+					detail: "messages decoded successfully",
+				});
+				return true;
+			};
+			await assert.rejects(client.listTools({}, { timeout: 500 }), checkError);
+			await assert.rejects(client.callTool({ name: "echo" }, undefined, { timeout: 500 }), checkError);
 			assert.ok(paths.every((path) => path === target));
 		} finally {
 			await client.close();
