@@ -195,6 +195,8 @@ const proseNames = new Set([
 	"routerModel",
 	// The session tool name is distinct from its exported SDK functions.
 	"structured_output",
+	// #3089: workflow routing's inline sentinel is a wire value, not an export.
+	"none",
 	// PR #2998 names bundled web-access tools and their parameters, not package-root exports.
 	"code_search",
 	"web_search",
