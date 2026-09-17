@@ -280,6 +280,51 @@ describe("resumeDurableWorkflow", () => {
 		await jobs.get(workflowId)?.promise;
 	});
 
+	test("rediscovers a same-cwd workflow instead of using the cached registry definition", async () => {
+		// Issue #3085
+		const workflowId = testRunId("wf-same-cwd");
+		const sessionCwd = process.cwd();
+		const ran: string[] = [];
+		const cached = workflow({
+			name: "resumable-pipeline",
+			description: "cached",
+			inputs: { topic: Type.String() },
+			outputs: { done: Type.Optional(Type.Boolean()) },
+			run: async () => {
+				ran.push("cached");
+				return { done: true };
+			},
+		}) as unknown as WorkflowDefinition;
+		const fresh = workflow({
+			name: "resumable-pipeline",
+			description: "fresh",
+			inputs: { topic: Type.String() },
+			outputs: { done: Type.Optional(Type.Boolean()) },
+			run: async () => {
+				ran.push("fresh");
+				return { done: true };
+			},
+		}) as unknown as WorkflowDefinition;
+		backend.registerWorkflow({
+			workflowId,
+			name: "resumable-pipeline",
+			inputs: { topic: "data" },
+			createdAt: 1,
+			status: "paused",
+			completedCheckpoints: 1,
+			invocationCwd: sessionCwd,
+		});
+		const result = await resumeDurableWorkflow(workflowId, {
+			...deps(),
+			registry: makeRegistryWith(cached),
+			baseRunOpts: { ...deps().baseRunOpts, cwd: sessionCwd },
+			resolveDefinition: async () => fresh,
+		});
+		assert.equal(result.ok, true, JSON.stringify(result));
+		await jobs.get(workflowId)?.promise;
+		assert.deepEqual(ran, ["fresh"]);
+	});
+
 	test("returns invalid_inputs when cached inputs fail schema validation", async () => {
 		const workflowId = testRunId("wf-bad-in-1");
 		backend.registerWorkflow({
