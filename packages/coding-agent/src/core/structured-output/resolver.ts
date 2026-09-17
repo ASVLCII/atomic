@@ -29,7 +29,12 @@ export function resolveRouterModel(options: RouterModelSelectionOptions): Struct
 	if (typeof explicit !== "string" || explicit.trim() !== explicit || explicit === "auto") {
 		throw new Error("Invalid routerModel: use an exact provider/model ID or an empty string, not auto.");
 	}
-	if (explicit === JEV_STRUCTURED_OUTPUT_PROVIDER.fullId || (!explicit && process.env.TYPESAFE_AI_API_KEY?.trim())) {
+	if (
+		explicit === JEV_STRUCTURED_OUTPUT_PROVIDER.fullId ||
+		(!explicit &&
+			(options.modelRegistry.getProviderAuthStatus?.(JEV_STRUCTURED_OUTPUT_PROVIDER.id).configured ||
+				Boolean(process.env.TYPESAFE_AI_API_KEY?.trim())))
+	) {
 		return { kind: "jev", fullId: JEV_STRUCTURED_OUTPUT_PROVIDER.fullId };
 	}
 	const model = explicit
@@ -39,7 +44,7 @@ export function resolveRouterModel(options: RouterModelSelectionOptions): Struct
 		throw new Error(
 			explicit
 				? "Invalid routerModel: the exact model is not in the current chat catalog. Check settings.json."
-				: "Router inference needs a selected chat model, TYPESAFE_AI_API_KEY, or an explicit routerModel.",
+				: "Router inference needs a selected chat model, configured Jev credentials, or an explicit routerModel.",
 		);
 	}
 	return { kind: "chat", fullId: `${model.provider}/${model.id}`, model };

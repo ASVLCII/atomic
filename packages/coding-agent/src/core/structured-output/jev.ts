@@ -148,11 +148,17 @@ async function askJev<T extends TSchema>(
 	signal: AbortSignal,
 ) {
 	const questions = compileQuestions(questionsToAsk, request.instructions);
-	const apiKey = process.env.TYPESAFE_AI_API_KEY?.trim();
+	let apiKey: string | undefined;
+	try {
+		apiKey = request.modelRegistry.getProviderAuth
+			? (await request.modelRegistry.getProviderAuth(provider.id, { signal }))?.auth.apiKey?.trim()
+			: process.env.TYPESAFE_AI_API_KEY?.trim();
+	} catch {
+		signal.throwIfAborted();
+		throw new Error("Jev credential resolution failed. Check /login typesafe-ai or TYPESAFE_AI_API_KEY.");
+	}
 	if (!apiKey)
-		throw new Error(
-			"typesafe-ai/jev requires a nonempty TYPESAFE_AI_API_KEY. Set it or select another inference model.",
-		);
+		throw new Error("typesafe-ai/jev requires an API key. Use /login typesafe-ai or set TYPESAFE_AI_API_KEY.");
 	signal.throwIfAborted();
 	let response: Response;
 	try {
@@ -176,7 +182,7 @@ async function askJev<T extends TSchema>(
 		void response.body?.cancel().catch(() => {});
 		const guidance =
 			response.status === 401
-				? "Check TYPESAFE_AI_API_KEY."
+				? "Check /login typesafe-ai or TYPESAFE_AI_API_KEY."
 				: response.status === 422
 					? "Check the state and Choice question contract."
 					: response.status === 429 || response.status === 529

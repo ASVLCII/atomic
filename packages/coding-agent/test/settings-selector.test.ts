@@ -1,8 +1,12 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Container } from "@earendil-works/pi-tui";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, expect, test, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 import { buildSettingsItems } from "../src/modes/interactive/components/settings-selector-items.ts";
 import type { SettingsCallbacks, SettingsConfig } from "../src/modes/interactive/components/settings-selector-types.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -111,4 +115,105 @@ test("keeps a configured automatic theme marked while browsing", () => {
 	output = render(submenu);
 	expect(output).toContain("  ✓ light");
 	expect(output).toContain("→   other");
+});
+
+function openRouterSubmenu(
+	config: SettingsConfig,
+	onRouterModelChange: (model: string) => void,
+	done = vi.fn(),
+): Container {
+	const item = buildSettingsItems(config, { onRouterModelChange } as SettingsCallbacks).find(
+		({ id }) => id === "router-model",
+	);
+	expect(item?.label).toBe("Router model");
+	return item!.submenu!(item!.currentValue, done) as Container;
+}
+
+test("router settings offer Jev without a chat catalog and save exact values via keyboard", () => {
+	const config = settingsConfig({ routerModel: "", availableDefaultModels: [] });
+	const changed = vi.fn();
+	const done = vi.fn();
+	const submenu = openRouterSubmenu(config, changed, done);
+	expect(render(submenu)).toContain("Automatic");
+	expect(render(submenu)).toContain("typesafe-ai/jev");
+	submenu.handleInput?.("\x1b[B");
+	expect(changed).not.toHaveBeenCalled();
+	submenu.handleInput?.("\r");
+	expect(changed).toHaveBeenCalledExactlyOnceWith("typesafe-ai/jev");
+	expect(done).toHaveBeenCalledWith("typesafe-ai/jev");
+	expect(config.routerModel).toBe("typesafe-ai/jev");
+	expect(config.availableDefaultModels).toEqual([]);
+
+	const reopened = openRouterSubmenu(config, changed);
+	expect(render(reopened)).toContain("→ ✓ typesafe-ai/jev");
+	reopened.handleInput?.("\x1b[A");
+	reopened.handleInput?.("\r");
+	expect(changed).toHaveBeenLastCalledWith("");
+	expect(config.routerModel).toBe("");
+});
+
+test("router settings search exact provider/model IDs without changing chat defaults", () => {
+	const config = settingsConfig({
+		routerModel: "",
+		availableDefaultModels: [
+			{ id: "nested/model", provider: "test", name: "Test model", reasoning: true },
+		] as SettingsConfig["availableDefaultModels"],
+		modelThinkingLevels: { "test/nested/model": "high" },
+	});
+	const changed = vi.fn();
+	const submenu = openRouterSubmenu(config, changed);
+	for (const character of "nested") submenu.handleInput?.(character);
+	expect(render(submenu)).toContain("→   test/nested/model");
+	expect(changed).not.toHaveBeenCalled();
+	submenu.handleInput?.("\r");
+	expect(changed).toHaveBeenCalledExactlyOnceWith("test/nested/model");
+	expect(config.modelThinkingLevels).toEqual({ "test/nested/model": "high" });
+	expect(config.thinkingLevel).toBe("off");
+});
+
+test("router settings preserve an unavailable selection and cancellation does not save", () => {
+	const config = settingsConfig({ routerModel: "missing/model", availableDefaultModels: [] });
+	const changed = vi.fn();
+	const done = vi.fn();
+	const submenu = openRouterSubmenu(config, changed, done);
+	expect(render(submenu)).toContain("→ ✓ missing/model");
+	expect(render(submenu)).toContain("not currently available");
+	submenu.handleInput?.("\x1b");
+	expect(changed).not.toHaveBeenCalled();
+	expect(done).toHaveBeenCalledWith();
+	expect(config.routerModel).toBe("missing/model");
+});
+
+test("router menu saves settings.json and Automatic clears only the router selection", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "atomic-router-settings-"));
+	try {
+		const file = join(directory, "settings.json");
+		const defaults = { defaultProvider: "test", defaultModel: "chat", theme: "dark" };
+		writeFileSync(file, JSON.stringify(defaults));
+		const manager = SettingsManager.create(directory, directory);
+		const config = settingsConfig({ routerModel: manager.getRouterModel() });
+		const change = (model: string) => manager.setRouterModel(model);
+		const menu = openRouterSubmenu(config, change);
+		menu.handleInput?.("\x1b[B");
+		menu.handleInput?.("\r");
+		await manager.flush();
+		expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...defaults, routerModel: "typesafe-ai/jev" });
+		expect(SettingsManager.create(directory, directory).getRouterModel()).toBe("typesafe-ai/jev");
+		const reopened = openRouterSubmenu(config, change);
+		reopened.handleInput?.("\x1b[A");
+		reopened.handleInput?.("\r");
+		await manager.flush();
+		expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...defaults, routerModel: "" });
+		expect(SettingsManager.create(directory, directory).getRouterModel()).toBe("");
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("router setter rejects malformed values without changing saved selection", () => {
+	const manager = SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" });
+	for (const value of ["auto", " typesafe-ai/jev", "typesafe-ai/jev "]) {
+		expect(() => manager.setRouterModel(value)).toThrow(/Invalid routerModel/);
+	}
+	expect(manager.getRouterModel()).toBe("typesafe-ai/jev");
 });

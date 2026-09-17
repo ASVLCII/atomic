@@ -184,7 +184,12 @@ export async function runSingleInProcess(
 			? `${options.currentModel}:${options.currentThinkingLevel}`
 			: options.currentModel,
 		agent.fallbackThinkingLevels,
-	).filter((candidate) => !options.modelRoute || options.modelRoute.allowsCandidate(candidate, agent.thinking));
+	).filter(
+		// Unsuffixed fallbacks inherit the routed session effort; null starts nonreasoning sessions at off.
+		(candidate) =>
+			!options.modelRoute ||
+			options.modelRoute.allowsCandidate(candidate, options.modelRoute.routerSelection.effort ?? "off"),
+	);
 	const filteredCandidates = filterSpawnableModelCandidates({
 		candidates: rawCandidates,
 		availableModels: options.availableModels,

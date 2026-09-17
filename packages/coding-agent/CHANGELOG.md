@@ -10,6 +10,8 @@
 - Added bounded structured-decision SDK APIs and direct TypeSafe Jev Choice integration. The shared `routerModel` setting selects prerequisite routing inference; general `inferStructuredOutput()` calls select their inference model explicitly. Decisions validate exact schema values without agent loops or automatic inference retries. The selected chat model and `structured_output` tool are unchanged ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - Model-tool workflow launches now require task/conversation/documentation state and one bounded routing decision before admission. Tool results show the validated workflow and exact budget as formatted JSON; `none` means continue inline without launching, and stale registry decisions are refused. Routing context containing known configured credentials is rejected before either provider receives it. User `/workflow` commands and authored `ctx.workflow(...)` calls bypass routing ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
 - Added opt-in subagent `model: "auto"` routing for single tasks, parallel tasks and agent defaults, using available model/effort pairs and shipped evaluation guidance. The shared `routerModel` setting selects the decision provider; invalid or stale decisions prevent child launch, and selected versus fallback execution models remain distinct in task metadata ([#3090](https://github.com/bastani-inc/atomic/issues/3090)).
+- TypeSafe Jev supports API-key login and logout through the normal credential store, with environment-key fallback. Saved Jev credentials can select the default router while Jev remains absent from chat-model selection.
+- Added a searchable Router model entry in `/settings`, saving automatic routing, Jev, or an available provider/model to `settings.json` without changing the chat model.
 
 ### Changed
 
@@ -45,6 +47,8 @@
 - Custom models declared in `models.json` no longer generate automatic `-fast` siblings, preventing invalid choices such as `gpt-6-astra-slow-fast`. Built-in fast variants and `modelOverrides` remain supported.
 - Bedrock requests honor the configured provider retry count, including zero, so bounded router decisions do not make hidden SDK retry attempts ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - Jev structured decisions now handle choices above 255 options through bounded multi-request tournaments, including every candidate and comparing finalists without cross-batch probability ranking. Subagent auto routing supports large model/effort catalogs; workflow routing retains `none` and exact budgets. One shared deadline and fail-closed validation cover all rounds ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
+- Workflow routing preserves omitted budget fields with strict-schema providers instead of rejecting their required null placeholders. Explicit zero and fractional limits retain their exact meaning.
+- Subagent auto routing uses the routed thinking level when checking unsuffixed fallbacks and cancels sibling routing requests when a parallel routing decision fails ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

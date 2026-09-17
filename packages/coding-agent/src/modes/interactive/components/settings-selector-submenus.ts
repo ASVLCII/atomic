@@ -170,7 +170,8 @@ export class SelectSubmenu extends Container {
 			SETTINGS_SUBMENU_SELECT_LIST_LAYOUT,
 		);
 		const currentIndex = options.findIndex((item) => item.value === this.currentValue);
-		if (currentIndex !== -1) list.setSelectedIndex(currentIndex);
+		// Searching should focus the best match, not a weaker match of the saved value.
+		if (!query && currentIndex !== -1) list.setSelectedIndex(currentIndex);
 		list.onSelect = (item) => this.onSelectValue(item.value);
 		list.onCancel = this.onCancelValue;
 		this.children[this.listChildIndex] = list;

@@ -14,7 +14,7 @@ export interface StructuredChoiceQuestion {
 
 export interface RouterModelSelectionOptions {
 	readonly settings: Pick<SettingsManager, "getRouterModel">;
-	readonly modelRegistry: Pick<ModelRegistry, "getAll">;
+	readonly modelRegistry: Pick<ModelRegistry, "getAll"> & Partial<Pick<ModelRegistry, "getProviderAuthStatus">>;
 	/** Read the active chat model at invocation time; never change it to perform a decision. */
 	readonly currentModel?: Model<Api>;
 }
@@ -26,7 +26,8 @@ export type StructuredOutputModel =
 export interface StructuredOutputRequest<T extends TSchema> {
 	/** Explicit inference model. General structured output never reads routerModel or the chat selection. */
 	readonly model: StructuredOutputModel;
-	readonly modelRegistry: Pick<ModelRegistry, "streamSimple">;
+	/** Full registries resolve Jev through normal provider auth; minimal adapters retain environment-only support. */
+	readonly modelRegistry: Pick<ModelRegistry, "streamSimple"> & Partial<Pick<ModelRegistry, "getProviderAuth">>;
 	/** Supply actual task, facts, constraints and reference text. Never supply credentials. */
 	readonly state: JsonObject;
 	readonly instructions: string;
@@ -49,7 +50,8 @@ export interface StructuredOutputRequest<T extends TSchema> {
 export interface RouterDecisionRequest<T extends TSchema>
 	extends Omit<StructuredOutputRequest<T>, "model" | "modelRegistry">,
 		RouterModelSelectionOptions {
-	readonly modelRegistry: Pick<ModelRegistry, "getAll" | "streamSimple">;
+	readonly modelRegistry: Pick<ModelRegistry, "getAll" | "streamSimple"> &
+		Partial<Pick<ModelRegistry, "getProviderAuthStatus" | "getProviderAuth">>;
 }
 
 export interface StructuredOutputResult<T> {

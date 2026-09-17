@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The BACKGROUND panel stays mounted across top-level `/reload` while a run is still awaiting input; status and connect keep targeting the same pending prompt ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
 - Combining-only pending prompts no longer receive a quoted BACKGROUND preview; they keep general needs-attention guidance ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
 - Jev launch routing now supports catalogs above 255 choices through bounded tournaments, retaining `none` in the final comparison and preserving exact user budgets. Any failed batch prevents launch without automatic rerouting ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
+- Fixed workflow routing with strict-schema providers such as Codex when budget limits are omitted or partially supplied, preserving exact limits and zero values without introducing null fields.
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

@@ -189,7 +189,12 @@ export async function routeWorkflowLaunch(
 		{
 			// Registered names are runtime strings; retain literal validation without inferring only "none".
 			workflowType: Type.Union([Type.Literal<string>("none"), ...names.map((name) => Type.Literal(name))]),
-			maxBudget: WorkflowBudgetSchema,
+			// Optional fields become required nullable fields in strict provider schemas.
+			// Describe only the preserved declaration so wire and local validation agree.
+			maxBudget: Type.Object(
+				Object.fromEntries(Object.entries(budget).map(([key, value]) => [key, Type.Literal(value)])),
+				{ additionalProperties: false },
+			),
 		},
 		{ additionalProperties: false },
 	);
@@ -222,6 +227,12 @@ export async function routeWorkflowLaunch(
 		modelRegistry: {
 			getAll: () => modelRegistry.getAll!(),
 			streamSimple: (...parameters) => modelRegistry.streamSimple!(...parameters),
+			...(modelRegistry.getProviderAuthStatus && {
+				getProviderAuthStatus: modelRegistry.getProviderAuthStatus.bind(modelRegistry),
+			}),
+			...(modelRegistry.getProviderAuth && {
+				getProviderAuth: modelRegistry.getProviderAuth.bind(modelRegistry),
+			}),
 		},
 		currentModel: ctx.model,
 		state: snapshot,

@@ -1,6 +1,4 @@
 // #3090: real shared inference with mocked provider transports, never live API calls.
-vi.mock("node:fs/promises", { spy: true });
-
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -23,6 +21,8 @@ import {
 	messageStream,
 	registeredDecisionRuntime,
 } from "../helpers/structured-output.js";
+
+vi.mock("node:fs/promises", { spy: true });
 
 beforeEach(() => vi.stubEnv("TYPESAFE_AI_API_KEY", ""));
 afterEach(() => {

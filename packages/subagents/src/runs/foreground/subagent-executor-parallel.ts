@@ -121,19 +121,41 @@ export async function runParallelPath(
 		...(skillOverrides[index] !== undefined ? { skills: skillOverrides[index] } : {}),
 		...(task.model ? { model: task.model } : {}),
 	}));
-	const modelRoutes = await Promise.all(
-		tasks.map((task, index) =>
-			(task.model ?? agentConfigs[index]?.model) === "auto"
-				? routeSubagentModel({
-						ctx,
-						agent: agentConfigs[index]!,
-						task: task.task,
-						modelConstraints: task.modelConstraints,
-						signal,
-					})
-				: undefined,
-		),
-	);
+	const modelRoutes = await (async () => {
+		const routing = new AbortController();
+		const cancelled = Promise.withResolvers<never>();
+		const onParentAbort = () => {
+			routing.abort(signal.reason);
+			cancelled.reject(signal.reason);
+		};
+		signal.throwIfAborted();
+		signal.addEventListener("abort", onParentAbort, { once: true });
+		try {
+			return await Promise.race([
+				Promise.all(
+					tasks.map((task, index) =>
+						(task.model ?? agentConfigs[index]?.model) === "auto"
+							? routeSubagentModel({
+									ctx,
+									agent: agentConfigs[index]!,
+									task: task.task,
+									modelConstraints: task.modelConstraints,
+									signal: routing.signal,
+								})
+							: undefined,
+					),
+				),
+				cancelled.promise,
+			]);
+		} catch (error) {
+			// Stop sibling inference without cancelling the parent or waiting for
+			// providers that ignore cancellation. Preserve the initiating failure.
+			routing.abort(error);
+			throw error;
+		} finally {
+			signal.removeEventListener("abort", onParentAbort);
+		}
+	})();
 	const modelOverrides = tasks.map(
 		(_, index) =>
 			modelRoutes[index]?.modelOverride ??

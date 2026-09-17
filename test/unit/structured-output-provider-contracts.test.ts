@@ -215,7 +215,7 @@ test("explicit Jev without its key fails without falling back to chat", async ()
 			...decisionRequest(),
 			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }),
 		}),
-		/requires a nonempty TYPESAFE_AI_API_KEY/,
+		/requires an API key.*\/login typesafe-ai/,
 	);
 });
 

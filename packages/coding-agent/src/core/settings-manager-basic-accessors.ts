@@ -46,6 +46,7 @@ interface SettingsManagerBasicAccessors {
 	getDefaultProvider(): string | undefined;
 	getDefaultModel(): string | undefined;
 	getRouterModel(): string;
+	setRouterModel(model: string): void;
 	setDefaultProvider(provider: string): void;
 	setDefaultModel(modelId: string): void;
 	setDefaultModelAndProvider(provider: string, modelId: string): void;
@@ -164,6 +165,16 @@ const basicAccessors: SettingsManagerBasicAccessors = {
 			throw new Error("Invalid routerModel: expected an exact provider/model ID or an empty string, not auto.");
 		}
 		return value;
+	},
+
+	setRouterModel(model) {
+		if (typeof model !== "string" || model.trim() !== model || model === "auto") {
+			throw new Error("Invalid routerModel: expected an exact provider/model ID or an empty string, not auto.");
+		}
+		const state = settingsInternals(this);
+		state.globalSettings.routerModel = model;
+		state.markModified("routerModel");
+		state.save();
 	},
 
 	setDefaultProvider(provider) {

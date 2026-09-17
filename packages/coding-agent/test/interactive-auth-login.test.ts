@@ -293,6 +293,30 @@ describe("interactive OAuth cancellation", () => {
 	});
 });
 describe("post-login model refresh", () => {
+	it("does not select or recommend a chat model after Jev login", async () => {
+		const harness = {
+			session: { modelRuntime: { refresh: vi.fn(), getAvailableSnapshot: vi.fn(() => []) }, setModel: vi.fn() },
+			updateAvailableProviderCount: vi.fn(),
+			setupAutocompleteProvider: vi.fn(),
+			footer: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+			maybeWarnAboutAnthropicSubscriptionAuth: vi.fn(),
+		};
+		const complete = InteractiveModeBase.prototype.completeProviderAuthentication as (
+			this: typeof harness,
+			providerId: string,
+			providerName: string,
+			authType: "api_key",
+			previousModel: Model<Api> | undefined,
+		) => Promise<void>;
+		const loggedOutModel = { provider: "unknown", id: "unknown", api: "unknown" } as Model<Api>;
+		await complete.call(harness, "typesafe-ai", "TypeSafe Jev", "api_key", loggedOutModel);
+		expect(harness.session.setModel).not.toHaveBeenCalled();
+		expect(harness.showError).not.toHaveBeenCalled();
+		expect(harness.showStatus).toHaveBeenCalledWith(expect.stringContaining("Saved API key for TypeSafe Jev"));
+	});
 	for (const scenario of [
 		{ provider: "kimi-coding", name: "Kimi For Coding", authType: "api_key" as const, modelId: "kimi-for-coding" },
 		{ provider: "anthropic", name: "Anthropic", authType: "oauth" as const, modelId: "claude-opus-4-8" },

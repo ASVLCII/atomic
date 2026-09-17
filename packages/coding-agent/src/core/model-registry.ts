@@ -2,6 +2,7 @@ import type {
 	Api,
 	AssistantMessage,
 	AssistantMessageEventStream,
+	AuthOperationOptions,
 	AuthResult,
 	Context,
 	Model,
@@ -138,8 +139,8 @@ export class ModelRegistry {
 		return this.runtime.getProvider(provider)?.name ?? provider;
 	}
 
-	getProviderAuth(provider: string): Promise<AuthResult | undefined> {
-		return this.runtime.getAuth(provider);
+	getProviderAuth(provider: string, options?: AuthOperationOptions): Promise<AuthResult | undefined> {
+		return this.runtime.getAuth(provider, options);
 	}
 
 	async getApiKeyForProvider(provider: string): Promise<string | undefined> {

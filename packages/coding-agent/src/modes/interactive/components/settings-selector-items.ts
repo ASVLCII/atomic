@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getCapabilities, type SettingItem } from "@earendil-works/pi-tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
+import { getStructuredOutputProviders } from "../../../core/structured-output/resolver.js";
 import { keyDisplayText } from "./keybinding-hints.js";
 import { DEFAULT_PROJECT_TRUST_LABELS } from "./settings-selector-options.ts";
 import { SelectSubmenu, ThemeSubmenu, WarningSettingsSubmenu } from "./settings-selector-submenus.ts";
@@ -260,6 +261,56 @@ export function buildSettingsItems(config: SettingsConfig, callbacks: SettingsCa
 					},
 					() => done(),
 				),
+		},
+		{
+			id: "router-model",
+			label: "Router model",
+			description: "Model for workflow and subagent routing decisions only; does not change the chat model",
+			currentValue: config.routerModel || "Automatic",
+			submenu: (_currentValue, done) => {
+				const current = config.routerModel ?? "";
+				const options = [
+					{
+						value: "",
+						label: "Automatic",
+						description: "Use Jev when authenticated, otherwise the current chat model",
+					},
+					...getStructuredOutputProviders().map((provider) => ({
+						value: provider.fullId,
+						label: provider.fullId,
+						description: `${provider.name} structured decisions · authenticate with /login ${provider.id}`,
+					})),
+					...(config.availableDefaultModels ?? []).map((model) => ({
+						value: `${model.provider}/${model.id}`,
+						label: `${model.provider}/${model.id}`,
+						description: model.name,
+					})),
+				];
+				if (current && !options.some((option) => option.value === current)) {
+					options.push({
+						value: current,
+						label: current,
+						description: "Configured model is not currently available",
+					});
+				}
+				return new SelectSubmenu(
+					"Router model",
+					"Choose a provider permitted to receive routing context. Automatic saves an empty routerModel.",
+					options.map((option) => ({
+						...option,
+						label: `${option.value === current ? "✓ " : "  "}${option.label}`,
+					})),
+					current,
+					(value) => {
+						callbacks.onRouterModelChange?.(value);
+						config.routerModel = value;
+						done(value || "Automatic");
+					},
+					() => done(),
+					undefined,
+					true,
+				);
+			},
 		},
 		{
 			id: "model-thinking",

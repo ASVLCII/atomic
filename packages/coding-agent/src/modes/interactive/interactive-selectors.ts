@@ -62,6 +62,7 @@ InteractiveModeBase.prototype.showSettingsSelector = function (this: Interactive
 				availableThinkingLevels: this.session.getAvailableThinkingLevels(),
 				availableDefaultModels: [...this.session.modelRuntime.getAvailableSnapshot()],
 				modelThinkingLevels: this.settingsManager.getAllModelThinkingLevels(),
+				routerModel: this.settingsManager.getRouterModel(),
 				currentTheme: this.themeController.getThemeSelection() || "dark",
 				terminalTheme: this.themeController.getTerminalTheme(),
 				availableThemes: getAvailableThemes(),
@@ -138,6 +139,9 @@ InteractiveModeBase.prototype.showSettingsSelector = function (this: Interactive
 					this.session.setThinkingLevel(level, { persist: true });
 					this.footer.invalidate();
 					this.updateEditorBorderColor();
+				},
+				onRouterModelChange: (model) => {
+					this.settingsManager.setRouterModel(model);
 				},
 				onModelThinkingLevelChange: (provider, modelId, level) => {
 					this.settingsManager.setModelThinkingLevel(provider, modelId, level);

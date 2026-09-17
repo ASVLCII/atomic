@@ -1,8 +1,13 @@
 // #3089: exercise the registered model-tool door, real dispatcher/admission, and mocked inference.
 import assert from "node:assert/strict";
 import { createAssistantMessageEventStream } from "@bastani/pi-ai";
+import { convertResponsesTools } from "@bastani/pi-ai/api/openai-responses-shared";
 import { Type } from "typebox";
+import { Compile } from "typebox/compile";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.js";
+import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.js";
+import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import * as durableFactory from "../../packages/workflows/src/durable/factory.js";
@@ -784,5 +789,79 @@ for (const failure of ["registry", "provider", "cancel"] as const) {
 		}
 		assert.ok(fetch.mock.calls.length > 1);
 		f.noLaunch();
+	});
+}
+
+test("workflow routing preserves stored-only Jev authentication through the registry adapter", async () => {
+	const f = fixture();
+	const runtime = await ModelRuntime.create({
+		modelsPath: null,
+		allowModelNetwork: false,
+		credentials: AuthStorage.inMemory({ "typesafe-ai": { type: "api_key", key: "mock-saved-jev" } }),
+	});
+	const modelRegistry = new ModelRegistry(runtime);
+	const transport = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+		assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer mock-saved-jev");
+		assert.doesNotMatch(String(init?.body), /mock-saved-jev/);
+		return Response.json(jevAnswer(JSON.parse(String(init?.body)) as JevRequest));
+	});
+	vi.stubGlobal("fetch", transport);
+	const result = await f.execute(f.args, { ...f.ctx, getRouterModel: () => "", modelRegistry });
+	assert.ok("routerDecision" in result);
+	assert.deepEqual(result.routerDecision, { workflowType: "none", maxBudget: {} });
+	assert.equal(transport.mock.calls.length, 1);
+	f.noLaunch();
+});
+
+for (const budget of [
+	{},
+	{ maxTokens: 0, maxCost: 0.123456789 },
+	{ maxDurationMs: 12345, maxTokens: 321, maxCost: 1.125, warnAtPercent: 12.345 },
+] satisfies WorkflowBudget[]) {
+	test(`strict Responses routing preserves only exact supplied budget keys: ${JSON.stringify(budget)}`, async () => {
+		const f = fixture(budget);
+		f.infer.mockImplementation((_model, context) => {
+			const tool = context.tools![0]!;
+			const converted = convertResponsesTools([tool], { strict: true })[0]!;
+			assert.equal(converted.type, "function");
+			if (converted.type !== "function") throw new Error("Expected function tool");
+			assert.equal(converted.strict, true);
+			const local = Compile(tool.parameters);
+			const wire = Compile(converted.parameters as typeof tool.parameters);
+			const decision = { workflowType: "none", maxBudget: budget };
+			assert.equal(local.Check(decision), true);
+			assert.equal(wire.Check(decision), true);
+			const invalid = [
+				null,
+				{ ...budget, extra: 1 },
+				{ ...budget, maxTokens: null },
+				{ ...budget, maxTokens: (budget.maxTokens ?? 0) + 1 },
+				...Object.keys(budget).map((key) => Object.fromEntries(Object.entries(budget).filter(([k]) => k !== key))),
+			];
+			for (const maxBudget of invalid) {
+				assert.equal(local.Check({ workflowType: "none", maxBudget }), false);
+				assert.equal(wire.Check({ workflowType: "none", maxBudget }), false);
+			}
+			return messageStream(decisionMessage(decision));
+		});
+		const result = await f.call();
+		assert.ok("routerDecision" in result.details);
+		assert.deepEqual(result.details.routerDecision, { workflowType: "none", maxBudget: budget });
+		assert.equal(f.infer.mock.calls.length, 1);
+		f.noLaunch();
+		for (const maxBudget of [
+			null,
+			{ ...budget, extra: 1 },
+			{ ...budget, maxTokens: null },
+			{ ...budget, maxTokens: (budget.maxTokens ?? 0) + 1 },
+		]) {
+			f.infer.mockImplementation(() =>
+				messageStream(decisionMessage({ workflowType: "approved-change", maxBudget })),
+			);
+			const rejected = await f.call();
+			assert.equal("routerDecision" in rejected.details, false);
+			assert.equal("status" in rejected.details ? rejected.details.status : "", "failed");
+			f.noLaunch();
+		}
 	});
 }

@@ -32,6 +32,7 @@ import { operationSignal, raceWithAbortSignal } from "../utils/abort.js";
 import { normalizePath } from "../utils/paths.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import { containsAuthConfig } from "./credential-screening.ts";
+import { jevAuthProvider } from "./decision-provider.js";
 import {
 	copilotAdvertisedFastModelIds,
 	copilotAdvertisesModelId,
@@ -187,6 +188,7 @@ export class ModelRuntime implements Models {
 					? provider
 					: withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt),
 			);
+		providers.push(jevAuthProvider());
 		const runtime = new ModelRuntime(
 			credentials,
 			config,
