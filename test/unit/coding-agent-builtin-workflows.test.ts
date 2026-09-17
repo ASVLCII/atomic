@@ -240,9 +240,10 @@ describe("coding-agent builtin resources", () => {
 			for (const skillName of ["subagent", "intercom", "feedback"]) {
 				assert.ok(skillNames.has(skillName), `expected builtin skill ${skillName}`);
 			}
-			const feedback = loader.getPrompts().prompts.find((prompt) => prompt.name === "feedback");
-			assert.ok(feedback, "expected bundled feedback prompt");
-			assert.equal(feedback.argumentHint, "<what happened or what you want to change>");
+			assert.ok(
+				!loader.getPrompts().prompts.some((prompt) => prompt.name === "feedback"),
+				"feedback should only be available as a skill, not a bundled prompt",
+			);
 		},
 		REAL_BUILTIN_RESOURCE_LOADER_TIMEOUT_MS,
 	);
