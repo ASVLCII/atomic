@@ -366,8 +366,9 @@ Behavior notes:
 
 For providers that support fast inference, Atomic adds a second selectable model whose ID is the base model ID plus `-fast` (for example `openai-codex/gpt-5.6-sol-fast`). Derivation runs **after** built-in composition, `models.json` custom models, extension model lists, and `modelOverrides` on those models, so it sees the final catalog. A `modelOverrides` entry keyed on a derived `-fast` ID is then applied to the derived entry itself. See [Providers](/providers#fast-models) for eligibility and what each provider sends upstream.
 
-Two rules matter when you write `models.json`:
+These rules apply when you write `models.json`:
 
+- **Custom models do not get automatic fast variants.** Entries in a provider's `models` array are used exactly as declared, including entries that replace a built-in model. For example, `gpt-6-astra-slow` does not create `gpt-6-astra-slow-fast`. Use `modelOverrides` instead of replacing a built-in through `models` if you want to customize it while keeping automatic fast derivation.
 - **Your exact ID wins.** If a provider, a custom model in `models`, or an extension already defines that exact `<base>-fast` ID, Atomic keeps yours untouched, does not derive a duplicate, and prints a warning naming the model to rename or remove if you wanted the derived variant instead. A model you define is an ordinary model: the `-fast` suffix alone never gives it fast routing behavior.
 - **`modelOverrides` applies to derived variants.** A derived entry is a real catalog model, so `modelOverrides["gpt-5.6-sol-fast"]` customizes it exactly like any other model, and its routing metadata survives the override. Overriding the *base* model still flows through to the derived entry by inheritance; a fast-specific override wins over that inherited value.
 
