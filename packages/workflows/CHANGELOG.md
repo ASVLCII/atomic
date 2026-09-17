@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Keep ready embedded PostgreSQL running when its starter exits or reloads, retain shared cluster identity and consumer leases outside installation directories, and preserve the original provider's cleanup across bundle reloads ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Verify managed PostgreSQL SQL/data/process identity before attachment, support `ATOMIC_POSTGRES_PORT`, and atomically share the actual port after bounded start/bind retries without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Monitor managed PostgreSQL SQL/process identity after attachment, invalidate lost connections, elect a shared recovery starter with bounded retries, and reconnect existing database consumers without relaunching workflow execution or changing external database endpoints ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
-- Pool acquisition timeouts no longer disconnect unrelated healthy database consumers or trigger managed PostgreSQL recovery ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Pool acquisition timeouts and PostgreSQL connection-capacity refusals no longer disconnect unrelated healthy database consumers or trigger managed PostgreSQL recovery ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

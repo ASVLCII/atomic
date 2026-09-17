@@ -78,6 +78,61 @@ for (const mode of ["promise", "callback"] as const) {
 	});
 }
 
+// #3074 R1: server capacity refusal affects only the refused acquisition.
+for (const mode of ["promise", "callback"] as const) {
+	test(`real pg-pool ${mode} SQLSTATE 53300 preserves healthy checkouts and health`, async () => {
+		const refusal = Object.assign(new Error("sorry, too many clients already"), { code: "53300" });
+		let attempts = 0;
+		class CapacityClient extends SocketlessClient {
+			override connect(): Promise<Client>;
+			override connect(callback: (error: Error | null, client: Client) => void): void;
+			override connect(callback?: (error: Error | null, client: Client) => void): Promise<Client> | undefined {
+				const error = attempts++ === 0 ? null : refusal;
+				if (callback) queueMicrotask(() => callback(error, this));
+				else return error === null ? Promise.resolve(this) : Promise.reject(error);
+			}
+		}
+		const onConnectionError = vi.fn();
+		const createPool = vi.fn(() => new Pool({ ...getPGClientConfig(url), Client: CapacityClient }));
+		const { pool } = createRecoverablePostgresPool(url, { createPool, onConnectionError });
+		const consumerErrors: Error[] = [];
+		pool.on("error", (error) => consumerErrors.push(error));
+		const held = await pool.connect();
+		held.on("error", (error) => consumerErrors.push(error));
+		try {
+			const pending =
+				mode === "promise"
+					? pool.connect()
+					: new Promise<PoolClient>((resolve, reject) => {
+							pool.connect((error, client, done) => {
+								if (error) {
+									assert.equal(client, undefined);
+									done();
+									reject(error);
+								} else resolve(client!);
+							});
+						});
+			await assert.rejects(pending, (error) => error === refusal);
+			assert.ok(held instanceof SocketlessClient);
+			assert.equal(await held.roundTrip(), 1);
+			assert.deepEqual(consumerErrors, []);
+			assert.equal(onConnectionError.mock.calls.length, 0, "refusal must not invalidate managed health");
+			assert.equal(pool.totalCount, 1);
+			held.release();
+			const next = await pool.connect();
+			try {
+				assert.equal(next, held, "healthy physical connection remains reusable");
+				assert.equal(createPool.mock.calls.length, 1, "refusal must not rotate the pool");
+			} finally {
+				next.release();
+			}
+		} finally {
+			held.release();
+			await pool.end();
+		}
+	});
+}
+
 // #3074: the admission exception must not mask confirmed socket loss.
 test("real pg-pool idle socket loss invalidates health, evicts checkouts and reconnects", async () => {
 	const onConnectionError = vi.fn();
