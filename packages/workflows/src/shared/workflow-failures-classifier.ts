@@ -204,6 +204,9 @@ function structuredClassification(
 		signalMessage !== undefined && messageTokens !== undefined
 			? classifyFallbackProviderAuthMessage(signalMessage, messageTokens)
 			: undefined;
+	if (messageDecision?.code === "auth_timeout") {
+		return classificationForDecision(messageDecision, source, signalMessage);
+	}
 	if (
 		weakClassification !== undefined &&
 		messageDecision !== undefined &&

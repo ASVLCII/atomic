@@ -643,7 +643,15 @@ describe("Models runtime", () => {
 			notify: () => {},
 		});
 
-		expect(received).toEqual([controller.signal, controller.signal, controller.signal]);
+		expect(received).toHaveLength(3);
+		expect(received[0]).toBe(controller.signal);
+		expect(received[2]).toBe(controller.signal);
+		// getAuth composes the caller with a request-auth deadline; abort still follows the caller.
+		expect(received[1]).toBeInstanceOf(AbortSignal);
+		expect(received[1]?.aborted).toBe(false);
+		controller.abort();
+		expect(received[1]?.aborted).toBe(true);
+		expect(received[1]?.reason).toBe(controller.signal.reason);
 	});
 
 	it("stops waiting for non-cooperative auth callbacks", async () => {

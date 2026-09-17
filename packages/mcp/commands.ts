@@ -18,7 +18,7 @@ import { buildToolMetadata } from "./tool-metadata.js";
 import { supportsOAuth, authenticate, removeAuth } from "./mcp-auth-flow.js";
 import { getAuthForUrl } from "./mcp-auth.js";
 import { loadOnboardingState, markSetupCompleted as persistSetupCompleted, markSharedConfigHintShown } from "./onboarding-state.ts";
-import { openPath } from "./utils.js";
+import { interpolateEnvVars, openPath } from "./utils.js";
 
 export async function showStatus(state: McpExtensionState, ctx: ExtensionContext): Promise<void> {
   if (!ctx.hasUI) return;
@@ -322,7 +322,7 @@ function buildMcpPanelCallbacks(
         && definition.url
         && definition.oauth !== false
         && definition.oauth?.grantType !== "client_credentials"
-        && !getAuthForUrl(serverName, definition.url)?.tokens
+        && !getAuthForUrl(serverName, interpolateEnvVars(definition.url))?.tokens
       ) {
         return "needs-auth";
       }
