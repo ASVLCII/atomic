@@ -13,6 +13,7 @@ import factory, {
 	type ExtensionAPI,
 	makeExecuteWorkflowTool,
 	type PiCommandOptions,
+	type PiExecuteContext,
 	type PiFlagNamedOpts,
 	type PiMessageRendererResult,
 	type PiToolOpts,
@@ -138,8 +139,9 @@ export function makeMock(): ExtensionAPI & {
 export async function runTool(
 	execute: PiToolOpts<WorkflowToolArgs, WorkflowToolResult>["execute"],
 	params: WorkflowToolArgs,
+	ctx: PiExecuteContext = {},
 ): Promise<WorkflowToolResult> {
-	const out = await execute("test-tool-call", params, undefined, undefined, {} as never);
+	const out = await execute("test-tool-call", params, undefined, undefined, ctx);
 	return out.details;
 }
 

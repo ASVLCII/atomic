@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, test } from "vitest";
 import type { ExtensionAPI, PiToolOpts, WorkflowToolArgs } from "../../packages/workflows/src/extension/index.js";
 import type { WorkflowToolResult } from "../../packages/workflows/src/extension/render-result.js";
 import { jobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import { buildMockPi, type CapturedCustomCall, factory, singletonStore } from "./overlay-entrypoints-helpers.js";
 
 type ExtensionEventHandler = Parameters<NonNullable<ExtensionAPI["on"]>>[1];
@@ -53,10 +54,10 @@ async function executeWorkflow(
 ) {
 	const response = await tool.execute(
 		"workflow-auto-attach-test",
-		{ action: "run", workflow, inputs: {} },
+		{ action: "run", workflow, inputs: {}, state: workflowRouterState() },
 		undefined,
 		undefined,
-		{ hasUI } as never,
+		{ ...workflowRouterContext(workflow), hasUI },
 	);
 	return response.details;
 }
@@ -190,7 +191,10 @@ describe("workflow auto-attach host entrypoints", () => {
 	test.sequential("interactive registered tool remains detached when autoAttach is omitted", async () => {
 		const host = await createFactoryHost();
 
-		await executeWorkflow(host.tool, "attach-default", true);
+		const result = await executeWorkflow(host.tool, "attach-default", true);
+		assert.ok("status" in result && "runId" in result);
+		assert.equal(result.status, "running");
+		assert.ok(result.runId.length > 0);
 
 		assert.equal(host.customCalls.length, 0);
 	});
@@ -198,7 +202,10 @@ describe("workflow auto-attach host entrypoints", () => {
 	test.sequential("headless registered tool remains detached when autoAttach is enabled", async () => {
 		const host = await createFactoryHost();
 
-		await executeWorkflow(host.tool, "attach-enabled", false);
+		const result = await executeWorkflow(host.tool, "attach-enabled", false);
+		assert.ok("status" in result && "runId" in result);
+		assert.equal(result.status, "completed");
+		assert.ok(result.runId.length > 0);
 
 		assert.equal(host.customCalls.length, 0);
 	});
