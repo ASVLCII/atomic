@@ -697,6 +697,10 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		this.promptReservations.clear();
 		this.writeQueues.clear();
 		this.writeErrors.clear();
+		this.admissionUnavailable = false;
+		this.unavailableAdmissions.clear();
+		this.admissionMetadataAttempted.clear();
+		this.admissionSettlements.clear();
 		this.unavailableCheckpoints.clear();
 		this.pendingRecoveryAdmissions.clear();
 	}

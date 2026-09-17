@@ -4,6 +4,41 @@ import { DbosDependencyError, dbosAdmissionContext } from "../../packages/workfl
 import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
 import { createMockSdk } from "./durable-dbos-backend-helpers.js";
 
+// #3074: reset removes outage history before admitting an unrelated root.
+test("reset clears failed admission state and its readiness fence", async () => {
+	const sdk = createMockSdk();
+	let fail = true;
+	let readinessChecks = 0;
+	const backend = new DbosDurableBackend(
+		{
+			...sdk,
+			async startWorkflow(id, name, inputs) {
+				if (fail) throw new DbosDependencyError();
+				return sdk.startWorkflow(id, name, inputs);
+			},
+		},
+		{
+			checkReady: async () => {
+				readinessChecks++;
+			},
+		},
+	);
+	const registration = (workflowId: string) => ({
+		workflowId,
+		name: "test",
+		inputs: {},
+		createdAt: 1,
+		status: "running" as const,
+	});
+	await assert.rejects(backend.admitWorkflow("old", registration("old"), new AbortController().signal));
+	assert.equal(backend.isAdmissionUnavailable("old"), true);
+	backend.reset();
+	assert.equal(backend.isAdmissionUnavailable("old"), false);
+	fail = false;
+	await backend.admitWorkflow("new", registration("new"), new AbortController().signal);
+	assert.equal(readinessChecks, 0);
+});
+
 // #3072/#3074: owned admission faults only, no external database is contacted.
 for (const accepted of [false, true]) {
 	test(`explicit reconciliation retains the id after root acceptance=${accepted}`, async () => {
