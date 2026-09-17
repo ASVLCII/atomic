@@ -518,7 +518,10 @@ const authStorage = AuthStorage.create("/custom/agent/auth.json");
 const modelRuntime = await ModelRuntime.create({ credentials: authStorage, modelsPath: null });
 
 // Runtime API key override (not persisted). setRuntimeApiKey updates auth state;
-// the scoped refresh updates that provider's catalog.
+// the scoped refresh updates that provider's catalog. getAuth, getRequestAuth, and
+// stream/complete options also accept `signal`; request-auth setup is cancelled with
+// the caller, uses one 15-second preparation bound per request, and does not keep
+// waiting after the model stream has opened.
 if (process.env.MY_KEY) {
   const providerId = "anthropic";
   const authController = new AbortController();
