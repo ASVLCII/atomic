@@ -304,6 +304,19 @@ const malformedCases: ReadonlyArray<readonly [string, (sdk: ReturnType<typeof cr
 		],
 	];
 
+// #3072: admission must preserve topology failure results and forbid unsafe resume.
+test("malformed DBOS topology at root admission returns a failed nonresumable result", async () => {
+	const observed = await runCase("admission-terminal-running", (sdk, runId) => seedTerminal(sdk, runId, "running"));
+	assert.equal(observed.result.status, "failed");
+	assert.match(observed.result.error ?? "", /durable nested topology is non-resumable/);
+	const snapshot = observed.store.runs().find((candidate) => candidate.id === observed.runId);
+	assert.equal(snapshot?.status, "failed");
+	assert.equal(snapshot?.resumable, false);
+	assert.equal(observed.childCalls, 0);
+	assert.equal(observed.adapterCalls, 0);
+	assert.equal(observed.lifecycleCalls, 0);
+});
+
 test("fresh DBOS active child topology fails closed before cache, boundary dispatch, targets, or side effects", async () => {
 	for (const [caseName, seed] of malformedCases) {
 		const observed = await runCase(caseName, seed);

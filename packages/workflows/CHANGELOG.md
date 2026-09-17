@@ -6,15 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- After DBOS initialization, bound database-dependent root admission to 10 seconds and stop cancelled admission writes from retrying or starting workflow code later. Unavailable admission skips database cleanup, preserving the failure diagnostic and run identity even when PostgreSQL stops answering. Database readiness lost during admission is rechecked before the next admission without switching existing durable runs to memory. First-time provisioning and initialization are outside this bound ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Malformed saved workflow topology is non-resumable. Rejection during root admission returns a failed run result without executing workflow code or hiding database write failures ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Timed-out or cancelled workflow resume admission no longer publishes stale ownership metadata when its database operation finishes late ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Database-rejected workflow admission preserves PostgreSQL authentication and permission diagnostics and removes a never-persisted local run without reporting it as still running ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Resume continuations skip cleanup when database admission is unavailable, leaving the source resumable instead of waiting on the failed database ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Cancellation during admission now retires a possibly committed database record without waiting on the abandoned admission write, including a checkpointed continuation whose resume has not finished. Failed cancellation persistence retains the local cancelled outcome and warns that database state is unknown ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Graceful quit during startup admission acknowledges the local stop immediately without waiting for registration. Registration settlement retains its admission deadline, including when a local kill arrives while registration finishes. Settlement failures appear in run status while preserving the local pause and resumability for continuations with saved durable progress. Runs without usable durable progress remain nonresumable ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Pausing during startup acknowledges immediately and retains the live executor without waiting for database admission. Later admission failures retain their original diagnostic in run status, and resume releases the failed attempt instead of leaving it stuck behind a rejected pause ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+
 ### Added
 
 - Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 - Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
-
-### Fixed
-
-- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
-- Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

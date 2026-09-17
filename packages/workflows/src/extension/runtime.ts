@@ -376,6 +376,14 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 					activeStore.runs().find((run) => run.id === accepted.runId)?.error,
 					`workflow run ${accepted.runId} ended before startup admission`,
 				);
+				if (getDurableBackend().isAdmissionUnavailable?.(accepted.runId)) {
+					releaseActiveBlockedClaim(claim);
+					return {
+						ok: false,
+						reason: "insufficient_state",
+						message: `continuation for run ${source.id} failed to start: ${startupError}; cleanup skipped: database admission unavailable; source left resumable`,
+					};
+				}
 				try {
 					await discardFailedActiveBlockedContinuation(getDurableBackend(), accepted.runId, activeStore);
 				} catch (error) {
@@ -431,6 +439,13 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				activeStore.runs().find((run) => run.id === accepted.runId)?.error,
 				`workflow run ${accepted.runId} ended before startup admission`,
 			);
+			if (getDurableBackend().isAdmissionUnavailable?.(accepted.runId)) {
+				return {
+					ok: false,
+					reason: "insufficient_state",
+					message: `continuation for run ${source.id} failed to start: ${startupError}; cleanup skipped: database admission unavailable; source left resumable`,
+				};
+			}
 			try {
 				await discardFailedActiveBlockedContinuation(getDurableBackend(), accepted.runId, activeStore);
 			} catch (error) {

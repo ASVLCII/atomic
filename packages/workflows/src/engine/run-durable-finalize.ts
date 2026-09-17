@@ -10,6 +10,7 @@
  */
 
 import type { DurableWorkflowBackend } from "../durable/backend.js";
+import { boundedAdmission, dbosAdmissionContext } from "../durable/dbos-admission.js";
 import { recordRunTimingCheckpoint } from "../durable/run-timing.js";
 import type { DurableWorkflowStatus } from "../durable/types.js";
 import { effectiveRunStatus } from "../shared/returned-run-status.js";
@@ -20,6 +21,23 @@ export interface DurableTerminalFinalizeInput {
 	readonly runSnapshot: RunSnapshot;
 	readonly isRoot: boolean;
 	readonly durableBackend: DurableWorkflowBackend;
+}
+
+/** Update the local mirror after failed admission, without starting more DB work. */
+export async function finalizeUnadmittedDurableStatus(input: DurableTerminalFinalizeInput): Promise<void> {
+	const controller = new AbortController();
+	controller.abort();
+	await dbosAdmissionContext.run(controller.signal, () => finalizeDurableTerminalStatus(input));
+}
+
+/** Best-effort durable cancellation uses neither the caller's aborted fence nor its queue. */
+export async function finalizeCancelledAdmission(input: DurableTerminalFinalizeInput): Promise<void> {
+	if (!input.isRoot || input.durableBackend.isAdmissionUnavailable?.(input.runId)) return;
+	// Graceful quit also aborts admission, but publishes a pause rather than cancellation.
+	if (toDurableStatus(effectiveRunStatus(input.runSnapshot)) !== "cancelled") return;
+	await boundedAdmission(async (signal) => {
+		await input.durableBackend.cancelUnadmittedWorkflow?.(input.runId, signal);
+	});
 }
 
 /** Persist the terminal durable status and surface DBOS write failures. */
@@ -36,7 +54,7 @@ export async function finalizeDurableTerminalStatus(input: DurableTerminalFinali
 		// Failed/blocked runs may be resumed cross-session by workflow id; persist
 		// the exact accumulated elapsed so the resumed dashboard total continues
 		// from the prior sessions instead of restarting at zero.
-		if (durableStatus === "failed" || durableStatus === "blocked") {
+		if (!dbosAdmissionContext.getStore()?.aborted && (durableStatus === "failed" || durableStatus === "blocked")) {
 			recordRunTimingCheckpoint(input.durableBackend, input.runSnapshot);
 		}
 		const failure =
@@ -76,7 +94,7 @@ export async function finalizeDurableTerminalStatus(input: DurableTerminalFinali
 			failure,
 		);
 	}
-	await input.durableBackend.flush(input.runId);
+	if (!dbosAdmissionContext.getStore()?.aborted) await input.durableBackend.flush(input.runId);
 }
 
 function toDurableStatus(status: RunSnapshot["status"]): DurableWorkflowStatus | undefined {

@@ -85,6 +85,21 @@ export interface DurableWorkflowBackend {
 	readonly persistent: boolean;
 	/** Register or update a workflow's top-level metadata. */
 	registerWorkflow(handle: WorkflowRegistrationInput): void;
+	/** Retire possibly committed admission metadata without waiting on its abandoned queue. */
+	cancelUnadmittedWorkflow?(workflowId: string, signal: AbortSignal): Promise<void>;
+
+	/** Cancellable root persistence boundary. Child runs retain their root's queue. */
+	admitWorkflow?(
+		workflowId: string,
+		registration: WorkflowRegistrationInput | undefined,
+		signal: AbortSignal,
+	): Promise<void>;
+	/** Whether this run's admission failed on database availability; performs no I/O. */
+	isAdmissionUnavailable?(workflowId: string): boolean;
+	/** Await this identity's bounded admission, retaining its rejection until a new attempt. */
+	settleWorkflowAdmission?(workflowId: string): Promise<void>;
+	/** Whether bounded registration is pending or retains a failed settlement. */
+	hasWorkflowAdmissionSettlement?(workflowId: string): boolean;
 	/** Persist one logical run's pending-stage transition under its durable owner. */
 	persistPendingStageMessages(
 		workflowId: string,
