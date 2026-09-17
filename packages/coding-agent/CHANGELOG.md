@@ -9,6 +9,7 @@
 ### Fixed
 
 - Running Atomic inside a Herdr pane no longer leaves the pane unreported or labelled as another agent when Herdr's installed Pi integration is present. Herdr installs `herdr-agent-state.ts` into the legacy `~/.pi/agent/extensions` directory that Atomic also loads from, and Atomic used to stand its built-in reporter down as soon as that file loaded — but the installed asset reports itself as `pi`, so the pane ended up mislabelled or never updated at all. Inside a Herdr pane Atomic now skips that installed integration when loading extensions and reports the pane itself; outside a Herdr pane the file loads exactly as before. Nothing to configure, and the extra extension no longer needs to be disabled by hand ([#2416](https://github.com/bastani-inc/atomic/pull/2416) by [@makgunay](https://github.com/makgunay))
+- Request authentication now fails within 15 seconds of one credential-preparation attempt when refresh or derivation does not settle, including a fallback whose OAuth login has expired. Agent sessions reuse that request's resolved auth for transport setup instead of starting a second deadline. Timeout errors tell you to check the provider's credential source rather than to log in. Operator cancellation still aborts without fallback or an auth-block notice, and the bound does not apply to human-input waits, tool execution, or an already-opened model stream ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 
