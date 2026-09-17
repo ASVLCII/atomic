@@ -3,6 +3,7 @@ import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "vitest";
 import {
+	EmbeddedPostgresCleanupPendingError,
 	embeddedPostgresTestHooks as hooks,
 	resetEmbeddedDbosPostgresForTests,
 	shutdownEmbeddedDbosPostgres,
@@ -188,6 +189,68 @@ test("managed attach registers a consumer and reattaches after orderly shutdown 
 	await hooks.ensure();
 	assert.equal(inspectPostgresConsumers(root, metadata).length, 1);
 	await shutdownEmbeddedDbosPostgres();
+});
+
+// #3074 / #3080: readiness rollback remains single-shot through the outer ensure path.
+test("failed ensure retains a timed-out startup lease until a later shutdown", async () => {
+	const root = makeTempDirectory("atomic-pg-startup-rollback-");
+	roots.push(root);
+	const data = join(root, "v18");
+	const cleanupError = new Error("Timed out waiting for retained Postgres");
+	const interruptCalls: number[] = [];
+	let releaseCalls = 0;
+	let spawnCalls = 0;
+	let initdbCalls = 0;
+	hooks.setRetainedPostgresSpawner(() => {
+		spawnCalls++;
+		return {
+			pid: 4242,
+			wait: async () => ({ exited: true, signaled: false }),
+			interruptAndWait: async (timeoutMs) => {
+				interruptCalls.push(timeoutMs);
+				if (interruptCalls.length === 1) throw cleanupError;
+				return { exited: true, signaled: false };
+			},
+			release: () => {
+				releaseCalls++;
+			},
+		};
+	});
+	hooks.setEnsureOperation(() =>
+		hooks.ensureCluster({
+			context: {
+				baseDir: root,
+				runAsOwner: async () => {
+					initdbCalls++;
+					makeDirectorySync(data);
+					writeTextSync(join(data, "PG_VERSION"), "18\n");
+					return { exitCode: 0, stdout: "", stderr: "" };
+				},
+			},
+			binaries: { pg_ctl: "fake-pg_ctl", initdb: "fake-initdb", postgres: "fake-postgres" },
+			isReachable: async () => false,
+		}),
+	);
+
+	await assert.rejects(hooks.ensure(), (error: unknown) => {
+		assert.ok(error instanceof EmbeddedPostgresCleanupPendingError);
+		assert.equal(error.errors.length, 2);
+		assert.ok(error.errors[0] instanceof Error);
+		assert.ok(!(error.errors[0] instanceof AggregateError));
+		assert.match(error.errors[0].message, /exited early/);
+		assert.equal(error.errors[1], cleanupError);
+		return true;
+	});
+	assert.equal(initdbCalls, 1);
+	assert.deepEqual(interruptCalls, [60_000]);
+	assert.equal(releaseCalls, 0);
+	await assert.rejects(hooks.ensure(), /retained Postgres cleanup is pending/i);
+	assert.equal(spawnCalls, 1);
+	assert.deepEqual(interruptCalls, [60_000]);
+
+	await shutdownEmbeddedDbosPostgres();
+	assert.deepEqual(interruptCalls, [60_000, 60_000]);
+	assert.equal(releaseCalls, 1);
 });
 
 test("local postmaster evidence rejects wrong data and port without signal authority", () => {

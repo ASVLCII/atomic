@@ -212,6 +212,8 @@ async function ensureCluster(
 			consumer = acquirePostgresConsumer(root, metadata, `${process.execPath} | ${import.meta.url}`);
 		});
 	} catch (startupError) {
+		// Readiness already attempted rollback; retain its lease for a later shutdown retry.
+		if (startupError instanceof EmbeddedPostgresCleanupPendingError) throw startupError;
 		await rollbackStartedCluster(startedCluster, startupError);
 	}
 }
