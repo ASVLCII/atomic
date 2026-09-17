@@ -10,9 +10,12 @@ import {
 	loadEmbeddedPostgresBinaries,
 	shutdownEmbeddedDbosPostgres,
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
+import { managedPostmaster } from "../../packages/workflows/src/durable/dbos-postgres-identity.js";
 import { managedPostgresMetadata } from "../../packages/workflows/src/durable/dbos-postgres-ownership.js";
 import { workflowDependency } from "../../packages/workflows/src/durable/dependency-doctor.js";
 import { runLocalCommand } from "../../packages/workflows/src/durable/local-command.js";
+import { postmasterIdentityChanged } from "../helpers/postgres-process-identity.js";
+import { readTextSync, sleep } from "../helpers/runtime.js";
 
 const home = process.env.ATOMIC_FAULT_TEST_HOME;
 assert.ok(home && resolve(homedir()) === resolve(home), "requires disposable HOME");
@@ -48,18 +51,34 @@ for await (const line of lines) {
 		} else if (command === "stop") {
 			// Only this fixture's directory is ever passed to pg_ctl, never a supplied PID/port.
 			if (existsSync(join(data, "postmaster.pid"))) {
+				const stoppedServer = managedPostmaster(managedPostgresMetadata(base, 18, false));
+				assert.ok(stoppedServer, "stop requires the owned live postmaster identity");
 				const binaries = await loadEmbeddedPostgresBinaries();
 				const stopped = await runLocalCommand(binaries.pg_ctl, [
 					"-D",
 					data,
 					"-m",
 					"fast",
-					"-w",
+					"-W",
 					"-t",
 					"15",
 					"stop",
 				]);
 				assert.equal(stopped.exitCode, 0, stopped.stderr);
+				// pg_ctl -w watches the pidfile: an automatic replacement can recreate it
+				// before its first poll. Observe removal of the captured identity instead.
+				// PostgreSQL removes its pidfile at shutdown; kill(pid, 0) can still see
+				// an exited but unreaped native child on Unix.
+				const deadline = Date.now() + 15_000;
+				for (;;) {
+					if (postmasterIdentityChanged(join(data, "postmaster.pid"), stoppedServer)) break;
+					if (Date.now() >= deadline) {
+						throw new Error(
+							`owned postmaster ${JSON.stringify(stoppedServer)} did not shut down\n${readTextSync(join(base, "v18.log"), "utf8")}`,
+						);
+					}
+					await sleep(20);
+				}
 			}
 		} else if (command === "exit") {
 			await shutdownEmbeddedDbosPostgres();

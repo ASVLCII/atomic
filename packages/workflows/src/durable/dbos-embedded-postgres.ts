@@ -264,7 +264,23 @@ async function ensureCluster(
 			}
 			let verified: ManagedPostgresServer | undefined;
 			let prepared = options.prepared ? options.binaries : undefined;
-			if (!existing) {
+			if (existing) {
+				await waitForClusterReadiness(
+					logFile,
+					undefined,
+					async () => {
+						verified = await verifyPostgresIdentity(metadata!, port, existing.pid, options.probeIdentity);
+						// A shutdown can overlap the SQL probe. Once that postmaster is gone,
+						// leave the attach wait and start under this same setup lease instead
+						// of polling the captured PID until the readiness deadline expires.
+						return verified !== undefined || managedPostmaster(metadata!) === undefined;
+					},
+					READY_ATTEMPTS,
+					delay,
+					port,
+				);
+			}
+			if (!verified) {
 				const loaded = options.binaries ?? (await loadEmbeddedPostgresBinaries());
 				const binaries =
 					prepared ??
@@ -318,18 +334,6 @@ async function ensureCluster(
 						startedCluster = undefined;
 					}
 				}
-			} else {
-				await waitForClusterReadiness(
-					logFile,
-					undefined,
-					async () => {
-						verified = await verifyPostgresIdentity(metadata!, port, existing.pid, options.probeIdentity);
-						return verified !== undefined;
-					},
-					READY_ATTEMPTS,
-					delay,
-					port,
-				);
 			}
 			if (!metadata || !verified) throw new Error("Managed Postgres identity was not verified.");
 			if (health === undefined) {

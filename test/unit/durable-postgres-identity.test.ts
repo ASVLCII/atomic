@@ -286,6 +286,77 @@ test("live consumers elect one recovery starter and retain cluster identity", as
 	}
 });
 
+// #3074: shutdown during recovery must not strand the elected starter on a dead PID.
+test("recovery starts once when the captured postmaster shuts down during its identity probe", async () => {
+	const f = fixture();
+	const port = await availablePostgresPort(0);
+	f.pidfile(port);
+	await hooks.ensureCluster(f.options);
+	const before = managedPostgresMetadata(f.root, 18, false);
+	let starts = 0;
+	let signals = 0;
+	hooks.setRetainedPostgresSpawner((options) => {
+		starts++;
+		f.pidfile(Number(options.args[options.args.indexOf("-p") + 1]));
+		return {
+			pid: process.pid,
+			wait: async () => {
+				throw new Error("Timed out waiting for the retained Postgres process to exit");
+			},
+			interruptAndWait: async () => {
+				signals++;
+				return { exited: true, signaled: true };
+			},
+			release() {},
+		};
+	});
+	let shuttingDown = true;
+	await hooks.ensureCluster({
+		...f.options,
+		recovery: before,
+		probeIdentity: async (selectedPort) => {
+			if (shuttingDown) {
+				shuttingDown = false;
+				rmSync(join(f.data, "postmaster.pid"));
+				return undefined;
+			}
+			return f.row(selectedPort);
+		},
+	});
+	assert.equal(starts, 1);
+	assert.equal(signals, 0, "a published postmaster is never signaled by recovery");
+	const after = managedPostgresMetadata(f.root, 18, false);
+	assert.equal(after.clusterId, before.clusterId);
+	assert.equal(after.directoryIdentity, before.directoryIdentity);
+	assert.equal(after.server?.systemIdentifier, before.server?.systemIdentifier);
+	assert.equal(after.server?.port, port);
+});
+
+// #3074: a failed SQL probe alone never authorizes a second server or a signal.
+test("an unavailable but present postmaster stays on the attach path", async () => {
+	const f = fixture();
+	f.pidfile(await availablePostgresPort(0));
+	await hooks.ensureCluster(f.options);
+	let probes = 0;
+	let starts = 0;
+	hooks.setRetainedPostgresSpawner(() => {
+		starts++;
+		throw new Error("must not start beside a live postmaster");
+	});
+	await assert.rejects(
+		hooks.ensureCluster({
+			...f.options,
+			probeIdentity: async () => {
+				if (++probes === 1) return undefined;
+				throw new Error("identity probe refused");
+			},
+		}),
+		/identity probe refused/,
+	);
+	assert.equal(probes, 2);
+	assert.equal(starts, 0);
+});
+
 test("live health refuses replaced ownership and never initializes missing data", async () => {
 	const f = fixture();
 	f.pidfile(await availablePostgresPort(0));

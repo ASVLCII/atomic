@@ -41,6 +41,12 @@ the existing backends. A callback interrupted
 before its result is durably checkpointed may run again; these tests do not claim
 exactly-once arbitrary external side effects with unknown outcomes.
 
+The shutdown fixture acknowledges disappearance of the captured postmaster identity,
+not disappearance of every PID file in the directory: automatic recovery may already
+have written the replacement's PID file. Managed recovery failures include elapsed
+shutdown timing and the disposable server's log. A focused identity regression also
+covers shutdown during the health probe, before the elected starter checks readiness.
+
 The tests are discovered by the existing integration project on Linux and Windows.
 They do not change the CI matrix, worker parallelism or default test budget. Named
 per-test budgets cover real process startup, initdb, outage/recovery and cleanup.

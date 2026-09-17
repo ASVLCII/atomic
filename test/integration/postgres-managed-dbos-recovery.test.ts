@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { type ManagedResult, RealPostgresHome, reserveListener } from "../helpers/real-postgres.js";
-import { sleep } from "../helpers/runtime.js";
+import { fileExists, readText, sleep } from "../helpers/runtime.js";
 
 const REAL_MANAGED_DBOS_PROCESS_TIMEOUT_MS = 120_000;
 type ConsumerResult = Pick<ManagedResult, "metadata"> & { runId: string; completedCalls: number };
@@ -12,6 +12,8 @@ test(
 	async () => {
 		const home = new RealPostgresHome();
 		const listener = await reserveListener();
+		const started = Date.now();
+		let stoppedAt: number | undefined;
 		try {
 			const first = home.client(
 				listener.port,
@@ -31,6 +33,7 @@ test(
 			// A third process only stops this disposable directory, never provisions or connects.
 			const fault = home.client(listener.port);
 			await fault.request("stop");
+			stoppedAt = Date.now();
 			const deadline = Date.now() + 20_000;
 			for (;;) {
 				const observed = await first.request<Pick<ManagedResult, "metadata">>("metadata");
@@ -54,6 +57,12 @@ test(
 			assert.notEqual(recoveredA.metadata.server.pid, a.metadata.server.pid);
 			assert.deepEqual(await first.request("inspect-peer", b.runId), { persisted: true });
 			assert.deepEqual(await second.request("inspect-peer", a.runId), { persisted: true });
+		} catch (error) {
+			const log = `${home.path}/.atomic/postgres/v18.log`;
+			throw new Error(
+				`Managed recovery failed after ${Date.now() - started}ms (shutdown acknowledged at ${stoppedAt === undefined ? "never" : `${stoppedAt - started}ms`})\n${(await fileExists(log)) ? await readText(log) : "No PostgreSQL log"}`,
+				{ cause: error },
+			);
 		} finally {
 			try {
 				await home.cleanup();

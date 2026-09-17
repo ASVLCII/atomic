@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Pool acquisition timeouts and PostgreSQL connection-capacity refusals, including refused managed health checks, no longer disconnect unrelated healthy database consumers or trigger managed PostgreSQL recovery ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Explicit resume reconciles retained database-failed admission under the original run ID, refuses conflicting incomplete records, and prevents stale concurrent resume from claiming a newer running generation. Awaited checkpoint writes now have a 10-second deadline; recovery rereads committed receipts rather than repeating checkpointed effects. External effects without a saved checkpoint remain uncertain and may repeat ([#3072](https://github.com/bastani-inc/atomic/issues/3072), [#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Same-ID database recovery remains retryable when resume preparation fails after reconciliation, including a temporarily missing workflow definition. Retried resume preserves saved tool receipts instead of switching to a new continuation ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Managed PostgreSQL recovery no longer waits on a vanished server when shutdown overlaps a health check. Recovery retains the existing cluster and checkpoints instead of exhausting readiness polling against the old process ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
