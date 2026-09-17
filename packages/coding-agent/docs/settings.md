@@ -69,6 +69,8 @@ A nonempty explicit model takes precedence over `TYPESAFE_AI_API_KEY`. Use an ex
 
 This setting selects the prerequisite inference for [model-invoked workflow launches](/workflows/operations#model-invoked-launch-routing) through the shared `inferRouterDecision()` API. Subagent `model: "auto"` routing is not enabled yet. It does not change the selected chat model, child execution model, `structured_output` tool or general structured-output inference. The selected router provider receives the supplied routing context, so choose a provider permitted to process that data. Jev requires the environment key even when selected explicitly; other models use normal provider authentication. See [Structured decisions](/sdk/structured-decisions) and [TypeSafe Jev](/providers#typesafe-jev).
 
+Remove secrets from workflow routing state, inputs, and workflow descriptions/contracts before calling the tool. A routing-context credential error stops before inference or launch. This includes text containing the configured `TYPESAFE_AI_API_KEY`, even when `routerModel` selects another provider. Remove the credential from the supplied context or registered definition, reload a changed definition, then retry explicitly. The guard does not detect every possible secret.
+
 #### thinkingBudgets
 
 ```json

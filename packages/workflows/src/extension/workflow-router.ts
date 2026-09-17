@@ -58,9 +58,14 @@ function assertJsonObject(value: unknown): asserts value is JsonObject {
 	visit(value);
 }
 
-/** Reject obvious credential material rather than sending it to a decision provider. */
+/** Reject known and obvious credential material before sending the snapshot to a decision provider. */
 function assertNoCredentials(value: unknown, suppliedValues: unknown): void {
 	const serialized = JSON.stringify(value);
+	// Match the credential Jev uses, including inside JSON-escaped values and property names.
+	const apiKey = process.env.TYPESAFE_AI_API_KEY?.trim();
+	if (apiKey && serialized.includes(JSON.stringify(apiKey).slice(1, -1))) {
+		throw new Error("Workflow routing context contains a configured credential. Remove secrets before retrying.");
+	}
 	if (
 		/\bBearer\s+[A-Za-z0-9._~+/-]{8,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|ghp|github_pat)[-_][A-Za-z0-9_-]{16,}/i.test(
 			serialized,
