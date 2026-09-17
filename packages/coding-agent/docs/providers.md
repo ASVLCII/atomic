@@ -477,6 +477,16 @@ Or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
 
 For router-mode discovery, load/unload management, and Hugging Face downloads with a local llama.cpp server, see [llama.cpp](/llama-cpp). Configure it with `/login llama.cpp` or `LLAMA_BASE_URL` and manage models with `/llama`.
 
+## TypeSafe Jev
+
+`typesafe-ai/jev` is a built-in structured-decision provider, not a chat or tool-calling model. It is available through [SDK structured decisions](/sdk/structured-decisions), not `/model`, chat `--model`, or child execution model fields. SDK integrations can inspect its supported capabilities with `getStructuredOutputProviders()`.
+
+Set `TYPESAFE_AI_API_KEY` in Atomic's process environment. The adapter uses that variable only, not `/login`, `auth.json`, or `models.json`. Do not put the key in a prompt or decision state. A nonempty key selects Jev when `structuredOutputModel` is empty; an explicit concrete setting takes precedence. This setup does not activate workflow or subagent routing.
+
+Atomic sends `POST https://api.typesafe.ai/v1/systemone` with wire model `jev-latest`, Bearer authentication, shared state and typed Choice questions. It does not send OpenAI chat-completion requests or ask Jev to generate arbitrary JSON Schema. There are no automatic inference retries. A Choice supports at most 255 options; larger sets fail without dropping candidates. Select an ordinary structured-output model for larger sets.
+
+HTTP 401 means check the environment key, 422 means check the question/state contract, and 429 or 529 means wait before retrying explicitly. Key presence does not verify access or quota. See [TypeSafe's API](https://docs.typesafe.ai/api.md) and [Choice reference](https://docs.typesafe.ai/primitives/choice.md).
+
 ## Custom Providers
 
 **Via models.json:** Add Ollama, LM Studio, vLLM, or any provider that speaks a supported API (OpenAI Completions, OpenAI Responses, Anthropic Messages, Google Generative AI). See [Custom models](/models).

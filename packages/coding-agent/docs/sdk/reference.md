@@ -152,6 +152,10 @@ const builtinsOnly = await ModelRuntime.create({ modelsPath: null });
 
 > See the complete [`ModelRuntime` credential and model configuration example](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/examples/sdk/09-api-keys-and-oauth.ts).
 
+### Bounded structured decisions
+
+Use `inferStructuredOutput()` for a single schema-validated semantic decision without starting an agent session or executing tools. It shares `structuredOutputModel` resolution across SDK consumers and supports ordinary configured models and the decision-only `typesafe-ai/jev` integration. It does not change the selected chat model or activate workflow/subagent routing. See [Structured decisions](/sdk/structured-decisions) for state preparation, complete examples, provider limits and failure handling.
+
 ### System Prompt
 
 Use a `ResourceLoader` to override the system prompt:
@@ -820,6 +824,11 @@ defineTool
 STRUCTURED_OUTPUT_TOOL_NAME
 createStructuredOutputTool
 createStructuredOutputCapture
+inferStructuredOutput
+resolveStructuredOutputModel
+getStructuredOutputProviders
+JEV_STRUCTURED_OUTPUT_PROVIDER
+DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS
 getAgentDir
 getPackageDir
 getReadmePath
@@ -844,6 +853,11 @@ type CreateAgentSessionOptions
 type CreateAgentSessionResult
 type StructuredOutputCapture
 type StructuredOutputToolOptions
+type StructuredOutputRequest
+type StructuredOutputResult
+type StructuredOutputModel
+type StructuredOutputSelectionOptions
+type StructuredChoiceQuestion
 type ExtensionFactory
 type ExtensionAPI
 type ToolDefinition
