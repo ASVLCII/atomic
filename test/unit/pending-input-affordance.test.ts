@@ -554,36 +554,38 @@ test("sanitizePromptDisplay well-forms unpaired surrogates and treats NEL as whi
 });
 
 test("sanitizePromptDisplay backs off the display cap around an astral character", () => {
-	const astral = "\ud83d\ude80";
-	const atCap = `${"a".repeat(255)}${astral}`;
-	const underCap = `${"a".repeat(254)}${astral}`;
-	assert.equal(atCap.length, 257);
-	assert.equal(underCap.length, 256);
+	const astral = "\u{1F680}";
+	const split = `${"a".repeat(MAX_PROMPT_DISPLAY_CHARS - 1)}${astral}${"b".repeat(50)}`;
+	const fits = `${"a".repeat(MAX_PROMPT_DISPLAY_CHARS - 2)}${astral}${"b".repeat(50)}`;
+	assert.equal(MAX_PROMPT_DISPLAY_CHARS, 256);
+	assert.equal(split.length, MAX_PROMPT_DISPLAY_CHARS - 1 + 2 + 50);
+	assert.equal(fits.length, MAX_PROMPT_DISPLAY_CHARS - 2 + 2 + 50);
 
-	const capped = sanitizePromptDisplay(atCap);
-	assert.equal(capped.length, 255);
-	assert.equal(capped, "a".repeat(255));
+	const capped = sanitizePromptDisplay(split);
+	assert.equal(capped.length, MAX_PROMPT_DISPLAY_CHARS - 1);
+	assert.equal(capped, "a".repeat(MAX_PROMPT_DISPLAY_CHARS - 1));
 	assert.equal(capped.isWellFormed(), true);
-	assert.equal(capped.includes(astral), false);
+	assert.equal(capped.endsWith(astral), false);
 
-	const retained = sanitizePromptDisplay(underCap);
-	assert.equal(retained.length, 256);
+	const retained = sanitizePromptDisplay(fits);
+	assert.equal(retained.length, MAX_PROMPT_DISPLAY_CHARS);
 	assert.equal(retained.endsWith(astral), true);
 	assert.equal(retained.isWellFormed(), true);
+	assert.equal(retained.includes("b"), false);
 
 	const atCapRun = makeRun("astral-cap", "astral-cap", "running");
-	atCapRun.pendingPrompt = primitive("astral-cap-prompt", atCap);
+	atCapRun.pendingPrompt = primitive("astral-cap-prompt", split);
 	const atCapRaw = structuredClone(atCapRun);
 	const atCapProjected = pendingInputAffordance(atCapRun, [atCapRun])?.message;
-	assert.equal(atCapProjected?.length, 255);
+	assert.equal(atCapProjected?.length, MAX_PROMPT_DISPLAY_CHARS - 1);
 	assert.equal(atCapProjected?.isWellFormed(), true);
 	assert.deepEqual(atCapRun, atCapRaw);
 
 	const underCapRun = makeRun("astral-keep", "astral-keep", "running");
-	underCapRun.pendingPrompt = primitive("astral-keep-prompt", underCap);
+	underCapRun.pendingPrompt = primitive("astral-keep-prompt", fits);
 	const underCapRaw = structuredClone(underCapRun);
 	const underCapProjected = pendingInputAffordance(underCapRun, [underCapRun])?.message;
-	assert.equal(underCapProjected?.length, 256);
+	assert.equal(underCapProjected?.length, MAX_PROMPT_DISPLAY_CHARS);
 	assert.equal(underCapProjected?.endsWith(astral), true);
 	assert.equal(underCapProjected?.isWellFormed(), true);
 	assert.deepEqual(underCapRun, underCapRaw);

@@ -132,7 +132,9 @@ test("structured stage prompts preview one question and keep multi-question root
 		1,
 	);
 	assert.ok(uniqueAdapter);
+	assert.equal(uniqueAdapter.prompt.questions.length, 1);
 	assert.ok(formAdapter);
+	assert.equal(formAdapter.prompt.questions.length, 2);
 	broker.provideStagePrompt(uniqueId, "ask", uniqueAdapter);
 	broker.provideStagePrompt(formId, "ask", formAdapter);
 	assert.equal(store.recordStageAwaitingInput(uniqueId, "ask", true), true);

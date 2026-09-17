@@ -371,7 +371,16 @@ test("multi-root prompt and connect pairs stay inside their owning layout ranges
 			const index = Number(range.id.slice(-1));
 			const prompt = `Approve root ${index}?`;
 			const connect = `Answer: /workflow connect ${range.id}`;
+			assert.equal(
+				card.some((line) => line.includes(range.id)),
+				true,
+				range.id,
+			);
+			const actionRows = card.filter(
+				(line) => line.includes(`"${prompt}"`) || line.includes("Answer: /workflow connect"),
+			);
 			if (waiting.has(index)) {
+				assert.equal(actionRows.length, 2, range.id);
 				assert.equal(
 					card.some((line) => line.includes(`"${prompt}"`)),
 					true,
@@ -383,6 +392,7 @@ test("multi-root prompt and connect pairs stay inside their owning layout ranges
 					range.id,
 				);
 			} else {
+				assert.equal(actionRows.length, 0, range.id);
 				assert.equal(
 					card.some((line) => line.includes('"')),
 					false,

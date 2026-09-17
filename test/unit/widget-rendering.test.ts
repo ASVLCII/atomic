@@ -1507,10 +1507,10 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 
 	test("completed retained cards drop stale prompt actions while quit cards suppress them until resume", () => {
 		const completedStore = createStore();
-		const completedId = "completed-retained-prompt";
+		const completedId = "00000000-0000-4000-8000-0000000000e1";
 		completedStore.recordRunStart({
 			id: completedId,
-			name: "completed-retained",
+			name: "stale-card",
 			inputs: {},
 			status: "running",
 			startedAt: Date.now() - 5_000,
@@ -1518,29 +1518,31 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		});
 		assert.equal(
 			completedStore.recordStagePendingPrompt(completedId, "ask", {
-				id: "completed-prompt",
+				id: "p",
 				kind: "confirm",
-				message: "Approve the completed prompt?",
-				createdAt: Date.now(),
+				message: "Answer the stale prompt?",
+				createdAt: 1,
 			}),
 			true,
 		);
-		const waitingCompleted = renderWidgetLines(completedStore.snapshot(), 120).map(stripAnsi).join("\n");
-		assert.match(waitingCompleted, /"Approve the completed prompt\?"/);
-		assert.match(waitingCompleted, new RegExp(`Answer: /workflow connect ${completedId}`));
+		assert.match(
+			renderWidgetLines(completedStore.snapshot(), 120).map(stripAnsi).join("\n"),
+			/"Answer the stale prompt\?"/,
+		);
 
-		assert.equal(completedStore.recordRunEnd(completedId, "completed"), true);
+		assert.equal(completedStore.recordRunEnd(completedId, "completed", {}), true);
 		const completedLines = renderWidgetLines(completedStore.snapshot(), 120).map(stripAnsi);
 		const completedJoined = completedLines.join("\n");
-		assert.ok(completedJoined.includes(completedId));
-		assert.doesNotMatch(completedJoined, /"Approve the completed prompt\?"/);
+		assert.equal(completedLines.length, 4);
+		assert.equal(completedJoined.includes(completedId), true);
+		assert.doesNotMatch(completedJoined, /"Answer the stale prompt\?"/);
 		assert.doesNotMatch(completedJoined, /Answer: \/workflow connect/);
 
 		const quitStore = createStore();
-		const quitId = "quit-retained-prompt";
+		const quitId = "00000000-0000-4000-8000-0000000000e2";
 		quitStore.recordRunStart({
 			id: quitId,
-			name: "quit-retained",
+			name: "stale-card",
 			inputs: {},
 			status: "running",
 			startedAt: Date.now() - 5_000,
@@ -1548,27 +1550,29 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		});
 		assert.equal(
 			quitStore.recordStagePendingPrompt(quitId, "ask", {
-				id: "quit-prompt",
+				id: "p",
 				kind: "confirm",
-				message: "Continue after quitting?",
-				createdAt: Date.now(),
+				message: "Answer the stale prompt?",
+				createdAt: 1,
 			}),
 			true,
 		);
-		assert.equal(quitStore.recordRunPaused(quitId, undefined, { exitReason: "quit", resumable: true }), true);
+		assert.equal(quitStore.recordRunPaused(quitId, Date.now(), { exitReason: "quit", resumable: true }), true);
 		const quitRun = quitStore.runs()[0]!;
 		assert.equal(quitRun.exitReason, "quit");
 		assert.equal(quitRun.resumable, true);
-		assert.equal(quitRun.stages[0]!.pendingPrompt?.id, "quit-prompt");
-		assert.equal(quitRun.stages[0]!.pendingPrompt?.message, "Continue after quitting?");
-		const quitJoined = renderWidgetLines(quitStore.snapshot(), 120).map(stripAnsi).join("\n");
-		assert.ok(quitJoined.includes(quitId));
-		assert.doesNotMatch(quitJoined, /"Continue after quitting\?"/);
+		assert.equal(quitRun.stages[0]!.pendingPrompt?.id, "p");
+		const quitLines = renderWidgetLines(quitStore.snapshot(), 120).map(stripAnsi);
+		const quitJoined = quitLines.join("\n");
+		assert.equal(quitLines.length, 4);
+		assert.equal(quitJoined.includes(quitId), true);
+		assert.match(quitJoined, /quit · resumable via \/workflow resume/);
+		assert.doesNotMatch(quitJoined, /"Answer the stale prompt\?"/);
 		assert.doesNotMatch(quitJoined, /Answer: \/workflow connect/);
 
 		assert.equal(quitStore.recordRunResumed(quitId), true);
 		const resumedJoined = renderWidgetLines(quitStore.snapshot(), 120).map(stripAnsi).join("\n");
-		assert.match(resumedJoined, /"Continue after quitting\?"/);
+		assert.match(resumedJoined, /"Answer the stale prompt\?"/);
 		assert.match(resumedJoined, new RegExp(`Answer: /workflow connect ${quitId}`));
 	});
 
