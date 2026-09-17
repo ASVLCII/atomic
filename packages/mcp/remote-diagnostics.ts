@@ -20,7 +20,7 @@ function secretRepresentations(rawSecrets: string[], decodedSecrets: Iterable<st
 	return representations;
 }
 
-function endpointCredentialPattern(endpoint: string): RegExp | undefined {
+function endpointCredentialPattern(endpoint: string, pathComponents?: string[]): RegExp | undefined {
 	const url = new URL(endpoint);
 	// searchParams decodes escapes and '+'; retain the wire values as well.
 	const representations = secretRepresentations([
@@ -30,7 +30,7 @@ function endpointCredentialPattern(endpoint: string): RegExp | undefined {
 		...url.search.slice(1).split("&").map((part) => (part.includes("=") ? part.slice(part.indexOf("=") + 1) : "")),
 	], url.searchParams.values());
 	const pathRepresentations = secretRepresentations([
-		...url.pathname.split("/"),
+		...(pathComponents ?? url.pathname.split("/")),
 		...url.search.slice(1).split("&").map((part) => part.split("=")[0]!),
 	], url.searchParams.keys());
 	const patterns = [...new Set([...representations, ...pathRepresentations])]
@@ -49,9 +49,26 @@ function endpointCredentialPattern(endpoint: string): RegExp | undefined {
 	return patterns.length ? new RegExp(patterns.join("|"), "gu") : undefined;
 }
 
-/** Requested OAuth instructions may contain ordinary parameters, but not configured credentials. */
-export function authorizationUrlContainsEndpointCredentials(url: URL, endpoint: string): boolean {
-	return endpointCredentialPattern(endpoint)?.test(url.href) ?? false;
+/** Requested instructions permit routing words; diagnostics still protect every path component. */
+export function authorizationUrlContainsEndpointCredentials(url: URL, endpoint: string, template = endpoint): boolean {
+	// Recover path substitutions from the actual attempt, never from mutable process.env.
+	const variables = [...template.matchAll(/\$\{\w+\}|\$env:\w+/g)];
+	const literals = template.split(/\$\{\w+\}|\$env:\w+/g);
+	const resolved = new RegExp(`^${literals.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(.*?)")}$`).exec(endpoint);
+	const pathStart = template.indexOf("/", template.indexOf("://") + 3);
+	const pathEnd = template.search(/[?#]/);
+	const substitutions = variables.flatMap((variable, index) =>
+		pathStart >= 0 && variable.index >= pathStart && (pathEnd < 0 || variable.index < pathEnd)
+			? (resolved?.[index + 1] ?? "").split("/").filter(Boolean)
+			: [],
+	);
+	// Literal paths have no credential schema. Lowercase route words (including compound
+	// names) and version segments are ordinary; encoded/opaque components stay protected.
+	// Explicit path substitutions override that inference, even when their value is a word.
+	const pathComponents = new URL(endpoint).pathname.split("/").filter((part) =>
+		!/^(?:[a-z]+(?:[-_][a-z]+)*|v\d+)$/.test(part) || substitutions.some((value) => part.includes(value)),
+	);
+	return endpointCredentialPattern(endpoint, pathComponents)?.test(url.href) ?? false;
 }
 
 function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {

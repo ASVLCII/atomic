@@ -140,3 +140,82 @@ test("MCP browser failure withholds configured credential overlap", async () => 
 		removeTempDirectory(dir);
 	}
 });
+
+// Regression for #3088: resolved origins and public routing words retain manual instructions.
+for (const [endpoint, path, clientId, secret] of [
+	[`\${RISK_ORIGIN}/mcp`, "/authorize", "public", ""],
+	["$env:RISK_ORIGIN/mcp", "/authorize", "public", ""],
+	[
+		`https://example.com/\${RISK_TOKEN}/mcp`,
+		"/PRIVATE_INTERPOLATED_CREDENTIAL/authorize",
+		"public",
+		"PRIVATE_INTERPOLATED_CREDENTIAL",
+	],
+	["https://example.com/mcp", "/authorize", "mcp", ""],
+	["https://example.com/mcp", "/mcp/authorize", "public", ""],
+	["https://example.com/api/v2/my-service", "/api/v2/my-service/authorize", "my-service", ""],
+]) {
+	test(`MCP browser fallback uses resolved endpoint and public routing: ${endpoint} ${path} ${clientId}`, async () => {
+		const dir = makeTempDirectory("mcp-browser-resolved-");
+		vi.stubEnv("MCP_OAUTH_DIR", dir);
+		vi.stubEnv("RISK_ORIGIN", "https://example.com");
+		vi.stubEnv("RISK_TOKEN", "PRIVATE_INTERPOLATED_CREDENTIAL");
+		const { authorizationUrl } = await startAuthorization("https://example.com", {
+			clientInformation: { client_id: clientId! },
+			redirectUrl: "http://127.0.0.1:19823/callback",
+			state: "ordinary-state",
+		});
+		authorizationUrl.pathname = path!;
+		browser.url = authorizationUrl.href;
+		browser.open.mockImplementation(async () => {
+			vi.stubEnv("RISK_TOKEN", "CHANGED_AFTER_DISCOVERY");
+			throw new Error("PRIVATE_CAUSE");
+		});
+		try {
+			await assert.rejects(authenticate("browser", endpoint!), (error: Error) => {
+				assert.equal(
+					error.message,
+					secret
+						? "Could not open browser. Check your default browser and retry MCP authentication."
+						: `Could not open browser. Please open this URL manually: ${browser.url}`,
+				);
+				if (secret) assert.ok(!inspect(error, { depth: null, showHidden: true }).includes(secret));
+				return true;
+			});
+			assert.equal(browser.open.mock.lastCall?.[0], browser.url);
+		} finally {
+			await shutdownOAuth();
+			removeTempDirectory(dir);
+		}
+	});
+}
+
+// Regression for #3088: explicit path interpolation is credential provenance even for words.
+test("MCP browser fallback protects an interpolated path word using the attempt snapshot", async () => {
+	const dir = makeTempDirectory("mcp-browser-word-");
+	vi.stubEnv("MCP_OAUTH_DIR", dir);
+	vi.stubEnv("RISK_TOKEN", "private");
+	const { authorizationUrl } = await startAuthorization("https://example.com", {
+		clientInformation: { client_id: "public" },
+		redirectUrl: "http://127.0.0.1:19823/callback",
+		state: "ordinary-state",
+	});
+	authorizationUrl.pathname = "/private/authorize";
+	browser.url = authorizationUrl.href;
+	browser.open.mockImplementation(async () => {
+		vi.stubEnv("RISK_TOKEN", "changed");
+		throw new Error("PRIVATE_CAUSE");
+	});
+	try {
+		await assert.rejects(authenticate("browser", `https://example.com/\${RISK_TOKEN}/mcp`), (error: Error) => {
+			assert.equal(
+				error.message,
+				"Could not open browser. Check your default browser and retry MCP authentication.",
+			);
+			return true;
+		});
+	} finally {
+		await shutdownOAuth();
+		removeTempDirectory(dir);
+	}
+});

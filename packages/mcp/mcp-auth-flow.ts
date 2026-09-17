@@ -244,7 +244,7 @@ async function performAuthentication(
       ])
       const sensitive = url.username || url.password || url.hash ||
         [...url.searchParams.keys()].some((key) => !publicParameters.has(key)) ||
-        authorizationUrlContainsEndpointCredentials(url, serverUrl)
+        authorizationUrlContainsEndpointCredentials(url, started.pendingTransport.serverUrl, serverUrl)
       throw new Error(sensitive
         ? "Could not open browser. Check your default browser and retry MCP authentication."
         : `Could not open browser. Please open this URL manually: ${started.authorizationUrl}`)
