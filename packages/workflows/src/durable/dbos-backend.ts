@@ -526,14 +526,27 @@ export class DbosDurableBackend implements DurableWorkflowBackend {
 		resumable?: boolean,
 		expectedUpdatedAt?: number,
 	): Promise<boolean> {
+		let records: readonly DbosStepRecord[] = [];
 		return await transitionDbosWorkflowStatus({
 			expectedStatuses: expected,
 			status,
 			flush: () => this.flush(workflowId),
 			expectedUpdatedAt,
 			local: () => this.getLoadableWorkflow(workflowId),
-			read: async () => classifyLatestMetadata(await this.sdk.listStepRecords(workflowId), workflowId),
-			reconcile: (entry) => this.applyMetadata(workflowId, entry),
+			read: async () => {
+				records = await this.sdk.listStepRecords(workflowId);
+				return classifyLatestMetadata(records, workflowId);
+			},
+			reconcile: (entry) => {
+				// Metadata stores the reservation baseline, not the live prompt count.
+				const pendingPrompts = this.promptReservations.hydrate(
+					workflowId,
+					entry.pendingPrompts,
+					records,
+					entry.promptReservationEpoch,
+				);
+				this.applyMetadata(workflowId, { ...entry, pendingPrompts });
+			},
 			claim: (authoritative, generation) =>
 				this.claimStatusTransition(workflowId, authoritative, generation, status, pendingPrompts, resumable),
 			write: async () => {
