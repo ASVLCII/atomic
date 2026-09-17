@@ -1606,6 +1606,9 @@ function processBasetenModels(provider: ModelsDevProvider | undefined): Model<Ap
 		supportsUsageInStreaming: true,
 		maxTokensField: "max_tokens",
 		supportsStrictMode: true,
+		// Baseten automatic prompt caching needs related requests on the same replica.
+		// https://docs.baseten.co/inference/model-apis/pricing-and-limits
+		sendSessionAffinityHeaders: true,
 		supportsLongCacheRetention: false,
 	};
 	const reasoningEffortCompat: OpenAICompletionsCompat = {

@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Added `workflowDependency()`, `/workflow dependency` and the workflow tool's `dependency` action for bounded database inspection and registered managed-cluster recovery, with actual port, verified identity, runtime versions, consumers, retained latest failure and safe guidance. External database endpoints receive query-only checks ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 
 ### Fixed
 
@@ -31,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Same-ID database recovery remains retryable when resume preparation fails after reconciliation, including a temporarily missing workflow definition. Retried resume preserves saved tool receipts instead of switching to a new continuation ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Managed PostgreSQL recovery no longer waits on a vanished server when shutdown overlaps a health check. Recovery retains the existing cluster and checkpoints instead of exhausting readiness polling against the old process ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Managed PostgreSQL startup no longer rejects an owned server when initialization crosses a second boundary. Identity failures now identify the mismatched fields while preserving the cluster and ownership records ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

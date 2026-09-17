@@ -42,6 +42,20 @@ export function mergeHeaders(
 	return merged;
 }
 
+/** SDK-owned request-auth result so transport preparation does not start a second deadline. */
+export interface PreparedRequestAuth {
+	readonly resolution: AuthResult | undefined;
+}
+
+export type ModelRuntimePreparedStreamOptions = StreamOptions &
+	ModelsRequestTransforms & {
+		preparedRequestAuth?: PreparedRequestAuth;
+	};
+
+export type ModelRuntimeSimpleStreamOptions = ModelsSimpleStreamOptions & {
+	preparedRequestAuth?: PreparedRequestAuth;
+};
+
 type ResolveAuth = (model: Model<Api>, overrides?: ModelRuntimeAuthOverrides) => Promise<AuthResult | undefined>;
 /** Whether an extension owns this model's transport, in which case it owns its serialization too. */
 type OwnsExtensionTransport = (model: Model<Api>) => boolean;
@@ -77,16 +91,24 @@ export class ModelRuntimeStreaming {
 
 	private async prepareRequest(
 		model: Model<Api>,
-		options: (StreamOptions & ModelsRequestTransforms) | undefined,
+		options: ModelRuntimePreparedStreamOptions | undefined,
 	): Promise<{ provider: Provider; model: Model<Api>; options: StreamOptions }> {
 		const provider = this.models.getProvider(model.provider);
 		if (!provider) throw new ModelsError("provider", `Unknown provider: ${model.provider}`);
-		const resolution = await this.resolveAuth(model, { apiKey: options?.apiKey, env: options?.env });
+		const { transformHeaders, preparedRequestAuth, ...providerOptions } = options ?? {};
+		const resolution = preparedRequestAuth
+			? preparedRequestAuth.resolution
+			: await this.resolveAuth(model, {
+					apiKey: options?.apiKey,
+					env: options?.env,
+					signal: options?.signal,
+				});
+		options?.signal?.throwIfAborted();
 		if (!resolution) throw new ModelsError("auth", `Provider is not configured: ${model.provider}`);
 
-		const { transformHeaders, ...providerOptions } = options ?? {};
 		let headers = mergeHeaders(resolution.auth.headers, providerOptions.headers);
 		if (transformHeaders) headers = await transformHeaders(headers ?? {});
+		options?.signal?.throwIfAborted();
 		const env =
 			resolution.env || providerOptions.env
 				? { ...(resolution.env ?? {}), ...(providerOptions.env ?? {}) }
@@ -129,7 +151,11 @@ export class ModelRuntimeStreaming {
 		return this.stream(model, context, options).result();
 	}
 
-	streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream {
+	streamSimple(
+		model: Model<Api>,
+		context: Context,
+		options?: ModelRuntimeSimpleStreamOptions,
+	): AssistantMessageEventStream {
 		return lazyStream(model, async () => {
 			const prepared = await this.prepareRequest(model, options);
 			return prepared.provider.streamSimple(
@@ -140,7 +166,11 @@ export class ModelRuntimeStreaming {
 		});
 	}
 
-	completeSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): Promise<AssistantMessage> {
+	completeSimple(
+		model: Model<Api>,
+		context: Context,
+		options?: ModelRuntimeSimpleStreamOptions,
+	): Promise<AssistantMessage> {
 		return this.streamSimple(model, context, options).result();
 	}
 
