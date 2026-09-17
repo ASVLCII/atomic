@@ -1,13 +1,22 @@
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { isJSONRPCErrorResponse } from "@modelcontextprotocol/sdk/types.js";
 
-/** SDK errors may retain request URLs in messages, causes and EventSource events. */
-export function sanitizeRemoteError(error: unknown, endpoint: string): Error {
+function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
 	const url = new URL(endpoint);
 	const secrets = [url.username, url.password, ...url.searchParams.values(), url.hash.slice(1)];
-	let message = error instanceof Error ? error.message : String(error);
 	// Also hide discovered OAuth/SSE URLs, which need not equal the configured endpoint.
-	message = message.replace(/https?:\/\/[^\s<>"']+/gi, "[redacted URL]");
+	message = message.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
+		if (preserveSafeUrls) {
+			try {
+				const candidate = new URL(match);
+				if (!candidate.username && !candidate.password && !candidate.search && !candidate.hash) return match;
+			} catch {
+				// Malformed diagnostic URLs may still contain credentials.
+			}
+		}
+		return "[redacted URL]";
+	});
 	for (const secret of secrets) {
 		if (!secret) continue;
 		message = message.replaceAll(secret, "[redacted]");
@@ -17,6 +26,12 @@ export function sanitizeRemoteError(error: unknown, endpoint: string): Error {
 			// A URL may legally contain a literal percent sign.
 		}
 	}
+	return message;
+}
+
+/** SDK errors may retain request URLs in messages, causes and EventSource events. */
+export function sanitizeRemoteError(error: unknown, endpoint: string): Error {
+	const message = redactDiagnosticText(error instanceof Error ? error.message : String(error), endpoint);
 	// Never attach the original error: stack, cause, event and arbitrary SDK fields
 	// can all contain secrets. Preserve the auth discriminator and numeric status.
 	const safe = error instanceof UnauthorizedError ? new UnauthorizedError(message) : new Error(message);
@@ -26,8 +41,39 @@ export function sanitizeRemoteError(error: unknown, endpoint: string): Error {
 	return safe;
 }
 
+/** Only error diagnostics are traversed; successful protocol payloads stay untouched. */
+function sanitizeRpcDiagnostic<T>(value: T, endpoint: string): T {
+	if (typeof value === "string") return redactDiagnosticText(value, endpoint, true) as T;
+	if (Array.isArray(value)) return value.map((item) => sanitizeRpcDiagnostic(item, endpoint)) as T;
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [
+				redactDiagnosticText(key, endpoint, true),
+				sanitizeRpcDiagnostic(item, endpoint),
+			]),
+		) as T;
+	}
+	return value;
+}
+
 /** Protect both rejected operations and asynchronous SDK diagnostics, not stdio. */
 export function protectRemoteTransport<T extends Transport>(transport: T, endpoint: string): T {
+	let onmessage: Transport["onmessage"];
+	Object.defineProperty(transport, "onmessage", {
+		configurable: true,
+		get: () => onmessage,
+		set: (handler: Transport["onmessage"]) => {
+			onmessage = handler
+				? (message, extra) =>
+						handler(
+							isJSONRPCErrorResponse(message)
+								? { ...message, error: sanitizeRpcDiagnostic(message.error, endpoint) }
+								: message,
+							extra,
+						)
+				: undefined;
+		},
+	});
 	let onerror: Transport["onerror"];
 	Object.defineProperty(transport, "onerror", {
 		configurable: true,
