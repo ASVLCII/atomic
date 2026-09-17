@@ -168,13 +168,20 @@ test.each(["dependency", "rejection"] as const)(
 		const sdk = createMockSdk();
 		const entered = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();
+		const controller = new AbortController();
+		let recovered = false;
+		let attempts = 0;
+		let bodyCalls = 0;
+		let effects = 0;
 		const error = failure === "dependency" ? new DbosDependencyError() : new Error("permission denied for admission");
 		const backend = new DbosDurableBackend({
 			...sdk,
-			resumeWorkflow: async () => {
+			resumeWorkflow: async (...args) => {
+				attempts++;
 				entered.resolve();
 				await release.promise;
-				throw error;
+				if (!recovered) throw error;
+				await sdk.resumeWorkflow(...args);
 			},
 		});
 		const runId = `checkpointed-pause-${failure}`;
@@ -198,6 +205,7 @@ test.each(["dependency", "rejection"] as const)(
 		await backend.flush(runId);
 		setDurableBackend(backend);
 		const priorSteps = [...sdk.state.steps.entries()];
+		const priorCheckpoint = backend.listCheckpoints(runId)[0];
 		const store = createStore();
 		const controls = createToolControlRegistry();
 		const definition = workflow({
@@ -205,8 +213,13 @@ test.each(["dependency", "rejection"] as const)(
 			description: "",
 			inputs: {},
 			outputs: {},
-			run: async () => {
-				assert.fail("failed admission must not execute author code");
+			run: async (ctx) => {
+				assert.ok(recovered, "failed admission must not execute author code");
+				assert.equal(controls.runControl(runId), owner, "retry retains the same executor");
+				assert.equal(store.runs()[0]?.error, undefined);
+				bodyCalls++;
+				await ctx.tool("new-effect", {}, async () => ++effects);
+				return {};
 			},
 		});
 		const pending = run(
@@ -217,12 +230,14 @@ test.each(["dependency", "rejection"] as const)(
 				store,
 				durableBackend: backend,
 				toolControlRegistry: controls,
+				signal: controller.signal,
 				continuation: {
 					source: { id: runId, name: runId, inputs: {}, status: "paused", startedAt: 1, stages: [] },
 				},
 			},
 		).catch((failure: unknown) => failure);
 		await entered.promise;
+		const owner = controls.runControl(runId);
 		try {
 			assert.equal((await pauseRun(runId, { store, toolControlRegistry: controls })).ok, true);
 			release.resolve();
@@ -241,12 +256,48 @@ test.each(["dependency", "rejection"] as const)(
 			assert.equal(fresh.getWorkflow(runId)?.resumable, true);
 			assert.equal(fresh.getWorkflow(runId)?.completedCheckpoints, 1);
 			assert.deepEqual(sdk.state.cancels, []);
+			assert.equal(bodyCalls, 0);
+			assert.equal(effects, 0);
+			if (failure === "dependency") {
+				// #3078: only an explicit resume retries this checkpointed identity.
+				recovered = true;
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(attempts, 1);
+				assert.equal(controls.runControl(runId), owner);
+				const results = await Promise.all([
+					resumeRun(runId, { store, toolControlRegistry: controls }),
+					resumeRun(runId, { store, toolControlRegistry: controls }),
+				]);
+				assert.ok(results.every((result) => result.ok));
+				await pending;
+				assert.equal(store.runs()[0]?.status, "completed");
+				assert.equal(store.runs()[0]?.dependencyError, undefined);
+				assert.equal(attempts, 2);
+				assert.equal(bodyCalls, 1);
+				assert.equal(effects, 1);
+				assert.deepEqual([...sdk.state.workflows.keys()], [runId]);
+				assert.equal(backend.isAdmissionUnavailable(runId), false);
+				assert.ok(backend.getWorkflow(runId)!.completedCheckpoints >= 2);
+				const restored = new DbosDurableBackend(sdk);
+				await restored.hydrateWorkflow(runId);
+				assert.equal(restored.getWorkflow(runId)?.status, "completed");
+				assert.ok(restored.getWorkflow(runId)!.completedCheckpoints >= 2);
+				assert.deepEqual(
+					restored.listCheckpoints(runId).find((checkpoint) => checkpoint.checkpointId === "prior"),
+					priorCheckpoint,
+					"same-ID recovery preserves the earlier checkpoint unchanged",
+				);
+				assert.deepEqual(sdk.state.cancels, []);
+			} else {
+				await assert.rejects(
+					resumeRun(runId, { store, toolControlRegistry: controls }),
+					(failure) => failure === error,
+				);
+				await pending;
+			}
 		} finally {
 			release.resolve();
-			await assert.rejects(
-				resumeRun(runId, { store, toolControlRegistry: controls }),
-				(failure) => failure === error,
-			);
+			controller.abort();
 			await pending;
 			setDurableBackend(undefined);
 		}

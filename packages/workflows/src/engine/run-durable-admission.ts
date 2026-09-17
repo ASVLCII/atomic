@@ -7,7 +7,7 @@
  */
 
 import type { DurableWorkflowBackend, WorkflowRegistrationInput } from "../durable/backend.js";
-import { boundedAdmission, dbosAdmissionContext } from "../durable/dbos-admission.js";
+import { boundedAdmission, dbosAdmissionContext, isDbosDependencyError } from "../durable/dbos-admission.js";
 import { isDurableWorkflowResumable } from "../durable/resume-eligibility.js";
 import type { WorkflowSerializableValue } from "../shared/types.js";
 import {
@@ -53,21 +53,30 @@ export async function admitDurableRootRun(args: {
 	readonly registration: WorkflowRegistrationInput | undefined;
 	readonly signal?: AbortSignal;
 	readonly timeoutMs?: number;
+	/** Retry only after an explicitly resumed live pause. */
+	readonly onDependencyBlocked?: (message: string) => Promise<boolean>;
 }): Promise<void> {
 	if (args.isChildRun) return;
-	await boundedAdmission(
-		async (signal) => {
-			if (args.backend.admitWorkflow !== undefined) {
-				await args.backend.admitWorkflow(args.runId, args.registration, signal);
-				return;
-			}
-			if (args.registration !== undefined) args.backend.registerWorkflow(args.registration);
-			else args.backend.setWorkflowStatus(args.runId, "running");
-			await args.backend.flush(args.runId);
-		},
-		args.signal,
-		args.timeoutMs,
-	);
+	for (;;) {
+		try {
+			await boundedAdmission(
+				async (signal) => {
+					if (args.backend.admitWorkflow !== undefined) {
+						await args.backend.admitWorkflow(args.runId, args.registration, signal);
+						return;
+					}
+					if (args.registration !== undefined) args.backend.registerWorkflow(args.registration);
+					else args.backend.setWorkflowStatus(args.runId, "running");
+					await args.backend.flush(args.runId);
+				},
+				args.signal,
+				args.timeoutMs,
+			);
+			return;
+		} catch (error) {
+			if (!isDbosDependencyError(error) || !(await args.onDependencyBlocked?.(error.message))) throw error;
+		}
+	}
 }
 
 /** Observe and fence failed durable controls without blocking local acknowledgement. */
@@ -100,7 +109,10 @@ export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeI
 		get admitting(): boolean {
 			return !admitted;
 		},
-		admit(registration: WorkflowRegistrationInput | undefined): Promise<void> {
+		admit(
+			registration: WorkflowRegistrationInput | undefined,
+			onDependencyBlocked?: (message: string) => Promise<boolean>,
+		): Promise<void> {
 			const controller = new AbortController();
 			const onAbort = () => {
 				// Quit suspends author execution immediately but drains registration before
@@ -115,6 +127,7 @@ export function createDurableAdmissionSettlement(input: DurableTerminalFinalizeI
 				isChildRun: !input.isRoot,
 				registration,
 				signal: controller.signal,
+				onDependencyBlocked,
 			})
 				.then(() => {
 					admitted = true;
