@@ -80,14 +80,22 @@ export async function runAgentTask(input: {
 	let yieldWait: ((reason: YieldReason) => Result<WaitOutcome, YieldError>) | undefined;
 	let pendingYield = false;
 	const registered = Promise.withResolvers<void>();
+	input.options.modelRoute?.assertCurrent();
 	const started = await input.host.startAgentTask(
-		{ kind: "agent", agent: input.agent, task: input.intentTask ?? input.task, cwd: input.options.cwd ?? input.cwd },
+		{
+			kind: "agent",
+			agent: input.agent,
+			task: input.intentTask ?? input.task,
+			cwd: input.options.cwd ?? input.cwd,
+			...(input.options.modelRoute ? { routerSelection: input.options.modelRoute.routerSelection } : {}),
+		},
 		`${input.options.runId}:${input.options.index ?? 0}` as OperationId,
 		(context) => {
 			const cleaned = Promise.withResolvers<Cleanup>();
 			let executionBound = false;
 			const result = registered.promise.then(async (): Promise<TaskResult> => {
 				try {
+					input.options.modelRoute?.assertCurrent();
 					const child = await input.runtime.runSync(input.cwd, input.agents, input.agent, input.task, {
 						...input.options,
 						signal: context.signal,

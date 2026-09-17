@@ -7,7 +7,7 @@ description: Make a bounded structured decision without starting an agent sessio
 
 Use `inferStructuredOutput()` from `@bastani/atomic` when an SDK integration needs one semantic decision before it performs an action. It returns a schema-validated value, the requested and responding model identities, and input/output token counts. It does not execute tools, start a session, or authorize an action.
 
-`inferStructuredOutput()` takes an explicit inference model and never reads `routerModel`. The `structured_output` tool continues to use its session's model. Neither API changes the selected chat model. [Model-invoked workflow launches](/workflows/operations#model-invoked-launch-routing) use the shared router entrypoint below; subagent `model: "auto"` routing is not enabled yet.
+`inferStructuredOutput()` takes an explicit inference model and never reads `routerModel`. The `structured_output` tool continues to use its session's model. Neither API changes the selected chat model. [Model-invoked workflow launches](/workflows/operations#model-invoked-launch-routing) and [subagent `model: "auto"`](/subagents/reference#automatic-model-selection) use the shared router entrypoint below.
 
 ## Select the inference model
 

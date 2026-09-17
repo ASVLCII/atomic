@@ -112,3 +112,47 @@ test("a successful main-chat fallback stays selected for the next user prompt", 
 		session.dispose();
 	}
 });
+
+// #3090: auto-router hard constraints still govern the actual session fallback,
+// after candidate defaults are resolved and clamped, not just launch preparation.
+test("session fallback skips forbidden effort and preserves the allowed candidate's own effort", async () => {
+	const { streamFn, requests } = stickyFallbackStream();
+	const agent = new Agent({
+		getApiKey: () => "test-key",
+		initialState: { model: PRIMARY, systemPrompt: "test", tools: [], thinkingLevel: "high" },
+		streamFn,
+	});
+	const runtime = await ModelRuntime.create({
+		credentials: AuthStorage.inMemory({
+			anthropic: { type: "api_key", key: "synthetic-primary" },
+			openai: { type: "api_key", key: "synthetic-fallback" },
+		}),
+		modelsPath: null,
+	});
+	const checked: string[] = [];
+	const session = new AgentSession({
+		agent,
+		sessionManager: SessionManager.inMemory(),
+		settingsManager: SettingsManager.inMemory({ retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 } }),
+		cwd: process.cwd(),
+		modelRuntime: runtime,
+		resourceLoader: createTestResourceLoader(),
+		fallbackModels: [`${FALLBACK.provider}/${FALLBACK.id}:high`, `${FALLBACK.provider}/${FALLBACK.id}:low`],
+		isFallbackModelAllowed: (model, effort) => {
+			checked.push(`${model.provider}/${model.id}:${effort}`);
+			return effort === "low";
+		},
+	});
+	try {
+		await session.prompt("approved task");
+		assert.deepEqual(checked, [
+			`${FALLBACK.provider}/${FALLBACK.id}:high`,
+			`${FALLBACK.provider}/${FALLBACK.id}:low`,
+		]);
+		assert.equal(requests.length, 2);
+		assert.equal(requests[1]?.options.reasoning, "low");
+		assert.equal(session.thinkingLevel, "low");
+	} finally {
+		session.dispose();
+	}
+});

@@ -26,6 +26,7 @@ export interface TaskParam {
 	reads?: string[] | boolean;
 	progress?: boolean;
 	model?: string;
+	modelConstraints?: import("../../shared/model-constraints.js").ModelConstraints;
 	skill?: string | string[] | boolean;
 	group?: string | true;
 }
@@ -55,6 +56,7 @@ export interface SubagentParamsLike {
 	artifacts?: boolean;
 	includeProgress?: boolean;
 	model?: string;
+	modelConstraints?: import("../../shared/model-constraints.js").ModelConstraints;
 	skill?: string | string[] | boolean;
 	group?: string | true;
 	output?: string | boolean;

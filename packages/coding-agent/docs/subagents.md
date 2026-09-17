@@ -46,6 +46,10 @@ The catalog is navigation, not an approval prompt. Leaving it open does not mark
 
 The catalog uses the same effective discovery rules as execution, so overridden definitions and disabled agents are not offered as separate launchable choices. Ask Atomic to create or modify an agent; the catalog does not change configuration.
 
+## Let Atomic choose the child model
+
+Use `model: "auto"` on a subagent call, parallel task, or agent definition to select a model and reasoning effort from your available catalog. Atomic injects its shipped evaluation guidance and makes one decision before launching the child. Ordinary omitted or concrete model selections retain their existing behavior. See [Automatic model selection](/subagents/reference#automatic-model-selection) for examples, routing configuration, and failure handling.
+
 ## Subagent execution is non-interactive
 
 Supported subagent launches start immediately without opening a preview/editor prompt or waiting for terminal input. This applies to single, parallel, forked, fanout, and prompt-template execution. Ask any necessary questions in the parent conversation before delegating.

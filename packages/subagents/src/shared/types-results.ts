@@ -135,6 +135,7 @@ export interface AgentProgress {
 	model?: string;
 	/** Effective thinking level for this live attempt. */
 	thinking?: string;
+	readonly routerSelection?: import("./model-constraints.js").ModelRouterOutput;
 	skills?: string[];
 	lastActivityAt?: number;
 	currentTool?: string;
@@ -195,6 +196,7 @@ export interface SingleResult {
 	usage: Usage;
 	model?: string;
 	thinking?: string;
+	routerSelection?: import("./model-constraints.js").ModelRouterOutput;
 	attemptedModels?: string[];
 	modelAttempts?: ModelAttempt[];
 	controlEvents?: ControlEvent[];

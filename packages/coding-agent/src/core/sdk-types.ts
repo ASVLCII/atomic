@@ -35,6 +35,8 @@ export interface CreateAgentSessionOptions {
 	 * Default: settings.fallbackModels
 	 */
 	fallbackModels?: string[];
+	/** Hard eligibility gate applied before fallback inference, including compaction borrowing. */
+	isFallbackModelAllowed?: (model: Model<Api>, effort: string | undefined) => boolean;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 

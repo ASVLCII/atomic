@@ -50,6 +50,7 @@ interface ForegroundParallelRunInput {
 	knownModelProviders: string[];
 	resolveCandidateModel: CandidateModelResolver;
 	modelOverrides: (string | undefined)[];
+	modelRoutes?: (import("../shared/model-router.js").ModelRoute | undefined)[];
 	behaviors: ResolvedStepBehavior[];
 	firstProgressIndex: number;
 	controlConfig: import("../../shared/types.js").ResolvedControlConfig;
@@ -222,6 +223,7 @@ export async function runForegroundParallelTasks(input: ForegroundParallelRunInp
 			// Parallel requests use Intercom's correlated waiter in the original child.
 			// The single-child terminal handoff would cancel unrelated siblings here.
 			modelOverride: input.modelOverrides[index],
+			modelRoute: input.modelRoutes?.[index],
 			availableModels: input.availableModels,
 			knownModelProviders: input.knownModelProviders,
 			resolveCandidateModel: input.resolveCandidateModel,
@@ -282,6 +284,7 @@ export async function runForegroundParallelTasks(input: ForegroundParallelRunInp
 					}
 				: undefined,
 		};
+		runOptions.modelRoute?.assertCurrent();
 		input.onExecution?.(index, input.ctx.cwd, runOptions);
 		if (host) {
 			if (input.wait?.kind !== "foreground") {

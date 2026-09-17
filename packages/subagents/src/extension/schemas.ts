@@ -1,3 +1,4 @@
+import { ModelConstraintsSchema } from "../shared/model-constraints.js";
 /**
  * TypeBox schemas for subagent tool parameters
  */
@@ -60,7 +61,12 @@ const TaskItem = Type.Object({
 	outputMode: Type.Optional(OutputModeOverride),
 	reads: Type.Optional(ReadsOverride),
 	progress: Type.Optional(Type.Boolean({ description: "Enable progress.md tracking for this task" })),
-	model: Type.Optional(Type.String({ description: "Override model for this task (e.g. 'google/gemini-3-pro')" })),
+	model: Type.Optional(
+		Type.String({
+			description: "Concrete model override, or 'auto' to select an available model and effort for this task.",
+		}),
+	),
+	modelConstraints: Type.Optional(ModelConstraintsSchema),
 	skill: Type.Optional(SkillOverride),
 	group: Type.Optional(GroupSchema),
 });
@@ -217,8 +223,11 @@ export const SubagentParams = Type.Object(
 		),
 		skill: Type.Optional(SkillOverride),
 		model: Type.Optional(
-			Type.String({ description: "Override model for single agent (e.g. 'anthropic/claude-sonnet-4')" }),
+			Type.String({
+				description: "Concrete model override, or 'auto' to select an available model and effort for this task.",
+			}),
 		),
+		modelConstraints: Type.Optional(ModelConstraintsSchema),
 	},
 	{ additionalProperties: false },
 );

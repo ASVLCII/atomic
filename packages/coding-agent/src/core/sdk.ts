@@ -419,6 +419,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
+		isFallbackModelAllowed: options.isFallbackModelAllowed,
 		resourceLoader,
 		customTools: options.customTools,
 		modelRuntime,

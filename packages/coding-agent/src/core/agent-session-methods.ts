@@ -430,6 +430,7 @@ export interface AgentSessionPublicSurface
 export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, AgentSessionPublicSurface {
 	_scopedModels: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 	_fallbackModels: string[];
+	_isFallbackModelAllowed?: (model: Model<Api>, effort: string | undefined) => boolean;
 	_fallbackAttemptedKeys: Set<string>;
 	_fallbackBlockedModels: Array<Model<Api>>;
 	_fallbackOriginModel: Model<Api> | undefined;

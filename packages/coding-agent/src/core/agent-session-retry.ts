@@ -302,6 +302,7 @@ export async function _trySwitchToFallbackModel(this: AgentSession, message: Ass
 				currentThinkingLevel ??
 				DEFAULT_THINKING_LEVEL,
 		) as ThinkingLevel;
+		if (this._isFallbackModelAllowed && !this._isFallbackModelAllowed(nextModel, nextLevel)) continue;
 		const key = fallbackKey(nextModel, nextLevel);
 		if (this._fallbackAttemptedKeys.has(key)) continue;
 		if (modelsAreEqual(nextModel, fromModel) && nextLevel === currentThinkingLevel) continue;

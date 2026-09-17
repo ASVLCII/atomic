@@ -153,6 +153,7 @@ export interface AgentSessionConfig {
 	cwd: string;
 	scopedModels?: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 	fallbackModels?: string[];
+	isFallbackModelAllowed?: (model: Model<Api>, effort: string | undefined) => boolean;
 	resourceLoader: ResourceLoader;
 	customTools?: ToolDefinition[];
 	modelRuntime: ModelRuntime;

@@ -23,6 +23,7 @@ import { compactForegroundDetails, getSingleResultOutput } from "../../shared/ut
 import { isParentCancellation } from "../shared/cancellation-recovery.js";
 import { sharedAutoGroupForSet } from "../shared/intercom-group.js";
 import { resolveModelCandidate } from "../shared/model-fallback.js";
+import { routeSubagentModel } from "../shared/model-router.js";
 import { formatParallelResultContent } from "../shared/parallel-utils.js";
 import { recordRun } from "../shared/run-history.js";
 import { resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.js";
@@ -120,8 +121,27 @@ export async function runParallelPath(
 		...(skillOverrides[index] !== undefined ? { skills: skillOverrides[index] } : {}),
 		...(task.model ? { model: task.model } : {}),
 	}));
-	const modelOverrides: (string | undefined)[] = tasks.map((_, i) =>
-		resolveModelCandidate(behaviorOverrides[i]?.model ?? agentConfigs[i]?.model, availableModels, currentProvider),
+	const modelRoutes = await Promise.all(
+		tasks.map((task, index) =>
+			(task.model ?? agentConfigs[index]?.model) === "auto"
+				? routeSubagentModel({
+						ctx,
+						agent: agentConfigs[index]!,
+						task: task.task,
+						modelConstraints: task.modelConstraints,
+						signal,
+					})
+				: undefined,
+		),
+	);
+	const modelOverrides = tasks.map(
+		(_, index) =>
+			modelRoutes[index]?.modelOverride ??
+			resolveModelCandidate(
+				behaviorOverrides[index]?.model ?? agentConfigs[index]?.model,
+				availableModels,
+				currentProvider,
+			),
 	);
 
 	const behaviors = agentConfigs.map((config, index) =>
@@ -215,6 +235,7 @@ export async function runParallelPath(
 			knownModelProviders,
 			resolveCandidateModel: createCandidateModelResolver(ctx.modelRegistry, currentProvider),
 			modelOverrides,
+			modelRoutes,
 			behaviors,
 			firstProgressIndex: parallelProgressPrecreated ? -1 : firstProgressIndex,
 			controlConfig,

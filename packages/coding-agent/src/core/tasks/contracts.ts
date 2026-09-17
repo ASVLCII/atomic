@@ -60,6 +60,7 @@ export type YieldReason = "explicit" | "default-background" | "elapsed" | "inter
 export type WaitOutcome =
 	| { kind: "settled"; taskId: TaskId; result: TaskResult }
 	| { kind: "yielded"; taskId: TaskId; waitId: WaitId; reason: YieldReason };
+export type RouterSelection = { readonly model: string; readonly effort: string | null };
 export type AgentIntent = {
 	kind: "agent";
 	agent: string;
@@ -67,6 +68,7 @@ export type AgentIntent = {
 	description?: string;
 	cwd?: string;
 	parentTaskId?: TaskId;
+	readonly routerSelection?: RouterSelection;
 };
 export type CommandIntent = {
 	kind: "command";
@@ -133,6 +135,7 @@ export type TaskRecord = {
 	/** Resolved execution settings, retained after completion. */
 	model?: string;
 	thinking?: string;
+	readonly routerSelection?: RouterSelection;
 	execution: Execution;
 	observation: HostObservation;
 	/** Retained native background membership, independent of the current wait. */

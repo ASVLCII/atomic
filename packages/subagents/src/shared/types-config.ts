@@ -134,6 +134,7 @@ export interface RunSyncOptions {
 	workflowSessionMetadata?: SessionWorkflowMetadata;
 	/** Override the agent's default model (format: "provider/id" or just "id") */
 	modelOverride?: string;
+	modelRoute?: import("../runs/shared/model-router.js").ModelRoute;
 	/** Registry models available for heuristic bare-model resolution */
 	availableModels?: Array<{ provider: string; id: string; fullId: string }>;
 	/** Providers known to the registry before auth filtering */

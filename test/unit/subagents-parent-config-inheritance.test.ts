@@ -254,3 +254,43 @@ describe("subagent inherits the dispatching session's configuration", () => {
 		assert.deepEqual(spec.tools, ["read", "bash"]);
 	});
 });
+
+// #3090: auto's null is not an invitation to inherit legacy agent thinking.
+test("auto null suppresses agent thinking while the parent fallback retains its own effort and hard gate", async () => {
+	harness.attempts.length = 0;
+	const selected = { ...configuredModel, reasoning: false };
+	const lookup = {
+		...registry,
+		getAvailable: () => [selected, parentModel],
+		find: (provider: string, id: string) =>
+			[selected, parentModel].find((model) => model.provider === provider && model.id === id),
+	};
+	const cwd = makeCwd();
+	const allowsModel = (model: Model<Api>, effort?: string) => model === selected || effort === "high";
+	const result = await runSingleInProcess(cwd, agentConfig({ model: "auto", thinking: "max" }), "Inspect", {
+		cwd,
+		runId: "auto-null",
+		testSession: { output: "done" },
+		modelOverride: CONFIGURED_MODEL_ID,
+		modelRoute: {
+			modelOverride: CONFIGURED_MODEL_ID,
+			routerSelection: Object.freeze({ model: CONFIGURED_MODEL_ID, effort: null }),
+			assertCurrent() {},
+			allowsCandidate: () => true,
+			allowsModel,
+		},
+		currentModel: PARENT_MODEL_ID,
+		currentThinkingLevel: "high",
+		resolveCandidateModel: createCandidateModelResolver(lookup, "anthropic"),
+		availableModels: [selected, parentModel].map((model) => ({
+			provider: model.provider,
+			id: model.id,
+			fullId: `${model.provider}/${model.id}`,
+		})),
+	});
+	const spec = harness.attempts[0]!.spec as ChildSpec;
+	assert.equal(spec.thinkingLevel, "off");
+	assert.deepEqual(spec.fallbackModels, [`${PARENT_MODEL_ID}:high`]);
+	assert.equal(spec.isFallbackModelAllowed, allowsModel);
+	assert.deepEqual(result.routerSelection, { model: CONFIGURED_MODEL_ID, effort: null });
+});
