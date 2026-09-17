@@ -18,7 +18,7 @@ import { logger } from "./logger.ts";
 import { McpOAuthProvider } from "./mcp-oauth-provider.js";
 import { supportsOAuth } from "./mcp-auth-flow.js";
 import { registerSamplingHandler, type ServerSamplingConfig } from "./sampling-handler.ts";
-import { interpolateEnvRecord, resolveBearerToken, resolveConfigPath } from "./utils.js";
+import { interpolateEnvRecord, resolveServerUrl, resolveBearerToken, resolveConfigPath } from "./utils.js";
 
 interface ServerConnection {
   client: Client;
@@ -96,7 +96,7 @@ export class McpServerManager {
         cwd: resolveConfigPath(definition.cwd),
         stderr: definition.debug ? "inherit" : "ignore",
       });
-    } else if (definition.url) {
+    } else if (definition.url !== undefined) {
       // HTTP transport with fallback
       transport = await this.createHttpTransport(definition, name);
     } else {
@@ -164,7 +164,8 @@ export class McpServerManager {
     definition: ServerDefinition, 
     serverName: string
   ): Promise<Transport> {
-    const url = new URL(definition.url!);
+    const resolvedUrl = resolveServerUrl(definition.url!);
+    const url = new URL(resolvedUrl);
     
     // Build headers first (including any bearer token)
     const headers = resolveHeaders(definition.headers) ?? {};
@@ -192,7 +193,7 @@ export class McpServerManager {
       };
       authProvider = new McpOAuthProvider(
         serverName,
-        definition.url!,
+        resolvedUrl,
         oauthConfig,
         {
           onRedirect: async (_authUrl) => {

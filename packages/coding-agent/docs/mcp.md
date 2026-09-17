@@ -29,6 +29,14 @@ Replace `command` and `args` with your server's launch instructions. For a remot
 }
 ```
 
+Remote `url` values support `${VAR}` and `$env:VAR` environment variable interpolation in both project and user configuration. For example, commit this server entry and set `MY_SERVICE_URL` and `MY_SERVICE_TOKEN` in the environment that launches Atomic:
+
+```json
+{ "url": "${MY_SERVICE_URL}/mcp", "auth": "bearer", "bearerTokenEnv": "MY_SERVICE_TOKEN" }
+```
+
+With `MY_SERVICE_URL=https://example.com`, the endpoint is `https://example.com/mcp`. Unset variables become empty strings. The resolved endpoint must be a non-empty HTTP(S) URL; otherwise Atomic reports a configuration error before connecting. If you see this error, check the variables in Atomic's environment and the URL suffix, then restart Atomic after changing its environment.
+
 Atomic reads configuration in this order, with later files overriding earlier settings:
 
 1. `~/.config/mcp/mcp.json`, shared user-global configuration.

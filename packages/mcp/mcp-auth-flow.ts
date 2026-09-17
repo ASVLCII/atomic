@@ -24,6 +24,7 @@ import {
 } from "./mcp-auth.js"
 import { McpSessionCleanupBarrier } from "./session-cleanup-barrier.js"
 import type { ServerEntry } from "./types.js"
+import { resolveServerUrl } from "./utils.js"
 
 export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 
@@ -113,6 +114,7 @@ async function startAuthAttempt(
   owner?: PendingAuthentication,
 ): Promise<StartedAuth> {
   assertActive(owner)
+  serverUrl = resolveServerUrl(serverUrl)
   const config = definition ? extractOAuthConfig(definition) : {}
   const storedAuth = getAuthForUrl(serverName, serverUrl)
   if (storedAuth?.clientInfo && !storedAuth.tokens && !config.clientId) {
@@ -315,6 +317,7 @@ export async function getValidToken(
   serverName: string,
   serverUrl: string,
 ): Promise<StoredTokens | null> {
+  serverUrl = resolveServerUrl(serverUrl)
   const entry = getAuthForUrl(serverName, serverUrl)
   if (!entry?.tokens) return null
   const expired = isTokenExpired(serverName)
