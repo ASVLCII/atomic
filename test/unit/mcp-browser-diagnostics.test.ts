@@ -21,7 +21,7 @@ afterEach(async () => {
 	browser.open.mockReset();
 });
 
-// Regression for #3088: safe browser URLs retain the existing manual-open fallback.
+// Regression for #3088: manual login instructions retain the complete authorization URL.
 test("MCP browser failure retains non-sensitive manual URL without a raw cause", async () => {
 	const dir = makeTempDirectory("mcp-browser-diagnostics-");
 	vi.stubEnv("MCP_OAUTH_DIR", dir);
@@ -50,8 +50,8 @@ test("MCP browser failure retains non-sensitive manual URL without a raw cause",
 	}
 });
 
-// Regression for #3088: never print secret-bearing authorization URLs or browser stderr.
-test("MCP browser failure hides sensitive URLs but startAuth still returns them", async () => {
+// Regression for #3088: intentional login instructions include credentials, unlike diagnostics.
+test("MCP browser failure and startAuth both retain complete credential-bearing URLs", async () => {
 	const dir = makeTempDirectory("mcp-browser-secrets-");
 	vi.stubEnv("MCP_OAUTH_DIR", dir);
 	browser.open.mockRejectedValue(new Error("browser stderr containing PRIVATE_CAUSE"));
@@ -65,8 +65,8 @@ test("MCP browser failure hides sensitive URLs but startAuth still returns them"
 			browser.url = url;
 			assert.equal((await startAuth("manual", "https://example.com/mcp")).authorizationUrl, url);
 			await assert.rejects(authenticate("browser", "https://example.com/mcp"), (error: Error) => {
-				assert.match(error.message, /Check your default browser and retry MCP authentication/);
-				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_|https:/);
+				assert.equal(error.message, `Could not open browser. Please open this URL manually: ${url}`);
+				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_CAUSE/);
 				return true;
 			});
 			assert.equal(browser.open.mock.lastCall?.[0], url);
@@ -78,7 +78,7 @@ test("MCP browser failure hides sensitive URLs but startAuth still returns them"
 });
 
 // Regression for #3088: the SDK can carry configured endpoint credentials in resource.
-test("MCP browser failure withholds SDK resource credentials", async () => {
+test("MCP browser failure retains SDK resource credentials in manual instructions", async () => {
 	const dir = makeTempDirectory("mcp-browser-resource-");
 	vi.stubEnv("MCP_OAUTH_DIR", dir);
 	const endpoint = "https://example.com/mcp?PRIVATE_TOKEN=";
@@ -93,8 +93,8 @@ test("MCP browser failure withholds SDK resource credentials", async () => {
 	try {
 		assert.equal((await startAuth("manual", endpoint)).authorizationUrl, browser.url);
 		await assert.rejects(authenticate("browser", endpoint), (error: Error) => {
-			assert.match(error.message, /Check your default browser and retry MCP authentication/);
-			assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_|https:/);
+			assert.equal(error.message, `Could not open browser. Please open this URL manually: ${browser.url}`);
+			assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_CAUSE/);
 			return true;
 		});
 		assert.equal(browser.open.mock.lastCall?.[0], browser.url);
@@ -104,8 +104,8 @@ test("MCP browser failure withholds SDK resource credentials", async () => {
 	}
 });
 
-// Regression for #3088: standard OAuth fields must not expose configured credentials.
-test("MCP browser failure withholds configured credential overlap", async () => {
+// Regression for #3088: credential overlap must not alter intentional OAuth instructions.
+test("MCP browser failure retains configured credential overlap", async () => {
 	const dir = makeTempDirectory("mcp-browser-overlap-");
 	vi.stubEnv("MCP_OAUTH_DIR", dir);
 	browser.open.mockRejectedValue(new Error("PRIVATE_CAUSE"));
@@ -126,11 +126,8 @@ test("MCP browser failure withholds configured credential overlap", async () => 
 			browser.url = authorizationUrl.href;
 			assert.equal((await startAuth("manual", endpoint!)).authorizationUrl, browser.url);
 			await assert.rejects(authenticate("browser", endpoint!), (error: Error) => {
-				assert.equal(
-					error.message,
-					"Could not open browser. Check your default browser and retry MCP authentication.",
-				);
-				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE|https:/);
+				assert.equal(error.message, `Could not open browser. Please open this URL manually: ${browser.url}`);
+				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_CAUSE/);
 				return true;
 			});
 			assert.equal(browser.open.mock.lastCall?.[0], browser.url);
@@ -142,25 +139,15 @@ test("MCP browser failure withholds configured credential overlap", async () => 
 });
 
 // Regression for #3088: resolved origins and public routing words retain manual instructions.
-for (const [endpoint, path, clientId, secret] of [
-	[`\${RISK_ORIGIN}/mcp`, "/authorize", "public", ""],
-	["$env:RISK_ORIGIN/mcp", "/authorize", "public", ""],
-	[
-		`https://example.com/\${RISK_TOKEN}/mcp`,
-		"/PRIVATE_INTERPOLATED_CREDENTIAL/authorize",
-		"public",
-		"PRIVATE_INTERPOLATED_CREDENTIAL",
-	],
-	// Regression for #3088: the credential remains sensitive without its configured prefix.
-	[
-		`https://example.com/access-\${RISK_TOKEN}/mcp`,
-		"/PRIVATE_INTERPOLATED_CREDENTIAL/authorize",
-		"public",
-		"PRIVATE_INTERPOLATED_CREDENTIAL",
-	],
-	["https://example.com/mcp", "/authorize", "mcp", ""],
-	["https://example.com/mcp", "/mcp/authorize", "public", ""],
-	["https://example.com/api/v2/my-service", "/api/v2/my-service/authorize", "my-service", ""],
+for (const [endpoint, path, clientId] of [
+	[`\${RISK_ORIGIN}/mcp`, "/authorize", "public"],
+	["$env:RISK_ORIGIN/mcp", "/authorize", "public"],
+	[`https://example.com/\${RISK_TOKEN}/mcp`, "/PRIVATE_INTERPOLATED_CREDENTIAL/authorize", "public"],
+	// Regression for #3088: a substitution may appear without its configured prefix.
+	[`https://example.com/access-\${RISK_TOKEN}/mcp`, "/PRIVATE_INTERPOLATED_CREDENTIAL/authorize", "public"],
+	["https://example.com/mcp", "/authorize", "mcp"],
+	["https://example.com/mcp", "/mcp/authorize", "public"],
+	["https://example.com/api/v2/my-service", "/api/v2/my-service/authorize", "my-service"],
 ]) {
 	test(`MCP browser fallback uses resolved endpoint and public routing: ${endpoint} ${path} ${clientId}`, async () => {
 		const dir = makeTempDirectory("mcp-browser-resolved-");
@@ -180,13 +167,8 @@ for (const [endpoint, path, clientId, secret] of [
 		});
 		try {
 			await assert.rejects(authenticate("browser", endpoint!), (error: Error) => {
-				assert.equal(
-					error.message,
-					secret
-						? "Could not open browser. Check your default browser and retry MCP authentication."
-						: `Could not open browser. Please open this URL manually: ${browser.url}`,
-				);
-				if (secret) assert.ok(!inspect(error, { depth: null, showHidden: true }).includes(secret));
+				assert.equal(error.message, `Could not open browser. Please open this URL manually: ${browser.url}`);
+				assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_CAUSE/);
 				return true;
 			});
 			assert.equal(browser.open.mock.lastCall?.[0], browser.url);
@@ -197,8 +179,8 @@ for (const [endpoint, path, clientId, secret] of [
 	});
 }
 
-// Regression for #3088: explicit path interpolation is credential provenance even for words.
-test("MCP browser fallback protects an interpolated path word using the attempt snapshot", async () => {
+// Regression for #3088: environment mutation must not change the SDK URL shown to the user.
+test("MCP browser fallback retains an interpolated path word using the attempt snapshot", async () => {
 	const dir = makeTempDirectory("mcp-browser-word-");
 	vi.stubEnv("MCP_OAUTH_DIR", dir);
 	vi.stubEnv("RISK_TOKEN", "private");
@@ -215,10 +197,8 @@ test("MCP browser fallback protects an interpolated path word using the attempt 
 	});
 	try {
 		await assert.rejects(authenticate("browser", `https://example.com/\${RISK_TOKEN}/mcp`), (error: Error) => {
-			assert.equal(
-				error.message,
-				"Could not open browser. Check your default browser and retry MCP authentication.",
-			);
+			assert.equal(error.message, `Could not open browser. Please open this URL manually: ${browser.url}`);
+			assert.doesNotMatch(inspect(error, { depth: null, showHidden: true }), /PRIVATE_CAUSE/);
 			return true;
 		});
 	} finally {

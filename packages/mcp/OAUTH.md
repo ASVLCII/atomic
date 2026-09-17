@@ -280,7 +280,7 @@ For pre-registered OAuth clients (`oauth.clientId`), the callback redirect URI m
 
 ### Browser doesn't open
 
-If the browser fails to open (e.g., in SSH sessions), ordinary authorization URLs are displayed intact, including state, callback and PKCE parameters. URLs with additional sensitive parameters, such as a credential-bearing resource, are omitted. Browser-launch failure cancels the pending attempt; configure a working browser opener and retry `/mcp-auth <server-name>`.
+If the browser fails to open (e.g., in SSH sessions), Atomic displays the exact complete authorization URL for manual login, including all paths and parameters (state, callback, PKCE, resource, and any credentials). These intentional login instructions are not diagnostic logs; transport and RPC error diagnostics remain redacted. Treat the displayed URL as sensitive and do not share it. Browser-launch failure still cancels the pending attempt, so its callback cannot complete authentication; configure a working browser opener and retry `/mcp-auth <server-name>`.
 
 ## Architecture
 

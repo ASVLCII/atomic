@@ -25,7 +25,7 @@ import {
 import { McpSessionCleanupBarrier } from "./session-cleanup-barrier.js"
 import type { ServerEntry } from "./types.js"
 import { resolveServerUrl } from "./utils.js"
-import { authorizationUrlContainsEndpointCredentials, sanitizeRemoteError } from "./remote-diagnostics.js"
+import { sanitizeRemoteError } from "./remote-diagnostics.js"
 
 export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 
@@ -236,18 +236,9 @@ async function performAuthentication(
       assertActive(owner)
     } catch {
       assertActive(owner)
-      const url = new URL(started.authorizationUrl)
-      // This is a requested authorization instruction, not an unsolicited diagnostic.
-      // Ordinary OAuth state and callback parameters are needed to open the complete URL.
-      const publicParameters = new Set([
-        "client_id", "scope", "response_type", "code_challenge", "code_challenge_method", "state", "redirect_uri",
-      ])
-      const sensitive = url.username || url.password || url.hash ||
-        [...url.searchParams.keys()].some((key) => !publicParameters.has(key)) ||
-        authorizationUrlContainsEndpointCredentials(url, started.pendingTransport.serverUrl, serverUrl)
-      throw new Error(sensitive
-        ? "Could not open browser. Check your default browser and retry MCP authentication."
-        : `Could not open browser. Please open this URL manually: ${started.authorizationUrl}`)
+      // Intentional manual-login instructions must retain the exact SDK URL, including
+      // any credentials. Do not apply diagnostic redaction or attach the opener error.
+      throw new Error(`Could not open browser. Please open this URL manually: ${started.authorizationUrl}`)
     }
 
     const code = await callbackPromise
