@@ -99,6 +99,8 @@ The dedicated history actions always change history entries, regardless of the c
 | `tui.select.confirm` | `enter` | Confirm selection |
 | `tui.select.cancel` | `escape`, `ctrl+c` | Cancel selection |
 
+Local copy operations require a working native clipboard or platform command. On Linux, install `wl-clipboard` for Wayland, `xclip` or `xsel` for X11, or the Termux:API app and `termux-api` package for Termux. Fullscreen selection shows a backend-specific failure message for five seconds. Atomic sends OSC 52 only in SSH or Mosh sessions, where the terminal must support clipboard forwarding; it no longer treats OSC 52 as proof of a successful local copy.
+
 ### TUI Fullscreen Viewport
 
 Interactive sessions always use this fullscreen viewport for the primary transcript scroll region. Mouse-wheel input scrolls the region under the pointer, falling back to the transcript over the fixed editor/status/footer dock. While the main transcript is scrolled up, a clickable "Jump to latest message" label on its bottom row shows the `tui.altScreen.bottom` shortcut; clicking it returns that transcript to its live end. An attached workflow stage chat keeps its own "Jump to latest message" OSC 8 link with the same shortcut, which returns the stage chat to its live end. Clicking other OSC 8 hyperlinks opens them in the default handler. Dragging with the primary mouse button selects text and, by default, copies it to the clipboard. Set `fullscreenCopyOnSelect` to `false` to highlight text without copying. See [Terminal setup](/terminal-setup) for terminal-specific mouse and trackpad behavior.

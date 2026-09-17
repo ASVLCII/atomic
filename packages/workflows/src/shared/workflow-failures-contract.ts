@@ -23,6 +23,9 @@ export interface WorkflowFailure {
 
 export const WORKFLOW_AUTH_FAILURE_MESSAGE = "You must be logged in to run workflows. Run /login and try again.";
 
+export const WORKFLOW_AUTH_TIMEOUT_FAILURE_MESSAGE =
+	"Request authentication timed out. Check the provider's credential source and resume the workflow.";
+
 export const WORKFLOW_MISSING_API_KEY_FAILURE_MESSAGE =
 	"A required model provider API key is missing. Configure the provider credentials and resume the workflow.";
 
@@ -50,6 +53,7 @@ export function isWorkflowFailureKind(kind: string): kind is WorkflowFailureKind
 export function isWorkflowFailureCode(code: string): code is WorkflowFailureCode {
 	switch (code) {
 		case "login_required":
+		case "auth_timeout":
 		case "missing_api_key":
 		case "invalid_api_key":
 		case "forbidden_config":

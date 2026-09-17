@@ -2,10 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- Session, Workflow, and Intercom UUID selectors accept unique 8-character hexadecimal prefixes while preserving exact custom IDs and visibility boundaries ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
+
+### Changed
+
+- Install/update telemetry pings now go to the Atomic version-adoption endpoint instead of pi.dev. First-interactive-launch triggers, opt-outs, and the independent update check are unchanged ([#2498](https://github.com/bastani-inc/atomic/issues/2498)).
+
 ### Fixed
 
-- Fixed compaction statistics mixing authoritative provider token counts with heuristic region estimates, which could produce incorrect/negative percentReduction. Statistics now use symmetric heuristic estimates (region + explicit tail) while preserving the authoritative tokensBefore for budgeting and display ([#2052](https://github.com/bastani-inc/atomic/issues/2052)).
-- Standalone installations include PostgreSQL library aliases and reject unusable database runtimes before installing or upgrading. macOS and Linux packaging validates the transitive dependencies required for PostgreSQL startup and workflow database operation. A server left running by an older installation no longer hides an incomplete runtime. npm hydration preserves safe ordered alias chains ([#3073](https://github.com/bastani-inc/atomic/issues/3073)).
+- Stage-scoped durable workflow resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Explicit Intercom reply names and full session IDs keep their original identity through broker collision checks, unique UUID prefixes still canonicalize to the stored session ID, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Canonicalized Intercom UUID-prefix sends revalidate the original selector against the broker's current authorized sessions, so a newly visible same-prefix UUID, exact name, or custom ID refuses instead of delivering to the previously unique identity ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Prefix ambiguity refusals no longer include unauthorized or hidden session names when a canonicalized UUID-prefix send is rejected ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+
+- Running Atomic inside a Herdr pane no longer leaves the pane unreported or labelled as another agent when Herdr's installed Pi integration is present. Herdr installs `herdr-agent-state.ts` into the legacy `~/.pi/agent/extensions` directory that Atomic also loads from, and Atomic used to stand its built-in reporter down as soon as that file loaded — but the installed asset reports itself as `pi`, so the pane ended up mislabelled or never updated at all. Inside a Herdr pane Atomic now skips that installed integration when loading extensions and reports the pane itself; outside a Herdr pane the file loads exactly as before. Nothing to configure, and the extra extension no longer needs to be disabled by hand ([#2416](https://github.com/bastani-inc/atomic/pull/2416) by [@makgunay](https://github.com/makgunay))
+- Request authentication now fails within 15 seconds of one credential-preparation attempt when refresh or derivation does not settle, including a fallback whose OAuth login has expired. Agent sessions reuse that request's resolved auth for transport setup instead of starting a second deadline. Timeout errors tell you to check the provider's credential source rather than to log in. Operator cancellation still aborts without fallback or an auth-block notice, and the bound does not apply to human-input waits, tool execution, or an already-opened model stream ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+- MCP server URLs now support `${VAR}` and `$env:VAR` environment interpolation, including deployment-specific origins in shared configuration. Empty, invalid, or unsupported resolved endpoints report a configuration error before connecting. Diagnostics redact query-key credentials, while manual OAuth instructions show the complete authorization URL, including all paths, parameters, and any credentials ([#3088](https://github.com/bastani-inc/atomic/issues/3088)).
 - After DBOS initialization, workflow root database registration now has a 10-second deadline instead of waiting for the request timeout. Unavailable admission skips database cleanup, preserving the failure diagnostic and run identity even when PostgreSQL stops answering. Cancelled admission cannot start workflow code later, and database loss invalidates admission readiness. First-time provisioning and initialization are outside this bound ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Malformed saved workflow topology is non-resumable. Rejection during root admission returns a failed run result without executing workflow code or hiding database write failures ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Timed-out or cancelled workflow resume admission no longer publishes stale ownership metadata when its database operation finishes late ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
@@ -18,6 +36,23 @@
 - Live executor resume allows up to 10 seconds for database confirmation instead of using the 500ms pause acknowledgement budget, avoiding false timeouts on healthy remote PostgreSQL connections ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Keep ready shared PostgreSQL running across Atomic client exit and reload, with installation-independent cluster ownership records and consumer leases ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+
+## [0.9.20-alpha.3] - 2026-09-16
+
+### Fixed
+
+- Fixed compaction statistics mixing authoritative provider token counts with heuristic region estimates, which could produce incorrect/negative percentReduction. Statistics now use symmetric heuristic estimates (region + explicit tail) while preserving the authoritative tokensBefore for budgeting and display ([#2052](https://github.com/bastani-inc/atomic/issues/2052)).
+- Standalone installations include PostgreSQL library aliases and reject unusable database runtimes before installing or upgrading. macOS and Linux packaging validates the transitive dependencies required for PostgreSQL startup and workflow database operation. A server left running by an older installation no longer hides an incomplete runtime. npm hydration preserves safe ordered alias chains ([#3073](https://github.com/bastani-inc/atomic/issues/3073)).
+- Local clipboard failures now report platform-specific remedies instead of falling back to an unverified OSC 52 write. Fullscreen selection displays the diagnostic for five seconds; SSH and Mosh retain OSC 52 support.
+- Exported missing extension hook event and result types from the public package entrypoint.
+
+### Added
+
+- Added `compat.allowedFallbackModels` configuration for Anthropic-compatible models, including complete target pricing and `[]` to disable inherited fallbacks.
+
+### Changed
+
+- Exact `--session-id` lookup and fork-target collision checks read session headers instead of scanning transcripts, while keeping internal workflow sessions hidden.
 
 ## [0.9.20-alpha.2] - 2026-09-15
 

@@ -383,28 +383,45 @@ describe("session summary generation", () => {
 	it("lets a new prompt supersede a launch that is still parked", async () => {
 		// A parked launch holds no AbortController, so abortSessionSummary() has to bump the token
 		// to reach it. Without that, prompt() cancels nothing and the stale launch runs anyway.
+		// Issue #3085 / #3087: the request-auth deadline deepens _getRequiredRequestAuth, so turn 2's
+		// fire-and-forget launch can still be resolving credentials when runTwoTurns() returns.
 		const harness = await createHarness();
 		harnesses.push(harness);
 		await harness.session.bindExtensions({ mode: "tui" });
+		const requestStarted = Promise.withResolvers<void>();
+		const releaseRequest = Promise.withResolvers<void>();
 		harness.setResponses([
 			fauxAssistantMessage("first turn"),
 			fauxAssistantMessage("second turn"),
-			// Turn 2's own launch is already in flight when the next prompt arrives, so it spends
-			// a request that prompt() then cancels. The parked launch under test spends none.
-			fauxAssistantMessage("summary the next prompt cancels"),
+			// Turn 2's own launch must be in flight when the next prompt arrives, so it spends a
+			// request that prompt() then cancels. The parked launch under test spends none. The
+			// gate makes "reached the provider" a fact rather than a race: whether the launch
+			// has crossed request-auth resolution by the time runTwoTurns() resolves depends on
+			// the microtask depth of that path, and a deeper path leaves the launch to be
+			// cancelled before it spends anything, which shifts every later response by one.
+			async () => {
+				requestStarted.resolve();
+				await releaseRequest.promise;
+				return fauxAssistantMessage("summary the next prompt cancels");
+			},
 			fauxAssistantMessage("third turn"),
 			fauxAssistantMessage("the surviving summary"),
 		]);
 
 		await runTwoTurns(harness);
+		// Turn 2's fire-and-forget launch is now provably in flight.
+		await requestStarted.promise;
 		const parked = harness.session._maybeGenerateSessionSummary();
 		await harness.session.prompt("and one more thing");
+		releaseRequest.resolve();
 		await parked;
 		await settle();
 
 		// Exactly one summary, and every response accounted for: the parked launch never spent a
 		// request of its own.
-		expect(summaryEntries(harness)).toHaveLength(1);
+		const summaries = summaryEntries(harness);
+		expect(summaries).toHaveLength(1);
+		expect(summaries[0]!.summary).toBe("the surviving summary");
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
