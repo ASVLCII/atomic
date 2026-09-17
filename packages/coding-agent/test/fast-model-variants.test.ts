@@ -520,6 +520,46 @@ describe("ModelRuntime fast model catalog", () => {
 		assert.equal(fast?.name, "Custom Base Name (fast)");
 	});
 
+	it.each(["openai", "openai-codex"])("does not derive fast variants for %s models.json entries", async (provider) => {
+		const dir = mkdtempSync(join(tmpdir(), "atomic-custom-fast-variants-"));
+		tempDirs.push(dir);
+		const modelsPath = join(dir, "models.json");
+		const writeModels = (models: Array<{ id: string }>) =>
+			writeFileSync(modelsPath, JSON.stringify({ providers: { [provider]: { models } } }));
+		writeModels([{ id: "gpt-6-astra-slow" }, { id: "custom-alias" }]);
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath,
+			allowModelNetwork: false,
+		});
+
+		for (const id of ["gpt-6-astra-slow", "custom-alias"]) {
+			assert.ok(runtime.getModel(provider, id));
+			assert.equal(runtime.getModel(provider, `${id}-fast`), undefined);
+			assert.equal(
+				runtime
+					.getProvider(provider)
+					?.getModels()
+					.some((m) => m.id === `${id}-fast`),
+				false,
+			);
+		}
+		assert.ok(runtime.getModel(provider, "gpt-6-astra-fast")?.fastRoute);
+		assert.equal(runtime.getError(), undefined);
+		assert.equal(runtime.getWarning(), undefined);
+
+		// Replacing a built-in via models[] is custom too; overrides alone remain eligible.
+		writeModels([{ id: "gpt-6-astra" }]);
+		await runtime.refresh();
+		assert.ok(runtime.getModel(provider, "gpt-6-astra"));
+		assert.equal(runtime.getModel(provider, "gpt-6-astra-fast"), undefined);
+		assert.equal(runtime.getModel(provider, "gpt-6-astra-slow"), undefined);
+
+		writeModels([]);
+		await runtime.refresh();
+		assert.ok(runtime.getModel(provider, "gpt-6-astra-fast")?.fastRoute);
+	});
+
 	it("suppresses a derived duplicate for a models.json custom model and warns", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "atomic-fast-variants-"));
 		tempDirs.push(dir);

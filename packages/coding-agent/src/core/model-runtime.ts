@@ -229,6 +229,7 @@ export class ModelRuntime implements Models {
 		return withFastModelVariants(provider, {
 			getCopilotFastModelIds: () => copilotAdvertisedFastModelIds(this.credentials.peek("github-copilot")),
 			getModelOverrides: () => this.config.getProvider(provider.id)?.modelOverrides,
+			getCustomModelIds: () => new Set(this.config.getProvider(provider.id)?.models?.map((model) => model.id)),
 			getExtensionOwnedApis: () => {
 				const ownedApis = new Set<Api>();
 				const extension = this.extensionProviders.get(provider.id);

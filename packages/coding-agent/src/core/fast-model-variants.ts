@@ -28,6 +28,8 @@ export interface DeriveFastModelVariantsOptions {
 	modelOverrides?: Readonly<Record<string, ModelsJsonModelOverride>>;
 	/** APIs whose transport a registered extension owns for this provider. No variant is derived for them. */
 	extensionOwnedApis?: ReadonlySet<Api>;
+	/** IDs explicitly declared in this provider's models.json models array. Never derive siblings for them. */
+	customModelIds?: ReadonlySet<string>;
 }
 
 export interface FastModelVariantsOptions {
@@ -38,6 +40,8 @@ export interface FastModelVariantsOptions {
 	getCopilotFastModelIds?: () => readonly string[] | undefined;
 	/** Synchronous read of this provider's `models.json` `modelOverrides`, so a reload takes effect. */
 	getModelOverrides?: () => Readonly<Record<string, ModelsJsonModelOverride>> | undefined;
+	/** Read current custom model IDs per pass so models.json reloads update eligibility. */
+	getCustomModelIds?: () => ReadonlySet<string>;
 	/**
 	 * Synchronous read of the APIs a registered extension supplies a stream function for. Read per call
 	 * because extensions register after initial composition on some paths.
@@ -153,6 +157,7 @@ export function deriveFastModelVariants(
 	for (const model of models) {
 		derived.push(model);
 		if (model.fastRoute !== undefined || model.id.endsWith(FAST_MODEL_ID_SUFFIX)) continue;
+		if (options.customModelIds?.has(model.id)) continue;
 		// An extension that supplies this API's stream function owns its serialization, so Atomic cannot
 		// guarantee the route reaches the wire. Publishing a `-fast` choice it may not honor is the same
 		// hazard as publishing one for an adapter that cannot carry the tier.
@@ -195,6 +200,7 @@ export function withFastModelVariants(provider: Provider, options: FastModelVari
 					: undefined,
 				modelOverrides: options.getModelOverrides?.(),
 				extensionOwnedApis: options.getExtensionOwnedApis?.(),
+				customModelIds: options.getCustomModelIds?.(),
 			});
 			options.onDiagnostics?.(provider.id, diagnostics);
 			return models;
