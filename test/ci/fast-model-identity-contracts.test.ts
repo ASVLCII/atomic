@@ -284,6 +284,27 @@ function backtickedIdentifiers(block: string): string[] {
 	return [...names];
 }
 
+function assertChangelogIdentifiersResolve(block: string, isExported: (name: string) => boolean): void {
+	for (const name of backtickedIdentifiers(block)) {
+		if (proseNames.has(name)) continue;
+		if (removedNames.has(name)) {
+			assert.equal(
+				isExported(name),
+				false,
+				`the changelog says ${name} was removed, but it is still named in the package root exports`,
+			);
+			continue;
+		}
+		assert.equal(
+			isExported(name),
+			true,
+			`the changelog names \`${name}\`, which is not exported from the package root. Rename the ` +
+				`changelog entry to the shipped symbol, add it to the removed list, or add it to proseNames ` +
+				`if it is ordinary prose.`,
+		);
+	}
+}
+
 interface SyntaxNode {
 	[key: string]: SyntaxValue | undefined;
 	type?: string;
@@ -384,24 +405,36 @@ test("every identifier the coding-agent [Unreleased] changelog names resolves", 
 	const runtimeExports = new Set(Object.keys(rootExports));
 	const barrelExports = collectBarrelExports(join(root, "packages/coding-agent/src/index.ts"));
 	const isExported = (name: string): boolean => runtimeExports.has(name) || barrelExports.has(name);
-	const block = unreleasedBlock("packages/coding-agent/CHANGELOG.md");
+	assertChangelogIdentifiersResolve(unreleasedBlock("packages/coding-agent/CHANGELOG.md"), isExported);
+});
 
-	for (const name of backtickedIdentifiers(block)) {
-		if (proseNames.has(name)) continue;
-		if (removedNames.has(name)) {
-			assert.equal(
-				isExported(name),
-				false,
-				`the changelog says ${name} was removed, but it is still named in the package root exports`,
-			);
-			continue;
-		}
-		assert.equal(
-			isExported(name),
-			true,
-			`the changelog names \`${name}\`, which is not exported from the package root. Rename the ` +
-				`changelog entry to the shipped symbol, add it to the removed list, or add it to proseNames ` +
-				`if it is ordinary prose.`,
-		);
-	}
+test("backticked pi in Herdr changelog prose is not required to be a root export", () => {
+	assertChangelogIdentifiersResolve(
+		"the installed asset reports itself as `pi`, so the pane ended up mislabelled",
+		() => false,
+	);
+});
+
+test("a genuine exported identifier in changelog prose resolves", () => {
+	assertChangelogIdentifiersResolve("`AgentSession` is the session type", (name) => name === "AgentSession");
+});
+
+test("a removed identifier is accepted only while absent from exports", () => {
+	const block = "the toggle named `fastMode` is gone";
+	assertChangelogIdentifiersResolve(block, () => false);
+	assert.throws(
+		() => assertChangelogIdentifiersResolve(block, () => true),
+		/the changelog says fastMode was removed, but it is still named in the package root exports/u,
+	);
+});
+
+test("a nonexistent API identifier is still rejected alongside pi", () => {
+	assert.throws(
+		() =>
+			assertChangelogIdentifiersResolve(
+				"the installed asset reports itself as `pi` and names `notARealExport`",
+				() => false,
+			),
+		/the changelog names `notARealExport`, which is not exported from the package root/u,
+	);
 });
