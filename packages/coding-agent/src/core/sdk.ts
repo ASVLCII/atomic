@@ -14,7 +14,7 @@ import { withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
 import { convertToLlm, repairOrphanToolResults } from "./messages.ts";
 import { findInitialModel, resolveRestoredModelReference } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.js";
-import { mergeHeaders } from "./model-runtime-streaming.ts";
+import { type ModelRuntimeSimpleStreamOptions, mergeHeaders } from "./model-runtime-streaming.ts";
 import { sanitizeOpenAIResponsesPayload } from "./openai-responses-payload-sanitizer.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import { scrubPreCompactionAssistantUsage } from "./provider-context-usage.ts";
@@ -278,7 +278,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, streamOptions) => {
-			const authResult = await modelRuntime.getRequestAuth(model);
+			const authResult = await modelRuntime.getRequestAuth(model, {
+				apiKey: streamOptions?.apiKey,
+				env: streamOptions?.env,
+				signal: streamOptions?.signal,
+			});
 			const compatibility = authResult ? undefined : modelRuntime.getCompatibilityRequestConfig(model);
 			if (!authResult && compatibility?.authHeader) {
 				throw new Error(`No API key found for "${model.provider}"`);
@@ -336,8 +340,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				maxRetryDelayMs: streamOptions?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
 				headers: transportHeaders,
 			});
+			const preparedStreamOptions: ModelRuntimeSimpleStreamOptions = {
+				...fastRouteStreamOptions,
+				preparedRequestAuth: { resolution: authResult },
+			};
 			if (usesExtensionStream) {
-				return modelRuntime.streamSimple(requestModel, context, fastRouteStreamOptions);
+				return modelRuntime.streamSimple(requestModel, context, preparedStreamOptions);
 			}
 			if (fastRoute?.serviceTier !== undefined) {
 				return streamWithFastRoute(requestModel, context, fastRouteStreamOptions);
@@ -345,7 +353,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// The Codex routing identity is attached by ModelRuntimeStreaming, after auth headers are
 			// merged. Applying it here would be inert: `mergeHeaders` copies the header object the
 			// wrapper mutates.
-			return modelRuntime.streamSimple(requestModel, context, fastRouteStreamOptions);
+			return modelRuntime.streamSimple(requestModel, context, preparedStreamOptions);
 		},
 		onPayload: async (payload, model) => {
 			const sourceMessages = lastConvertedLlmMessages;

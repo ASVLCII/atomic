@@ -11,6 +11,7 @@ import { workflowSessionMetadataFromEnv } from "./core/session-manager-classific
 import type { SettingsManager } from "./core/settings-manager.ts";
 import { ExtensionSelectorComponent } from "./modes/interactive/components/extension-selector.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.js";
+import { resolveSessionIdTargetAcrossScopes } from "./session-id-target.js";
 import { resolvePath } from "./utils/paths.ts";
 
 /** Result from resolving a session argument */
@@ -18,20 +19,21 @@ type ResolvedSession =
 	| { type: "path"; path: string } // Direct file path
 	| { type: "local"; path: string } // Found in current project
 	| { type: "global"; path: string; cwd: string } // Found in different project
+	| { type: "error"; message: string }
 	| { type: "not_found"; arg: string }; // Not found anywhere
 
 /**
  * Resolve a session argument to a file path.
- * If it looks like a path, use as-is. Otherwise try to match as session ID prefix.
+ * If it looks like a path, use as-is. Otherwise resolve an exact ID or unique
+ * 8-character prefix of a UUID-backed session.
  */
-async function findLocalSessionByExactId(
+function findLocalSessionByExactId(
 	sessionId: string,
 	cwd: string,
 	sessionDir?: string,
-): Promise<{ type: "local"; path: string } | undefined> {
-	const localSessions = await SessionManager.list(cwd, sessionDir);
-	const localMatch = localSessions.find((s) => s.id === sessionId);
-	return localMatch ? { type: "local", path: localMatch.path } : undefined;
+): { type: "local"; path: string } | undefined {
+	const path = SessionManager.findById(cwd, sessionId, sessionDir);
+	return path ? { type: "local", path } : undefined;
 }
 
 async function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: string): Promise<ResolvedSession> {
@@ -40,22 +42,18 @@ async function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: 
 		return { type: "path", path: resolvePath(sessionArg, cwd) };
 	}
 
-	// Try to match as session ID in current project first
+	// Preserve project-local precedence, including for unique UUID prefixes.
 	const localSessions = await SessionManager.list(cwd, sessionDir);
-	const localMatch =
-		localSessions.find((s) => s.id === sessionArg) ?? localSessions.find((s) => s.id.startsWith(sessionArg));
-
-	if (localMatch) {
-		return { type: "local", path: localMatch.path };
+	const resolution = await resolveSessionIdTargetAcrossScopes(sessionArg, localSessions, () =>
+		SessionManager.listAll(sessionDir),
+	);
+	if (resolution.kind === "exact" || resolution.kind === "unique_prefix") {
+		return resolution.scope === "local"
+			? { type: "local", path: resolution.session.path }
+			: { type: "global", path: resolution.session.path, cwd: resolution.session.cwd };
 	}
-
-	// Try global search across all projects
-	const allSessions = await SessionManager.listAll(sessionDir);
-	const globalMatch =
-		allSessions.find((s) => s.id === sessionArg) ?? allSessions.find((s) => s.id.startsWith(sessionArg));
-
-	if (globalMatch) {
-		return { type: "global", path: globalMatch.path, cwd: globalMatch.cwd };
+	if (resolution.kind === "ambiguous" || resolution.kind === "malformed") {
+		return { type: "error", message: resolution.message };
 	}
 
 	// Not found anywhere
@@ -155,7 +153,7 @@ export async function createSessionManager(
 
 	if (parsed.fork) {
 		if (parsed.sessionId) {
-			const existingTarget = await findLocalSessionByExactId(parsed.sessionId, cwd, sessionDir);
+			const existingTarget = findLocalSessionByExactId(parsed.sessionId, cwd, sessionDir);
 			if (existingTarget) {
 				console.error(chalk.red(`Session already exists with id '${parsed.sessionId}'`));
 				process.exit(1);
@@ -169,6 +167,10 @@ export async function createSessionManager(
 			case "local":
 			case "global":
 				return forkSessionOrExit(resolved.path, cwd, sessionDir, parsed.sessionId);
+			case "error":
+				console.error(chalk.red(`Error: ${resolved.message}`));
+				process.exit(1);
+				throw new Error("unreachable");
 
 			case "not_found":
 				console.error(chalk.red(`No session found matching '${resolved.arg}'`));
@@ -193,6 +195,10 @@ export async function createSessionManager(
 				}
 				return forkSessionOrExit(resolved.path, cwd, sessionDir);
 			}
+			case "error":
+				console.error(chalk.red(`Error: ${resolved.message}`));
+				process.exit(1);
+				throw new Error("unreachable");
 
 			case "not_found":
 				console.error(chalk.red(`No session found matching '${resolved.arg}'`));
@@ -223,7 +229,7 @@ export async function createSessionManager(
 	}
 
 	if (parsed.sessionId) {
-		const existingSession = await findLocalSessionByExactId(parsed.sessionId, cwd, sessionDir);
+		const existingSession = findLocalSessionByExactId(parsed.sessionId, cwd, sessionDir);
 		if (existingSession) {
 			return openSessionOrExit(existingSession.path, sessionDir);
 		}

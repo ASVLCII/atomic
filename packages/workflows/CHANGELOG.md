@@ -29,6 +29,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Pool acquisition timeouts and PostgreSQL connection-capacity refusals, including refused managed health checks, no longer disconnect unrelated healthy database consumers or trigger managed PostgreSQL recovery ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Explicit resume reconciles retained database-failed admission under the original run ID, refuses conflicting incomplete records, and prevents stale concurrent resume from claiming a newer running generation. Awaited checkpoint writes now have a 10-second deadline; recovery rereads committed receipts rather than repeating checkpointed effects. External effects without a saved checkpoint remain uncertain and may repeat ([#3072](https://github.com/bastani-inc/atomic/issues/3072), [#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Same-ID database recovery remains retryable when resume preparation fails after reconciliation, including a temporarily missing workflow definition. Retried resume preserves saved tool receipts instead of switching to a new continuation ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
+
+### Added
+
+- Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
