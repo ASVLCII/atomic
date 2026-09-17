@@ -1,10 +1,17 @@
 /**
- * Parent-process stage session for issue #3085.
+ * Stage session factory for issue #3085.
  *
- * The isolated resume child must not import this file: jiti would re-transform
- * the coding-agent SDK graph on every restart, which is what blew the Windows
- * duration gate. The parent still drives the fabricated 429 + hung OAuth block
- * through a real AgentSession.
+ * Parent and isolated resume child both use this: the parent with
+ * `recovered: false` (429 + hung OAuth) and the child with `recovered: true`
+ * (same primary failure, then fallback OAuth refresh succeeds). Do not import
+ * `packages/coding-agent/test/utilities.ts` here; that file loads `src/index.ts`
+ * and dominates cold jiti.
+ *
+ * The resume child is a real Node process, so retry backoff is wall-clock.
+ * Same-model 429 retries at baseDelayMs 2000 cost 2s+4s+8s (measured: vitest
+ * tests 19s, fixture import 5s, session create 0.4s). Parent keeps 2000ms
+ * under fake timers. Recovered resume keeps maxRetries and still falls through
+ * to probe OAuth refresh; only the backoff is shortened.
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -160,7 +167,12 @@ export async function createIssue3085StageSession(input: {
 		model: modelRuntime.getModel(requestedProvider(input.model), "m")!,
 		fallbackModels: input.fallbackModels,
 		settingsManager: SettingsManager.inMemory({
-			retry: { enabled: true, maxRetries: 3, baseDelayMs: 2000, maxAgentDelayMs: 60_000 },
+			retry: {
+				enabled: true,
+				maxRetries: 3,
+				baseDelayMs: input.recovered ? 1 : 2000,
+				maxAgentDelayMs: 60_000,
+			},
 			compaction: { enabled: false },
 		}),
 		sessionManager: SessionManager.create(sessionDir, join(sessionDir, "sessions")),

@@ -8,10 +8,10 @@
  * after simulated provider recovery, and proves the completed prefix is not
  * executed again.
  *
- * The restart child must not import the coding-agent SDK graph. Cold jiti of
- * that graph is the Windows duration-gate cost; resume uses the prompt adapter
- * so the new process still completes the recovered stage without replaying the
- * prefix.
+ * Resume still constructs a recovered AgentSession (primary 429, fallback,
+ * successful OAuth refresh). It must not import coding-agent `test/utilities.ts`
+ * or `src/index.ts`: those pull createCodingTools and dominate cold jiti.
+ * The session factory inlines a stub resource loader instead.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -31,6 +31,7 @@ import {
 	restoreMockSdkState,
 	type SerializedMockDbosState,
 } from "../../unit/durable-dbos-backend-helpers.js";
+import { createIssue3085StageSession } from "./issue-3085-provider-auth-block-session.js";
 
 export const ISSUE_3085_WORKFLOW_NAME = "provider-auth-block-3085";
 export const ISSUE_3085_PERSIST_FILE = "persist.json";
@@ -114,8 +115,14 @@ export async function resumeIssue3085FromPersistedState(dir: string): Promise<Is
 			cwd: dir,
 			registry: createRegistry([definition]),
 			adapters: {
-				prompt: {
-					prompt: async () => "ok",
+				agentSession: {
+					create: async (options) =>
+						createIssue3085StageSession({
+							dir,
+							model: options.model,
+							fallbackModels: options.fallbackModels,
+							recovered: true,
+						}),
 				},
 			},
 		});
