@@ -14,12 +14,12 @@
  */
 
 import { describe, test } from "vitest";
-import { KeybindingsManager } from "../../packages/coding-agent/src/core/keybindings.ts";
-import { buildItemsForQuestion } from "../../packages/coding-agent/src/core/tools/ask-user-question/ask-user-question.ts";
-import { QuestionnaireSession } from "../../packages/coding-agent/src/core/tools/ask-user-question/state/questionnaire-session.ts";
-import type { QuestionnaireResult } from "../../packages/coding-agent/src/core/tools/ask-user-question/tool/types.ts";
-import { CustomEditor } from "../../packages/coding-agent/src/modes/interactive/components/custom-editor.ts";
-import { getEditorTheme, initTheme, theme } from "../../packages/coding-agent/src/modes/interactive/theme/theme.ts";
+import { KeybindingsManager } from "../../packages/coding-agent/src/core/keybindings.js";
+import { buildItemsForQuestion } from "../../packages/coding-agent/src/core/tools/ask-user-question/ask-user-question.js";
+import { QuestionnaireSession } from "../../packages/coding-agent/src/core/tools/ask-user-question/state/questionnaire-session.js";
+import type { QuestionnaireResult } from "../../packages/coding-agent/src/core/tools/ask-user-question/tool/types.js";
+import { CustomEditor } from "../../packages/coding-agent/src/modes/interactive/components/custom-editor.js";
+import { getEditorTheme, initTheme, theme } from "../../packages/coding-agent/src/modes/interactive/theme/theme.js";
 import type { PiCustomComponent } from "../../packages/workflows/src/extension/ui-surface.js";
 import {
 	applyStageLabelToEditorTopRule,
