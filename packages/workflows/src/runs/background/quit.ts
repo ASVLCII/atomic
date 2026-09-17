@@ -7,6 +7,7 @@ import {
 	getLoadableDurableWorkflow,
 	transitionDurableWorkflowStatus,
 } from "../../durable/workflow-status-transition.js";
+import { backgroundAdmissionControl } from "../../engine/run-durable-admission.js";
 import type { ToolAdmissionBoundary } from "../../engine/run-tool-admission-boundary.js";
 import {
 	toolControlRegistry as defaultToolControlRegistry,
@@ -145,8 +146,12 @@ export async function quitRunWithAction(
 	// When no node can acknowledge control, the executor owns the await itself.
 	// Abort synchronously before yielding so no later ctx.* call can slip in.
 	let runtimeQuit: Promise<void> | undefined;
+	let admissionControl = discoverDurableQuitBackend(runId)?.hasWorkflowAdmissionSettlement?.(runId) === true;
+	let admissionSettlement: Promise<void> | undefined;
 	if (handles.length === 0 && !hasLiveToolWork && promptStages.length === 0) {
 		const runtimeControl = toolControls.runControl(runId);
+		admissionControl ||= runtimeControl?.admitting === true;
+		admissionSettlement = runtimeControl?.admissionSettlement;
 		if (runtimeControl !== undefined) runtimeQuit = runtimeControl.quit();
 		else if (!hasPausedState) return { ok: false, runId, reason: "no_active_stages" };
 	}
@@ -189,7 +194,17 @@ export async function quitRunWithAction(
 	// acknowledged is included, and none can start afterwards — not even while
 	// `markDurableQuit()` awaits the backend.
 	await closeToolAdmission(admissionBoundaries, runId);
-	await runtimeQuit;
+	if (runtimeQuit !== undefined) {
+		// Local suspension acknowledges independently of durable registration.
+		publishLocalQuit(activeStore, runId, pausedRunIds, hasDurableQuitProgress(runId), opts?.actor);
+		try {
+			await runtimeQuit;
+		} catch (error) {
+			const resumable = hasDurableQuitProgress(runId);
+			publishLocalQuit(activeStore, runId, pausedRunIds, resumable, opts?.actor);
+			throw new Error(unrecordedDurableQuitMessage(error, resumable), { cause: error });
+		}
+	}
 	const toolHandles = controllableToolHandles(activeStore, toolControls, runId);
 	const abandonedTools = await abortInFlightTools(activeStore, toolHandles);
 	const cancelledTools = collectCancelledToolNodes(activeStore, toolHandles);
@@ -198,7 +213,9 @@ export async function quitRunWithAction(
 	for (const handle of toolHandles) if (handle.runId !== runId) pausedRunIds.add(handle.runId);
 	const current = activeStore.runs().find((candidate) => candidate.id === runId);
 	if (current === undefined) return { ok: false, runId, reason: "not_found" };
-	if (current.endedAt !== undefined) return { ok: false, runId, reason: "already_ended" };
+	// A quit that suspended the executor owns durable settlement even if a kill
+	// ended the local run while registration drained. Do not leave it running in DBOS.
+	if (current.endedAt !== undefined && runtimeQuit === undefined) return { ok: false, runId, reason: "already_ended" };
 	// A quit that aborted a call is committed: each of those callbacks observed a
 	// whole-run quit, so its executor suspends without writing any terminal
 	// record, and only the publication below can report that the run stopped.
@@ -213,30 +230,48 @@ export async function quitRunWithAction(
 		if (abandonedTools.length > 0) jobs.detach(runId, jobs.get(runId));
 	};
 	const needsProgressCheck = runtimeQuit !== undefined || (current.resumable === false && graph.nodes.length === 0);
-	const durableHandle = needsProgressCheck ? discoverDurableQuitBackend(runId)?.getWorkflow(runId) : undefined;
-	const resumable =
-		!needsProgressCheck ||
-		(durableHandle !== undefined &&
-			isDurableWorkflowResumable({ ...durableHandle, status: "paused", resumable: true }));
-	// The executor has relinquished ownership. Report that local stop even if
-	// the non-cancellable durable write stalls; only its completion permits resume.
-	if (runtimeQuit !== undefined) publishLocalQuit(activeStore, runId, pausedRunIds, false);
-	let durableTransition: DurableQuitOutcome;
-	try {
-		durableTransition = await markDurableQuit(runId, current, resumable);
-	} catch (error) {
-		if (!suspendedByAbort) throw error;
-		publish(false);
-		throw new Error(unrecordedDurableQuitMessage(error), { cause: error });
+	const resumable = !needsProgressCheck || hasDurableQuitProgress(runId);
+	// Existing checkpoints survive an unconfirmed transition; a fresh run cannot
+	// become resumable merely because its executor stopped locally.
+	if (runtimeQuit !== undefined) publishLocalQuit(activeStore, runId, pausedRunIds, hasDurableQuitProgress(runId));
+	const settle = async (): Promise<DurableQuitOutcome> => {
+		await admissionSettlement;
+		const durableTransition = await markDurableQuit(runId, current, resumable);
+		if (durableTransition === "refused") {
+			if (suspendedByAbort) publish(hasDurableQuitProgress(runId));
+			return durableTransition;
+		}
+		publish(resumable);
+		return durableTransition;
+	};
+	if (admissionControl) {
+		publish(resumable);
+		backgroundAdmissionControl(
+			discoverDurableQuitBackend(runId),
+			runId,
+			settle().then((outcome) => {
+				if (outcome === "refused") throw new Error(`Workflow ${runId} refused the durable paused transition`);
+			}),
+			(error, preservedProgress) => {
+				const message = unrecordedDurableQuitMessage(error, preservedProgress);
+				current.error = message;
+				publish(preservedProgress);
+				return message;
+			},
+		);
+	} else {
+		try {
+			if ((await settle()) === "refused") return { ok: false, runId, reason: "already_ended" };
+		} catch (error) {
+			if (!suspendedByAbort) throw error;
+			const preservedProgress = hasDurableQuitProgress(runId);
+			publish(preservedProgress);
+			throw new Error(unrecordedDurableQuitMessage(error, preservedProgress), { cause: error });
+		}
 	}
-	if (durableTransition === "refused") {
-		if (suspendedByAbort) publish(false);
-		return { ok: false, runId, reason: "already_ended" };
-	}
-	publish(resumable);
 	const message =
 		runtimeQuit !== undefined || !resumable
-			? `Run ${runId} quit. ${runtimeQuit === undefined ? "" : "No further workflow steps will be admitted; untracked initialization or workflow code may still finish. "}${resumable ? "Resume with /workflow resume." : "No durable progress was recorded; this run cannot be resumed."}`
+			? `Run ${runId} quit. ${runtimeQuit === undefined ? "" : "No further workflow steps will be admitted; untracked initialization or workflow code may still finish. "}${resumable ? "Resume with /workflow resume." : "No durable progress was recorded; this run cannot be resumed."}${admissionControl ? " Database pause settlement is pending; inspect workflow status for persistence errors." : ""}`
 			: undefined;
 	return { ok: true, runId, paused, cancelledTools, abandonedTools, ...(message === undefined ? {} : { message }) };
 }
@@ -244,11 +279,9 @@ export async function quitRunWithAction(
 /**
  * Publish the local paused record for this workflow boundary.
  *
- * `resumable` follows the durable outcome rather than the local one: a pause the
- * durable backend never accepted is still real — the run stopped — but no future
- * process could resume from it, so it is not advertised as resumable. Recording
- * it keeps the run controllable, so a later `/workflow quit` re-attempts the
- * transition and upgrades the record.
+ * An unconfirmed transition does not create durable progress, but must not
+ * discard existing checkpoints either. Recording the local stop keeps the run
+ * controllable so a later quit can retry the durable transition.
  *
  * The boundary run is deliberately excluded from the descendant loop: a bare
  * `recordRunPaused(runId)` first would publish a plain paused state, and a
@@ -279,12 +312,18 @@ function publishLocalQuit(
  * Every caller already names the run ("Failed to quit run …: "), so this reads
  * as the rest of that sentence.
  */
-function unrecordedDurableQuitMessage(error: unknown): string {
+function unrecordedDurableQuitMessage(error: unknown, resumable: boolean): string {
 	const detail = error instanceof Error ? error.message : String(error);
 	return (
-		`the in-flight ctx.tool work was cancelled but the durable paused transition failed: ${detail}.` +
-		" The run is paused locally and is not resumable until a retried quit records it durably."
+		`Workflow execution stopped locally but the durable paused transition failed: ${detail}.` +
+		` The run is paused locally and ${resumable ? "retains resumable durable progress" : "is not resumable"}. Inspect workflow status and database availability before retrying.`
 	);
+}
+
+/** Progress already recorded survives a failed attempt to persist the quit. */
+function hasDurableQuitProgress(runId: string): boolean {
+	const handle = discoverDurableQuitBackend(runId)?.getWorkflow(runId);
+	return handle !== undefined && isDurableWorkflowResumable({ ...handle, status: "paused", resumable: true });
 }
 
 /** Distinct admission boundaries owned by this workflow boundary's runs. */
@@ -387,11 +426,11 @@ type DurableQuitOutcome = "transitioned" | "not_needed" | "refused";
 async function markDurableQuit(runId: string, run: RunSnapshot, resumable = true): Promise<DurableQuitOutcome> {
 	const backend = discoverDurableQuitBackend(runId);
 	if (backend === undefined) return "not_needed";
+	await backend.settleWorkflowAdmission?.(runId);
 	// The workflow is durably tracked, so a failure to persist the paused
 	// transition or flush it must surface: swallowing it here would let quitRun
-	// advertise a resumable pause no future process could resume from. The caller
-	// still reconciles an already-suspended executor into a pause that is not
-	// advertised as resumable, so the failure costs the promise, not the record.
+	// advertise a newly resumable pause no future process could resume from.
+	// Existing durable progress remains resumable even when this transition fails.
 	const transitioned = await transitionDurableWorkflowStatus(
 		backend,
 		runId,
@@ -417,7 +456,9 @@ async function markDurableQuit(runId: string, run: RunSnapshot, resumable = true
 function discoverDurableQuitBackend(runId: string): DurableWorkflowBackend | undefined {
 	try {
 		const backend = getDurableBackend();
-		return getLoadableDurableWorkflow(backend, runId) === undefined ? undefined : backend;
+		return backend.hasWorkflowAdmissionSettlement?.(runId) || getLoadableDurableWorkflow(backend, runId) !== undefined
+			? backend
+			: undefined;
 	} catch {
 		return undefined;
 	}

@@ -46,6 +46,9 @@ export interface ToolControlHandle {
 /** Executor control for initialization and between-node awaits; never a graph node. */
 export interface WorkflowRunControlHandle {
 	readonly paused: boolean;
+	/** Root startup still owns durable registration; controls acknowledge locally. */
+	readonly admitting?: boolean;
+	readonly admissionSettlement?: Promise<void>;
 	pause(): Promise<void>;
 	resume(): Promise<void>;
 	quit(): Promise<void>;
