@@ -175,8 +175,9 @@ runTest(
 				import { getVirtualModules } from "./dist/core/extensions/loader-host-modules.js";
 				const hosted = (await getVirtualModules())["@bastani/atomic"];
 				assert.equal(hosted.inferStructuredOutput, sdk.inferStructuredOutput);
-				assert.equal(hosted.resolveStructuredOutputModel, sdk.resolveStructuredOutputModel);
-				assert.equal(sdk.SettingsManager.inMemory().getStructuredOutputModel(), "");
+				assert.equal(hosted.inferRouterDecision, sdk.inferRouterDecision);
+				assert.equal(hosted.resolveRouterModel, sdk.resolveRouterModel);
+				assert.equal(sdk.SettingsManager.inMemory().getRouterModel(), "");
 				assert.equal(sdk.getStructuredOutputProviders()[0].capabilities.chat, false);
 				process.env.TYPESAFE_AI_API_KEY = "mock-installed-key";
 				let requests = 0;
@@ -186,7 +187,7 @@ runTest(
 						type: "choice", choice: "yes", confidence: 1, probabilities: {yes: 1}
 					}}, usage: {input_tokens: 1, output_tokens: 1}});
 				};
-				const result = await sdk.inferStructuredOutput({
+				const result = await sdk.inferRouterDecision({
 					settings: sdk.SettingsManager.inMemory(),
 					modelRegistry: {getAll: () => [], streamSimple: () => {throw Error("unexpected chat request")}},
 					state: {task: "classify this fixture"}, instructions: "Choose yes.",

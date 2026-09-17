@@ -5,7 +5,7 @@ import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.j
 import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.js";
 import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
-import type { StructuredOutputRequest } from "../../packages/coding-agent/src/core/structured-output/index.js";
+import type { RouterDecisionRequest } from "../../packages/coding-agent/src/core/structured-output/index.js";
 
 export const decisionModel: Model<Api> = {
 	provider: "decision-test",
@@ -26,9 +26,9 @@ export const decisionSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export function decisionRequest(): StructuredOutputRequest<typeof decisionSchema> {
+export function decisionRequest(): RouterDecisionRequest<typeof decisionSchema> {
 	return {
-		settings: SettingsManager.inMemory({ structuredOutputModel: "decision-test/chat" }),
+		settings: SettingsManager.inMemory({ routerModel: "decision-test/chat" }),
 		modelRegistry: {
 			getAll: () => [decisionModel],
 			streamSimple: () => {

@@ -308,14 +308,16 @@ export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
 	DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS,
 	getStructuredOutputProviders,
+	inferRouterDecision,
 	inferStructuredOutput,
 	JEV_STRUCTURED_OUTPUT_PROVIDER,
-	resolveStructuredOutputModel,
+	type RouterDecisionRequest,
+	type RouterModelSelectionOptions,
+	resolveRouterModel,
 	type StructuredChoiceQuestion,
 	type StructuredOutputModel,
 	type StructuredOutputRequest,
 	type StructuredOutputResult,
-	type StructuredOutputSelectionOptions,
 } from "./core/structured-output/index.js";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Builtin tool definitions reusable by first-party extensions (e.g. workflows

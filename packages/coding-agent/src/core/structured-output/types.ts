@@ -10,9 +10,9 @@ export interface StructuredChoiceQuestion {
 	readonly criteria: Readonly<Record<string, string>>;
 }
 
-export interface StructuredOutputSelectionOptions {
-	readonly settings: Pick<SettingsManager, "getStructuredOutputModel">;
-	readonly modelRegistry: Pick<ModelRegistry, "getAll" | "streamSimple">;
+export interface RouterModelSelectionOptions {
+	readonly settings: Pick<SettingsManager, "getRouterModel">;
+	readonly modelRegistry: Pick<ModelRegistry, "getAll">;
 	/** Read the active chat model at invocation time; never change it to perform a decision. */
 	readonly currentModel?: Model<Api>;
 }
@@ -21,7 +21,10 @@ export type StructuredOutputModel =
 	| { readonly kind: "chat"; readonly fullId: string; readonly model: Model<Api> }
 	| { readonly kind: "jev"; readonly fullId: "typesafe-ai/jev" };
 
-export interface StructuredOutputRequest<T extends TSchema> extends StructuredOutputSelectionOptions {
+export interface StructuredOutputRequest<T extends TSchema> {
+	/** Explicit inference model. General structured output never reads routerModel or the chat selection. */
+	readonly model: StructuredOutputModel;
+	readonly modelRegistry: Pick<ModelRegistry, "streamSimple">;
 	/** Supply actual task, facts, constraints and reference text. Never supply credentials. */
 	readonly state: JsonObject;
 	readonly instructions: string;
@@ -38,6 +41,13 @@ export interface StructuredOutputRequest<T extends TSchema> extends StructuredOu
 	readonly timeoutMs?: number;
 	/** Ordinary-provider output bound, default 4096 tokens. */
 	readonly maxTokens?: number;
+}
+
+/** Shared prerequisite router request. Neither routing consumer is activated by this API alone. */
+export interface RouterDecisionRequest<T extends TSchema>
+	extends Omit<StructuredOutputRequest<T>, "model" | "modelRegistry">,
+		RouterModelSelectionOptions {
+	readonly modelRegistry: Pick<ModelRegistry, "getAll" | "streamSimple">;
 }
 
 export interface StructuredOutputResult<T> {

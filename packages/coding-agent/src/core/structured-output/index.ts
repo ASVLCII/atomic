@@ -8,20 +8,21 @@ import {
 	STRUCTURED_OUTPUT_TOOL_NAME,
 } from "../tools/structured-output.js";
 import { inferJev, STRUCTURED_DECISION_POLICY } from "./jev.js";
-import { resolveStructuredOutputModel } from "./resolver.js";
-import type { StructuredOutputRequest, StructuredOutputResult } from "./types.js";
+import { resolveRouterModel } from "./resolver.js";
+import type { RouterDecisionRequest, StructuredOutputRequest, StructuredOutputResult } from "./types.js";
 
 export {
 	getStructuredOutputProviders,
 	JEV_STRUCTURED_OUTPUT_PROVIDER,
-	resolveStructuredOutputModel,
+	resolveRouterModel,
 } from "./resolver.js";
 export type {
+	RouterDecisionRequest,
+	RouterModelSelectionOptions,
 	StructuredChoiceQuestion,
 	StructuredOutputModel,
 	StructuredOutputRequest,
 	StructuredOutputResult,
-	StructuredOutputSelectionOptions,
 } from "./types.js";
 
 export const DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS = 30_000;
@@ -158,7 +159,16 @@ export async function inferStructuredOutput<T extends TSchema>(
 		jev: { questions, decode: request.jev.decode },
 	};
 	const validator = Compile(snapshot.schema);
-	const selected = resolveStructuredOutputModel(request);
+	const selected = request.model;
+	if (!selected || (selected.kind !== "chat" && selected.kind !== "jev")) {
+		throw new Error("Structured output requires an explicit concrete inference model.");
+	}
+	if (
+		selected.kind === "chat" &&
+		(!selected.model || selected.model.id === "auto" || selected.model.provider === "typesafe-ai")
+	) {
+		throw new Error("Structured output requires a concrete chat model or the decision-only Jev adapter.");
+	}
 	const controller = new AbortController();
 	const abort = () => controller.abort(new Error("Structured output cancelled; no decision was accepted."));
 	request.signal?.addEventListener("abort", abort, { once: true });
@@ -166,7 +176,7 @@ export async function inferStructuredOutput<T extends TSchema>(
 		() =>
 			controller.abort(
 				new Error(
-					"Structured output timed out; no decision was accepted. Retry explicitly or select another structuredOutputModel.",
+					"Structured output timed out; no decision was accepted. Retry explicitly or select another inference model.",
 				),
 			),
 		timeoutMs,
@@ -192,4 +202,14 @@ export async function inferStructuredOutput<T extends TSchema>(
 		clearTimeout(timer);
 		request.signal?.removeEventListener("abort", abort);
 	}
+}
+
+/** Resolve only prerequisite routing inference. Does not execute the selected action or alter chat/tools. */
+export async function inferRouterDecision<T extends TSchema>(
+	request: RouterDecisionRequest<T>,
+): Promise<StructuredOutputResult<Static<T>>> {
+	request.signal?.throwIfAborted();
+	const { settings, currentModel, ...inference } = request;
+	const model = resolveRouterModel({ settings, currentModel, modelRegistry: request.modelRegistry });
+	return inferStructuredOutput({ ...inference, model });
 }

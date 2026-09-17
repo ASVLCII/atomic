@@ -5,10 +5,10 @@ import { createAssistantMessageEventStream } from "@bastani/pi-ai";
 import { Type } from "typebox";
 import { afterEach, test, vi } from "vitest";
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
-import { inferStructuredOutput } from "../../packages/coding-agent/src/core/structured-output/index.js";
+import { inferRouterDecision } from "../../packages/coding-agent/src/core/structured-output/index.js";
 import {
 	getStructuredOutputProviders,
-	resolveStructuredOutputModel,
+	resolveRouterModel,
 } from "../../packages/coding-agent/src/core/structured-output/resolver.js";
 import {
 	decisionMessage,
@@ -53,8 +53,8 @@ for (const [setting, key, expected] of [
 ] as const) {
 	test(`resolver precedence: ${JSON.stringify(setting)}, key present=${Boolean(key.trim())}`, () => {
 		vi.stubEnv("TYPESAFE_AI_API_KEY", key);
-		const settings = SettingsManager.inMemory({ structuredOutputModel: setting });
-		assert.equal(resolveStructuredOutputModel({ settings, modelRegistry, currentModel: chat }).fullId, expected);
+		const settings = SettingsManager.inMemory({ routerModel: setting });
+		assert.equal(resolveRouterModel({ settings, modelRegistry, currentModel: chat }).fullId, expected);
 		assert.equal(settings.getDefaultModel(), undefined);
 		assert.equal(chat.id, "chat");
 	});
@@ -63,22 +63,16 @@ for (const [setting, key, expected] of [
 test("empty default reads the current chat model on each invocation", () => {
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
 	const settings = SettingsManager.inMemory();
-	assert.equal(settings.getStructuredOutputModel(), "");
-	assert.equal(
-		resolveStructuredOutputModel({ settings, modelRegistry, currentModel: alternate }).fullId,
-		"test/alternate",
-	);
-	assert.throws(() => resolveStructuredOutputModel({ settings, modelRegistry }), /selected chat model/);
+	assert.equal(settings.getRouterModel(), "");
+	assert.equal(resolveRouterModel({ settings, modelRegistry, currentModel: alternate }).fullId, "test/alternate");
+	assert.throws(() => resolveRouterModel({ settings, modelRegistry }), /selected chat model/);
 });
 
 for (const explicit of ["auto", "missing/model", "chat", "test/chat:high", " typesafe-ai/jev", " "]) {
 	test(`invalid explicit selection ${JSON.stringify(explicit)} never falls back to Jev or chat`, () => {
 		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
-		const settings = SettingsManager.inMemory({ structuredOutputModel: explicit });
-		assert.throws(
-			() => resolveStructuredOutputModel({ settings, modelRegistry, currentModel: chat }),
-			/Invalid structuredOutputModel/,
-		);
+		const settings = SettingsManager.inMemory({ routerModel: explicit });
+		assert.throws(() => resolveRouterModel({ settings, modelRegistry, currentModel: chat }), /Invalid routerModel/);
 	});
 }
 
@@ -115,13 +109,13 @@ test("ordinary entrypoint uses configured provider/auth, complete state, one sch
 	const { runtime, registry } = await registeredDecisionRuntime(dispatch);
 	const request = { ...decisionRequest(), modelRegistry: registry };
 	const before = JSON.stringify(request.currentModel);
-	const result = await inferStructuredOutput(request);
+	const result = await inferRouterDecision(request);
 	assert.deepEqual(result.value, { route: "review", limit: 1.23456789 });
 	assert.equal(result.model, "decision-test/chat");
 	assert.deepEqual(result.usage, { inputTokens: 20, outputTokens: 10 });
 	assert.equal(dispatch.mock.calls.length, 1);
 	assert.equal(JSON.stringify(request.currentModel), before);
-	assert.equal(request.settings.getStructuredOutputModel(), "decision-test/chat");
+	assert.equal(request.settings.getRouterModel(), "decision-test/chat");
 	assert.equal(
 		runtime.getModels().some((model) => model.provider === "typesafe-ai"),
 		false,
@@ -140,7 +134,7 @@ for (const args of [
 		const dispatch = vi.fn(() => messageStream(decisionMessage(args)));
 		const request = decisionRequest();
 		await assert.rejects(
-			inferStructuredOutput({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
+			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
 			/Invalid structured output/,
 		);
 		assert.equal(dispatch.mock.calls.length, 1);
@@ -151,7 +145,7 @@ for (const limit of [undefined, 0, 1.23456789, Number.MAX_SAFE_INTEGER]) {
 	test(`ordinary decision preserves exact zero, omission and large limits: ${limit}`, async () => {
 		const args = { route: "review", ...(limit === undefined ? {} : { limit }) };
 		const request = decisionRequest();
-		const result = await inferStructuredOutput({
+		const result = await inferRouterDecision({
 			...request,
 			modelRegistry: { ...request.modelRegistry, streamSimple: () => messageStream(decisionMessage(args)) },
 		});
@@ -175,7 +169,7 @@ for (const kind of ["text", "multiple", "wrong-tool", "error", "aborted", "lengt
 		const request = decisionRequest();
 		const dispatch = vi.fn(() => messageStream(message));
 		await assert.rejects(
-			inferStructuredOutput({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
+			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
 			/Structured output/,
 		);
 		assert.equal(dispatch.mock.calls.length, 1);
@@ -206,7 +200,7 @@ test("Jev entrypoint sends both Choice judgments together and maps exact values 
 		return Response.json(jevResponse());
 	});
 	vi.stubGlobal("fetch", transport);
-	const result = await inferStructuredOutput(request);
+	const result = await inferRouterDecision(request);
 	assert.deepEqual(result, {
 		value: { route: "review", limit: 1.23456789 },
 		model: "typesafe-ai/jev",
@@ -222,7 +216,7 @@ for (const status of [401, 422, 429, 529]) {
 		const transport = vi.fn(async () => new Response("private echoed context and mock-key", { status }));
 		vi.stubGlobal("fetch", transport);
 		await assert.rejects(
-			inferStructuredOutput({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
+			inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
 			(error: Error) => {
 				assert.match(error.message, new RegExp(`HTTP ${status}`));
 				assert.equal(error.message.includes("private"), false);
@@ -267,7 +261,7 @@ for (const kind of [
 		const request = decisionRequest();
 		const decode = vi.fn(request.jev.decode);
 		await assert.rejects(
-			inferStructuredOutput({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
+			inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
 			/[Mm]alformed/,
 		);
 		assert.equal(transport.mock.calls.length, 1);
@@ -280,7 +274,7 @@ test("Jev decoded result must still satisfy the normalized schema", async () => 
 	vi.stubGlobal("fetch", async () => Response.json(jevResponse()));
 	const request = decisionRequest();
 	await assert.rejects(
-		inferStructuredOutput({
+		inferRouterDecision({
 			...request,
 			settings: SettingsManager.inMemory(),
 			jev: { ...request.jev, decode: () => ({ route: "review" as const, limit: -1 }) },
@@ -311,7 +305,7 @@ for (const count of [255, 256]) {
 			});
 		});
 		vi.stubGlobal("fetch", transport);
-		const result = inferStructuredOutput({
+		const result = inferRouterDecision({
 			...decisionRequest(),
 			settings: SettingsManager.inMemory(),
 			jev: {
@@ -347,7 +341,7 @@ for (const kind of ["cancel", "timeout", "pre-cancel"] as const) {
 			const decode = vi.fn(request.jev.decode);
 			if (kind === "pre-cancel") controller.abort(new Error("pre-cancelled"));
 			let accepted = 0;
-			const pending = inferStructuredOutput({
+			const pending = inferRouterDecision({
 				...request,
 				settings: SettingsManager.inMemory(),
 				modelRegistry: { ...request.modelRegistry, streamSimple: dispatch },
@@ -383,14 +377,14 @@ test("independent overlapping decisions cannot share state, candidates or cancel
 		return streams[contexts.length - 1];
 	});
 	const registry = { ...request.modelRegistry, streamSimple: dispatch };
-	const first = inferStructuredOutput({
+	const first = inferRouterDecision({
 		...request,
 		modelRegistry: registry,
 		state: { task: "first task" },
 		signal: controller.signal,
 	});
 	const rejected = assert.rejects(first, /cancelled/);
-	const second = inferStructuredOutput({ ...request, modelRegistry: registry, state: { task: "second task" } });
+	const second = inferRouterDecision({ ...request, modelRegistry: registry, state: { task: "second task" } });
 	controller.abort();
 	streams[1].push({ type: "done", reason: "toolUse", message: decisionMessage({ route: "none" }) });
 	await rejected;
@@ -432,7 +426,7 @@ test("model/effort pairs use one Choice and one closed union, preserving null ve
 			});
 		});
 		vi.stubGlobal("fetch", transport);
-		const result = await inferStructuredOutput({
+		const result = await inferRouterDecision({
 			...decisionRequest(),
 			settings: SettingsManager.inMemory(),
 			schema,

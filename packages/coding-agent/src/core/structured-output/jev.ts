@@ -13,7 +13,7 @@ function compileQuestions(questions: Readonly<Record<string, StructuredChoiceQue
 		Object.entries(questions).map(([id, question]) => {
 			if (Object.keys(question.criteria).length > provider.capabilities.maxChoiceOptions) {
 				throw new Error(
-					"Jev supports at most 255 options per Choice. Select an ordinary structuredOutputModel; no candidates were removed.",
+					"Jev supports at most 255 options per Choice. Select an ordinary inference model; no candidates were removed.",
 				);
 			}
 			return [
@@ -133,7 +133,7 @@ export async function inferJev<T extends TSchema>(
 	const apiKey = process.env.TYPESAFE_AI_API_KEY?.trim();
 	if (!apiKey)
 		throw new Error(
-			"typesafe-ai/jev requires a nonempty TYPESAFE_AI_API_KEY. Set it or select another structuredOutputModel.",
+			"typesafe-ai/jev requires a nonempty TYPESAFE_AI_API_KEY. Set it or select another inference model.",
 		);
 	signal.throwIfAborted();
 	let response: Response;

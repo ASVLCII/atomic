@@ -45,7 +45,7 @@ interface SettingsManagerBasicAccessors {
 	getSessionDir(): string | undefined;
 	getDefaultProvider(): string | undefined;
 	getDefaultModel(): string | undefined;
-	getStructuredOutputModel(): string;
+	getRouterModel(): string;
 	setDefaultProvider(provider: string): void;
 	setDefaultModel(modelId: string): void;
 	setDefaultModelAndProvider(provider: string, modelId: string): void;
@@ -157,13 +157,11 @@ const basicAccessors: SettingsManagerBasicAccessors = {
 		return settingsInternals(this).settings.defaultModel;
 	},
 
-	getStructuredOutputModel() {
-		const value = settingsInternals(this).settings.structuredOutputModel;
+	getRouterModel() {
+		const value = settingsInternals(this).settings.routerModel;
 		if (value === undefined) return "";
 		if (typeof value !== "string" || value.trim() !== value || value === "auto") {
-			throw new Error(
-				"Invalid structuredOutputModel: expected an exact provider/model ID or an empty string, not auto.",
-			);
+			throw new Error("Invalid routerModel: expected an exact provider/model ID or an empty string, not auto.");
 		}
 		return value;
 	},

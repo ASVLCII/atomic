@@ -154,7 +154,7 @@ const builtinsOnly = await ModelRuntime.create({ modelsPath: null });
 
 ### Bounded structured decisions
 
-Use `inferStructuredOutput()` for a single schema-validated semantic decision without starting an agent session or executing tools. It shares `structuredOutputModel` resolution across SDK consumers and supports ordinary configured models and the decision-only `typesafe-ai/jev` integration. It does not change the selected chat model or activate workflow/subagent routing. See [Structured decisions](/sdk/structured-decisions) for state preparation, complete examples, provider limits and failure handling.
+Use `inferStructuredOutput()` with an explicit inference model for a single schema-validated semantic decision without starting an agent session or executing tools. It supports ordinary configured models and the decision-only `typesafe-ai/jev` integration, and never reads `routerModel`. The separate `inferRouterDecision()` entrypoint shares `routerModel` resolution for prerequisite workflow/subagent-auto routing only. Neither API changes the selected chat model or the `structured_output` tool; workflow/subagent routing is not enabled yet. See [Structured decisions](/sdk/structured-decisions) for state preparation, examples, provider limits and failure handling.
 
 ### System Prompt
 
@@ -825,7 +825,8 @@ STRUCTURED_OUTPUT_TOOL_NAME
 createStructuredOutputTool
 createStructuredOutputCapture
 inferStructuredOutput
-resolveStructuredOutputModel
+inferRouterDecision
+resolveRouterModel
 getStructuredOutputProviders
 JEV_STRUCTURED_OUTPUT_PROVIDER
 DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS
@@ -856,7 +857,8 @@ type StructuredOutputToolOptions
 type StructuredOutputRequest
 type StructuredOutputResult
 type StructuredOutputModel
-type StructuredOutputSelectionOptions
+type RouterModelSelectionOptions
+type RouterDecisionRequest
 type StructuredChoiceQuestion
 type ExtensionFactory
 type ExtensionAPI

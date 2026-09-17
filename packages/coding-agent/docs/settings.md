@@ -49,7 +49,7 @@ See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herd
 |---------|------|---------|-------------|
 | `defaultProvider` | string | - | Startup provider, saved automatically when you switch models interactively |
 | `defaultModel` | string | - | Startup model ID, saved automatically when you switch models interactively |
-| `structuredOutputModel` | string | `""` | Inference model for the structured-decision SDK API. Exact `provider/model`; empty selects Jev when `TYPESAFE_AI_API_KEY` is nonempty, otherwise the current chat model. Does not enable routing or change the chat model. |
+| `routerModel` | string | `""` | Inference model for prerequisite workflow and subagent-auto routing only. Exact `provider/model`; empty selects Jev when `TYPESAFE_AI_API_KEY` is nonempty, otherwise the current chat model. Does not change chat or `structured_output` tool inference. |
 | `defaultThinkingLevel` | string | - | Startup thinking level, saved automatically on interactive model/thinking changes: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`; clamped to the active model's supported levels |
 | `modelThinkingLevels` | object | - | Per-model startup thinking levels keyed by `"provider/modelId"`; updated automatically on interactive model/thinking changes, or configured from `/settings` → Default thinking level per model |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in output |
@@ -59,15 +59,15 @@ See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herd
 
 `defaultProvider` and `defaultModel` form one exact saved selection when both are present. Atomic waits for built-in, configured, and extension provider registration before classifying that provider. If it remains unsupported, Atomic does not silently switch providers: interactive mode stays live with a generic configuration warning; print and JSON modes write the warning to stderr and exit nonzero before prompting (with JSON stdout remaining JSONL-clean); and RPC rejects `prompt` until a successful explicit `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle does not clear the condition. If the provider is supported but its saved model is unknown or lacks configured authentication, normal automatic selection of an available authenticated model remains enabled; the same is true when either field is omitted. Valid extension-provider defaults can resolve after deferred extension loading. Update an unsupported pair or choose a model with `/model`.
 
-#### structuredOutputModel
+#### routerModel
 
 ```json
-{ "structuredOutputModel": "" }
+{ "routerModel": "" }
 ```
 
 A nonempty explicit model takes precedence over `TYPESAFE_AI_API_KEY`. Use an exact catalog ID without a reasoning suffix, or the decision-only alias `typesafe-ai/jev`. An invalid explicit ID, `auto`, non-string value or surrounding whitespace fails the decision instead of silently changing providers. An explicit empty project value overrides a global selection and restores the environment-key/current-chat precedence.
 
-This setting currently serves [SDK structured decisions](/sdk/structured-decisions). It does not activate workflow routing or subagent automatic model selection. It changes neither the chat model nor the execution model. The selected provider receives the supplied decision context, so choose a provider permitted to process that data. Jev requires the environment key even when selected explicitly; other models use normal provider authentication. See [TypeSafe Jev](/providers#typesafe-jev).
+This setting is reserved for prerequisite model-invoked workflow routing and subagent `model: "auto"` routing through the shared `inferRouterDecision()` API. That routing is not enabled yet. It does not change the selected chat model, child execution model, `structured_output` tool or general structured-output inference. The selected router provider receives the supplied routing context, so choose a provider permitted to process that data. Jev requires the environment key even when selected explicitly; other models use normal provider authentication. See [Structured decisions](/sdk/structured-decisions) and [TypeSafe Jev](/providers#typesafe-jev).
 
 #### thinkingBudgets
 

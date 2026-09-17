@@ -7,17 +7,19 @@ description: Make a bounded structured decision without starting an agent sessio
 
 Use `inferStructuredOutput()` from `@bastani/atomic` when an SDK integration needs one semantic decision before it performs an action. It returns a schema-validated value, the requested and responding model identities, and input/output token counts. It does not execute tools, start a session, or authorize an action.
 
-This API and its shared setting do not enable workflow launch routing or subagent `model: "auto"`. Existing workflow and subagent launches are unchanged.
+`inferStructuredOutput()` takes an explicit inference model and never reads `routerModel`. The `structured_output` tool continues to use its session's model. Neither API changes the selected chat model. Workflow launch routing and subagent `model: "auto"` routing are not enabled yet.
 
 ## Select the inference model
 
-Set `structuredOutputModel` in [settings.json](/settings#structuredoutputmodel). Each invocation uses:
+For a general structured-output call, pass `model: { kind: "chat", fullId, model }` with a concrete model from the current registry, or `model: { kind: "jev", fullId: "typesafe-ai/jev" }`. Setting `routerModel` or exporting a TypeSafe key does not change this explicit selection.
 
-1. A nonempty explicit, exact `provider/model` ID.
+`inferRouterDecision()` is the shared entrypoint for prerequisite model-invoked workflow and subagent-auto routing. Only this entrypoint consults `routerModel` in [settings.json](/settings#routermodel). It takes `settings`, `modelRegistry` and the invocation-time `currentModel` instead of an explicit inference `model`. Resolution is:
+
+1. A nonempty explicit, exact `routerModel` value.
 2. Otherwise `typesafe-ai/jev` when `TYPESAFE_AI_API_KEY` is nonempty.
 3. Otherwise the chat model supplied as `currentModel` at invocation time.
 
-An invalid explicit selection fails instead of falling back. `auto`, model patterns, reasoning suffixes, and surrounding whitespace are not supported. Ordinary models must exist in the current configured catalog; their usual provider authentication applies. Catalog presence and an environment key do not prove live access, quota, or entitlement. The API never changes the chat model or saved defaults.
+An invalid explicit router selection fails instead of falling back. `auto`, model patterns, reasoning suffixes, and surrounding whitespace are not supported. Ordinary models must exist in the current configured catalog; their usual provider authentication applies. Catalog presence and an environment key do not prove live access, quota, or entitlement. The resolver never changes the chat model, the `structured_output` tool's model or saved defaults.
 
 ## Prepare a decision
 
@@ -29,23 +31,24 @@ import {
   inferStructuredOutput,
   ModelRegistry,
   ModelRuntime,
-  SettingsManager,
+  type StructuredOutputModel,
 } from "@bastani/atomic";
 
 const modelRuntime = await ModelRuntime.create();
 const modelRegistry = new ModelRegistry(modelRuntime);
-const settings = SettingsManager.create();
-// In a session, pass its currently selected model instead.
-const currentModel = modelRegistry.getAvailable()[0];
+const model = modelRegistry.getAvailable()[0];
+if (!model) throw new Error("Choose a configured chat model before making this request.");
+const inferenceModel: StructuredOutputModel = {
+  kind: "chat", fullId: `${model.provider}/${model.id}`, model,
+};
 
 const schema = Type.Object(
   { category: Type.Union([Type.Literal("question"), Type.Literal("none")]) },
   { additionalProperties: false },
 );
 const result = await inferStructuredOutput({
-  settings,
+  model: inferenceModel,
   modelRegistry,
-  currentModel,
   schema,
   instructions: "Classify whether the task asks a question. Use none for other tasks.",
   state: {
@@ -86,7 +89,7 @@ Ordinary requests set `maxRetries: 0`, use HTTP/SSE rather than WebSocket transp
 
 [TypeSafe Jev](/providers#typesafe-jev) accepts shared state and typed questions instead of JSON-schema generation. Atomic sends all questions in one direct HTTP request without automatic retries. Question IDs are correlation keys, not instructions seen by Jev, so put complete semantics in each question's `instructions`. Describe the speculative premise of a conditional question and consume its answer only when that premise applies.
 
-Jev accepts at most 255 options per Choice. Atomic rejects larger sets before dispatch; it never truncates candidates or adds a shortlist request. Select an ordinary `structuredOutputModel` when the complete set exceeds this limit. Jev response bodies are limited to 1 MiB. Atomic validates answer types, choices, probability distributions and usage, but does not impose a confidence threshold or treat ordinary-model confidence as calibrated.
+Jev accepts at most 255 options per Choice. Atomic rejects larger sets before dispatch; it never truncates candidates or adds a shortlist request. Select an ordinary inference model when the complete set exceeds this limit, using `routerModel` for prerequisite routing or the explicit `model` argument for general SDK calls. Jev response bodies are limited to 1 MiB. Atomic validates answer types, choices, probability distributions and usage, but does not impose a confidence threshold or treat ordinary-model confidence as calibrated.
 
 ## Cancellation and failures
 

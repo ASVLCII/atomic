@@ -1,4 +1,4 @@
-import type { StructuredOutputModel, StructuredOutputSelectionOptions } from "./types.js";
+import type { RouterModelSelectionOptions, StructuredOutputModel } from "./types.js";
 
 /** Decision-only registration: deliberately not a pi-ai chat Provider or Model. */
 export const JEV_STRUCTURED_OUTPUT_PROVIDER = Object.freeze({
@@ -24,10 +24,10 @@ export function getStructuredOutputProviders(): readonly (typeof JEV_STRUCTURED_
 	return [JEV_STRUCTURED_OUTPUT_PROVIDER];
 }
 
-export function resolveStructuredOutputModel(options: StructuredOutputSelectionOptions): StructuredOutputModel {
-	const explicit = options.settings.getStructuredOutputModel();
+export function resolveRouterModel(options: RouterModelSelectionOptions): StructuredOutputModel {
+	const explicit = options.settings.getRouterModel();
 	if (typeof explicit !== "string" || explicit.trim() !== explicit || explicit === "auto") {
-		throw new Error("Invalid structuredOutputModel: use an exact provider/model ID or an empty string, not auto.");
+		throw new Error("Invalid routerModel: use an exact provider/model ID or an empty string, not auto.");
 	}
 	if (explicit === JEV_STRUCTURED_OUTPUT_PROVIDER.fullId || (!explicit && process.env.TYPESAFE_AI_API_KEY?.trim())) {
 		return { kind: "jev", fullId: JEV_STRUCTURED_OUTPUT_PROVIDER.fullId };
@@ -38,8 +38,8 @@ export function resolveStructuredOutputModel(options: StructuredOutputSelectionO
 	if (!model || model.id === "auto" || model.provider === "typesafe-ai") {
 		throw new Error(
 			explicit
-				? "Invalid structuredOutputModel: the exact model is not in the current chat catalog. Check settings.json."
-				: "Structured output needs a selected chat model, TYPESAFE_AI_API_KEY, or an explicit structuredOutputModel.",
+				? "Invalid routerModel: the exact model is not in the current chat catalog. Check settings.json."
+				: "Router inference needs a selected chat model, TYPESAFE_AI_API_KEY, or an explicit routerModel.",
 		);
 	}
 	return { kind: "chat", fullId: `${model.provider}/${model.id}`, model };

@@ -6,7 +6,7 @@ import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.j
 import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.js";
 import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
 import { InMemorySettingsStorage, SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
-import { inferStructuredOutput } from "../../packages/coding-agent/src/core/structured-output/index.js";
+import { inferRouterDecision } from "../../packages/coding-agent/src/core/structured-output/index.js";
 import type { JsonObject } from "../../packages/coding-agent/src/core/tools/structured-output.js";
 import {
 	decisionMessage,
@@ -130,9 +130,9 @@ for (const api of ["openai-completions", "anthropic-messages"] as const) {
 				refreshOnCreate: false,
 			});
 			runtime.registerProvider(model.provider, { api, baseUrl: model.baseUrl, apiKey: "mock-key", models: [model] });
-			const pending = inferStructuredOutput({
+			const pending = inferRouterDecision({
 				...decisionRequest(),
-				settings: SettingsManager.inMemory({ structuredOutputModel: `${model.provider}/${model.id}` }),
+				settings: SettingsManager.inMemory({ routerModel: `${model.provider}/${model.id}` }),
 				currentModel: model,
 				modelRegistry: new ModelRegistry(runtime),
 			});
@@ -152,12 +152,12 @@ for (const api of ["openai-completions", "anthropic-messages"] as const) {
 for (const invalid of [null, false, 7, [], {}, "auto", " "]) {
 	test(`loaded invalid setting ${JSON.stringify(invalid)} rejects before inference`, async () => {
 		const storage = new InMemorySettingsStorage();
-		storage.withLock("global", () => JSON.stringify({ structuredOutputModel: invalid }));
+		storage.withLock("global", () => JSON.stringify({ routerModel: invalid }));
 		const settings = SettingsManager.fromStorage(storage);
 		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
 		const transport = vi.fn<typeof fetch>();
 		vi.stubGlobal("fetch", transport);
-		await assert.rejects(inferStructuredOutput({ ...decisionRequest(), settings }), /Invalid structuredOutputModel/);
+		await assert.rejects(inferRouterDecision({ ...decisionRequest(), settings }), /Invalid routerModel/);
 		assert.equal(transport.mock.calls.length, 0);
 	});
 }
@@ -166,21 +166,21 @@ test("global/project settings honor trust, explicit empty override and reload wi
 	const storage = new InMemorySettingsStorage();
 	storage.withLock("global", () =>
 		JSON.stringify({
-			structuredOutputModel: "decision-test/chat",
+			routerModel: "decision-test/chat",
 			defaultModel: "saved-chat",
 			defaultProvider: "saved-provider",
 		}),
 	);
-	storage.withLock("project", () => JSON.stringify({ structuredOutputModel: "typesafe-ai/jev" }));
+	storage.withLock("project", () => JSON.stringify({ routerModel: "typesafe-ai/jev" }));
 	const settings = SettingsManager.fromStorage(storage);
-	assert.equal(settings.getStructuredOutputModel(), "typesafe-ai/jev");
+	assert.equal(settings.getRouterModel(), "typesafe-ai/jev");
 	const untrusted = SettingsManager.fromStorage(storage, { projectTrusted: false });
-	assert.equal(untrusted.getStructuredOutputModel(), "decision-test/chat");
+	assert.equal(untrusted.getRouterModel(), "decision-test/chat");
 	untrusted.setProjectTrusted(true);
-	assert.equal(untrusted.getStructuredOutputModel(), "typesafe-ai/jev");
-	storage.withLock("project", () => JSON.stringify({ structuredOutputModel: "" }));
+	assert.equal(untrusted.getRouterModel(), "typesafe-ai/jev");
+	storage.withLock("project", () => JSON.stringify({ routerModel: "" }));
 	await settings.reload();
-	assert.equal(settings.getStructuredOutputModel(), "");
+	assert.equal(settings.getRouterModel(), "");
 	assert.equal(settings.getDefaultModel(), "saved-chat");
 	assert.equal(settings.getDefaultProvider(), "saved-provider");
 });
@@ -191,7 +191,7 @@ for (const state of invalidStates) {
 		const request = decisionRequest();
 		const dispatch = vi.fn(() => messageStream(decisionMessage()));
 		await assert.rejects(
-			inferStructuredOutput({
+			inferRouterDecision({
 				...request,
 				state,
 				modelRegistry: { ...request.modelRegistry, streamSimple: dispatch },
@@ -204,16 +204,16 @@ for (const state of invalidStates) {
 
 for (const timeoutMs of [0, -1, 0.5, Infinity, NaN, 2 ** 31]) {
 	test(`unbounded/invalid timeout ${timeoutMs} is rejected`, async () => {
-		await assert.rejects(inferStructuredOutput({ ...decisionRequest(), timeoutMs }), /timeoutMs/);
+		await assert.rejects(inferRouterDecision({ ...decisionRequest(), timeoutMs }), /timeoutMs/);
 	});
 }
 
 test("explicit Jev without its key fails without falling back to chat", async () => {
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
 	await assert.rejects(
-		inferStructuredOutput({
+		inferRouterDecision({
 			...decisionRequest(),
-			settings: SettingsManager.inMemory({ structuredOutputModel: "typesafe-ai/jev" }),
+			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }),
 		}),
 		/requires a nonempty TYPESAFE_AI_API_KEY/,
 	);
@@ -226,7 +226,7 @@ test("Jev network errors do not leak transport messages or retry", async () => {
 	});
 	vi.stubGlobal("fetch", transport);
 	await assert.rejects(
-		inferStructuredOutput({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
+		inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
 		/Jev request failed/,
 	);
 	assert.equal(transport.mock.calls.length, 1);
@@ -241,7 +241,7 @@ test("Jev input snapshot cannot be changed while awaiting transport", async () =
 		...request.jev.questions,
 		route: { ...request.jev.questions.route, criteria: { ...request.jev.questions.route.criteria } },
 	};
-	const pending = inferStructuredOutput({
+	const pending = inferRouterDecision({
 		...request,
 		settings: SettingsManager.inMemory(),
 		jev: { ...request.jev, questions },
@@ -266,7 +266,7 @@ for (const reason of ["timeout", "oversized"] as const) {
 		const request = decisionRequest();
 		const decode = vi.fn(request.jev.decode);
 		const pending = assert.rejects(
-			inferStructuredOutput({
+			inferRouterDecision({
 				...request,
 				settings: SettingsManager.inMemory(),
 				timeoutMs: 50,
@@ -310,7 +310,7 @@ for (const reason of ["cancel", "timeout"] as const) {
 			},
 		});
 		const controller = new AbortController();
-		const pending = inferStructuredOutput({
+		const pending = inferRouterDecision({
 			...decisionRequest(),
 			modelRegistry: new ModelRegistry(runtime),
 			signal: controller.signal,

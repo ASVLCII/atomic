@@ -7,7 +7,7 @@
 - Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers, retained latest failure and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Session, Workflow, and Intercom UUID selectors accept unique 8-character hexadecimal prefixes while preserving exact custom IDs and visibility boundaries ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 - Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
-- Added the bounded `inferStructuredOutput()` SDK API, shared `structuredOutputModel` setting and direct TypeSafe Jev Choice integration. Decisions validate exact schema values without agent loops, automatic inference retries or chat-model changes; workflow and subagent routing remain unchanged ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
+- Added bounded structured-decision SDK APIs and direct TypeSafe Jev Choice integration. The shared `routerModel` setting is reserved for prerequisite workflow/subagent-auto routing; general `inferStructuredOutput()` calls select their inference model explicitly. Decisions validate exact schema values without agent loops or automatic inference retries. The selected chat model and `structured_output` tool are unchanged; workflow/subagent routing is not enabled yet ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 
 ### Changed
 
@@ -41,6 +41,7 @@
 - Keep ready shared PostgreSQL running across Atomic client exit and reload, with installation-independent cluster ownership records and consumer leases ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Managed PostgreSQL verifies server identity and SQL readiness, supports `ATOMIC_POSTGRES_PORT`, and shares an available actual port across sessions without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Custom models declared in `models.json` no longer generate automatic `-fast` siblings, preventing invalid choices such as `gpt-6-astra-slow-fast`. Built-in fast variants and `modelOverrides` remain supported.
+- Bedrock requests honor the configured provider retry count, including zero, so bounded router decisions do not make hidden SDK retry attempts ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 
