@@ -95,6 +95,8 @@ export interface DurableWorkflowBackend {
 	): Promise<void>;
 	/** Whether this run's admission failed on database availability; performs no I/O. */
 	isAdmissionUnavailable?(workflowId: string): boolean;
+	/** Whether an awaited checkpoint failed on database availability; performs no I/O. */
+	isCheckpointUnavailable?(workflowId: string): boolean;
 	/** Await this identity's bounded admission, retaining its rejection until a new attempt. */
 	settleWorkflowAdmission?(workflowId: string): Promise<void>;
 	/** Whether bounded registration is pending or retains a failed settlement. */
@@ -172,6 +174,8 @@ export interface DurableWorkflowBackend {
 		resumable?: boolean,
 		failure?: DurableWorkflowFailureMetadata,
 	): void;
+	/** Explicit resume-only repair of a locally retained, unavailable admission. Never executes author code. */
+	reconcileWorkflowAdmission?(workflowId: string, signal?: AbortSignal): Promise<void>;
 	/** Atomically update status only when the authoritative status is expected. */
 	transitionWorkflowStatus(
 		workflowId: string,
@@ -179,6 +183,7 @@ export interface DurableWorkflowBackend {
 		status: DurableWorkflowStatus,
 		pendingPrompts?: number,
 		resumable?: boolean,
+		expectedUpdatedAt?: number,
 	): Promise<boolean>;
 	/** Atomically adjust unresolved UI prompt count, clamped at zero. */
 	adjustPendingPrompts(workflowId: string, delta: number): void;
@@ -473,7 +478,7 @@ export class InMemoryDurableBackend implements DurableWorkflowBackend {
 			failureDisposition: undefined,
 			failedToolNodeId: undefined,
 			status,
-			updatedAt: Date.now(),
+			updatedAt: Math.max(Date.now(), rec.handle.updatedAt + 1),
 			...(pendingPrompts !== undefined ? { pendingPrompts } : {}),
 			...(resumable !== undefined ? { resumable } : {}),
 			...(status === "failed" ? (failure ?? {}) : {}),
@@ -487,9 +492,15 @@ export class InMemoryDurableBackend implements DurableWorkflowBackend {
 		status: DurableWorkflowStatus,
 		pendingPrompts?: number,
 		resumable?: boolean,
+		expectedUpdatedAt?: number,
 	): Promise<boolean> {
-		const current = this.workflows.get(workflowId)?.handle.status;
-		if (current === undefined || !expected.includes(current)) return false;
+		const current = this.workflows.get(workflowId)?.handle;
+		if (
+			current === undefined ||
+			!expected.includes(current.status) ||
+			(expectedUpdatedAt !== undefined && current.updatedAt !== expectedUpdatedAt)
+		)
+			return false;
 		this.setWorkflowStatus(workflowId, status, pendingPrompts, resumable);
 		return true;
 	}

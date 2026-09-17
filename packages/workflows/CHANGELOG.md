@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Verify managed PostgreSQL SQL/data/process identity before attachment, support `ATOMIC_POSTGRES_PORT`, and atomically share the actual port after bounded start/bind retries without adopting foreign listeners or unregistered data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Monitor managed PostgreSQL SQL/process identity after attachment, invalidate lost connections, elect a shared recovery starter with bounded retries, and reconnect existing database consumers without relaunching workflow execution or changing external database endpoints ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Pool acquisition timeouts and PostgreSQL connection-capacity refusals, including refused managed health checks, no longer disconnect unrelated healthy database consumers or trigger managed PostgreSQL recovery ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Explicit resume reconciles retained database-failed admission under the original run ID, refuses conflicting incomplete records, and prevents stale concurrent resume from claiming a newer running generation. Awaited checkpoint writes now have a 10-second deadline; recovery rereads committed receipts rather than repeating checkpointed effects. External effects without a saved checkpoint remain uncertain and may repeat ([#3072](https://github.com/bastani-inc/atomic/issues/3072), [#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

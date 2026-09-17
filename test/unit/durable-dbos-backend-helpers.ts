@@ -40,11 +40,11 @@ export function createMockSdk(): DbosSdkHandle & { state: MockDbosState } {
 		state,
 		async launch() {},
 		async shutdown() {},
-		async startWorkflow(workflowId, name) {
+		async startWorkflow(workflowId, name, inputs) {
 			state.starts.push({ workflowId, name });
 			// Simulate DBOS registering the workflow so it shows up in listAllWorkflows.
 			if (!state.workflows.has(workflowId)) {
-				state.workflows.set(workflowId, { workflowId, name, status: "PENDING", createdAt: Date.now() });
+				state.workflows.set(workflowId, { workflowId, name, inputs, status: "PENDING", createdAt: Date.now() });
 			}
 		},
 		async retrieveWorkflow(workflowId) {

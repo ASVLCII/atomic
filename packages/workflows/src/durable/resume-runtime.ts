@@ -108,7 +108,20 @@ export async function resumeDurableWorkflow(
 ): Promise<ResumeDurableResult> {
 	deps.signal?.throwIfAborted();
 	const backend = deps.durableBackend ?? getDurableBackend();
-	const resolvedCatalog = catalog ?? backend.listResumableWorkflows();
+	if (!isFullRunId(workflowId))
+		return { ok: false, reason: "not_registered", message: malformedRunIdMessage(workflowId) };
+	const recovering = backend.isAdmissionUnavailable?.(workflowId) || backend.isCheckpointUnavailable?.(workflowId);
+	if (recovering && hasActiveLiveRun(deps.baseRunOpts.store, workflowId)) {
+		return alreadyRunningResult(
+			backend.getWorkflow(workflowId)?.name ?? workflowId,
+			workflowId,
+			deps.baseRunOpts.store,
+		);
+	}
+	await backend.reconcileWorkflowAdmission?.(workflowId, deps.signal);
+	const resolvedCatalog = recovering
+		? backend.listResumableWorkflows()
+		: (catalog ?? backend.listResumableWorkflows());
 	const resolved = resolveDurableEntry(workflowId, resolvedCatalog);
 	if (resolved === undefined) {
 		const direct = backend.getWorkflow(workflowId);
@@ -213,10 +226,16 @@ export async function resumeDurableWorkflow(
 		toolContinuation = { source: source!, resumeFromToolNodeId: frontier.toolNodeId };
 	}
 	deps.signal?.throwIfAborted();
-	removeDurableResumeShadowRuns(deps.baseRunOpts.store, resolved.workflowId);
 
 	// Claim resume against concurrent deletion through the required transition seam.
-	const claimed = await backend.transitionWorkflowStatus(resolved.workflowId, [handle.status], "running");
+	const claimed = await backend.transitionWorkflowStatus(
+		resolved.workflowId,
+		[handle.status],
+		"running",
+		undefined,
+		undefined,
+		resolved.updatedAt,
+	);
 	if (!claimed) {
 		return {
 			ok: false,
@@ -224,6 +243,7 @@ export async function resumeDurableWorkflow(
 			message: `Workflow ${resolved.workflowId} changed while resume was pending; refresh the workflow list and try again.`,
 		};
 	}
+	removeDurableResumeShadowRuns(deps.baseRunOpts.store, resolved.workflowId);
 
 	const resumeRunOpts: RunOpts = {
 		...deps.baseRunOpts,
@@ -260,9 +280,11 @@ export async function resumeDurableWorkflow(
 			snapshot?.error,
 			`Workflow ${resolved.workflowId} ended before startup admission`,
 		);
-		deps.baseRunOpts.store?.removeRun(accepted.runId);
-		backend.setWorkflowStatus(resolved.workflowId, handle.status, handle.pendingPrompts, handle.resumable);
-		await backend.flush(resolved.workflowId);
+		if (!backend.isAdmissionUnavailable?.(resolved.workflowId)) {
+			deps.baseRunOpts.store?.removeRun(accepted.runId);
+			backend.setWorkflowStatus(resolved.workflowId, handle.status, handle.pendingPrompts, handle.resumable);
+			await backend.flush(resolved.workflowId);
+		}
 		return {
 			ok: false,
 			reason: "startup_failed",
