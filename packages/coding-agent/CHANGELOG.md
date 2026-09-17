@@ -16,6 +16,7 @@
 - Pausing during startup acknowledges immediately and retains the live executor without waiting for database admission. Later admission failures retain their original diagnostic in run status, and resume releases the failed attempt instead of leaving it stuck behind a rejected pause ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Workflow status distinguishes pending database admission from execution and reports dependency failures, phase age, and last progress. Live executor pause/resume reports local versus confirmed database persistence, stays responsive during outages, and preserves the paused owner for same-ID recovery ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Live executor resume allows up to 10 seconds for database confirmation instead of using the 500ms pause acknowledgement budget, avoiding false timeouts on healthy remote PostgreSQL connections ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 
 ## [0.9.20-alpha.2] - 2026-09-15
 

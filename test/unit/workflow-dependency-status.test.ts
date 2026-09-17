@@ -4,6 +4,7 @@ import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { DBOS_ADMISSION_TIMEOUT_MS } from "../../packages/workflows/src/durable/dbos-admission.js";
 import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
+import { classifyLatestMetadata } from "../../packages/workflows/src/durable/dbos-metadata.js";
 import { run } from "../../packages/workflows/src/engine/run.js";
 import { createToolControlRegistry } from "../../packages/workflows/src/engine/run-tool-control-registry.js";
 import { isWorkflowHeartbeatEligibleRun } from "../../packages/workflows/src/extension/workflow-heartbeat-scheduler.js";
@@ -282,88 +283,105 @@ test("paused admission reports dependency age and retries the same owner only on
 });
 
 // #3072: a live owner cannot promise a durable pause or release on failed resume.
-test("outage controls are bounded, persistence is truthful, and recovery releases once", async () => {
-	vi.useFakeTimers();
-	const sdk = createMockSdk();
-	const stalled = Promise.withResolvers<void>();
-	let unavailable = false;
-	const backend = new DbosDurableBackend({
-		...sdk,
-		listStepRecords: async (id) => {
-			if (unavailable) await stalled.promise;
-			return sdk.listStepRecords(id);
-		},
-	});
-	const entered = Promise.withResolvers<void>();
-	const body = Promise.withResolvers<void>();
-	const store = createStore();
-	const toolControlRegistry = createToolControlRegistry();
-	let effects = 0;
-	const pending = run(
-		workflow({
-			name: "control-outage",
-			description: "",
-			inputs: {},
-			outputs: {},
-			run: async (ctx) => {
-				await ctx.tool("before", {}, async () => {
-					effects++;
-					return "before";
-				});
-				entered.resolve();
-				await body.promise;
-				await ctx.tool("after", {}, async () => {
-					effects++;
-					return "after";
-				});
-				return {};
+test.each([false, true])(
+	"outage controls are bounded and truthful (await pause deadline: %s)",
+	async (awaitPauseDeadline) => {
+		vi.useFakeTimers();
+		const sdk = createMockSdk();
+		const stalled = Promise.withResolvers<void>();
+		let unavailable = false;
+		const backend = new DbosDurableBackend({
+			...sdk,
+			listStepRecords: async (id) => {
+				if (unavailable) await stalled.promise;
+				return sdk.listStepRecords(id);
 			},
-		}),
-		{},
-		{ runId: "control-owner", store, toolControlRegistry, durableBackend: backend },
-	);
-	await entered.promise;
-	try {
-		unavailable = true;
-		let acknowledged = false;
-		const pause = pauseRun("control-owner", { store, toolControlRegistry }).then((result) => {
-			acknowledged = result.ok;
 		});
-		await vi.advanceTimersByTimeAsync(500);
-		assert.equal(acknowledged, true, "pause must acknowledge the local barrier within 500ms");
-		await pause;
-		assert.equal(store.runs()[0]!.controlPersistence, "observed");
-		const resume = assert.rejects(resumeRun("control-owner", { store, toolControlRegistry }), /database/i);
-		await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
-		await resume;
-		assert.equal(store.runs()[0]!.status, "paused");
-		assert.equal(store.runs()[0]!.phase, "blocked_dependency");
-		body.resolve();
-		unavailable = false;
-		stalled.resolve();
-		await vi.advanceTimersByTimeAsync(0);
-		assert.equal(effects, 1, "late persistence cannot release the pause");
-		await Promise.all([
-			resumeRun("control-owner", { store, toolControlRegistry }),
-			resumeRun("control-owner", { store, toolControlRegistry }),
-		]);
-		assert.equal((await pending).status, "completed");
-		assert.equal(effects, 2);
-		assert.equal(store.runs()[0]!.controlPersistence, "durable");
-	} finally {
-		unavailable = false;
-		stalled.resolve();
-		body.resolve();
-		await toolControlRegistry.runControl("control-owner")?.resume();
-		await pending;
-	}
-});
+		const entered = Promise.withResolvers<void>();
+		const body = Promise.withResolvers<void>();
+		const store = createStore();
+		const toolControlRegistry = createToolControlRegistry();
+		let effects = 0;
+		const pending = run(
+			workflow({
+				name: "control-outage",
+				description: "",
+				inputs: {},
+				outputs: {},
+				run: async (ctx) => {
+					await ctx.tool("before", {}, async () => {
+						effects++;
+						return "before";
+					});
+					entered.resolve();
+					await body.promise;
+					await ctx.tool("after", {}, async () => {
+						effects++;
+						return "after";
+					});
+					return {};
+				},
+			}),
+			{},
+			{ runId: "control-owner", store, toolControlRegistry, durableBackend: backend },
+		);
+		await entered.promise;
+		try {
+			unavailable = true;
+			let acknowledged = false;
+			const pause = pauseRun("control-owner", { store, toolControlRegistry }).then((result) => {
+				acknowledged = result.ok;
+			});
+			await vi.advanceTimersByTimeAsync(500);
+			assert.equal(acknowledged, true, "pause must acknowledge the local barrier within 500ms");
+			await pause;
+			assert.equal(store.runs()[0]!.controlPersistence, "observed");
+			assert.equal(
+				store.runs()[0]!.dependencyError,
+				undefined,
+				"acknowledgement timeout is not a dependency failure",
+			);
+			assert.notEqual(store.runs()[0]!.phase, "blocked_dependency");
+			if (awaitPauseDeadline) {
+				await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS - 501);
+				assert.equal(store.runs()[0]!.dependencyError, undefined);
+				await vi.advanceTimersByTimeAsync(1);
+				assert.equal(store.runs()[0]!.phase, "blocked_dependency");
+				assert.match(store.runs()[0]!.dependencyError ?? "", /database unavailable during pause/i);
+				assert.equal(store.runs()[0]!.controlPersistence, "observed");
+			}
+			const resume = assert.rejects(resumeRun("control-owner", { store, toolControlRegistry }), /database/i);
+			await vi.advanceTimersByTimeAsync(DBOS_ADMISSION_TIMEOUT_MS);
+			await resume;
+			assert.equal(store.runs()[0]!.status, "paused");
+			assert.equal(store.runs()[0]!.phase, "blocked_dependency");
+			body.resolve();
+			unavailable = false;
+			stalled.resolve();
+			await vi.advanceTimersByTimeAsync(0);
+			assert.equal(effects, 1, "late persistence cannot release the pause");
+			await Promise.all([
+				resumeRun("control-owner", { store, toolControlRegistry }),
+				resumeRun("control-owner", { store, toolControlRegistry }),
+			]);
+			assert.equal((await pending).status, "completed");
+			assert.equal(effects, 2);
+			assert.equal(store.runs()[0]!.controlPersistence, "durable");
+		} finally {
+			unavailable = false;
+			stalled.resolve();
+			body.resolve();
+			await toolControlRegistry.runControl("control-owner")?.resume();
+			await pending;
+		}
+	},
+);
 
 // #3072: healthy remote database round trips must not inherit the pause acknowledgement deadline.
-test("explicit resume confirms durability on a healthy database with 100ms round trips", async () => {
+test.each([95, 100, 150, 200])("pause settles durably and resume confirms on a healthy %ims database", async (rtt) => {
 	vi.useFakeTimers();
 	const sdk = createMockSdk();
-	const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 100));
+	const delay = () => new Promise<void>((resolve) => setTimeout(resolve, rtt));
 	const backend = new DbosDurableBackend({
 		...sdk,
 		startWorkflow: async (...args) => {
@@ -420,6 +438,12 @@ test("explicit resume confirms durability on a healthy database with 100ms round
 		assert.equal((await pause).ok, true);
 		assert.equal(store.runs()[0]!.status, "paused");
 		await vi.advanceTimersByTimeAsync(3_000);
+		assert.equal(store.runs()[0]!.controlPersistence, "durable", "healthy pause must settle after acknowledgement");
+		assert.equal(store.runs()[0]!.dependencyError, undefined);
+		assert.notEqual(store.runs()[0]!.phase, "blocked_dependency");
+		assert.equal(backend.getWorkflow(runId)?.status, "paused");
+		const persisted = classifyLatestMetadata(await sdk.listStepRecords(runId), runId);
+		assert.equal(persisted.kind === "current" ? persisted.metadata.status : persisted.kind, "paused");
 		const resume = resumeRun(runId, { store, toolControlRegistry });
 		// Observe rejection immediately so a regression does not leak an unhandled rejection.
 		const confirmed = resume.then(

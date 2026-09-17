@@ -765,45 +765,60 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		controlAttempt?.abort(new Error("Workflow control superseded"));
 		const attempt = new AbortController();
 		controlAttempt = attempt;
-		// Pause acknowledges promptly; resume must confirm multiple database round trips before release.
-		const CONTROL_PERSISTENCE_TIMEOUT_MS = 500;
-		try {
-			await boundedAdmission(
-				(signal) =>
-					dbosAdmissionContext.run(signal, async () => {
-						if (
-							!(await transitionDurableWorkflowStatus(
-								durableBackend,
-								runId,
-								["running", "paused"],
-								status,
-								undefined,
-								true,
-							))
-						) {
-							throw new Error(`Workflow ${runId} refused the durable ${status} transition`);
-						}
-						signal.throwIfAborted();
-						recordRunTimingCheckpoint(durableBackend, runSnapshot);
-						await durableBackend.flush(runId);
-					}),
-				AbortSignal.any([ownController.signal, attempt.signal]),
-				status === "paused" ? CONTROL_PERSISTENCE_TIMEOUT_MS : DBOS_ADMISSION_TIMEOUT_MS,
-			);
-			attempt.signal.throwIfAborted();
-			activeStore.recordRunExecutionState(runId, {
-				controlPersistence: durableBackend.persistent ? "durable" : "observed",
-				...(durableRootAdmitted ? { phase: "executing" as const, dependencyError: undefined } : {}),
-			});
-		} catch (error) {
-			if (!attempt.signal.aborted && isDbosDependencyError(error)) {
+		// Acknowledgement bounds local control latency, not the durable round trips.
+		const settlement = (async () => {
+			try {
+				await boundedAdmission(
+					(signal) =>
+						dbosAdmissionContext.run(signal, async () => {
+							if (
+								!(await transitionDurableWorkflowStatus(
+									durableBackend,
+									runId,
+									["running", "paused"],
+									status,
+									undefined,
+									true,
+								))
+							) {
+								throw new Error(`Workflow ${runId} refused the durable ${status} transition`);
+							}
+							signal.throwIfAborted();
+							recordRunTimingCheckpoint(durableBackend, runSnapshot);
+							await durableBackend.flush(runId);
+						}),
+					AbortSignal.any([ownController.signal, attempt.signal]),
+					DBOS_ADMISSION_TIMEOUT_MS,
+				);
+				attempt.signal.throwIfAborted();
+				ownController.signal.throwIfAborted();
 				activeStore.recordRunExecutionState(runId, {
-					phase: "blocked_dependency",
-					dependencyError: `Workflow database unavailable during ${status === "paused" ? "pause" : "resume"}; persistence not confirmed.`,
+					controlPersistence: durableBackend.persistent ? "durable" : "observed",
+					...(durableRootAdmitted ? { phase: "executing" as const, dependencyError: undefined } : {}),
 				});
-				if (status === "paused") return;
+			} catch (error) {
+				if (!attempt.signal.aborted && !ownController.signal.aborted && isDbosDependencyError(error)) {
+					activeStore.recordRunExecutionState(runId, {
+						phase: "blocked_dependency",
+						dependencyError: `Workflow database unavailable during ${status === "paused" ? "pause" : "resume"}; persistence not confirmed.`,
+					});
+					if (status === "paused") return;
+				}
+				throw error;
 			}
-			throw error;
+		})();
+		if (status === "running") return settlement;
+		// Keep observing settlement after the local acknowledgement, including rejection.
+		let acknowledgementTimer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				settlement,
+				new Promise<void>((resolve) => {
+					acknowledgementTimer = setTimeout(resolve, 500);
+				}),
+			]);
+		} finally {
+			clearTimeout(acknowledgementTimer);
 		}
 	};
 	const admission = createDurableAdmissionSettlement(

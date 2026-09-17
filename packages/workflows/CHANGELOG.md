@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Pausing during startup acknowledges immediately and retains the live executor without waiting for database admission. Later admission failures retain their original diagnostic in run status, and resume releases the failed attempt instead of leaving it stuck behind a rejected pause ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Report root admission phases, dependency errors, phase age, and last progress without healthy-running heartbeats during blocked admission. Bound live executor control persistence, distinguish observed from durable acknowledgements, and retain paused admission for explicit same-owner recovery ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 - Live executor resume allows up to 10 seconds for database confirmation instead of using the 500ms pause acknowledgement budget, avoiding false timeouts on healthy remote PostgreSQL connections ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
+- Live executor pause acknowledges within 500ms while database confirmation continues for up to 10 seconds. Healthy slower connections no longer leave a false dependency failure; status updates to durable when confirmation succeeds ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
