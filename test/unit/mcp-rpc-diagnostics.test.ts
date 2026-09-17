@@ -3,6 +3,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { inspect } from "node:util";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { type JSONRPCMessage, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { test } from "vitest";
@@ -147,3 +149,84 @@ test("MCP diagnostic boundary preserves success identity and optional or zero er
 	transport.onmessage = undefined;
 	assert.equal(transport.onmessage, undefined);
 });
+
+// Regression for #3088: permitted tokens must not rename JSON-RPC protocol fields.
+test.each(["code", "message", "data"])("MCP error envelope survives a %s token collision", (token) => {
+	const transport = protectRemoteTransport<Transport>(
+		{ start: async () => {}, send: async () => {}, close: async () => {} },
+		`https://example.com/mcp?token=${token}`,
+	);
+	let received: JSONRPCMessage | undefined;
+	transport.onmessage = (message) => {
+		received = message;
+	};
+	transport.onmessage({
+		jsonrpc: "2.0",
+		id: token,
+		error: { code: -32603, message: `Unavailable: ${token}`, data: { [token]: [token], retryable: false } },
+	});
+	assert.deepEqual(received, {
+		jsonrpc: "2.0",
+		id: token,
+		error: {
+			code: -32603,
+			message: "Unavailable: [redacted]",
+			data: { "[redacted]": ["[redacted]"], retryable: false },
+		},
+	});
+});
+
+test.each(["code", "message", "data"])(
+	"MCP HTTP discovery preserves errors with a %s token collision",
+	async (token) => {
+		const paths: string[] = [];
+		const server = createServer(async (request, response) => {
+			paths.push(request.url ?? "");
+			let raw = "";
+			for await (const chunk of request) raw += chunk;
+			const message = raw ? JSON.parse(raw) : {};
+			response.setHeader("Content-Type", "application/json");
+			if (!("id" in message)) {
+				response.writeHead(202).end();
+				return;
+			}
+			response.end(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: message.id,
+					...(message.method === "initialize"
+						? {
+								result: {
+									protocolVersion: "2025-03-26",
+									capabilities: { tools: {} },
+									serverInfo: { name: "rpc", version: "1" },
+								},
+							}
+						: { error: { code: -32603, message: `Unavailable: ${token}`, data: { [token]: token } } }),
+				}),
+			);
+		});
+		server.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		const address = server.address();
+		assert.ok(address && typeof address !== "string");
+		const endpoint = `http://127.0.0.1:${address.port}/mcp?token=${token}`;
+		const client = new Client({ name: "collision", version: "1" });
+		try {
+			await client.connect(protectRemoteTransport(new StreamableHTTPClientTransport(new URL(endpoint)), endpoint));
+			// Bound malformed-envelope failures rather than waiting for the SDK's 60-second default.
+			await assert.rejects(client.listTools({}, { timeout: 500 }), (error: unknown) => {
+				assert.ok(error instanceof McpError);
+				assert.equal(error.code, -32603);
+				assert.match(error.message, /Unavailable: \[redacted\]/);
+				assert.deepEqual(error.data, { "[redacted]": "[redacted]" });
+				return true;
+			});
+			assert.ok(paths.every((path) => path === `/mcp?token=${token}`));
+		} finally {
+			await client.close();
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	},
+);

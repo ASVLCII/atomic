@@ -1,6 +1,6 @@
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { isJSONRPCErrorResponse } from "@modelcontextprotocol/sdk/types.js";
+import { isJSONRPCErrorResponse, type JSONRPCErrorResponse } from "@modelcontextprotocol/sdk/types.js";
 
 function redactDiagnosticText(message: string, endpoint: string, preserveSafeUrls = false): string {
 	const url = new URL(endpoint);
@@ -56,6 +56,17 @@ function sanitizeRpcDiagnostic<T>(value: T, endpoint: string): T {
 	return value;
 }
 
+function sanitizeRpcError(error: JSONRPCErrorResponse["error"], endpoint: string): JSONRPCErrorResponse["error"] {
+	const { code, message, data, ...diagnostics } = error;
+	// Protocol field names are not diagnostics, even when a token equals one of them.
+	return {
+		...sanitizeRpcDiagnostic(diagnostics, endpoint),
+		code,
+		message: redactDiagnosticText(message, endpoint, true),
+		...("data" in error ? { data: sanitizeRpcDiagnostic(data, endpoint) } : {}),
+	};
+}
+
 /** Protect both rejected operations and asynchronous SDK diagnostics, not stdio. */
 export function protectRemoteTransport<T extends Transport>(transport: T, endpoint: string): T {
 	let onmessage: Transport["onmessage"];
@@ -67,7 +78,7 @@ export function protectRemoteTransport<T extends Transport>(transport: T, endpoi
 				? (message, extra) =>
 						handler(
 							isJSONRPCErrorResponse(message)
-								? { ...message, error: sanitizeRpcDiagnostic(message.error, endpoint) }
+								? { ...message, error: sanitizeRpcError(message.error, endpoint) }
 								: message,
 							extra,
 						)
