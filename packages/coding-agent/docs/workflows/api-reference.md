@@ -1222,7 +1222,7 @@ Managed `doctor` also checks the installed `postgres`, `pg_ctl` and `initdb` bin
 | `cluster` | Optional trusted managed cluster metadata, including cluster ID, data directory, directory identity, major version and published server identity |
 | `identityVerified` | Whether managed SQL/data/process identity agreed during this check; external reachability does not grant managed ownership |
 | `consumers` | Conservative live managed-consumer leases with process and runtime identity, not workflow counts |
-| `lastFailure` | Optional process-local last failure; not a persisted incident history |
+| `lastFailure` | Optional most recently observed failure, retained after successful checks until a newer failure replaces it. Process-local, not a persisted incident history; use `state` for current availability. |
 | `guidance` | Safe next steps for the reported condition |
 
 The response budget is five seconds. A `checking` or `recovering` report leaves the existing operation running; concurrent calls join it instead of starting another operation. These states do not confirm availability or recovery success. Inspect again before resuming the original run ID. The workflow tool returns `{ action: "dependency", operation, report }`; `/workflow dependency [status|doctor|recover]` exposes the same capability. See [database inspection and recovery](/workflows/operations#inspecting-and-recovering-the-workflow-database) for troubleshooting and safety limits.

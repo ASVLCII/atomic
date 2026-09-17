@@ -22,6 +22,7 @@ interface DoctorOwner {
 	operation?: WorkflowDependencyOperation;
 	last?: WorkflowDependencyReport;
 	failure?: string;
+	healthFailure?: Error;
 }
 const ownerKey = Symbol.for("atomic-workflows/dependency-doctor@1");
 const bag = globalThis as typeof globalThis & Record<symbol, DoctorOwner | undefined>;
@@ -138,7 +139,10 @@ async function inspect(operation: WorkflowDependencyOperation): Promise<Workflow
 			};
 		}
 		const context = await resolveEmbeddedRunContext();
-		owner.failure = postgresLastFailure()?.message ?? owner.failure;
+		const healthFailure = postgresLastFailure();
+		// Health retains the same Error after recovery; only a new failure supersedes doctor diagnostics.
+		if (healthFailure && healthFailure !== owner.healthFailure) owner.failure = healthFailure.message;
+		owner.healthFailure = healthFailure;
 		report = { ...report, lastFailure: owner.failure };
 		if (!existsSync(postgresOwnershipDirectory(context.baseDir, 18))) {
 			if (operation === "doctor") report = await withRuntime(report);
@@ -154,7 +158,7 @@ async function inspect(operation: WorkflowDependencyOperation): Promise<Workflow
 			cluster: metadata,
 			endpoint: metadata.server ? { host: "127.0.0.1", port: metadata.server.port } : undefined,
 			consumers: inspectPostgresConsumers(context.baseDir, metadata, undefined, false),
-			lastFailure: postgresLastFailure()?.message ?? owner.failure,
+			lastFailure: owner.failure,
 		};
 		if (operation !== "status") report = await withRuntime(report);
 		if (!metadata.server)
@@ -198,6 +202,7 @@ async function inspect(operation: WorkflowDependencyOperation): Promise<Workflow
 				PRESERVE,
 		};
 	} catch (error) {
+		if (report.provider === "managed") owner.healthFailure = postgresLastFailure();
 		// External driver diagnostics can contain credentials or server-supplied text. Never publish them.
 		owner.failure =
 			report.provider === "external"

@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
 	provider: "unresolved",
 	connectError: false,
 	runtimeBroken: false,
+	healthFailure: undefined as Error | undefined,
 	recover: vi.fn(async () => {}),
 	query: vi.fn(),
 	end: vi.fn(),
@@ -31,7 +32,7 @@ vi.mock("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js", (
 }));
 vi.mock("../../packages/workflows/src/durable/dbos-local-postgres.js", () => ({
 	resolvedPostgresProvider: () => state.provider,
-	postgresLastFailure: () => undefined,
+	postgresLastFailure: () => state.healthFailure,
 	recoverManagedPostgres: state.recover,
 }));
 vi.mock("../../packages/workflows/src/durable/dependency-runtime.js", () => ({
@@ -87,6 +88,7 @@ beforeEach(() => {
 	state.root = mkdtempSync(join(tmpdir(), "atomic-doctor-"));
 	state.unavailable = false;
 	state.runtimeBroken = false;
+	state.healthFailure = undefined;
 	state.mismatch = false;
 	state.connectError = false;
 	state.provider = "unresolved";
@@ -104,12 +106,14 @@ beforeEach(() => {
 				operation?: string;
 				last?: WorkflowDependencyReport;
 				failure?: string;
+				healthFailure?: Error;
 			}
 		>;
 	const owner = bag[Symbol.for("atomic-workflows/dependency-doctor@1")];
 	assert.equal(owner.pending, undefined);
 	delete owner.last;
 	delete owner.failure;
+	delete owner.healthFailure;
 });
 afterEach(() => {
 	vi.useRealTimers();
@@ -169,6 +173,51 @@ test("recover refuses SQL identity mismatch and retains diagnostic after later s
 	const ready = await workflowDependency("doctor");
 	assert.equal(ready.state, "ready");
 	assert.equal(ready.lastFailure, failed.lastFailure);
+});
+
+// #3072/#3074: retained health diagnostics must not displace a newer doctor failure.
+test.each([false, true])("retains newer doctor failure with registered cluster %s", async (registered) => {
+	if (registered) cluster();
+	state.healthFailure = new Error("older recovered database outage");
+	assert.equal((await workflowDependency("status")).lastFailure, state.healthFailure.message);
+	state.runtimeBroken = true;
+	const failed = await workflowDependency("doctor");
+	assert.equal(failed.state, "unavailable");
+	assert.match(failed.lastFailure!, /missing library/);
+	state.runtimeBroken = false;
+	for (const operation of ["status", "doctor"] as const) {
+		const report = await workflowDependency(operation);
+		assert.equal(report.state, registered ? "ready" : "uninitialized");
+		assert.equal(report.lastFailure, failed.lastFailure);
+	}
+});
+
+// #3072/#3074: a new health failure wins even when its message repeats an older outage.
+test("newer health failure supersedes retained doctor failure", async () => {
+	cluster();
+	state.healthFailure = new Error("repeated database outage");
+	await workflowDependency("status");
+	state.runtimeBroken = true;
+	const failed = await workflowDependency("doctor");
+	assert.match(failed.lastFailure!, /missing library/);
+	state.runtimeBroken = false;
+	state.healthFailure = new Error("repeated database outage");
+	for (const operation of ["status", "doctor"] as const) {
+		const report = await workflowDependency(operation);
+		assert.equal(report.state, "ready");
+		assert.equal(report.lastFailure, state.healthFailure.message);
+	}
+});
+
+// #3074: failures before health inspection must also supersede the retained health error.
+test("context failure remains newer than an existing health failure", async () => {
+	state.healthFailure = new Error("older recovered database outage");
+	state.gate = Promise.reject(new Error("newer context failure"));
+	const failed = await workflowDependency("doctor");
+	assert.equal(failed.state, "unavailable");
+	assert.equal(failed.lastFailure, "newer context failure");
+	state.gate = undefined;
+	assert.equal((await workflowDependency("status")).lastFailure, failed.lastFailure);
 });
 
 test("recover refuses published process start mismatch", async () => {

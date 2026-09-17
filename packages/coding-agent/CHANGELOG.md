@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
+- Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers, retained latest failure and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 
 ### Fixed
 
