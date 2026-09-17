@@ -1479,6 +1479,31 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		}
 	});
 
+	test("zero-cell prompt text keeps the ordinary needs-attention card", () => {
+		const run = awaitingRun("zero-cell-card", "zero-cell-card", "\u0301".repeat(300));
+		const snap = makeSnap([run]);
+		const before = structuredClone(snap);
+		for (const lines of [renderWidgetLines(snap, 120), buildThemedWidgetLines(snap, NULL_PI_THEME, 120)]) {
+			assert.equal(lines.length, 4, "zero-cell prompts must not add preview or Answer rows");
+			const joined = lines.map(stripAnsi).join("\n");
+			assert.ok(joined.includes(run.id));
+			assert.ok(joined.includes(statusIcon("awaiting_input")));
+			assert.ok(joined.includes("needs attention"));
+			assert.doesNotMatch(joined, /"/);
+			assert.doesNotMatch(joined, /Answer: \/workflow connect/);
+			for (const line of lines) {
+				const plain = stripAnsi(line);
+				assert.equal(visibleWidth(plain), 120);
+				assert.equal(
+					[...plain].filter((c) => /\p{Mn}/u.test(c)).length,
+					0,
+					"combining marks must not land on widget chrome",
+				);
+			}
+		}
+		assert.deepEqual(snap, before);
+	});
+
 	test("waiting and non-waiting metadata rows stay identical for the same run", () => {
 		const now = 1_700_000_000_000;
 		const id = "8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44";

@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Stage-scoped durable resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 - Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 - The BACKGROUND panel stays mounted across top-level `/reload` while a run is still awaiting input; status and connect keep targeting the same pending prompt ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
+- Combining-only pending prompts no longer receive a quoted BACKGROUND preview; they keep general needs-attention guidance ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
 
 ### Added
 

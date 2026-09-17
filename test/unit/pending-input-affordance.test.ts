@@ -12,6 +12,7 @@ import {
 	sanitizePromptDisplay,
 	visibleRootPendingInput,
 } from "../../packages/workflows/src/tui/pending-input-affordance.js";
+import { visibleWidth } from "../../packages/workflows/src/tui/text-helpers.js";
 
 function makeStage(
 	id: string,
@@ -589,6 +590,86 @@ test("sanitizePromptDisplay backs off the display cap around an astral character
 	assert.equal(underCapProjected?.endsWith(astral), true);
 	assert.equal(underCapProjected?.isWellFormed(), true);
 	assert.deepEqual(underCapRun, underCapRaw);
+});
+
+test("zero-cell sanitized prompts stay non-displayable", () => {
+	const zeroCellMessages = [
+		"\u0301".repeat(300),
+		"\u0334".repeat(300),
+		`\u00a0${"\u0301".repeat(300)}\u00a0`,
+	] as const;
+
+	for (const [index, message] of zeroCellMessages.entries()) {
+		const sanitized = sanitizePromptDisplay(message);
+		assert.ok(sanitized.length > 0, `case ${index} still occupies code units`);
+		assert.equal(visibleWidth(sanitized), 0, `case ${index} occupies no terminal cells`);
+
+		const runLevel = makeRun(`zero-run-${index}`, "zero-run", "running");
+		runLevel.pendingPrompt = primitive("p", message);
+		const runRaw = structuredClone(runLevel);
+		assert.deepEqual(visibleRootPendingInput(runLevel, [runLevel]), {
+			hasPendingInput: true,
+			affordance: undefined,
+		});
+		assert.equal(pendingInputAffordance(runLevel, [runLevel]), undefined);
+		assert.deepEqual(runLevel, runRaw);
+
+		const stageId = `zero-stage-${index}`;
+		const store = createStore();
+		store.recordRunStart({
+			id: stageId,
+			name: "zero-stage",
+			inputs: {},
+			status: "running",
+			startedAt: 1,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(store.recordStagePendingPrompt(stageId, "ask", primitive("p", message)), true);
+		const stageRun = store.runs()[0]!;
+		const stageRaw = structuredClone(stageRun);
+		assert.deepEqual(visibleRootPendingInput(stageRun, store.runs()), {
+			hasPendingInput: true,
+			affordance: undefined,
+		});
+		assert.equal(pendingInputAffordance(stageRun, store.runs()), undefined);
+		assert.deepEqual(stageRun, stageRaw);
+
+		const structured = makeRun(`zero-structured-${index}`, "zero-structured", "running", [
+			makeStage("gate", "gate", "awaiting_input"),
+		]);
+		structured.stages[0]!.inputRequest = {
+			id: "p",
+			kind: "readiness_gate",
+			questions: [{ question: message, options: [] }],
+			createdAt: 1,
+		};
+		const structuredRaw = structuredClone(structured);
+		assert.deepEqual(visibleRootPendingInput(structured, [structured]), {
+			hasPendingInput: true,
+			affordance: undefined,
+		});
+		assert.equal(pendingInputAffordance(structured, [structured]), undefined);
+		assert.deepEqual(structured, structuredRaw);
+	}
+
+	const visible = `A${"\u0301".repeat(300)}`;
+	const controlStore = createStore();
+	controlStore.recordRunStart({
+		id: "visible-prefix",
+		name: "visible-prefix",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(controlStore.recordStagePendingPrompt("visible-prefix", "ask", primitive("p", visible)), true);
+	const controlRun = controlStore.runs()[0]!;
+	const controlRaw = structuredClone(controlRun);
+	const affordance = pendingInputAffordance(controlRun, controlStore.runs());
+	assert.ok(affordance?.message.startsWith("A"));
+	assert.ok(visibleWidth(affordance?.message ?? "") >= 1);
+	assert.ok((affordance?.message.length ?? 0) <= MAX_PROMPT_DISPLAY_CHARS);
+	assert.deepEqual(controlRun, controlRaw);
 });
 
 test("pause resume and block keep a pending prompt preview and answering while paused clears it", () => {

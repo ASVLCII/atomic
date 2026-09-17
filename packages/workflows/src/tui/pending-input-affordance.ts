@@ -10,6 +10,7 @@ import { effectiveRunStatus } from "../shared/returned-run-status.js";
 import { isTerminalStageStatus } from "../shared/store-internal.js";
 import type { PendingPrompt, RunSnapshot, RunStatus, StageInputRequest, StageSnapshot } from "../shared/store-types.js";
 import { reciprocalWorkflowRootRunId } from "../shared/workflow-run-ownership.js";
+import { visibleWidth } from "./text-helpers.js";
 
 /**
  * One safe, displayable pending-input request attributed to a visible run.
@@ -160,6 +161,10 @@ function boundPromptDisplay(message: string): string {
 	return message.slice(0, end);
 }
 
+function isDisplayablePrompt(message: string): boolean {
+	return visibleWidth(message) > 0;
+}
+
 function isTerminalOrBlockedRun(run: RunSnapshot): boolean {
 	return TERMINAL_OR_BLOCKED.has(effectiveRunStatus(run)) || run.endedAt !== undefined;
 }
@@ -246,7 +251,7 @@ function descriptorOccurrence(
 
 function runPromptOccurrence(run: RunSnapshot, prompt: PendingPrompt): PendingInputOccurrence {
 	const message = sanitizePromptDisplay(prompt.message);
-	return descriptorOccurrence(run, null, prompt.id, message, message.length > 0);
+	return descriptorOccurrence(run, null, prompt.id, message, isDisplayablePrompt(message));
 }
 
 function structuredOccurrence(
@@ -261,7 +266,7 @@ function structuredOccurrence(
 		stage.id,
 		request.id,
 		message,
-		request.questions.length === 1 && message.length > 0,
+		request.questions.length === 1 && isDisplayablePrompt(message),
 	);
 }
 
@@ -317,7 +322,7 @@ function runPromptOccurrenceForStage(
 	prompt: PendingPrompt,
 ): PendingInputOccurrence {
 	const message = sanitizePromptDisplay(prompt.message);
-	return descriptorOccurrence(run, stage.id, prompt.id, message, message.length > 0);
+	return descriptorOccurrence(run, stage.id, prompt.id, message, isDisplayablePrompt(message));
 }
 
 function pendingInputOccurrences(run: RunSnapshot): PendingInputOccurrence[] {
