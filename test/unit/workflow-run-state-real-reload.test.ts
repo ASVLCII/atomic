@@ -475,7 +475,7 @@ test(
 		recordGenerationState(first, ids, callbackSettled);
 		const firstFactory = widget.calls.findLast((call) => call.factory !== undefined);
 		assert.ok(firstFactory?.factory, "the initial active tool-only run must mount the widget");
-		assert.equal(firstFactory.placement, "aboveEditor");
+		assert.equal(firstFactory.placement, "belowEditor");
 		assert.match(firstFactory.factory(undefined, undefined).render(120).join("\n"), /reload-tool · running/);
 
 		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
@@ -600,7 +600,7 @@ test.sequential(
 			assert.deepEqual(first.stageControlRegistry.forRun(launched.runId), []);
 			const initialWidget = widget.calls.slice(widgetCallStart).findLast((call) => call.factory !== undefined);
 			assert.ok(initialWidget?.factory, "run-start invalidation must mount the host widget before any stage exists");
-			assert.equal(initialWidget.placement, "aboveEditor");
+			assert.equal(initialWidget.placement, "belowEditor");
 			assert.match(initialWidget.factory(undefined, undefined).render(120).join("\n"), /BACKGROUND/);
 			emitReloadEvidence("agent-start", {
 				head: process.env.ATOMIC_RELOAD_EVIDENCE_HEAD,
@@ -667,7 +667,7 @@ test.sequential(
 			const replacementWidget = widget.calls
 				.slice(reloadWidgetCallStart)
 				.findLast((call) => call.factory !== undefined);
-			assert.ok(replacementWidget?.factory, "the host must remount the adopted active run above the editor");
+			assert.ok(replacementWidget?.factory, "the host must remount the adopted active run below the editor");
 			assert.match(replacementWidget.factory(undefined, undefined).render(120).join("\n"), /BACKGROUND/);
 			assert.deepEqual(replacementWidget.factory(undefined, undefined).render(60), [
 				" ▾  1 background · 1 ● · 1 tool",

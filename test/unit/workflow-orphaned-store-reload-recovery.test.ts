@@ -140,7 +140,7 @@ test("reload reclaims a live workflow displaced into an auxiliary session scope"
 		},
 		store,
 	);
-	assert.deepEqual(widgetCalls[0], { key: "workflow.run", mounted: true, placement: "aboveEditor" });
+	assert.deepEqual(widgetCalls[0], { key: "workflow.run", mounted: true, placement: "belowEditor" });
 
 	disposeWidget();
 	disposeTool();

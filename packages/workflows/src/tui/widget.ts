@@ -427,7 +427,9 @@ function awaitingRunLines(
 	bodyWidth: number,
 	expandGraph: ReturnType<typeof createWorkflowGraphExpander>,
 ): string[] {
-	const meta = metaLine(run, expandGraph, now, runMetaWidth(run, bodyWidth + 2));
+	const resolveBoundarySegments: WorkflowBoundarySegmentsResolver = (runId) =>
+		workflowBoundarySegments(allRuns, runId);
+	const meta = metaLine(run, expandGraph, now, runMetaWidth(run, bodyWidth + 2), resolveBoundarySegments);
 	const identity = renderRunIdentityRows({
 		runId: run.id,
 		name: run.name,

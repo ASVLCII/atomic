@@ -3,8 +3,10 @@
  */
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { RunSnapshot, StageSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import {
+	MAX_PROMPT_DISPLAY_CHARS,
 	pendingInputAffordance,
 	sanitizePromptDisplay,
 	visibleRootPendingInput,
@@ -208,6 +210,37 @@ test("conflicting descriptors do not select an arbitrary prompt", () => {
 	assert.deepEqual(pendingInputAffordance(aligned, [aligned])?.identity, [aligned.id, "ask", "same-id"]);
 });
 
+test("same-id multi-question and conflicting text prevent false uniqueness", () => {
+	const sameIdMulti = makeRun("same-id-multi", "same-id-multi", "running", [
+		makeStage("ask", "ask", "awaiting_input"),
+	]);
+	sameIdMulti.stages[0]!.pendingPrompt = primitive("shared-prompt", "Approve the shared prompt?");
+	sameIdMulti.stages[0]!.inputRequest = {
+		id: "shared-prompt",
+		kind: "ask_user_question",
+		questions: [
+			{ question: "First questionnaire field?", options: [] },
+			{ question: "Second questionnaire field?", options: [] },
+		],
+		createdAt: 1,
+	};
+	assert.equal(pendingInputAffordance(sameIdMulti, [sameIdMulti]), undefined);
+	assert.equal(visibleRootPendingInput(sameIdMulti, [sameIdMulti]).hasPendingInput, true);
+
+	const sameIdConflict = makeRun("same-id-conflict", "same-id-conflict", "running", [
+		makeStage("ask", "ask", "awaiting_input"),
+	]);
+	sameIdConflict.stages[0]!.pendingPrompt = primitive("shared-prompt", "Primitive wording");
+	sameIdConflict.stages[0]!.inputRequest = {
+		id: "shared-prompt",
+		kind: "ask_user_question",
+		questions: [{ question: "Structured wording", options: [] }],
+		createdAt: 1,
+	};
+	assert.equal(pendingInputAffordance(sameIdConflict, [sameIdConflict]), undefined);
+	assert.equal(visibleRootPendingInput(sameIdConflict, [sameIdConflict]).hasPendingInput, true);
+});
+
 test("nested prompts retain owner identity and navigate through the visible root", () => {
 	const root = makeRun("visible-root", "nested-release", "running");
 	const child = nestedChild(root, "nested-owner");
@@ -354,4 +387,104 @@ test("control sequences cannot manufacture a preview", () => {
 	const run = makeRun("control-owner", "release-docs", "running");
 	run.pendingPrompt = primitive("control-prompt", "  Approve\x1b[2J this\x1b]0;pwned\x07 release?\x07\x08  ");
 	assert.equal(pendingInputAffordance(run, [run])?.message, "Approve this release?");
+});
+
+test("same-id store descriptors require a compatible single question for a preview", () => {
+	const store = createStore();
+	store.recordRunStart({
+		id: "store-root",
+		name: "store-root",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(
+		store.recordStagePendingPrompt("store-root", "ask", primitive("shared-id", "Approve the store prompt?")),
+		true,
+	);
+	assert.equal(
+		store.recordStageInputRequest("store-root", "ask", {
+			id: "shared-id",
+			kind: "ask_user_question",
+			questions: [
+				{ question: "First field?", options: [] },
+				{ question: "Second field?", options: [] },
+			],
+			createdAt: 1,
+		}),
+		true,
+	);
+	const multi = store.runs()[0]!;
+	assert.equal(visibleRootPendingInput(multi, store.runs()).hasPendingInput, true);
+	assert.equal(pendingInputAffordance(multi, store.runs()), undefined);
+
+	const conflictStore = createStore();
+	conflictStore.recordRunStart({
+		id: "conflict-root",
+		name: "conflict-root",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(
+		conflictStore.recordStagePendingPrompt("conflict-root", "ask", primitive("shared-id", "Primitive store wording")),
+		true,
+	);
+	assert.equal(
+		conflictStore.recordStageInputRequest("conflict-root", "ask", {
+			id: "shared-id",
+			kind: "ask_user_question",
+			questions: [{ question: "Structured store wording", options: [] }],
+			createdAt: 1,
+		}),
+		true,
+	);
+	const conflict = conflictStore.runs()[0]!;
+	assert.equal(visibleRootPendingInput(conflict, conflictStore.runs()).hasPendingInput, true);
+	assert.equal(pendingInputAffordance(conflict, conflictStore.runs()), undefined);
+
+	const alignedStore = createStore();
+	alignedStore.recordRunStart({
+		id: "aligned-root",
+		name: "aligned-root",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(
+		alignedStore.recordStagePendingPrompt("aligned-root", "ask", primitive("shared-id", "Shared store identity")),
+		true,
+	);
+	assert.equal(
+		alignedStore.recordStageInputRequest("aligned-root", "ask", {
+			id: "shared-id",
+			kind: "ask_user_question",
+			questions: [{ question: "Shared store identity", options: [] }],
+			createdAt: 1,
+		}),
+		true,
+	);
+	assert.deepEqual(pendingInputAffordance(alignedStore.runs()[0]!, alignedStore.runs())?.identity, [
+		"aligned-root",
+		"ask",
+		"shared-id",
+	]);
+});
+
+test("sanitizePromptDisplay bounds payload and drops bidi without mutating raw state", () => {
+	const zeroWidth = `Approve?${"\u200b".repeat(200_000)}`;
+	const combining = `Approve?${"\u0301".repeat(100_000)}`;
+	const bidi = "\u202eStop! Do not approve";
+	assert.equal(sanitizePromptDisplay(zeroWidth), "Approve?");
+	assert.ok(sanitizePromptDisplay(combining).length <= MAX_PROMPT_DISPLAY_CHARS);
+	assert.equal(sanitizePromptDisplay(bidi), "Stop! Do not approve");
+	assert.equal(sanitizePromptDisplay(bidi).includes("\u202e"), false);
+	const run = makeRun("bound-owner", "bound", "running");
+	run.pendingPrompt = primitive("bound-prompt", zeroWidth);
+	const raw = structuredClone(run);
+	assert.equal(pendingInputAffordance(run, [run])?.message, "Approve?");
+	assert.deepEqual(run, raw);
 });

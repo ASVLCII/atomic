@@ -40,6 +40,9 @@ interface PendingInputOccurrence {
 
 const TERMINAL_OR_BLOCKED = new Set<RunStatus>(["completed", "failed", "killed", "cancelled", "skipped", "blocked"]);
 
+/** Display-only cap for a single BACKGROUND preview line, in UTF-16 code units. */
+export const MAX_PROMPT_DISPLAY_CHARS = 256;
+
 const ESC = 0x1b;
 const BEL = 0x07;
 const DEL = 0x7f;
@@ -135,9 +138,22 @@ function stripTerminalControls(message: string): string {
 	return out.replace(/[\u2028\u2029]+/g, " ");
 }
 
-/** Strip CSI/OSC/DCS and leftover C0/C1, then collapse to one display line. */
+/** Strip CSI/OSC/DCS and leftover C0/C1, drop bidi/default-ignorable code points, then bound one display line. */
 export function sanitizePromptDisplay(message: string): string {
-	return stripTerminalControls(message).replace(/\s+/g, " ").trim();
+	return boundPromptDisplay(
+		stripTerminalControls(message)
+			.replace(/\p{Default_Ignorable_Code_Point}/gu, "")
+			.replace(/\s+/g, " ")
+			.trim(),
+	);
+}
+
+function boundPromptDisplay(message: string): string {
+	if (message.length <= MAX_PROMPT_DISPLAY_CHARS) return message;
+	let end = MAX_PROMPT_DISPLAY_CHARS;
+	const lead = message.charCodeAt(end - 1);
+	if (lead >= 0xd800 && lead <= 0xdbff) end -= 1;
+	return message.slice(0, end);
 }
 
 function isTerminalOrBlockedRun(run: RunSnapshot): boolean {
@@ -247,8 +263,16 @@ function structuredOccurrence(
 /**
  * One stage contributes at most the descriptors that actually exist. A
  * descriptor and its awaiting marker count once. Conflicting primitive and
- * structured descriptors without a shared id fail closed on uniqueness.
+ * structured descriptors without a shared id, or same-id descriptors that are
+ * not a compatible single question, fail closed on uniqueness.
  */
+function descriptorsAreCompatible(prompt: PendingPrompt, request: StageInputRequest): boolean {
+	if (prompt.id !== request.id || request.questions.length !== 1) return false;
+	const question = request.questions[0]?.question;
+	if (question === undefined) return false;
+	return sanitizePromptDisplay(prompt.message) === sanitizePromptDisplay(question);
+}
+
 function stagePromptOccurrences(run: RunSnapshot): PendingInputOccurrence[] {
 	const occurrences: PendingInputOccurrence[] = [];
 
@@ -257,9 +281,13 @@ function stagePromptOccurrences(run: RunSnapshot): PendingInputOccurrence[] {
 
 		const prompt = stage.pendingPrompt;
 		const request = stage.inputRequest;
-		if (prompt !== undefined && request !== undefined && prompt.id !== request.id) {
-			occurrences.push(runPromptOccurrenceForStage(run, stage, prompt));
-			occurrences.push(structuredOccurrence(run, stage, request));
+		if (prompt !== undefined && request !== undefined) {
+			if (descriptorsAreCompatible(prompt, request)) {
+				occurrences.push(runPromptOccurrenceForStage(run, stage, prompt));
+			} else {
+				occurrences.push(runPromptOccurrenceForStage(run, stage, prompt));
+				occurrences.push(structuredOccurrence(run, stage, request));
+			}
 			continue;
 		}
 		if (prompt !== undefined) {

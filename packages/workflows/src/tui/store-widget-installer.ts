@@ -1,14 +1,15 @@
 /**
- * Widget installer — wires the orchestrator's above-editor BACKGROUND widget
- * to the workflow store using a single long-lived component that is updated
- * in place (issue #1109).
+ * Widget installer — wires the orchestrator's below-editor widget to the
+ * workflow store using a single long-lived component that is updated in
+ * place (issue #1109).
  *
- * Placement note (aboveEditor): waiting HIL rows sit above the editor so
- * the prompt preview stays visible while typing. Pi-tui still full-clears
- * when a changed line sits above the viewport fold (#1109), so this installer
- * keeps a single mounted component, bounds clock-driven diffs to in-place
- * repaint, and never remounts on store ticks. See the `setWidget` call site
- * for the mount/unmount rationale.
+ * Placement note (belowEditor, not aboveEditor): pi-tui full-clears the
+ * screen + scrollback whenever a changed line is above the viewport fold. An
+ * aboveEditor widget gets pushed above the fold once the bottom region grows
+ * tall, so each repaint cleared the whole screen (the resize flicker in
+ * #1109). belowEditor keeps the widget among the last rendered lines (always
+ * within the bottom viewport), so a repaint is a clean differential redraw.
+ * See the `setWidget` call site for the full rationale.
  *
  * Pattern:
  *   1. The widget mounts once (`ui.setWidget(WIDGET_KEY, factory)`) on the
@@ -160,7 +161,7 @@ export function installStoreWidget(
 			...(onWidgetRelease ? { onWidgetRelease: (key, listener) => onWidgetRelease.call(ui, key, listener) } : {}),
 		},
 		key: WIDGET_KEY,
-		placement: "aboveEditor",
+		placement: "belowEditor",
 		scroll: { maxHeight: 10, maxHeightFraction: 1 / 3 },
 		timers,
 		getSnapshot: () => liveWidgetSnapshot(storeInstance),

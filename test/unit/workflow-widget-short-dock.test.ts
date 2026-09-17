@@ -64,25 +64,15 @@ test("registered workflow shortcuts reach every run in a clipped dock without st
 		const draft = Array.from({ length: 10 }, (_, i) => `draft${i}`).join("\n");
 		editor.setText(draft);
 		tui.renderNow();
-		const mounted = context.extensionWidgetsAbove.get("workflow.run");
+		const mounted = context.extensionWidgetsBelow.get("workflow.run");
 		assert.ok(mounted);
 		const frame = () => {
 			tui.renderNow();
-			const layout = getLayoutFrame(tui);
-			const lines = layout.lines;
+			const lines = getLayoutFrame(tui).lines;
 			assert.ok(lines.every((line) => visibleWidth(line) <= terminal.columns));
 			assert.ok(lines.length <= terminal.rows);
 			assert.equal(editor.getText(), draft);
-			assert.equal(context.extensionWidgetsAbove.get("workflow.run"), mounted);
-			assert.equal(context.extensionWidgetsBelow.has("workflow.run"), false);
-			assert.ok(context.widgetContainerAbove.children.includes(mounted));
-			const widgetIndex = lines.findIndex(
-				(line) => line.includes("BACKGROUND") || line.includes("00000000-0000-4000-8000"),
-			);
-			const editorIndex = lines.findIndex((line) => line.includes("draft0"));
-			if (widgetIndex >= 0 && editorIndex >= 0) {
-				assert.ok(widgetIndex < editorIndex, "BACKGROUND rows must paint above the editor");
-			}
+			assert.equal(context.extensionWidgetsBelow.get("workflow.run"), mounted);
 			return lines;
 		};
 		for (const [width, height] of [
@@ -123,7 +113,7 @@ test("registered workflow shortcuts reach every run in a clipped dock without st
 		store.removeRun(ids.at(-1)!);
 		await Promise.resolve();
 		tui.renderNow();
-		assert.equal(context.extensionWidgetsAbove.has("workflow.run"), false);
+		assert.equal(context.extensionWidgetsBelow.has("workflow.run"), false);
 		assert.equal(editor.getText(), draft);
 	} finally {
 		for (const id of ids) store.removeRun(id);
@@ -134,7 +124,7 @@ test("registered workflow shortcuts reach every run in a clipped dock without st
 	}
 });
 
-test("above-editor pending input preserves editor focus draft and frame bounds", async () => {
+test("pending input preserves editor focus draft and frame bounds", async () => {
 	const fixture = createProductionFullscreenContext({ columns: 80, rows: 9 });
 	const { context, tui, terminal } = fixture;
 	const local = createStore();
@@ -160,7 +150,7 @@ test("above-editor pending input preserves editor focus draft and frame bounds",
 			local.recordStagePendingPrompt(runId, "ask", {
 				id: "prompt-42",
 				kind: "confirm",
-				message: "Approve the above-editor prompt?",
+				message: "Approve the pending-input prompt?",
 				createdAt: 1,
 			}),
 			true,
@@ -168,7 +158,7 @@ test("above-editor pending input preserves editor focus draft and frame bounds",
 		await Promise.resolve();
 		const draft = Array.from({ length: 8 }, (_, i) => `focus-draft-${i}`).join("\n");
 		editor.setText(draft);
-		const mounted = context.extensionWidgetsAbove.get("workflow.run");
+		const mounted = context.extensionWidgetsBelow.get("workflow.run");
 		assert.ok(mounted);
 		for (const [width, height] of [
 			[80, 9],
@@ -183,14 +173,14 @@ test("above-editor pending input preserves editor focus draft and frame bounds",
 			assert.ok(frame.lines.length <= terminal.rows);
 			assert.equal(editor.getText(), draft);
 			assert.equal(tui.getFocusedComponent(), editor);
-			assert.equal(context.extensionWidgetsAbove.get("workflow.run"), mounted);
-			assert.equal(context.extensionWidgetsBelow.has("workflow.run"), false);
+			assert.equal(context.extensionWidgetsBelow.get("workflow.run"), mounted);
+			assert.equal(context.extensionWidgetsAbove.has("workflow.run"), false);
 			if (width! >= 80) {
 				const widgetIndex = frame.lines.findIndex((line) => line.includes(runId) || line.includes("BACKGROUND"));
 				const editorIndex = frame.lines.findIndex((line) => line.includes("focus-draft"));
 				assert.ok(widgetIndex >= 0, `pending-input card must paint at ${width}x${height}`);
 				if (editorIndex >= 0) {
-					assert.ok(widgetIndex < editorIndex, "pending-input card must paint above the editor");
+					assert.ok(widgetIndex > editorIndex, "pending-input card must paint below the editor");
 				}
 			}
 		}

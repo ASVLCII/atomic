@@ -1269,4 +1269,66 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		buildThemedWidgetLines(snap, NULL_PI_THEME, 80);
 		assert.deepEqual(snap, before);
 	});
+
+	test("hostile zero-width combining and bidi text stay bounded and readable", () => {
+		const MAX_PROMPT_ROW_CHARS = 512;
+		const BIDI_RE = /[\u202a-\u202e\u2066-\u2069]/u;
+		const cases = [
+			`Approve?${"\u200b".repeat(200_000)}`,
+			`Approve?${"\u0301".repeat(100_000)}`,
+			"\u202eStop! Do not approve",
+		] as const;
+		for (const message of cases) {
+			const run = awaitingRun("hostile-bound", "hostile-bound", message);
+			const snap = makeSnap([run]);
+			const before = structuredClone(snap);
+			const plain = renderWidgetLines(snap, 120);
+			const themed = buildThemedWidgetLines(snap, NULL_PI_THEME, 120);
+			for (const lines of [plain, themed]) {
+				for (const line of lines) {
+					assert.ok(
+						line.length <= MAX_PROMPT_ROW_CHARS,
+						`unbounded row (${line.length}): ${JSON.stringify(line)}`,
+					);
+					assert.equal(visibleWidth(stripAnsi(line)), 120);
+					assert.equal(BIDI_RE.test(line), false);
+				}
+				const joined = lines.map(stripAnsi).join("\n");
+				assert.ok(joined.includes('"'));
+				if (message.includes("Stop")) {
+					assert.ok(joined.includes("Stop! Do not approve"));
+					assert.equal(joined.includes("\u202e"), false);
+				} else {
+					assert.ok(joined.includes("Approve?"));
+				}
+			}
+			assert.deepEqual(snap, before);
+		}
+	});
+
+	test("waiting and non-waiting metadata rows stay identical for the same run", () => {
+		const now = 1_700_000_000_000;
+		const id = "8f3a1c20-5b64-4d8e-a791-2c3f0e6b9d44";
+		const stages: StageSnapshot[] = [
+			makeStage("ask", "ask", "running"),
+			makeStage("publish", "publish", "pending", { pendingStageDeliveryAvailable: true }),
+		];
+		const running = makeRun(id, "release-docs", "running", stages, now - 5_000);
+		running.rootRunId = id;
+		const waitingStages: StageSnapshot[] = [
+			makeStage("ask", "ask", "awaiting_input", {
+				pendingPrompt: { id: "ask-prompt", kind: "confirm", message: "Approve metadata parity?", createdAt: now },
+			}),
+			makeStage("publish", "publish", "pending", { pendingStageDeliveryAvailable: true }),
+		];
+		const waiting = makeRun(id, "release-docs", "running", waitingStages, now - 5_000);
+		waiting.rootRunId = id;
+		const runningLines = buildThemedWidgetLines(makeSnap([running]), undefined, 120, now).map(stripAnsi);
+		const waitingLines = buildThemedWidgetLines(makeSnap([waiting]), undefined, 120, now).map(stripAnsi);
+		assert.equal(runningLines.length, 4);
+		assert.equal(waitingLines.length, 6);
+		assert.equal(waitingLines[2], runningLines[2]);
+		assert.ok(waitingLines[3]?.includes('"Approve metadata parity?"'));
+		assert.ok(waitingLines[4]?.includes(`Answer: /workflow connect ${id}`));
+	});
 });

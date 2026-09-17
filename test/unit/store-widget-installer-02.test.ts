@@ -11,6 +11,7 @@ import { statusRuns } from "../../packages/workflows/src/runs/background/status.
 import type { Store } from "../../packages/workflows/src/shared/store.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { PendingPrompt, RunSnapshot, StageSnapshot } from "../../packages/workflows/src/shared/store-types.js";
+import { statusIcon } from "../../packages/workflows/src/tui/status-helpers.js";
 import { installStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 
 // ---------------------------------------------------------------------------
@@ -189,7 +190,7 @@ describe("installStoreWidget", () => {
 		await Promise.resolve();
 		const mounted = widgetCalls.findLast((call) => call.factory !== undefined);
 		assert.ok(mounted?.factory);
-		assert.equal(mounted.opts?.placement, "aboveEditor");
+		assert.equal(mounted.opts?.placement, "belowEditor");
 		assert.match(mounted.factory(undefined, undefined).render(120).join("\n"), /publish-watcher · running/);
 		const rendersAfterHydration = renderRequests.count;
 
@@ -213,7 +214,7 @@ describe("installStoreWidget", () => {
 		assert.equal(factoryCalls.length, 1, "expected exactly one setWidget(factory) mount");
 		assert.equal(factoryCalls[0]!.key, "workflow.run");
 		assert.deepEqual(factoryCalls[0]!.opts, {
-			placement: "aboveEditor",
+			placement: "belowEditor",
 			scroll: { maxHeight: 10, maxHeightFraction: 1 / 3 },
 		});
 	});
@@ -303,6 +304,69 @@ describe("installStoreWidget", () => {
 		assert.equal(widgetCalls.length, callsAfterMount, "resolving a prompt must not remount the widget");
 		assert.ok(renderRequests.count > requestsBeforeResolution, "prompt resolution must request an in-place repaint");
 		assert.doesNotMatch(component.render(120).join("\n"), /Approve the deployment/);
+	});
+
+	test("pending prompt transitions one to many to one to none without remounting", async () => {
+		const { pi, widgetCalls, renderRequests } = makeMockPi();
+		installStoreWidget(pi, storeInstance);
+		const run = makeRun("r1", "my-wf");
+		(run.stages as StageSnapshot[]).push(makeStage("s1", "ask"));
+		(run.stages as StageSnapshot[]).push(makeStage("s2", "publish"));
+		storeInstance.recordRunStart(run);
+		const mountCall = widgetCalls.findLast((c) => typeof c.factory === "function")!;
+		const component = mountCall.factory!(null, undefined) as { render(w: number): string[] };
+		const callsAfterMount = widgetCalls.length;
+
+		assert.equal(
+			storeInstance.recordStagePendingPrompt("r1", "s1", {
+				id: "p1",
+				kind: "confirm",
+				message: "Answer one?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		assert.equal(widgetCalls.length, callsAfterMount);
+		const afterOne = renderRequests.count;
+		assert.match(component.render(120).join("\n"), /"Answer one\?"/);
+		assert.match(component.render(120).join("\n"), /Answer: \/workflow connect r1/);
+
+		assert.equal(
+			storeInstance.recordStagePendingPrompt("r1", "s2", {
+				id: "p2",
+				kind: "confirm",
+				message: "Answer two?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		assert.equal(widgetCalls.length, callsAfterMount);
+		assert.ok(renderRequests.count > afterOne);
+		const afterMany = renderRequests.count;
+		const many = component.render(120).join("\n");
+		assert.doesNotMatch(many, /"Answer one\?"/);
+		assert.doesNotMatch(many, /"Answer two\?"/);
+		assert.doesNotMatch(many, /Answer: \/workflow connect/);
+		assert.match(many, /？ ↵ 1 needs attention \(attach to workflow with `\/workflow connect`\)/);
+
+		assert.equal(storeInstance.resolveStagePendingPrompt("r1", "s2", "p2", true), true);
+		await Promise.resolve();
+		assert.equal(widgetCalls.length, callsAfterMount);
+		assert.ok(renderRequests.count > afterMany);
+		const afterOneAgain = renderRequests.count;
+		assert.match(component.render(120).join("\n"), /"Answer one\?"/);
+		assert.match(component.render(120).join("\n"), /Answer: \/workflow connect r1/);
+
+		assert.equal(storeInstance.resolveStagePendingPrompt("r1", "s1", "p1", true), true);
+		await Promise.resolve();
+		assert.equal(widgetCalls.length, callsAfterMount);
+		assert.ok(renderRequests.count > afterOneAgain);
+		const none = component.render(120).join("\n");
+		assert.doesNotMatch(none, /"Answer one\?"/);
+		assert.doesNotMatch(none, /Answer: \/workflow connect/);
+		assert.doesNotMatch(none, new RegExp(statusIcon("awaiting_input")));
 	});
 
 	test("answering one root leaves another root's preview intact", async () => {
