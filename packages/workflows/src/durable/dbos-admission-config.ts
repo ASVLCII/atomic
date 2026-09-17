@@ -1,6 +1,6 @@
 import { ensurePGDatabase } from "@dbos-inc/dbos-sdk/datasource";
 import { fenceDbosAdmissionPool } from "./dbos-admission-pool.js";
-import { resolvedPostgresHealth } from "./dbos-local-postgres.js";
+import { resolvedPostgresHealth } from "./dbos-managed-health.js";
 import { createRecoverablePostgresPool } from "./dbos-recoverable-pool.js";
 import type { DbosConfiguration, DbosStatic } from "./dbos-sdk-handle.js";
 

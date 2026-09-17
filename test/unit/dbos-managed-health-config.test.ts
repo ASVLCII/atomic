@@ -7,7 +7,7 @@ import { PostgresHealth } from "../../packages/workflows/src/durable/dbos-postgr
 import type { DbosConfiguration } from "../../packages/workflows/src/durable/dbos-sdk-handle.js";
 
 const local = vi.hoisted(() => ({ health: undefined as PostgresHealth | undefined }));
-vi.mock("../../packages/workflows/src/durable/dbos-local-postgres.js", () => ({
+vi.mock("../../packages/workflows/src/durable/dbos-managed-health.js", () => ({
 	resolvedPostgresHealth: () => local.health,
 }));
 vi.mock("@dbos-inc/dbos-sdk/datasource", async (original) => ({
