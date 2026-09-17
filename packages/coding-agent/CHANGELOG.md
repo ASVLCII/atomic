@@ -49,6 +49,7 @@
 - Jev structured decisions now handle choices above 255 options through bounded multi-request tournaments, including every candidate and comparing finalists without cross-batch probability ranking. Subagent auto routing supports large model/effort catalogs; workflow routing retains `none` and exact budgets. One shared deadline and fail-closed validation cover all rounds ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - Workflow routing preserves omitted budget fields with strict-schema providers instead of rejecting their required null placeholders. Explicit zero and fractional limits retain their exact meaning.
 - Subagent auto routing uses the routed thinking level when checking unsuffixed fallbacks and cancels sibling routing requests when a parallel routing decision fails ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
+- The Router model picker updates an existing project override instead of silently changing a global default that the project ignores, and displays the save scope ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

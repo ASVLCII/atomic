@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -216,4 +216,45 @@ test("router setter rejects malformed values without changing saved selection", 
 		expect(() => manager.setRouterModel(value)).toThrow(/Invalid routerModel/);
 	}
 	expect(manager.getRouterModel()).toBe("typesafe-ai/jev");
+});
+
+test("router menu edits the project override including Automatic without changing global defaults", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "atomic-project-router-"));
+	try {
+		mkdirSync(join(directory, ".atomic"));
+		const globalFile = join(directory, "settings.json");
+		const projectFile = join(directory, ".atomic", "settings.json");
+		const global = { routerModel: "global/model", theme: "dark" };
+		writeFileSync(globalFile, JSON.stringify(global));
+		writeFileSync(projectFile, JSON.stringify({ routerModel: "typesafe-ai/jev", quietStartup: true }));
+		const manager = SettingsManager.create(directory, directory);
+		for (const next of ["", "test/nested/model"]) {
+			const scope = manager.getProjectSettings().routerModel !== undefined ? "project" : "global";
+			const menu = openRouterSubmenu(
+				settingsConfig({
+					routerModel: manager.getRouterModel(),
+					routerModelScope: scope,
+					availableDefaultModels: [
+						{ id: "nested/model", provider: "test", name: "Test model" },
+					] as SettingsConfig["availableDefaultModels"],
+				}),
+				(model) => manager.setRouterModel(model, scope),
+			);
+			for (const character of next ? "nested" : "Automatic") menu.handleInput?.(character);
+			menu.handleInput?.("\r");
+			await manager.flush();
+			expect(manager.getRouterModel()).toBe(next);
+			expect(JSON.parse(readFileSync(globalFile, "utf8"))).toEqual(global);
+			expect(JSON.parse(readFileSync(projectFile, "utf8"))).toEqual({ routerModel: next, quietStartup: true });
+			expect(render(menu)).toContain("project settings");
+			await manager.reload();
+			expect(manager.getRouterModel()).toBe(next);
+		}
+		const untrusted = SettingsManager.create(directory, directory, { projectTrusted: false });
+		expect(untrusted.getProjectSettings().routerModel).toBeUndefined();
+		expect(() => untrusted.setRouterModel("", "project")).toThrow(/not trusted/);
+		expect(untrusted.getRouterModel()).toBe("global/model");
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
 });

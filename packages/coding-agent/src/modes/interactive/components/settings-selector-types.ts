@@ -29,6 +29,7 @@ export interface SettingsConfig {
 	availableThinkingLevels: ThinkingLevel[];
 	availableDefaultModels?: Model<Api>[];
 	routerModel?: string;
+	routerModelScope?: "global" | "project";
 	modelThinkingLevels?: Record<string, ThinkingLevel>;
 	currentTheme: string;
 	terminalTheme: TerminalTheme;

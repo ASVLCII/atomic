@@ -265,7 +265,7 @@ export function buildSettingsItems(config: SettingsConfig, callbacks: SettingsCa
 		{
 			id: "router-model",
 			label: "Router model",
-			description: "Model for workflow and subagent routing decisions only; does not change the chat model",
+			description: `Saves to ${config.routerModelScope ?? "global"} settings; affects routing decisions, not the chat model`,
 			currentValue: config.routerModel || "Automatic",
 			submenu: (_currentValue, done) => {
 				const current = config.routerModel ?? "";
@@ -295,7 +295,7 @@ export function buildSettingsItems(config: SettingsConfig, callbacks: SettingsCa
 				}
 				return new SelectSubmenu(
 					"Router model",
-					"Choose a provider permitted to receive routing context. Automatic saves an empty routerModel.",
+					`Saves to ${config.routerModelScope ?? "global"} settings. Choose a provider permitted to receive routing context. Automatic saves an empty routerModel.`,
 					options.map((option) => ({
 						...option,
 						label: `${option.value === current ? "✓ " : "  "}${option.label}`,

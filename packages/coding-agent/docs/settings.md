@@ -65,7 +65,7 @@ See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herd
 { "routerModel": "" }
 ```
 
-Use `/settings` → **Router model** to save a global default in `~/.atomic/agent/settings.json`. Choose **Automatic** to save `""`, **typesafe-ai/jev** for Jev, or search the available chat models by provider/model ID. Jev is offered here without appearing in `/model`. Run `/reload` or restart Atomic to apply the saved choice to an already-running isolated engine. Project settings still override this global default.
+Use `/settings` → **Router model** to change the effective selection. If the project already defines `routerModel`, the picker edits that project override; otherwise it saves the global default in `~/.atomic/agent/settings.json`. The picker identifies which scope it will save. Choose **Automatic** to save `""` in that scope, **typesafe-ai/jev** for Jev, or search the available chat models by provider/model ID. Jev is offered here without appearing in `/model`. Run `/reload` or restart Atomic to apply the saved choice to an already-running isolated engine.
 
 A nonempty explicit model takes precedence over automatic Jev selection. Use an exact catalog ID without a reasoning suffix, or the decision-only alias `typesafe-ai/jev`. An invalid explicit ID, `auto`, non-string value or surrounding whitespace fails the decision instead of silently changing providers. An explicit empty project value overrides a global selection and restores the configured-Jev/current-chat precedence.
 

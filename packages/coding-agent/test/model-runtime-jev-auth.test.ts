@@ -1,9 +1,8 @@
-import assert from "node:assert/strict";
-import { afterEach, test, vi } from "vitest";
-import type { AgentSession } from "../src/core/agent-session.js";
-import { AuthStorage } from "../src/core/auth-storage.js";
-import { ModelRuntime } from "../src/core/model-runtime.js";
-import { RpcProviderAuth } from "../src/modes/rpc/rpc-provider-auth.js";
+import { afterEach, expect, test, vi } from "vitest";
+import type { AgentSession } from "../src/core/agent-session.ts";
+import { AuthStorage } from "../src/core/auth-storage.ts";
+import { ModelRuntime } from "../src/core/model-runtime.ts";
+import { RpcProviderAuth } from "../src/modes/rpc/rpc-provider-auth.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -12,24 +11,24 @@ test("Jev supports stored API-key login and logout without exposing chat models"
 	const credentials = AuthStorage.inMemory();
 	const runtime = await ModelRuntime.create({ credentials, modelsPath: null });
 	const provider = runtime.getProviders().find((candidate) => candidate.id === "typesafe-ai");
-	assert.ok(provider?.auth.apiKey);
-	assert.equal((await runtime.getAuth("typesafe-ai"))?.auth.apiKey, "environment-test-key");
+	expect(provider?.auth.apiKey).toBeTruthy();
+	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("environment-test-key");
 	await runtime.login("typesafe-ai", "api_key", {
 		signal: new AbortController().signal,
 		prompt: async () => "stored-test-key",
 		notify: () => {},
 	});
-	assert.deepEqual(credentials.peek("typesafe-ai"), { type: "api_key", key: "stored-test-key" });
-	assert.equal(runtime.hasConfiguredAuth("typesafe-ai"), true);
-	assert.equal((await runtime.getAuth("typesafe-ai"))?.auth.apiKey, "stored-test-key");
-	assert.deepEqual(runtime.getModels("typesafe-ai"), []);
-	assert.deepEqual(await runtime.getAvailable("typesafe-ai"), []);
-	assert.equal(runtime.canRestoreUnknownModel("typesafe-ai", "jev"), false);
+	expect(credentials.peek("typesafe-ai")).toEqual({ type: "api_key", key: "stored-test-key" });
+	expect(runtime.hasConfiguredAuth("typesafe-ai")).toBe(true);
+	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("stored-test-key");
+	expect(runtime.getModels("typesafe-ai")).toEqual([]);
+	expect(await runtime.getAvailable("typesafe-ai")).toEqual([]);
+	expect(runtime.canRestoreUnknownModel("typesafe-ai", "jev")).toBe(false);
 	await runtime.logout("typesafe-ai");
-	assert.equal(credentials.peek("typesafe-ai"), undefined);
-	assert.equal((await runtime.getAuth("typesafe-ai"))?.auth.apiKey, "environment-test-key");
+	expect(credentials.peek("typesafe-ai")).toBeUndefined();
+	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("environment-test-key");
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
-	assert.equal(await runtime.getAuth("typesafe-ai"), undefined);
+	expect(await runtime.getAuth("typesafe-ai")).toBeUndefined();
 });
 
 test("Jev resolves stored environment references and removes stored-only availability on logout", async () => {
@@ -40,11 +39,11 @@ test("Jev resolves stored environment references and removes stored-only availab
 		}),
 		modelsPath: null,
 	});
-	assert.equal(runtime.hasConfiguredAuth("typesafe-ai"), true);
-	assert.equal((await runtime.getAuth("typesafe-ai"))?.auth.apiKey, "scoped-test-key");
+	expect(runtime.hasConfiguredAuth("typesafe-ai")).toBe(true);
+	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("scoped-test-key");
 	await runtime.logout("typesafe-ai");
-	assert.equal(runtime.hasConfiguredAuth("typesafe-ai"), false);
-	assert.equal(await runtime.getAuth("typesafe-ai"), undefined);
+	expect(runtime.hasConfiguredAuth("typesafe-ai")).toBe(false);
+	expect(await runtime.getAuth("typesafe-ai")).toBeUndefined();
 });
 
 test("isolated Jev login persists in the engine and returns no key or chat model", async () => {
@@ -55,12 +54,9 @@ test("isolated Jev login persists in the engine and returns no key or chat model
 		session,
 		"typesafe-ai",
 	);
-	assert.equal(result.cancelled, false);
-	assert.equal(credentials.peek("typesafe-ai")?.type, "api_key");
-	assert.equal((await modelRuntime.getAuth("typesafe-ai"))?.auth.apiKey, "isolated-test-secret");
-	assert.equal(JSON.stringify(result).includes("isolated-test-secret"), false);
-	assert.equal(
-		result.models?.some((model) => model.provider === "typesafe-ai"),
-		false,
-	);
+	expect(result.cancelled).toBe(false);
+	expect(credentials.peek("typesafe-ai")?.type).toBe("api_key");
+	expect((await modelRuntime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("isolated-test-secret");
+	expect(JSON.stringify(result)).not.toContain("isolated-test-secret");
+	expect(result.models?.some((model) => model.provider === "typesafe-ai")).toBe(false);
 });
