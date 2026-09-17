@@ -1,6 +1,7 @@
-import { ensurePGDatabase, getPGClientConfig } from "@dbos-inc/dbos-sdk/datasource";
-import { Pool } from "pg";
+import { ensurePGDatabase } from "@dbos-inc/dbos-sdk/datasource";
 import { fenceDbosAdmissionPool } from "./dbos-admission-pool.js";
+import { resolvedPostgresHealth } from "./dbos-local-postgres.js";
+import { createRecoverablePostgresPool } from "./dbos-recoverable-pool.js";
 import type { DbosConfiguration, DbosStatic } from "./dbos-sdk-handle.js";
 
 /** Preserve DBOS's default endpoint when the Docker fallback supplies no URL. */
@@ -26,17 +27,31 @@ export function configureAdmissionDatabase(
 	config: DbosConfiguration,
 ): { launch: () => Promise<void>; checkReady: () => Promise<void> } {
 	const systemDatabaseUrl = config.systemDatabaseUrl ?? defaultDatabaseUrl(config.name);
-	let pool = fenceDbosAdmissionPool(new Pool(getPGClientConfig(systemDatabaseUrl)));
+	const health = resolvedPostgresHealth(systemDatabaseUrl);
+	const createPool = () => {
+		let unsubscribe: (() => void) | undefined;
+		const managed = createRecoverablePostgresPool(systemDatabaseUrl, {
+			beforeConnect: health === undefined ? undefined : () => health.check(),
+			afterConnect: health === undefined ? undefined : (client) => health.validate(client),
+			onConnectionError: () => health?.invalidate(),
+			onEnd: () => unsubscribe?.(),
+		});
+		unsubscribe = health?.subscribe(managed.invalidate);
+		health?.start();
+		return fenceDbosAdmissionPool(managed.pool);
+	};
+	let pool = createPool();
 	sdk.setConfig({ ...config, systemDatabaseUrl, systemDatabasePool: pool });
 	const launch = async (): Promise<void> => {
 		// DBOS closes custom pools on shutdown, including the failed-launch retry.
 		if (pool.ended) {
-			pool = fenceDbosAdmissionPool(new Pool(getPGClientConfig(systemDatabaseUrl)));
+			pool = createPool();
 			sdk.setConfig({ ...config, systemDatabaseUrl, systemDatabasePool: pool });
 		}
 		// DBOS skips database creation with a custom pool. Keep its existing
 		// ensure-database behavior via the public datasource API, never reset data.
-		const result = await ensurePGDatabase({ urlToEnsure: systemDatabaseUrl, logger: () => {} });
+		const urlToEnsure = health === undefined ? systemDatabaseUrl : await health.check();
+		const result = await ensurePGDatabase({ urlToEnsure, logger: () => {} });
 		if (result.status === "failed") {
 			config.logger.warn("Workflow database could not be verified or created; attempting DBOS launch.");
 		}

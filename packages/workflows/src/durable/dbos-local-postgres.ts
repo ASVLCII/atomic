@@ -14,6 +14,7 @@
 import {
 	EmbeddedPostgresCleanupPendingError,
 	embeddedDbosSystemDatabaseUrl,
+	embeddedPostgresHealth,
 	ensureEmbeddedDbosPostgres,
 	shutdownEmbeddedDbosPostgres,
 } from "./dbos-embedded-postgres.js";
@@ -41,15 +42,25 @@ interface LocalDbosOwner {
 	provision: typeof provisionResolvedLocalDbos;
 	shutdown: typeof shutdownResolvedLocalDbos;
 }
+// Optional on predecessor owners; never create a second provider after reload.
+type HealthOwner = LocalDbosOwner & { health?: typeof resolvedPostgresHealth };
 const ownerKey = Symbol.for("atomic-workflows/local-postgres-owner@1");
-const ownerBag = globalThis as typeof globalThis & Record<symbol, LocalDbosOwner | undefined>;
+const ownerBag = globalThis as typeof globalThis & Record<symbol, HealthOwner | undefined>;
 const owner = ownerBag[ownerKey] ?? {
 	resolve: resolveDbosSystemDatabaseUrl,
 	provision: provisionResolvedLocalDbos,
 	shutdown: shutdownResolvedLocalDbos,
+	health: resolvedPostgresHealth,
 };
 ownerBag[ownerKey] = owner;
 
+/** Only a resolved managed provider grants automatic recovery authority. */
+export function resolvedPostgresHealth(url?: string): ReturnType<typeof embeddedPostgresHealth> {
+	if (owner.health !== resolvedPostgresHealth) return owner.health?.(url);
+	if (process.env.DBOS_SYSTEM_DATABASE_URL?.trim() || resolvedProvider !== embeddedProvider) return undefined;
+	if (url !== undefined && url !== embeddedDbosSystemDatabaseUrl()) return undefined;
+	return embeddedPostgresHealth();
+}
 /**
  * Resolve the system database URL for this process and make its database
  * reachable. `undefined` defers to the environment/DBOS defaults (explicit
@@ -57,6 +68,8 @@ ownerBag[ownerKey] = owner;
  */
 export function resolveDbosSystemDatabaseUrl(): Promise<string | undefined> {
 	if (owner.resolve !== resolveDbosSystemDatabaseUrl) return owner.resolve();
+	const health = resolvedPostgresHealth();
+	if (health !== undefined) return health.check();
 	resolution ??= resolve().catch((error: unknown) => {
 		resolution = undefined;
 		throw error;
@@ -182,6 +195,7 @@ export function resetLocalDbosProvisioningForTests(
 		resolve: resolveDbosSystemDatabaseUrl,
 		provision: provisionResolvedLocalDbos,
 		shutdown: shutdownResolvedLocalDbos,
+		health: resolvedPostgresHealth,
 	});
 	resolution = undefined;
 	resolvedProvider = undefined;

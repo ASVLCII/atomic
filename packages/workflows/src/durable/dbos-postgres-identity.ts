@@ -89,6 +89,11 @@ export interface PostgresIdentityRow {
 }
 export type PostgresIdentityProbe = (port: number) => Promise<PostgresIdentityRow | undefined>;
 
+export const POSTGRES_IDENTITY_SQL = `SELECT current_setting('data_directory') AS data_dir,
+	inet_server_port() AS port, host(inet_server_addr()) AS host,
+	floor(extract(epoch FROM pg_postmaster_start_time()))::text AS started,
+	system_identifier::text FROM pg_control_system()`;
+
 export async function probePostgresIdentity(port: number): Promise<PostgresIdentityRow | undefined> {
 	const client = new Client({
 		host: "127.0.0.1",
@@ -104,17 +109,18 @@ export async function probePostgresIdentity(port: number): Promise<PostgresIdent
 	client.on("error", () => {}); // Connection loss is reported by the pending connect/query.
 	try {
 		await client.connect();
-		const result = await client.query<PostgresIdentityRow>(`SELECT current_setting('data_directory') AS data_dir,
-			inet_server_port() AS port, host(inet_server_addr()) AS host,
-			floor(extract(epoch FROM pg_postmaster_start_time()))::text AS started,
-			system_identifier::text FROM pg_control_system()`);
+		const result = await client.query<PostgresIdentityRow>(POSTGRES_IDENTITY_SQL);
 		return result.rows[0];
 	} catch (error) {
 		const code = error instanceof Error && "code" in error ? error.code : undefined;
 		if (
 			code === "ECONNREFUSED" ||
+			code === "ECONNRESET" ||
+			code === "EPIPE" ||
+			code === "57P01" ||
+			code === "57P02" ||
 			code === "57P03" ||
-			(error instanceof Error && /timeout|timed out/i.test(error.message))
+			(error instanceof Error && /timeout|timed out|connection terminated/i.test(error.message))
 		)
 			return undefined;
 		throw error;
