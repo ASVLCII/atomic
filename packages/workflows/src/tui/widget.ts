@@ -29,6 +29,7 @@ import {
 	workflowBoundarySegments,
 } from "../shared/pending-stage-status.js";
 import { effectiveRunStatus } from "../shared/returned-run-status.js";
+import { runIndicatorStatus } from "../shared/run-indicator-status.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import type { RunSnapshot, StageSnapshot, StoreSnapshot } from "../shared/store-types.js";
 import { elapsedRunMs } from "../shared/timing.js";
@@ -41,7 +42,6 @@ import {
 	type PendingInputAffordance,
 	pendingInputAffordance,
 	sanitizePromptDisplay,
-	visibleRootPendingInput,
 } from "./pending-input-affordance.js";
 import { renderRunIdentityRows, wrapIdentifierLines } from "./run-identity-rows.js";
 import { statusColor, statusIcon } from "./status-helpers.js";
@@ -112,7 +112,7 @@ interface RunCounts {
 }
 
 function subtreeAwaitsInput(root: RunSnapshot, allRuns: readonly RunSnapshot[]): boolean {
-	return visibleRootPendingInput(root, allRuns).hasPendingInput;
+	return runIndicatorStatus(root, allRuns) === "awaiting_input";
 }
 
 function countRuns(runs: readonly RunSnapshot[], allRuns: readonly RunSnapshot[] = runs): RunCounts {
@@ -177,13 +177,13 @@ function selectDisplayRuns(snap: StoreSnapshot, now: number): RunSnapshot[] {
 
 function statusGlyph(run: RunSnapshot, allRuns: readonly RunSnapshot[]): string {
 	if (isQuitRun(run)) return statusIcon("pending");
-	if (visibleRootPendingInput(run, allRuns).hasPendingInput) return statusIcon("awaiting_input");
-	return statusIcon(effectiveRunStatus(run));
+	return statusIcon(runIndicatorStatus(run, allRuns));
 }
 
 function statusFg(run: RunSnapshot, theme: GraphTheme, allRuns: readonly RunSnapshot[]): string {
 	if (isQuitRun(run)) return theme.warning;
-	if (visibleRootPendingInput(run, allRuns).hasPendingInput) return statusColor("awaiting_input", theme);
+	const indicatorStatus = runIndicatorStatus(run, allRuns);
+	if (indicatorStatus === "awaiting_input") return statusColor(indicatorStatus, theme);
 	switch (effectiveRunStatus(run)) {
 		case "running":
 		case "paused":
@@ -308,7 +308,7 @@ function metaLine(
 // Count badges for the band header
 // ---------------------------------------------------------------------------
 
-function countBadges(counts: RunCounts, theme: GraphTheme, needsConnectGuidance: boolean): FlatBandBadge[] {
+function countBadges(counts: RunCounts, theme: GraphTheme): FlatBandBadge[] {
 	const badges: FlatBandBadge[] = [];
 	if (counts.active > 0) {
 		badges.push({ text: `● ${counts.active} running`, fg: theme.warning });
@@ -324,7 +324,7 @@ function countBadges(counts: RunCounts, theme: GraphTheme, needsConnectGuidance:
 	// question-mark status glyph, then keep ↵ as the attach/respond action hint.
 	if (counts.awaiting > 0) {
 		badges.push({
-			text: `${statusIcon("awaiting_input")} ↵ ${counts.awaiting} needs attention${needsConnectGuidance ? " (attach to workflow with `/workflow connect`)" : ""}`,
+			text: `${statusIcon("awaiting_input")} ↵ ${counts.awaiting} needs attention (attach to workflow with \`/workflow connect\`)`,
 			fg: theme.info,
 		});
 	}
@@ -544,14 +544,7 @@ export function buildThemedWidgetLines(
 	const total = display.length;
 	const subtitle = `${total} run${total === 1 ? "" : "s"}`;
 
-	const needsConnectGuidance = display.some(
-		(run) =>
-			run.endedAt === undefined &&
-			!isQuitRun(run) &&
-			subtreeAwaitsInput(run, snap.runs) &&
-			pendingInputAffordance(run, snap.runs) === undefined,
-	);
-	const badgeList = countBadges(visibleCounts, graphTheme, needsConnectGuidance);
+	const badgeList = countBadges(visibleCounts, graphTheme);
 	const badges = formatTitleBadges(badgeList, graphTheme, themed);
 	const title = `BACKGROUND  ${subtitle}${badges ? `  ${badges}` : ""}`;
 	const body: string[] = [];

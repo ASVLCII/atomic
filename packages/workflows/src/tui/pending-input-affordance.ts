@@ -121,7 +121,7 @@ function stripTerminalControls(message: string): string {
 			i = skipStringControl(message, i + 1, false);
 			continue;
 		}
-		if (code === 0x09 || code === 0x0a || code === 0x0b || code === 0x0c || code === 0x0d) {
+		if (code === 0x09 || code === 0x0a || code === 0x0b || code === 0x0c || code === 0x0d || code === 0x85) {
 			out += " ";
 			i += 1;
 			continue;
@@ -140,12 +140,16 @@ function stripTerminalControls(message: string): string {
 
 /** Strip CSI/OSC/DCS and leftover C0/C1, drop bidi/default-ignorable code points, then bound one display line. */
 export function sanitizePromptDisplay(message: string): string {
-	return boundPromptDisplay(
-		stripTerminalControls(message)
-			.replace(/\p{Default_Ignorable_Code_Point}/gu, "")
-			.replace(/\s+/g, " ")
-			.trim(),
-	);
+	return boundPromptDisplay(normalizePromptDisplay(message));
+}
+
+/** Display-normalized prompt text before the BACKGROUND length cap. */
+function normalizePromptDisplay(message: string): string {
+	return stripTerminalControls(message)
+		.toWellFormed()
+		.replace(/\p{Default_Ignorable_Code_Point}/gu, "")
+		.replace(/\s+/g, " ")
+		.trim();
 }
 
 function boundPromptDisplay(message: string): string {
@@ -270,7 +274,7 @@ function descriptorsAreCompatible(prompt: PendingPrompt, request: StageInputRequ
 	if (prompt.id !== request.id || request.questions.length !== 1) return false;
 	const question = request.questions[0]?.question;
 	if (question === undefined) return false;
-	return sanitizePromptDisplay(prompt.message) === sanitizePromptDisplay(question);
+	return normalizePromptDisplay(prompt.message) === normalizePromptDisplay(question);
 }
 
 function stagePromptOccurrences(run: RunSnapshot): PendingInputOccurrence[] {

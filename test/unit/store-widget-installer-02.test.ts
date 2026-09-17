@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "vitest";
 import { statusRuns } from "../../packages/workflows/src/runs/background/status.js";
+import { runIndicatorStatus } from "../../packages/workflows/src/shared/run-indicator-status.js";
 import type { Store } from "../../packages/workflows/src/shared/store.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { PendingPrompt, RunSnapshot, StageSnapshot } from "../../packages/workflows/src/shared/store-types.js";
@@ -296,7 +297,7 @@ describe("installStoreWidget", () => {
 		const waiting = component.render(120).join("\n");
 		assert.match(waiting, /"Approve the deployment\?"/);
 		assert.match(waiting, /Answer: \/workflow connect r1/);
-		assert.doesNotMatch(waiting, /F2 answer|attach to workflow/);
+		assert.doesNotMatch(waiting, /F2 answer/);
 
 		const requestsBeforeResolution = renderRequests.count;
 		assert.equal(storeInstance.resolveStagePendingPrompt("r1", "s1", "prompt-1", true), true);
@@ -409,6 +410,113 @@ describe("installStoreWidget", () => {
 		assert.doesNotMatch(after, /Answer first/);
 		assert.match(after, /"Answer second\?"/);
 		assert.match(after, /Answer: \/workflow connect second-root/);
+	});
+
+	test("linked nested child prompt previews under the visible root and clears without remounting", async () => {
+		const { pi, widgetCalls, renderRequests } = makeMockPi();
+		installStoreWidget(pi, storeInstance);
+		const rootId = "nested-root";
+		const childId = "nested-child-owner";
+		storeInstance.recordRunStart({
+			id: rootId,
+			name: "nested-root",
+			status: "running",
+			inputs: {},
+			startedAt: Date.now(),
+			stages: [{ id: "to-child", name: "child", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			storeInstance.recordStageWorkflowChildRun(rootId, "to-child", {
+				alias: "child",
+				workflow: "nested-child",
+				runId: childId,
+			}),
+			true,
+		);
+		storeInstance.recordRunStart({
+			id: childId,
+			name: "nested-child",
+			status: "running",
+			inputs: {},
+			startedAt: Date.now(),
+			parentRunId: rootId,
+			parentStageId: "to-child",
+			rootRunId: rootId,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		const component = widgetCalls.findLast((c) => typeof c.factory === "function")!.factory!(null, undefined) as {
+			render(w: number): string[];
+		};
+		const callsAfterMount = widgetCalls.length;
+		const requestsBeforePrompt = renderRequests.count;
+		assert.equal(
+			storeInstance.recordStagePendingPrompt(childId, "ask", {
+				id: "nested-prompt",
+				kind: "confirm",
+				message: "Answer inside the child?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		const waiting = component.render(120).join("\n");
+		assert.match(waiting, /"Answer inside the child\?"/);
+		assert.match(waiting, new RegExp(`Answer: /workflow connect ${rootId}`));
+		assert.equal(waiting.includes(childId), false);
+		assert.equal(widgetCalls.length, callsAfterMount);
+		assert.ok(renderRequests.count > requestsBeforePrompt);
+		assert.equal(storeInstance.resolveStagePendingPrompt(childId, "ask", "nested-prompt", true), true);
+		await Promise.resolve();
+		const after = component.render(120).join("\n");
+		assert.doesNotMatch(after, /Answer inside the child/);
+		assert.doesNotMatch(after, /Answer: \/workflow connect/);
+		assert.equal(widgetCalls.length, callsAfterMount);
+	});
+
+	test("unlinked nested child keeps general needs-attention without a preview", async () => {
+		const { pi, widgetCalls } = makeMockPi();
+		installStoreWidget(pi, storeInstance);
+		const rootId = "unlinked-root";
+		const childId = "unlinked-child-owner";
+		storeInstance.recordRunStart({
+			id: rootId,
+			name: "unlinked-root",
+			status: "running",
+			inputs: {},
+			startedAt: Date.now(),
+			stages: [{ id: "to-child", name: "child", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		storeInstance.recordRunStart({
+			id: childId,
+			name: "unlinked-child",
+			status: "running",
+			inputs: {},
+			startedAt: Date.now(),
+			parentRunId: rootId,
+			parentStageId: "to-child",
+			rootRunId: rootId,
+			stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+		});
+		assert.equal(
+			storeInstance.recordStagePendingPrompt(childId, "ask", {
+				id: "nested-prompt",
+				kind: "confirm",
+				message: "Answer inside the child?",
+				createdAt: 1,
+			}),
+			true,
+		);
+		await Promise.resolve();
+		const root = storeInstance.runs().find((run) => run.id === rootId)!;
+		assert.equal(runIndicatorStatus(root, storeInstance.runs()), "awaiting_input");
+		const component = widgetCalls.findLast((c) => typeof c.factory === "function")!.factory!(null, undefined) as {
+			render(w: number): string[];
+		};
+		const waiting = component.render(120).join("\n");
+		assert.match(waiting, /↵ 1 needs attention \(attach to workflow with `\/workflow connect`\)/);
+		assert.match(waiting, new RegExp(statusIcon("awaiting_input")));
+		assert.doesNotMatch(waiting, /"Answer inside the child\?"/);
+		assert.equal(waiting.includes(`/workflow connect ${childId}`), false);
 	});
 
 	test("display-equivalent prompt updates do not broadcast redundant renders", async () => {

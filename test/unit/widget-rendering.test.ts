@@ -14,6 +14,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import { statusRuns } from "../../packages/workflows/src/runs/background/status.js";
+import { runIndicatorStatus } from "../../packages/workflows/src/shared/run-indicator-status.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { RunSnapshot, StageSnapshot, StoreSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import { hexToAnsi } from "../../packages/workflows/src/tui/color-utils.js";
@@ -649,6 +650,136 @@ describe("renderWidgetLines — standard form", () => {
 		assert.ok(!joined.includes("contract-hil-nested-child"), "nested child run must be hidden");
 	});
 
+	test("surfaces a hidden nested child's awaiting-input (HiL) state on the top-level run", () => {
+		const t = Date.now();
+		// Root is running and blocked on its imported composition; the actual HiL
+		// prompt is awaiting in the nested child run, which the widget hides.
+		const root = makeRun("root1111", "contract-hil-nested-root", "running", [], t - 3000);
+		const parent: RunSnapshot = {
+			...makeRun("parent22", "contract-hil-nested-parent", "running", [], t - 2000),
+			parentRunId: "root1111",
+			rootRunId: "root1111",
+		};
+		const child: RunSnapshot = {
+			...makeRun(
+				"child333",
+				"contract-hil-nested-child",
+				"running",
+				[makeStage("s1", "ask", "awaiting_input")],
+				t - 1000,
+			),
+			parentRunId: "parent22",
+			rootRunId: "root1111",
+		};
+		child.stages[0]!.pendingPrompt = {
+			id: "nested-prompt",
+			kind: "confirm",
+			message: "Answer in the child workflow?",
+			createdAt: t - 1000,
+		};
+		const lines = renderWidgetLines(makeSnap([child, parent, root]), 120).map(stripAnsi);
+		const joined = lines.join("\n");
+		const header = lines[0]!;
+		// Only the root is listed, but its hidden descendant's awaiting state still
+		// raises the "needs attention" badge so the HiL prompt is discoverable.
+		assert.ok(header.includes("1 run"), `expected "1 run" subtitle, got: ${header}`);
+		assert.ok(
+			header.includes("↵ 1 needs attention (attach to workflow with `/workflow connect`)"),
+			`expected nested HiL to surface a needs-attention badge, got: ${header}`,
+		);
+		assert.ok(joined.includes(statusIcon("awaiting_input")));
+		assert.ok(!joined.includes("contract-hil-nested-child"), "nested child stays hidden");
+		assert.ok(!joined.includes("child333"));
+		assert.ok(!joined.includes('"Answer in the child workflow?"'));
+		assert.ok(!joined.includes("/workflow connect child333"));
+	});
+
+	test("BACKGROUND needs-attention agrees with runIndicatorStatus for nested owner shapes", () => {
+		const t = Date.now();
+		const childId = "child-nested";
+		const rootId = "root-nested";
+		const prompt = {
+			id: "nested-prompt",
+			kind: "confirm" as const,
+			message: "Answer the nested prompt?",
+			createdAt: t - 1000,
+		};
+		const childBase = (): RunSnapshot => {
+			const child = makeRun(
+				childId,
+				"nested-child",
+				"running",
+				[makeStage("ask", "ask", "awaiting_input")],
+				t - 1000,
+			);
+			child.stages[0]!.pendingPrompt = prompt;
+			return child;
+		};
+		const shapes: Array<{
+			name: string;
+			root: RunSnapshot;
+			child: RunSnapshot;
+			preview: boolean;
+		}> = [
+			{
+				name: "loose ancestry",
+				root: makeRun(rootId, "nested-root", "running", [], t - 3000),
+				child: { ...childBase(), parentRunId: rootId, rootRunId: rootId },
+				preview: false,
+			},
+			{
+				name: "parentStageId without reciprocal link",
+				root: makeRun(rootId, "nested-root", "running", [makeStage("to-child", "child", "running")], t - 3000),
+				child: { ...childBase(), parentRunId: rootId, parentStageId: "to-child", rootRunId: rootId },
+				preview: false,
+			},
+			{
+				name: "fully linked ancestry",
+				root: makeRun(
+					rootId,
+					"nested-root",
+					"running",
+					[
+						makeStage("to-child", "child", "running", {
+							workflowChildRun: { alias: "child", workflow: "child", runId: childId },
+						}),
+					],
+					t - 3000,
+				),
+				child: { ...childBase(), parentRunId: rootId, parentStageId: "to-child", rootRunId: rootId },
+				preview: true,
+			},
+		];
+
+		for (const shape of shapes) {
+			const runs = [shape.child, shape.root];
+			assert.equal(runIndicatorStatus(shape.root, runs), "awaiting_input", shape.name);
+			const lines = renderWidgetLines(makeSnap(runs), 120).map(stripAnsi);
+			const joined = lines.join("\n");
+			assert.ok(lines[0]!.includes("needs attention"), `${shape.name}: header must agree with runIndicatorStatus`);
+			assert.ok(
+				joined.includes(statusIcon("awaiting_input")),
+				`${shape.name}: glyph must agree with runIndicatorStatus`,
+			);
+			if (shape.preview) {
+				assert.ok(joined.includes('"Answer the nested prompt?"'), `${shape.name}: linked preview`);
+				assert.ok(
+					joined.includes(`Answer: /workflow connect ${rootId}`),
+					`${shape.name}: connect the visible root`,
+				);
+			} else {
+				assert.ok(
+					lines[0]!.includes("(attach to workflow with `/workflow connect`)"),
+					`${shape.name}: unproven ownership keeps the header connect hint`,
+				);
+				assert.ok(!joined.includes('"Answer the nested prompt?"'), `${shape.name}: no preview`);
+				assert.ok(
+					!joined.includes(`Answer: /workflow connect ${rootId}`),
+					`${shape.name}: no selected connect row`,
+				);
+			}
+		}
+	});
 	test("surfaces a reciprocally owned hidden nested child's awaiting-input state on the top-level run", () => {
 		const t = Date.now();
 		const root = makeRun(
@@ -1203,6 +1334,48 @@ describe("renderWidgetLines — awaiting-input affordances", () => {
 		assert.ok(joined.includes(`Answer: /workflow connect ${unique.id}`));
 		assert.ok(!joined.includes(`Answer: /workflow connect ${form.id}`));
 		assert.ok(!joined.includes("First field?"));
+	});
+
+	test("same-id truncated prefixes keep general guidance without a preview", () => {
+		const prefix = "x".repeat(256);
+		const run = makeRun("prefix-collision", "prefix-collision", "running", [
+			makeStage("ask", "ask", "awaiting_input"),
+		]);
+		run.stages[0]!.pendingPrompt = {
+			id: "shared-prompt",
+			kind: "confirm",
+			message: `${prefix} APPROVE`,
+			createdAt: 1,
+		};
+		run.stages[0]!.inputRequest = {
+			id: "shared-prompt",
+			kind: "ask_user_question",
+			questions: [{ question: `${prefix} REJECT`, options: [] }],
+			createdAt: 1,
+		};
+		const lines = renderWidgetLines(makeSnap([run]), 120).map(stripAnsi);
+		const joined = lines.join("\n");
+		assert.ok(lines[0]!.includes("needs attention"));
+		assert.ok(joined.includes(statusIcon("awaiting_input")));
+		assert.ok(!joined.includes("APPROVE"));
+		assert.ok(!joined.includes("REJECT"));
+		assert.ok(!joined.includes(`Answer: /workflow connect ${run.id}`));
+	});
+
+	test("unpaired surrogates render as well-formed rows of the requested width", () => {
+		const run = awaitingRun("surrogate-card", "surrogate-card", "Approve \ud800 release?");
+		for (const width of [80, 120]) {
+			for (const lines of [
+				renderWidgetLines(makeSnap([run]), width),
+				buildThemedWidgetLines(makeSnap([run]), NULL_PI_THEME, width),
+			]) {
+				for (const line of lines) {
+					const plain = stripAnsi(line);
+					assert.equal(plain.isWellFormed(), true, JSON.stringify(plain));
+					assert.equal(visibleWidth(plain), width);
+				}
+			}
+		}
 	});
 
 	test("hostile prompt controls cannot escape plain or themed rendering", () => {

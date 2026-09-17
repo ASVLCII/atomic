@@ -239,6 +239,20 @@ test("same-id multi-question and conflicting text prevent false uniqueness", () 
 	};
 	assert.equal(pendingInputAffordance(sameIdConflict, [sameIdConflict]), undefined);
 	assert.equal(visibleRootPendingInput(sameIdConflict, [sameIdConflict]).hasPendingInput, true);
+
+	const prefix = "x".repeat(256);
+	const sameIdTruncation = makeRun("same-id-truncation", "same-id-truncation", "running", [
+		makeStage("ask", "ask", "awaiting_input"),
+	]);
+	sameIdTruncation.stages[0]!.pendingPrompt = primitive("shared-prompt", `${prefix} APPROVE`);
+	sameIdTruncation.stages[0]!.inputRequest = {
+		id: "shared-prompt",
+		kind: "ask_user_question",
+		questions: [{ question: `${prefix} REJECT`, options: [] }],
+		createdAt: 1,
+	};
+	assert.equal(visibleRootPendingInput(sameIdTruncation, [sameIdTruncation]).hasPendingInput, true);
+	assert.equal(pendingInputAffordance(sameIdTruncation, [sameIdTruncation]), undefined);
 });
 
 test("nested prompts retain owner identity and navigate through the visible root", () => {
@@ -472,6 +486,33 @@ test("same-id store descriptors require a compatible single question for a previ
 		"ask",
 		"shared-id",
 	]);
+
+	const prefixStore = createStore();
+	const prefix = "x".repeat(256);
+	prefixStore.recordRunStart({
+		id: "prefix-root",
+		name: "prefix-root",
+		inputs: {},
+		status: "running",
+		startedAt: 1,
+		stages: [{ id: "ask", name: "ask", status: "running", parentIds: [], toolEvents: [] }],
+	});
+	assert.equal(
+		prefixStore.recordStagePendingPrompt("prefix-root", "ask", primitive("shared-id", `${prefix} APPROVE`)),
+		true,
+	);
+	assert.equal(
+		prefixStore.recordStageInputRequest("prefix-root", "ask", {
+			id: "shared-id",
+			kind: "ask_user_question",
+			questions: [{ question: `${prefix} REJECT`, options: [] }],
+			createdAt: 1,
+		}),
+		true,
+	);
+	const truncated = prefixStore.runs()[0]!;
+	assert.equal(visibleRootPendingInput(truncated, prefixStore.runs()).hasPendingInput, true);
+	assert.equal(pendingInputAffordance(truncated, prefixStore.runs()), undefined);
 });
 
 test("sanitizePromptDisplay bounds payload and drops bidi without mutating raw state", () => {
@@ -486,5 +527,27 @@ test("sanitizePromptDisplay bounds payload and drops bidi without mutating raw s
 	run.pendingPrompt = primitive("bound-prompt", zeroWidth);
 	const raw = structuredClone(run);
 	assert.equal(pendingInputAffordance(run, [run])?.message, "Approve?");
+	assert.deepEqual(run, raw);
+});
+
+test("sanitizePromptDisplay well-forms unpaired surrogates and treats NEL as whitespace", () => {
+	const loneHigh = "Approve \ud800 release?";
+	const loneLow = "Approve \udfff release?";
+	const astral = "Approve \ud83d\ude80 release?";
+	for (const message of [loneHigh, loneLow, astral]) {
+		const sanitized = sanitizePromptDisplay(message);
+		assert.equal(sanitized.isWellFormed(), true, JSON.stringify(message));
+	}
+	assert.ok(sanitizePromptDisplay(astral).includes("\ud83d\ude80"));
+	assert.ok(sanitizePromptDisplay(loneHigh).includes("Approve"));
+	assert.ok(sanitizePromptDisplay(loneHigh).includes("release?"));
+	assert.ok(sanitizePromptDisplay(loneLow).includes("Approve"));
+	assert.ok(sanitizePromptDisplay(loneLow).includes("release?"));
+	assert.equal(sanitizePromptDisplay("Approve\u0085release?"), "Approve release?");
+
+	const run = makeRun("surrogate-owner", "surrogate", "running");
+	run.pendingPrompt = primitive("surrogate-prompt", loneHigh);
+	const raw = structuredClone(run);
+	pendingInputAffordance(run, [run]);
 	assert.deepEqual(run, raw);
 });
