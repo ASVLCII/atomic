@@ -303,12 +303,10 @@ describe("version-adoption nonblocking failure", () => {
 		assert.doesNotThrow(() => reportInstallTelemetry({ settingsManager: SettingsManager.inMemory() }, VERSION));
 		assert.equal(settled, false);
 		assert.equal(fetchMock.mock.calls.length, 1);
-		assert.match(
-			fetchUrl(fetchMock.mock.calls[0]![0]),
-			/^https:\/\/atomic-version-adoption\.bastani-atomic\.workers\.dev\//,
-		);
-		assert.ok(!fetchUrl(fetchMock.mock.calls[0]![0]).includes("registry.npmjs.org"));
-		assert.ok(!fetchUrl(fetchMock.mock.calls[0]![0]).includes("pi.dev"));
+		const requested = new URL(fetchUrl(fetchMock.mock.calls[0]![0]));
+		assert.match(requested.href, /^https:\/\/atomic-version-adoption\.bastani-atomic\.workers\.dev\//);
+		assert.notEqual(requested.hostname, "registry.npmjs.org");
+		assert.notEqual(requested.hostname, "pi.dev");
 	});
 
 	it("swallows a rejected fetch without throwing, retrying, or leaking unhandled rejection", async () => {
