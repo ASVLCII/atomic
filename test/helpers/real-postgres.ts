@@ -5,6 +5,7 @@ import {
 	bunExecutable,
 	decodeStream,
 	makeTempDirectory,
+	moduleDir,
 	readStreamText,
 	removeTempDirectory,
 	type SpawnedProcess,
@@ -71,7 +72,7 @@ export class RealPostgresClient {
 		fixture = "real-postgres-client.ts",
 	) {
 		assert.notEqual(process.getuid?.(), 0, "Run disposable managed cluster tests as an unprivileged account");
-		this.child = spawnProcess([bunExecutable(), join(import.meta.dirname, "../fixtures", fixture)], {
+		this.child = spawnProcess([bunExecutable(), join(moduleDir(import.meta.url), "../fixtures", fixture)], {
 			env: {
 				...process.env,
 				HOME: home,
@@ -152,21 +153,23 @@ export class RealPostgresHome {
 	}
 	async cleanup() {
 		// Detach observers before stopping the server so health polling cannot restart it during cleanup.
-		const errors: unknown[] = [];
+		const errors: Error[] = [];
 		const exits = await Promise.allSettled(this.clients.map((client) => client.exit()));
 		for (const result of exits) {
-			if (result.status === "rejected") errors.push(result.reason);
+			if (result.status === "rejected")
+				errors.push(new Error("Postgres fixture exit failed", { cause: result.reason }));
 		}
 		// This client never provisions or starts a health observer.
 		const cleanup = this.client(5439);
 		try {
 			await cleanup.request("stop", undefined, CLEANUP_TIMEOUT_MS);
 		} catch (error) {
-			errors.push(error);
+			errors.push(new Error("Postgres fixture stop failed", { cause: error }));
 		}
 		const stopped = await Promise.allSettled([cleanup.exit()]);
 		for (const result of stopped) {
-			if (result.status === "rejected") errors.push(result.reason);
+			if (result.status === "rejected")
+				errors.push(new Error("Postgres cleanup client exit failed", { cause: result.reason }));
 		}
 		if (errors.length) {
 			throw new AggregateError(errors, `Postgres fixture cleanup failed; preserved ${this.path}`);
