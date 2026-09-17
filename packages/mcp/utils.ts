@@ -66,6 +66,17 @@ export function interpolateEnvVars(value: string): string {
     .replace(/\$env:(\w+)/g, (_, name) => process.env[name] ?? "");
 }
 
+export function resolveServerUrl(value: string): string {
+  const resolved = interpolateEnvVars(value);
+  try {
+    const url = new URL(resolved);
+    if (url.protocol === "http:" || url.protocol === "https:") return resolved;
+  } catch {
+    // URL parsing errors can contain credentials or tokens. Do not retain them.
+  }
+  throw new Error("Invalid MCP server url: expected a non-empty HTTP(S) URL after environment variable interpolation.");
+}
+
 export function interpolateEnvRecord(values: Record<string, string> | undefined): Record<string, string> | undefined {
   if (!values) return undefined;
 
