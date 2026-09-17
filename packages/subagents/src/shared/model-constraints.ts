@@ -27,7 +27,9 @@ export const ModelConstraintsSchema = Type.Object(
 		minContextWindow: Type.Optional(
 			Type.Number({ minimum: 0, description: "Minimum catalog context window in tokens." }),
 		),
-		requiredInputs: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
+		requiredInputs: Type.Optional(
+			Type.Array(Type.Unsafe<"text" | "image">(Type.String({ enum: ["text", "image"] }))),
+		),
 		allowedEfforts: Type.Optional(Type.Array(Type.Union([Type.String({ enum: [...THINKING_LEVELS] }), Type.Null()]))),
 	},
 	{

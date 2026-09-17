@@ -68,6 +68,23 @@ test("task and actual shipped docs reach one inference; nonreasoning selection u
 	assert.ok(state.documents.every((doc: { content: string }) => doc.content.length > 1000));
 	assert.equal(options?.maxRetries, 0);
 });
+test("hard constraints preserve exact input and nullable effort choices", () => {
+	const constraints = {
+		requiredInputs: ["text", "image"],
+		allowedEfforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
+	};
+	assert.deepEqual(parseModelConstraints(constraints), constraints);
+	assert.deepEqual(parseModelConstraints({ requiredInputs: [], allowedEfforts: [] }), {
+		requiredInputs: [],
+		allowedEfforts: [],
+	});
+	for (const input of ["audio", "", null, 1]) {
+		assert.throws(() => parseModelConstraints({ requiredInputs: [input] }), /Invalid modelConstraints/);
+	}
+	for (const effort of ["bogus", "", "null", 1, false]) {
+		assert.throws(() => parseModelConstraints({ allowedEfforts: [effort] }), /Invalid modelConstraints/);
+	}
+});
 for (const invalid of [
 	{ unknown: true },
 	{ maxInputCost: -1 },
