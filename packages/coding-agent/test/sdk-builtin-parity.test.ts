@@ -21,6 +21,15 @@ import type { AtomicBuiltin, CreateAgentSessionOptions } from "../src/core/sdk-t
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { getDefaultToolNames } from "../src/core/tools/index.ts";
+import type {
+	ExtensionBindings,
+	ExtensionContext,
+	HostDiagnostic,
+	HostInput,
+	HostInputOptions,
+	QuestionnaireResult,
+	QuestionParams,
+} from "../src/index.js";
 
 // #3105: the ordinary SDK factory, not CLI setup, supplies Atomic's shipped capabilities.
 test("default SDK creation returns an Atomic AgentSession with builtin tools and resources", async () => {
@@ -717,5 +726,521 @@ test.each<Partial<Record<AtomicBuiltin, boolean>>>([
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: a Node callback, without a terminal, answers the existing questionnaire tool.
+test("SDK host callback answers a questionnaire without rendering", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-host-input-"));
+	const params = {
+		questions: [
+			{
+				question: "Choose?",
+				header: "Choice",
+				options: [
+					{ label: "Yes", description: "Proceed" },
+					{ label: "No", description: "Decline" },
+				],
+			},
+		],
+	};
+	const answer: QuestionnaireResult = {
+		answers: [{ questionIndex: 0, question: "Choose?", kind: "option", answer: "Yes" }],
+		cancelled: false,
+	};
+	try {
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory(),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			extensionBindings: {
+				humanInput: {
+					confirm: async () => false,
+					select: async () => undefined,
+					input: async () => "",
+					editor: async () => "",
+					questionnaire: async (received, options) => {
+						assert.deepEqual(received, params);
+						assert.equal(options.sessionId, session.sessionId);
+						assert.ok(options.requestId);
+						return answer;
+					},
+				},
+			},
+		});
+		try {
+			const tool = session.agent.state.tools.find((entry) => entry.name === "ask_user_question")!;
+			const result = await tool.execute("question", params, new AbortController().signal);
+			assert.deepEqual(result.details, answer);
+		} finally {
+			session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+const callbackHost = (overrides: Partial<HostInput> = {}): HostInput => ({
+	confirm: async () => false,
+	select: async () => undefined,
+	input: async () => "",
+	editor: async () => "",
+	questionnaire: async () => ({ answers: [], cancelled: true }),
+	...overrides,
+});
+
+async function hostSession(bindings: ExtensionBindings = {}) {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-host-contract-"));
+	const contexts: ExtensionContext[] = [];
+	const settingsManager = SettingsManager.inMemory();
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		noContextFiles: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_start", (_event, context) => {
+					contexts.push(context);
+				});
+				pi.registerCommand("diagnostic-test", {
+					description: "fixture",
+					handler: async () => {
+						throw new Error("secret prompt token");
+					},
+				});
+			},
+		],
+	});
+	await loader.reload();
+	try {
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager,
+			resourceLoader: loader,
+			sessionManager: SessionManager.inMemory(cwd),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			extensionBindings: bindings,
+		});
+		return {
+			session,
+			contexts,
+			close: () => {
+				session.dispose();
+				rmSync(cwd, { recursive: true, force: true });
+			},
+		};
+	} catch (error) {
+		rmSync(cwd, { recursive: true, force: true });
+		throw error;
+	}
+}
+
+// #3105: host cancellation is runtime-owned even when callbacks never cooperate.
+test("SDK abort cancels host input and ignores late approval", async () => {
+	let identity: HostInputOptions | undefined;
+	let approve!: (value: boolean) => void;
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			confirm: async (_title, _message, options) => {
+				identity = options;
+				return new Promise<boolean>((resolve) => {
+					approve = resolve;
+				});
+			},
+		}),
+	});
+	try {
+		const pending = fixture.contexts[0].ui.confirm("Approve", "Run?");
+		const rejected = assert.rejects(pending, { code: "HumanInputCancelled" });
+		await Promise.resolve();
+		await fixture.session.abort();
+		await rejected;
+		assert.equal(identity?.signal.aborted, true);
+		approve(true);
+		await fixture.session.bindExtensions({ humanInput: callbackHost() });
+		assert.equal(await fixture.contexts[0].ui.confirm("Again", "Run?"), false);
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: creation, omitted rebinding, explicit override and null are distinct.
+test("SDK human capability is separate from rendering and binding preserves pending requests", async () => {
+	let resolve!: (value: string) => void;
+	const ui = {
+		...noOpUIContext,
+		input: async () =>
+			new Promise<string>((done) => {
+				resolve = done;
+			}),
+	};
+	const fixture = await hostSession({ uiContext: ui });
+	try {
+		const context = fixture.contexts[0];
+		assert.equal(context.hasUI, true);
+		assert.equal(context.hasHumanInput, true);
+		const pending = context.ui.input("Raw");
+		await Promise.resolve();
+		await fixture.session.bindExtensions({});
+		resolve("  unchanged\n");
+		assert.equal(await pending, "  unchanged\n");
+		assert.equal(fixture.contexts.length, 1);
+		await fixture.session.bindExtensions({ humanInput: callbackHost({ input: async () => "" }) });
+		assert.equal(await context.ui.input("Raw"), "");
+		await fixture.session.bindExtensions({ humanInput: null });
+		assert.equal(context.hasUI, true);
+		assert.equal(context.hasHumanInput, false);
+		await assert.rejects(context.ui.confirm("No", "Approval"), { code: "HumanInputUnavailable" });
+		await fixture.session.bindExtensions({ uiContext: ui });
+		assert.equal(context.hasHumanInput, false);
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: runtime validation is not TypeScript trust or truthy coercion.
+test("SDK dialogs preserve raw arguments and reject malformed host replies", async () => {
+	const identities: HostInputOptions[] = [];
+	const choices = [" same ", "same", " same ", ""];
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			confirm: async (title, message, options) => {
+				assert.equal(title, "  title\n");
+				assert.equal(message, "");
+				identities.push(options);
+				return false;
+			},
+			select: async (title, values, options) => {
+				assert.equal(title, "");
+				assert.deepEqual(values, choices);
+				identities.push(options);
+				return "";
+			},
+			input: async (_title, placeholder) => {
+				assert.equal(placeholder, "  ");
+				return "";
+			},
+			editor: async (_title, initial) => {
+				assert.equal(initial, "\n raw ");
+				return "\n raw ";
+			},
+		}),
+	});
+	try {
+		const ctx = fixture.contexts[0];
+		assert.equal(ctx.hasUI, false);
+		assert.equal(ctx.hasHumanInput, true);
+		assert.equal(await ctx.ui.confirm("  title\n", ""), false);
+		assert.equal(await ctx.ui.select("", choices), "");
+		assert.equal(await ctx.ui.input("", "  "), "");
+		assert.equal(await ctx.ui.editor("", "\n raw "), "\n raw ");
+		assert.notEqual(identities[0].requestId, identities[1].requestId);
+		for (const identity of identities) {
+			assert.deepEqual(Object.keys(identity).sort(), ["requestId", "sessionId", "signal"]);
+			assert.equal(identity.sessionId, fixture.session.sessionId);
+		}
+		for (const invalid of ["true", 1, undefined, null]) {
+			await fixture.session.bindExtensions({ humanInput: callbackHost({ confirm: async () => invalid as never }) });
+			await assert.rejects(ctx.ui.confirm("", ""), { code: "InvalidHostInput" });
+		}
+		await fixture.session.bindExtensions({
+			humanInput: callbackHost({
+				select: async () => "foreign",
+				input: async () => 1 as never,
+				editor: async () => false as never,
+			}),
+		});
+		await assert.rejects(ctx.ui.select("", choices), { code: "InvalidHostInput" });
+		await assert.rejects(ctx.ui.input(""), { code: "InvalidHostInput" });
+		await assert.rejects(ctx.ui.editor(""), { code: "InvalidHostInput" });
+		await assert.rejects(
+			ctx.ui.custom(async () => {
+				throw new Error("must not mount");
+			}),
+			{ code: "HumanInputUnavailable" },
+		);
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: caller cancellation, timeout, rejection, withdrawal and generations cannot approve.
+test("SDK pending host requests settle at each cancellation boundary", async () => {
+	const fixture = await hostSession();
+	try {
+		await assert.rejects(fixture.contexts[0].ui.input(""), { code: "HumanInputUnavailable" });
+		for (const boundary of ["signal", "timeout", "withdraw", "reload", "dispose"] as const) {
+			let identity!: HostInputOptions;
+			let answer!: (value: boolean) => void;
+			await fixture.session.bindExtensions({
+				humanInput: callbackHost({
+					confirm: async (_t, _m, options) => {
+						identity = options;
+						return new Promise<boolean>((resolve) => {
+							answer = resolve;
+						});
+					},
+				}),
+			});
+			const context = fixture.contexts.at(-1)!;
+			const controller = new AbortController();
+			const pending = context.ui.confirm("", "", {
+				signal: controller.signal,
+				...(boundary === "timeout" ? { timeout: 0 } : {}),
+			});
+			const rejected = assert.rejects(pending, { code: "HumanInputCancelled" });
+			await Promise.resolve();
+			if (boundary === "signal") controller.abort();
+			if (boundary === "withdraw") await fixture.session.bindExtensions({ humanInput: null });
+			if (boundary === "reload") await fixture.session.reload();
+			if (boundary === "dispose") fixture.session.dispose();
+			await rejected;
+			assert.equal(identity.signal.aborted, true);
+			answer(true);
+			if (boundary === "reload") {
+				assert.throws(() => context.hasHumanInput);
+				assert.equal(fixture.contexts.at(-1)!.hasHumanInput, true);
+			}
+		}
+		await assert.rejects(fixture.session.bindExtensions({}), { code: "SessionClosed" });
+	} finally {
+		fixture.close();
+	}
+	const failure = new Error("adapter refused");
+	const rejected = await hostSession({
+		humanInput: callbackHost({
+			confirm: async () => {
+				throw failure;
+			},
+		}),
+	});
+	try {
+		await assert.rejects(rejected.contexts[0].ui.confirm("", ""), (error) => error === failure);
+	} finally {
+		rejected.close();
+	}
+});
+
+// #3105: exact questionnaire result types and schema failures survive the Node bridge.
+test("SDK questionnaire preserves rich answers and rejects malformed results and request schemas", async () => {
+	const params: QuestionParams = {
+		questions: [
+			{
+				question: " Raw? ",
+				header: "",
+				options: [
+					{ label: " yes ", description: "", preview: "\n## Preview\n" },
+					{ label: "no", description: "" },
+				],
+			},
+		],
+	};
+	const result: QuestionnaireResult = {
+		answers: [
+			{
+				questionIndex: 0,
+				question: " Raw? ",
+				kind: "option",
+				answer: " yes ",
+				preview: "\n## Preview\n",
+				notes: " raw notes ",
+			},
+		],
+		cancelled: false,
+	};
+	let calls = 0;
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			questionnaire: async (received) => {
+				calls++;
+				assert.deepEqual(received, params);
+				return result;
+			},
+		}),
+	});
+	try {
+		const execute = (request: QuestionParams) =>
+			fixture.session.agent.state.tools
+				.find((tool) => tool.name === "ask_user_question")!
+				.execute("question", request, new AbortController().signal);
+		assert.deepEqual((await execute(params)).details, result);
+		assert.equal(calls, 1);
+		for (const [request, error] of [
+			[{ questions: [] }, "no_questions"],
+			[{ questions: [params.questions[0], params.questions[0]] }, "duplicate_question"],
+			[
+				{
+					questions: [
+						{ ...params.questions[0], options: [params.questions[0].options[0], params.questions[0].options[0]] },
+					],
+				},
+				"duplicate_option_label",
+			],
+			[
+				{
+					questions: [
+						{
+							...params.questions[0],
+							options: [{ label: "Other", description: "" }, params.questions[0].options[1]],
+						},
+					],
+				},
+				"reserved_label",
+			],
+		] as const) {
+			const response = await execute(request as QuestionParams);
+			assert.equal((response.details as QuestionnaireResult).error, error);
+		}
+		assert.equal(calls, 1);
+		for (const malformed of [
+			null,
+			{},
+			{ answers: [], cancelled: "false" },
+			{ ...result, answers: [{ ...result.answers[0], answer: "foreign" }] },
+			{ ...result, answers: [result.answers[0], result.answers[0]] },
+		]) {
+			await fixture.session.bindExtensions({
+				humanInput: callbackHost({ questionnaire: async () => malformed as never }),
+			});
+			await assert.rejects(execute(params), { code: "InvalidHostInput" });
+		}
+		await fixture.session.bindExtensions({ humanInput: callbackHost() });
+		assert.deepEqual((await execute(params)).details, { answers: [], cancelled: true });
+		await fixture.session.bindExtensions({ humanInput: null });
+		assert.deepEqual((await execute(params)).details, { answers: [], cancelled: true, error: "no_ui" });
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: operational diagnostics belong to this session and omit arbitrary exception text.
+test("SDK diagnostic sinks are session attributed and remain separate", async () => {
+	const first: HostDiagnostic[] = [];
+	const second: HostDiagnostic[] = [];
+	const a = await hostSession({ onDiagnostic: (diagnostic) => first.push(diagnostic) });
+	const b = await hostSession({ onDiagnostic: (diagnostic) => second.push(diagnostic) });
+	try {
+		await a.session.prompt("/diagnostic-test");
+		assert.equal(first.length, 1);
+		assert.equal(second.length, 0);
+		assert.equal(first[0].sessionId, a.session.sessionId);
+		assert.equal(first[0].level, "error");
+		assert.ok(first[0].source);
+		assert.ok(!first[0].message.includes("secret prompt token"));
+		await b.session.prompt("/diagnostic-test");
+		assert.equal(second[0].sessionId, b.session.sessionId);
+	} finally {
+		a.close();
+		b.close();
+	}
+});
+
+// #3105: callbacks see untouched multi-selection, custom text and omitted optional fields.
+test("SDK questionnaire preserves multi-selection and empty custom answers", async () => {
+	const params: QuestionParams = {
+		questions: [
+			{
+				question: "Multiple?",
+				header: "Multi",
+				multiSelect: true,
+				options: [
+					{ label: "A", description: "" },
+					{ label: "B", description: "" },
+				],
+			},
+			{
+				question: "Text?",
+				header: "Text",
+				options: [
+					{ label: "A", description: "" },
+					{ label: "B", description: "" },
+				],
+			},
+		],
+	};
+	const result: QuestionnaireResult = {
+		answers: [
+			{ questionIndex: 1, question: "Text?", kind: "custom", answer: "" },
+			{ questionIndex: 0, question: "Multiple?", kind: "multi", answer: null, selected: ["B", "A"], notes: "  \n" },
+		],
+		cancelled: false,
+	};
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			questionnaire: async (received) => {
+				assert.deepEqual(received, params);
+				return result;
+			},
+		}),
+	});
+	try {
+		const tool = fixture.session.agent.state.tools.find((entry) => entry.name === "ask_user_question")!;
+		assert.deepEqual((await tool.execute("question", params, new AbortController().signal)).details, result);
+		const controller = new AbortController();
+		controller.abort();
+		await assert.rejects(tool.execute("cancelled", params, controller.signal), { code: "HumanInputCancelled" });
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: a fully typed adapter is present before the first startup event, not after it.
+test("SDK startup hooks can await human input without rendering", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-host-start-"));
+	const settingsManager = SettingsManager.inMemory();
+	const calls: string[] = [];
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		noContextFiles: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_start", async (_event, context) => {
+					assert.equal(context.hasUI, false);
+					assert.equal(context.hasHumanInput, true);
+					calls.push((await context.ui.input("Startup")) ?? "unanswered");
+				});
+			},
+		],
+	});
+	try {
+		await loader.reload();
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager,
+			resourceLoader: loader,
+			sessionManager: SessionManager.inMemory(cwd),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			extensionBindings: { humanInput: callbackHost({ input: async () => "  initial " }) },
+		});
+		try {
+			assert.deepEqual(calls, ["  initial "]);
+			await session.bindExtensions({});
+			assert.deepEqual(calls, ["  initial "]);
+			await session.reload();
+			assert.deepEqual(calls, ["  initial ", "  initial "]);
+		} finally {
+			session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: JavaScript hosts cannot advertise a partial or non-object human adapter.
+test("SDK rejects adapters without every required method", async () => {
+	for (const humanInput of [false, 0, "", {}, { confirm: async () => true }]) {
+		await assert.rejects(hostSession({ humanInput: humanInput as never }), { code: "InvalidHostInput" });
 	}
 });

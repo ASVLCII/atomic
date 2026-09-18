@@ -1,3 +1,12 @@
+export type {
+	HostDiagnostic,
+	HostInput,
+	HostInputOptions,
+	QuestionAnswer,
+	QuestionnaireError,
+	QuestionnaireResult,
+	QuestionParams,
+} from "./core/extensions/host-input.js";
 // Internal trusted-host task integration (not model authority).
 export { AgentTaskHost, type AgentTaskHostBinding, type AgentTaskRunnerFactory } from "./core/tasks/agent-adapter.js";
 export type { AgentIntent, OperationId, TaskId, TaskResult, WaitPolicy } from "./core/tasks/contracts.js";

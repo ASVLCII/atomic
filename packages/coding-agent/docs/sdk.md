@@ -131,6 +131,41 @@ const { session } = await createAgentSession({
 });
 ```
 
+### Human input without a terminal
+
+Pass `extensionBindings.humanInput` to answer extension dialogs and `ask_user_question` in a Node host. `HostInput` requires all five methods: `confirm`, `select`, `input`, `editor` and `questionnaire`. `QuestionParams` and `QuestionnaireResult` are exported from `@bastani/atomic`; questionnaire answers retain their question indices, answer kinds, selections, previews and notes.
+
+Each callback receives a `HostInputOptions` argument with a runtime-generated `requestId`, the originating `sessionId`, and an `AbortSignal`. Stop presenting the question when the signal aborts. Return an actual boolean from `confirm`, a supplied choice or `undefined` from `select`, and a string or `undefined` from text dialogs. Empty strings, whitespace and choice order are preserved. Malformed replies reject with `InvalidHostInput`; false, cancellation and rejected callbacks never approve an action.
+
+```typescript
+import { createAgentSession, type HostInput } from "@bastani/atomic";
+
+async function attachApplication(humanInput: HostInput) {
+  const { session } = await createAgentSession({
+    extensionBindings: {
+      humanInput,
+      onDiagnostic: ({ level, source, message, sessionId }) => {
+        console.log({ level, source, message, sessionId });
+      },
+    },
+  });
+
+  // Cancel current work and any outstanding ordinary questions.
+  await session.abort();
+  // Withdraw input while keeping the session available for noninteractive work.
+  await session.bindExtensions({ humanInput: null });
+  // Reattach the application's callbacks when it is ready to answer again.
+  await session.bindExtensions({ humanInput });
+  return session;
+}
+```
+
+At creation, omitted `humanInput` means no input unless `uiContext` supplies a dialog bridge. Explicit callbacks take precedence over that bridge. On later binding, omission preserves the adapter; `null` withdraws it and cancels pending ordinary questions. Rebinding does not repeat startup hooks. Abort, reload and disposal invalidate pending replies, including late successful replies from callbacks that ignore cancellation.
+
+Extension authors should check `ctx.hasHumanInput` for questions and `ctx.hasUI` for rendering. Existing `ctx.ui.confirm/select/input/editor` calls use the host adapter. Dialog timeouts cancel requests. Without an adapter, ordinary dialogs reject with `HumanInputUnavailable`; `ask_user_question` retains its compatible `{ answers: [], cancelled: true, error: "no_ui" }` details. `ui.custom` still needs a presentation host and is not part of `HostInput`.
+
+`onDiagnostic` receives session-attributed operational diagnostics. Existing errors and tool results remain available without a callback. Third-party extensions can still write directly to the console; the callback does not intercept their output.
+
 ### AgentSession
 
 The session manages agent lifecycle, message history, model state, compaction, and event streaming.

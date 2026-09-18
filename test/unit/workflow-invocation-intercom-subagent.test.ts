@@ -49,6 +49,7 @@ function stageContext(
 		cwd,
 		mode: "tui",
 		hasUI: false,
+		hasHumanInput: false,
 		ui: ui as ExtensionContext["ui"],
 		model: undefined,
 		scopedModels: [],

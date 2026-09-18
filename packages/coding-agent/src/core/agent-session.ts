@@ -174,6 +174,8 @@ class AgentSessionBase {
 	protected _sessionStartEvent: SessionStartEvent;
 	protected _orchestrationContext?: OrchestrationContext;
 	protected _extensionUIContext?: ExtensionUIContext;
+	protected _extensionHumanInput?: import("./extensions/host-input.js").HostInput | null;
+	protected _extensionDiagnosticListener?: (diagnostic: import("./extensions/host-input.js").HostDiagnostic) => void;
 	protected _extensionMode: ExtensionMode = "print";
 	protected _extensionCommandContextActions?: ExtensionCommandContextActions;
 	protected _extensionShutdownHandler?: () => void;

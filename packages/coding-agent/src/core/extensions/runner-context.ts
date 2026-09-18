@@ -31,6 +31,7 @@ export interface ExtensionContextSource {
 	getUIContext(): ExtensionUIContext;
 	getMode(): ExtensionMode;
 	hasUI(): boolean;
+	hasHumanInput?(): boolean;
 	getCwd(): string;
 	getSessionManager(): SessionManager;
 	getModelRegistry(): ModelRegistry;
@@ -169,6 +170,10 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		observeWorkflowActivity: (observer) => {
 			source.assertActive();
 			return source.observeWorkflowActivity(observer);
+		},
+		get hasHumanInput() {
+			source.assertActive();
+			return source.hasHumanInput?.() ?? source.hasUI();
 		},
 		get hasUI() {
 			source.assertActive();

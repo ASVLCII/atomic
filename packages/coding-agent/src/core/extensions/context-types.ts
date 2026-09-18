@@ -188,6 +188,8 @@ export interface ExtensionContext {
 	mode: ExtensionMode;
 	/** Whether dialog-capable UI is available (true in TUI and RPC modes) */
 	hasUI: boolean;
+	/** Whether a semantic human-input adapter is available, independently of rendering. */
+	hasHumanInput: boolean;
 	/** Current working directory */
 	cwd: string;
 	/** Session manager (read-only) */

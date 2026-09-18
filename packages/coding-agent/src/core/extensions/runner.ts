@@ -12,6 +12,14 @@ import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
+import {
+	copyHostQuestionnaire,
+	type HostDiagnostic,
+	type HostInput,
+	HostInputBridge,
+	hostInputError,
+} from "./host-input.js";
 import { runResourceRegistrationBatch } from "./loader-runtime.ts";
 import {
 	createExtensionCommandContext,
@@ -123,6 +131,14 @@ export class ExtensionRunner {
 	private extensions: Extension[];
 	private runtime: ExtensionRuntime;
 	private uiContext: ExtensionUIContext;
+	private presentationUI?: ExtensionUIContext;
+	private presentationInput?: HostInput;
+	private humanInput?: HostInput | null;
+	private readonly inputBridge = new HostInputBridge(
+		() => this.sessionManager.getSessionId(),
+		() => this.getSignalFn(),
+	);
+	private onDiagnostic?: (diagnostic: HostDiagnostic) => void;
 	private mode: ExtensionMode = "print";
 	private cwd: string;
 	private sessionManager: SessionManager;
@@ -287,10 +303,52 @@ export class ExtensionRunner {
 		this.reloadHandler = async () => {};
 	}
 
+	setHostBindings(
+		humanInput: HostInput | null | undefined,
+		onDiagnostic?: (diagnostic: HostDiagnostic) => void,
+	): void {
+		this.humanInput = humanInput;
+		this.onDiagnostic = onDiagnostic;
+		this.refreshHostInput();
+	}
+
+	cancelHostInput(): void {
+		this.inputBridge.cancel();
+	}
+
+	private refreshHostInput(): void {
+		const ui = this.presentationUI;
+		this.inputBridge.bind(this.humanInput === undefined ? this.presentationInput : (this.humanInput ?? undefined));
+		const bridged = this.inputBridge.wrap(
+			ui ?? {
+				...noOpUIContext,
+				custom: async () => {
+					throw hostInputError("HumanInputUnavailable");
+				},
+			},
+			this.presentationInput,
+		);
+		this.uiContext = this.wrapUIPromptContext(bridged, this.uiPromptBinding);
+		copyHostQuestionnaire(bridged, this.uiContext);
+	}
+
 	setUIContext(uiContext?: ExtensionUIContext, mode: ExtensionMode = "print"): void {
-		this.endActiveUIPrompt();
-		const binding = ++this.uiPromptBinding;
-		this.uiContext = uiContext ? this.wrapUIPromptContext(uiContext, binding) : noOpUIContext;
+		if (uiContext !== this.presentationUI) {
+			this.endActiveUIPrompt();
+			++this.uiPromptBinding;
+			this.presentationUI = uiContext;
+			const ui = uiContext;
+			this.presentationInput = ui
+				? {
+						confirm: (title, message, options) => ui.confirm(title, message, options),
+						select: (title, choices, options) => ui.select(title, choices, options),
+						input: (title, placeholder, options) => ui.input(title, placeholder, options),
+						editor: (title, initial, options) => ui.editor(title, initial, options),
+						questionnaire: (params, options) => presentQuestionnaire(ui, params, options.signal),
+					}
+				: undefined;
+			this.refreshHostInput();
+		}
 		this.mode = mode;
 	}
 
@@ -412,7 +470,7 @@ export class ExtensionRunner {
 	}
 
 	hasUI(): boolean {
-		return this.uiContext !== noOpUIContext;
+		return this.presentationUI !== undefined;
 	}
 
 	getExtensionPaths(): string[] {
@@ -459,6 +517,7 @@ export class ExtensionRunner {
 	}
 
 	invalidate(message = STALE_EXTENSION_CONTEXT_MESSAGE): void {
+		this.inputBridge.close();
 		if (!this.staleMessage) {
 			this.staleMessage = message;
 			this.runtime.invalidate(message);
@@ -477,6 +536,12 @@ export class ExtensionRunner {
 	}
 
 	emitError(error: ExtensionError): void {
+		this.onDiagnostic?.({
+			level: "error",
+			source: error.extensionPath,
+			message: `Extension ${error.event} failed`,
+			sessionId: this.sessionManager.getSessionId(),
+		});
 		for (const listener of this.errorListeners) {
 			listener(error);
 		}
@@ -536,6 +601,7 @@ export class ExtensionRunner {
 			getUIContext: () => this.uiContext,
 			getMode: () => this.mode,
 			hasUI: () => this.hasUI(),
+			hasHumanInput: () => this.inputBridge.available,
 			getCwd: () => this.cwd,
 			getSessionManager: () => this.sessionManager,
 			getModelRegistry: () => this.modelRegistry,

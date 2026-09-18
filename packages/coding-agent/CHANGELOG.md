@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - Intercom now respects tool allowlists and exclusions. `tools: []` and `noTools: "all"` expose no tools; `noTools: "all"` also overrides nonempty allowlists. Select `"intercom"` explicitly when using an allowlist. SDK `builtins` flags can disable individual shipped packages and resources without reload restoring them ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Extension dialogs without human-input support now reject with `HumanInputUnavailable` instead of returning empty defaults. Check `ctx.hasHumanInput` for questions; `ctx.hasUI` remains a presentation capability. Pending dialogs are cancelled on adapter withdrawal, abort, reload and disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Added
 
@@ -18,6 +19,8 @@
 - Added a searchable Router model entry in `/settings`, saving automatic routing, Jev, or an available provider/model to `settings.json` without changing the chat model.
 - Added workflow-stage `model: "auto"` selection from actual prompts and evaluation guidance, with constrained model/effort pairs and separate selected versus execution metadata.
 - The workflow tool's run action now lets the router choose and dispatch from neutral task context, reports a duration estimate, and returns missing or invalid selected input contracts before admission. Brainstorming and inline preferences remain router-owned decisions.
+
+- SDK hosts can provide typed `HostInput` callbacks for confirmations, selection, text and questionnaires without a terminal. Replies are validated and carry session/request identity and cancellation; `onDiagnostic` receives session-attributed operational messages ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Changed
 

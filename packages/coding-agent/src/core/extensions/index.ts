@@ -1,3 +1,12 @@
+export type {
+	HostDiagnostic,
+	HostInput,
+	HostInputOptions,
+	QuestionAnswer,
+	QuestionnaireError,
+	QuestionnaireResult,
+	QuestionParams,
+} from "./host-input.js";
 /**
  * Extension system for lifecycle events and custom tools.
  */

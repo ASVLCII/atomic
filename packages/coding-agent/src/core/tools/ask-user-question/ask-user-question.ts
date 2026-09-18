@@ -1,6 +1,8 @@
 import type { OverlayOptions } from "@earendil-works/pi-tui";
 import { experimentalToolSamplingProperty } from "../../experimental.ts";
+import { getHostQuestionnaire } from "../../extensions/host-input.js";
 import type { ToolDefinition } from "../../extensions/types.ts";
+import type { ExtensionUIContext } from "../../extensions/ui-types.js";
 import { loadConfig, validateGuidanceFields } from "./config.ts";
 import { QuestionnaireSession } from "./state/questionnaire-session.ts";
 import { ROW_INTENT_META, sentinelsToAppend } from "./state/row-intent.ts";
@@ -103,7 +105,8 @@ Preview content is rendered as markdown in a monospace box. Multi-line text with
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const typed = params as unknown as QuestionParams;
-			if (!ctx.hasUI) return buildToolResult(ERROR_NO_UI, { answers: [], cancelled: true, error: "no_ui" });
+			if (!(ctx.hasHumanInput ?? ctx.hasUI))
+				return buildToolResult(ERROR_NO_UI, { answers: [], cancelled: true, error: "no_ui" });
 
 			const validation = validateQuestionnaire(typed);
 			if (!validation.ok) {
@@ -114,47 +117,42 @@ Preview content is rendered as markdown in a monospace box. Multi-line text with
 				});
 			}
 
-			const itemsByTab: WrappingSelectItem[][] = typed.questions.map((q) => buildItemsForQuestion(q));
-
-			// Suspend the animated working loader for the lifetime of the blocking dialog.
-			//
-			// The loader ticks every ~88ms and calls `requestRender()` on each frame, and it
-			// conveys nothing while we are blocked on human input. Hiding it for the duration
-			// keeps the frame behind the dialog static and avoids the differential renderer
-			// falling back to a full clear+replay (`\x1b[2J\x1b[H\x1b[3J`) on every tick.
-			// Restored once the dialog closes (on every path).
-			//
-			// Guarded: some hosts (e.g. the workflow stage-UI broker) pass a minimal UI
-			// context that only implements `custom`, so treat a missing loader control as a
-			// no-op rather than throwing.
-			ctx.ui.setWorkingVisible?.(false);
-			try {
-				const result = await ctx.ui.custom<QuestionnaireResult>(
-					(tui, theme, _kb, done) => {
-						const session = new QuestionnaireSession({
-							tui,
-							theme,
-							params: typed,
-							itemsByTab,
-							done,
-							...(options?.chatAsOption === true ? { chatAsOption: true } : {}),
-						});
-						return session.component;
-					},
-					{
-						signal,
-						overlay: true,
-						reserveTranscriptRows: true,
-						overlayOptions: QUESTIONNAIRE_OVERLAY_OPTIONS,
-					},
-				);
-
-				return buildQuestionnaireResponse(result, typed);
-			} finally {
-				ctx.ui.setWorkingVisible?.(true);
-			}
+			const questionnaire = getHostQuestionnaire(ctx.ui);
+			const result = questionnaire
+				? await questionnaire(typed, signal, (requestSignal) =>
+						presentQuestionnaire(ctx.ui, typed, requestSignal, options?.chatAsOption),
+					)
+				: await presentQuestionnaire(ctx.ui, typed, signal, options?.chatAsOption);
+			return buildQuestionnaireResponse(result, typed);
 		},
 	};
+}
+
+/** Rendering adapter shared by the CLI bridge and legacy presentation hosts. */
+export async function presentQuestionnaire(
+	ui: ExtensionUIContext,
+	params: QuestionParams,
+	signal?: AbortSignal,
+	chatAsOption?: boolean,
+): Promise<QuestionnaireResult> {
+	const itemsByTab = params.questions.map(buildItemsForQuestion);
+	ui.setWorkingVisible?.(false);
+	try {
+		return await ui.custom<QuestionnaireResult>(
+			(tui, theme, _kb, done) =>
+				new QuestionnaireSession({
+					tui,
+					theme,
+					params,
+					itemsByTab,
+					done,
+					...(chatAsOption === true ? { chatAsOption: true } : {}),
+				}).component,
+			{ signal, overlay: true, reserveTranscriptRows: true, overlayOptions: QUESTIONNAIRE_OVERLAY_OPTIONS },
+		);
+	} finally {
+		ui.setWorkingVisible?.(true);
+	}
 }
 
 export { buildQuestionnaireResponse, buildToolResult };

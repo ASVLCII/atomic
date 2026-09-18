@@ -502,6 +502,8 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_subagentPolicy?: import("./extensions/index.js").SubagentChildPolicy;
 	_subagentMessageAdmission?: import("./workflow-stage-admission.ts").WorkflowStageAdmissionBoundary;
 	_extensionUIContext?: ExtensionUIContext;
+	_extensionHumanInput?: import("./extensions/host-input.js").HostInput | null;
+	_extensionDiagnosticListener?: (diagnostic: import("./extensions/host-input.js").HostDiagnostic) => void;
 	_extensionMode: ExtensionMode;
 	_disposed: boolean;
 	_sessionSummaryAbortController: AbortController | undefined;

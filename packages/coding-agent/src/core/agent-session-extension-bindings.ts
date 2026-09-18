@@ -3,6 +3,7 @@ import { resetApiProviders } from "@bastani/pi-ai/compat";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { recoverProtectedStreamingCustomMessages } from "./agent-session-persistent-custom-messages.ts";
 import type { AgentSessionReloadOptions, ExtensionBindings } from "./agent-session-types.ts";
+import { hostInputError } from "./extensions/host-input.js";
 import { ExtensionRunner } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { bindExtensionContextPublication } from "./extensions/runner-context.ts";
@@ -126,6 +127,7 @@ async function extendRunnerResources(
 }
 
 const extensionStarts = new WeakMap<ExtensionRunner, Promise<void>>();
+const failedExtensionStarts = new WeakSet<ExtensionRunner>();
 
 function startExtensions(
 	session: AgentSession,
@@ -150,6 +152,7 @@ function startExtensions(
 			await finalize?.();
 			completeStartup(runner);
 		} catch (error) {
+			failedExtensionStarts.add(runner);
 			return rollbackStartup(runner, error instanceof Error ? error : new Error(String(error)));
 		} finally {
 			unsubscribe();
@@ -160,6 +163,13 @@ function startExtensions(
 }
 
 export async function bindExtensions(this: AgentSession, bindings: ExtensionBindings): Promise<void> {
+	if (this._disposed) {
+		// Failed creation retains its original rejection; it never admits another startup.
+		if (failedExtensionStarts.has(this._extensionRunner)) return extensionStarts.get(this._extensionRunner)!;
+		throw hostInputError("SessionClosed");
+	}
+	if (bindings.humanInput !== undefined) this._extensionHumanInput = bindings.humanInput;
+	if (bindings.onDiagnostic !== undefined) this._extensionDiagnosticListener = bindings.onDiagnostic;
 	if (bindings.uiContext !== undefined) {
 		this._extensionUIContext = bindings.uiContext;
 	}
@@ -212,6 +222,7 @@ export function getExtensionSourceLabel(this: AgentSession, extensionPath: strin
 }
 
 export function _applyExtensionBindings(this: AgentSession, runner: ExtensionRunner): void {
+	runner.setHostBindings(this._extensionHumanInput, this._extensionDiagnosticListener);
 	runner.setUIContext(this._extensionUIContext, this._extensionMode);
 	runner.bindCommandContext(this._extensionCommandContextActions);
 
@@ -501,6 +512,7 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 	let rollbackPreparedResources: (() => void) | undefined;
 	try {
 		this._bindExtensionCore(candidateRunner, publication);
+		candidateRunner.setHostBindings(this._extensionHumanInput, this._extensionDiagnosticListener);
 		candidateRunner.setUIContext(this._extensionUIContext, this._extensionMode);
 		candidateRunner.bindCommandContext(this._extensionCommandContextActions);
 		await options?.beforeSessionStart?.();

@@ -34,6 +34,9 @@ InteractiveModeBase.prototype.setupExtensionShortcuts = function (
 		ui: extensionRunner.getUIContext(),
 		mode: "tui",
 		hasUI: true,
+		get hasHumanInput() {
+			return extensionRunner.createContext().hasHumanInput;
+		},
 		cwd: this.sessionManager.getCwd(),
 		sessionManager: this.sessionManager,
 		modelRegistry: new ModelRegistry(this.session.modelRuntime),

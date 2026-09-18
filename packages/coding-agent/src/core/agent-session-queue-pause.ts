@@ -74,6 +74,7 @@ export async function resumeQueuedMessages(this: AgentSession, beforeRelease?: (
 
 /** Abort an ordinary turn and synchronously publish its pause-associated settlement boundary. */
 export function abort(this: AgentSession): Promise<void> {
+	this._extensionRunner.cancelHostInput();
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner.abort();
 	if (this._subagentMessageAdmission) {
