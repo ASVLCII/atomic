@@ -880,6 +880,85 @@ test("workflow child inherits SDK host and disabled tool ceiling", async () => {
 	}
 });
 
+// #3105: production workflow adapter preserves optional inheritance and manager cwd precedence.
+test.each(["omitted", "undefined", "manager", "relative"] as const)(
+	"workflow child configuration boundaries: %s",
+	async (mode) => {
+		const { buildRuntimeAdapters } = await import("../../packages/workflows/src/extension/wiring.js");
+		const { getModel } = await import("@bastani/pi-ai/compat");
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-child-options-"));
+		const managerCwd = join(cwd, "manager");
+		mkdirSync(managerCwd);
+		const host = {
+			input: async () => "  inherited\n",
+			confirm: async () => false,
+			select: async () => undefined,
+			editor: async () => "",
+			questionnaire: async () => ({ answers: [], cancelled: true }),
+		};
+		const { session: parent } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			thinkingLevel: "high",
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory(),
+			builtins: { workflows: false, subagents: false, intercom: false, mcp: false, "web-access": false },
+			tools: ["read"],
+			extensionBindings: { humanInput: host },
+		});
+		let child: typeof parent | undefined;
+		try {
+			const adapters = buildRuntimeAdapters(
+				{ getChildSessionOptions: parent.extensionRunner.createContext().getChildSessionOptions },
+				{
+					createAgentSession: async (options) => {
+						const result = await createAgentSession(options);
+						child = result.session;
+						return result as unknown as import("../../packages/workflows/src/runs/foreground/stage-runner.js").StageSessionCreateResult;
+					},
+				},
+			);
+			const options = Object.freeze({
+				sessionManager: SessionManager.inMemory(mode === "manager" || mode === "relative" ? managerCwd : cwd),
+				...(mode === "relative" ? { cwd: "." } : {}),
+				...(mode === "undefined"
+					? {
+							model: undefined,
+							modelRuntime: undefined,
+							settingsManager: undefined,
+							agentDir: undefined,
+							thinkingLevel: undefined,
+							tools: undefined,
+							builtins: undefined,
+							extensionBindings: Object.freeze({ humanInput: undefined }),
+						}
+					: {}),
+			});
+			await adapters.agentSession!.create(options, {
+				runId: "configuration",
+				stageId: mode,
+				stageName: mode,
+				executionMode: "interactive",
+				signal: new AbortController().signal,
+			});
+			assert.ok(child);
+			assert.equal(child.extensionRunner.createContext().cwd, mode === "manager" ? managerCwd : cwd);
+			assert.equal(child.sessionManager, options.sessionManager);
+			assert.equal(child.model, parent.model);
+			assert.equal(child.thinkingLevel, parent.thinkingLevel);
+			assert.equal(child.settingsManager, parent.settingsManager);
+			assert.deepEqual(child.getActiveToolNames(), ["read"]);
+			assert.equal(await child.extensionRunner.createContext().ui.input("question"), "  inherited\n");
+			assert.equal(options.extensionBindings?.humanInput, undefined);
+		} finally {
+			await child?.dispose();
+			await parent.dispose();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
 // #3105: exercise the real in-process runner, not its testSession stub.
 test.each([false, true])(
 	"subagent child uses the parent's model runtime and tool ceiling, fallback=%s",

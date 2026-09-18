@@ -792,7 +792,7 @@ const callbackHost = (overrides: Partial<HostInput> = {}): HostInput => ({
 	...overrides,
 });
 
-async function hostSession(bindings: ExtensionBindings = {}) {
+async function hostSession(bindings: ExtensionBindings = {}, options: CreateAgentSessionOptions = {}) {
 	const cwd = mkdtempSync(join(tmpdir(), "atomic-host-contract-"));
 	const contexts: ExtensionContext[] = [];
 	const settingsManager = SettingsManager.inMemory();
@@ -827,6 +827,7 @@ async function hostSession(bindings: ExtensionBindings = {}) {
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
 			extensionBindings: bindings,
+			...options,
 		});
 		return {
 			session,
@@ -1446,5 +1447,89 @@ test("child callbacks, diagnostics and relative cwd stay owner-local across rebi
 	} finally {
 		for (const child of children) child.dispose();
 		for (const fixture of fixtures) fixture.close();
+	}
+});
+
+// #3105: the child manager supplies cwd unless an explicit parent-relative cwd wins.
+test("child working directory honors manager before inherited default", async () => {
+	const fixture = await hostSession();
+	const parentCwd = fixture.session.sessionManager.getCwd();
+	const managerCwd = join(parentCwd, "manager");
+	mkdirSync(managerCwd);
+	try {
+		for (const cwd of [undefined, "", "."]) {
+			const sessionManager = SessionManager.inMemory(managerCwd);
+			const input = Object.freeze({ cwd, sessionManager });
+			const { session } = await createAgentSession(fixture.contexts[0]!.getChildSessionOptions!(input));
+			try {
+				assert.equal(session.extensionRunner.createContext().cwd, cwd === undefined ? managerCwd : parentCwd);
+				assert.equal(session.sessionManager, sessionManager);
+				assert.equal(input.cwd, cwd);
+			} finally {
+				await session.dispose();
+			}
+		}
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: optional undefined is omission, not a replacement model or host withdrawal.
+test("undefined child configuration retains inherited values and callback identities", async () => {
+	const diagnostics: HostDiagnostic[] = [];
+	const host = callbackHost({ input: async () => "  inherited\n" });
+	const fallbackModels = ["anthropic/claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"];
+	const customTools = [
+		{
+			name: "inherited_fixture",
+			label: "Fixture",
+			description: "Inherited custom tool",
+			parameters: Type.Object({}),
+			execute: async () => ({ content: [{ type: "text" as const, text: " raw " }], details: {} }),
+		},
+	];
+	const fixture = await hostSession(
+		{ humanInput: host, onDiagnostic: (entry) => diagnostics.push(entry) },
+		{ fallbackModels, customTools, thinkingLevel: "high", isFallbackModelAllowed: () => false },
+	);
+	try {
+		const resolve = fixture.contexts[0]!.getChildSessionOptions!;
+		const baseline = resolve({});
+		const input: CreateAgentSessionOptions = Object.freeze({
+			agentDir: undefined,
+			modelRuntime: undefined,
+			settingsManager: undefined,
+			model: undefined,
+			thinkingLevel: undefined,
+			fallbackModels: undefined,
+			isFallbackModelAllowed: undefined,
+			builtins: Object.freeze({ intercom: undefined }),
+			tools: undefined,
+			noTools: undefined,
+			excludedTools: undefined,
+			customTools: undefined,
+			extensionBindings: Object.freeze({ humanInput: undefined, onDiagnostic: undefined }),
+		});
+		const options = resolve(input);
+		const { session } = await createAgentSession({ ...options, resourceLoader: fixture.loader });
+		try {
+			assert.equal(session.model, fixture.session.model);
+			assert.equal(session.settingsManager, fixture.session.settingsManager);
+			assert.ok(session.getAllTools().some((tool) => tool.name === "inherited_fixture"));
+			assert.equal(await session.extensionRunner.createContext().ui.input("raw"), "  inherited\n");
+			await session.prompt("/diagnostic-test");
+			assert.equal(diagnostics.length, 1);
+			assert.equal(diagnostics[0]!.sessionId, session.sessionId);
+			assert.deepEqual(options, baseline);
+			for (const key of ["model", "modelRuntime", "settingsManager", "customTools", "fallbackModels"] as const) {
+				assert.equal(options[key], baseline[key], key);
+			}
+			assert.equal(options.extensionBindings!.humanInput, host);
+			assert.equal(input.extensionBindings!.humanInput, undefined);
+		} finally {
+			await session.dispose();
+		}
+	} finally {
+		fixture.close();
 	}
 });

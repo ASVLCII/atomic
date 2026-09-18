@@ -68,6 +68,7 @@
 - Workflow and subagent children retain the invoking SDK session's model/auth configuration, host callbacks and tool restrictions through fallback. Child requests and diagnostics keep their own session identity; disabled Intercom cannot grant supervisor access, and workflow children no longer share their parent stage's pending asks ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Workflow stage questionnaires respect explicit child human-input adapters and withdrawal without losing durable pending/rebind behavior. Stage fallback replacements enforce inherited model restrictions instead of treating fallback candidates as unrestricted primaries ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Explicitly rebinding a workflow child to its originally inherited adapter now keeps questions with that selected host after parent rebinding, including across child reload ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Child sessions honor a supplied session manager's working directory when `cwd` is omitted, and optional `undefined` child configuration no longer discards inherited models, settings or host callbacks ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

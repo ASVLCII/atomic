@@ -105,6 +105,24 @@ After the prerequisite, **unmodified** `npm run build` and `npm run check` both 
 
 Final candidate unmodified build/check reran successfully after all repair edits (`r3-build-final.log`, `r3-check-final.log`). Both signed commits use normal hooks with no catalog preload or skipped check; final signature/status evidence belongs to the repair receipt.
 
+## Optional configuration / child cwd repair (baseline `fbd15305e`)
+
+Frozen goal: preserve explicit child cwd (relative to its invoking parent), then supplied child manager cwd, then parent cwd; treat optional `undefined` as inheritance without changing literal values, raw data, host intent, fallback restrictions or capability/owner boundaries.
+
+All seven consolidated findings are resolved by two changes in `child-session-options.ts`: cwd precedence (entries 1, 5, 7) and undefined-safe shallow option/builtin/binding merges (entries 2, 3, 4, 6). Only undefined is filtered; object/array/callback values are not cloned or normalized. Existing tool intersection, exclusions, builtin ceiling and fallback predicate composition are unchanged. No new schema, API or provider changes.
+
+The inherited-field audit covered cwd, agentDir, modelRuntime, settingsManager, model, thinkingLevel, fallbackModels, isFallbackModelAllowed, builtins, tools, noTools, excludedTools, customTools and extensionBindings (humanInput and onDiagnostic). The public factory regression exercises model/settings/custom-tool/input/diagnostic behavior and compares resolved configuration, including borrowed identities and ordered duplicate fallback entries. A second factory regression covers manager cwd and explicit empty/dot cwd. Four production workflow-adapter cases cover omission, undefined configuration, manager cwd and explicit parent-relative cwd. Existing null withdrawal, explicit-host reuse/reload, fallback, owner/group/depth and empty-tool cases remain unchanged.
+
+Evidence in `/tmp/atomic-sdk-e-evidence/`:
+
+- Before edits, `node /tmp/sdk-e-risk-boundaries.mjs` fails with all three assertions (undefined host, undefined model, manager cwd); `node /tmp/sdk-e-risk-stage.mjs` prints the same incorrect production adapter state (`r4-{boundary,stage}-red.log`). The adapter probe itself exits zero because it prints observations; persisted assertions now cover those observations. Both original scripts pass/correctly report inherited state after the build (`r4-{boundary,stage}-green.log`).
+- Vertical factory regressions: `r4-cwd-red.log` then `r4-cwd-green.log`; `r4-undefined-red.log` then `r4-config-green.log`. The intermediate `r4-undefined-green.log` exposed a fixture assumption: settings returns a fresh fallback array on each read. The fixture now supplies an explicit ordered duplicate fallback array to test borrowed-reference preservation rather than incorrectly requiring settings snapshots to share identity.
+- Unmodified `npm run build` and `npm run check`, with no NODE_OPTIONS/preload, pass (`r4-build.log`, `r4-check.log`). No generated AI drift or provider changes.
+- Complete SDK parity plus five affected files: 73 passed in six files (`r4-agent-full.log`), including all 54 SDK cases. Complete host parity: 43 passed (`r4-host-full.log`). Existing explicit runner configuration: 32 passed (`r4-runner-full.log`). Existing 25-file affected unit command: 225 passed (`r4-unit-full.log`; exact file list in `r3-unit-command.log`). Additional session-manager/shared-model/windows-path and parent-config suites pass (`r4-config-suites.log`, `r4-parent-config.log`). No required acceptance was skipped or softened; test-name filters were used only for red/green iteration.
+- Supplemental qlty 0.642.0 metrics and smells on the resolver both exit zero, with no smells reported (`r4-qlty-{metrics,smells}.log`). Configuration unchanged; this is not full lint/security coverage.
+
+Only these resolved E issues were removed from tracked `ISSUES.md`; unrelated warnings and F/G/H items remain. Public disposal/DBOS cleanup, services, genuine packed strict declarations and normal exit are not claimed. Cumulative PR exact-head CI, Greptile and conditional merge remain parent-owned.
+
 ## Deferred work
 
 F must fix public `await session.dispose()` leaving DBOS ready and keeping Node alive. H must demonstrate normal packed-consumer exit without manual DBOS cleanup or forced exit. No lifecycle success is claimed here.

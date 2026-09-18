@@ -176,7 +176,9 @@ Only an actual `true` confirms a primitive approval. Questionnaire readiness kee
 
 ### Workflow and subagent children
 
-Children use the invoking session's model/auth runtime, settings, agent directory, human-input callbacks and diagnostic sink. A child model or fallback choice does not switch to global credentials. Relative child working directories resolve from the invoking session, without changing the process working directory.
+Children use the invoking session's model/auth runtime, settings, agent directory, human-input callbacks and diagnostic sink. A child model or fallback choice does not switch to global credentials. Explicit child `cwd` wins, then a supplied child `sessionManager.getCwd()`, then the invoking session's directory. Relative child working directories resolve from the invoking session, without changing the process working directory.
+
+Omitted or `undefined` child options retain inherited configuration, including individual builtin flags and host bindings. Use `humanInput: null` to withdraw input explicitly; empty arrays and other explicit values keep their normal meanings, subject to the parent's capability ceiling.
 
 Child tool selections can narrow the parent's selection, not expand it. Disabled builtin packages, excluded tools, empty allowlists and `noTools: "all"` remain suppressed in children and fallback attempts. Enable a needed capability on the parent before launching a child. Workflow stages and subagents still exclude recursive workflow tooling; subagents retain the single-level delegation limit.
 
