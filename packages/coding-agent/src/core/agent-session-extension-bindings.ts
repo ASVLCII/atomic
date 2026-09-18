@@ -132,9 +132,10 @@ function startExtensions(
 	runner: ExtensionRunner,
 	loader: ResourceLoader,
 	event: AgentSession["_sessionStartEvent"],
+	finalize?: () => Promise<void>,
 ): Promise<void> {
 	const existing = extensionStarts.get(runner);
-	if (existing) return existing;
+	if (existing) return finalize ? existing.then(finalize) : existing;
 	const start = Promise.resolve().then(async () => {
 		const failures: Error[] = [];
 		const unsubscribe = runner.onError((error) => {
@@ -146,6 +147,7 @@ function startExtensions(
 			await runner.emit(event);
 			await extendRunnerResources(session, runner, loader, event.reason === "reload" ? "reload" : "startup");
 			if (failures.length) throw new AggregateError(failures, "Extension startup failed");
+			await finalize?.();
 			completeStartup(runner);
 		} catch (error) {
 			return rollbackStartup(runner, error instanceof Error ? error : new Error(String(error)));
@@ -175,12 +177,13 @@ export async function bindExtensions(this: AgentSession, bindings: ExtensionBind
 	}
 
 	this._applyExtensionBindings(this._extensionRunner);
-	await startExtensions(this, this._extensionRunner, this._resourceLoader, this._sessionStartEvent);
-	this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-	this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
-	if (recoverProtectedStreamingCustomMessages(this) > 0) {
-		await this._continueQueuedAgentMessages();
-	}
+	await startExtensions(this, this._extensionRunner, this._resourceLoader, this._sessionStartEvent, async () => {
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		if (recoverProtectedStreamingCustomMessages(this) > 0) {
+			await this._continueQueuedAgentMessages();
+		}
+	});
 }
 
 export async function extendResourcesFromExtensions(this: AgentSession, reason: "startup" | "reload"): Promise<void> {

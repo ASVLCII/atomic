@@ -15,7 +15,7 @@ import { getBuiltinPackagePaths } from "../src/core/builtin-packages.ts";
 import { noOpUIContext } from "../src/core/extensions/runner-ui.ts";
 import { ModelRuntime } from "../src/core/model-runtime.js";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
-import { createAgentSession } from "../src/core/sdk.ts";
+import { createAgentSession, createUnstartedAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
@@ -85,6 +85,12 @@ test("custom loaders retain their resources and factories while startup runs onc
 		const { session } = await createAgentSession(options);
 		try {
 			assert.equal(starts, 1);
+			// #3105: mandatory composition must reuse the genuine overlay registration.
+			const builtins = session.resourceLoader
+				.getExtensions()
+				.extensions.filter((extension) => extension.sourceInfo.configurationOrigin === "bundled");
+			assert.equal(builtins.length, 5);
+			assert.equal(new Set(builtins.map((extension) => extension.resolvedPath)).size, 5);
 			assert.ok(session.getAllTools().some((tool) => tool.name === "workflow"));
 			assert.ok(session.systemPrompt.startsWith("Caller-owned prompt"));
 			assert.deepEqual(loader.getExtensions().extensions, originalExtensions);
@@ -92,6 +98,12 @@ test("custom loaders retain their resources and factories while startup runs onc
 			assert.equal(starts, 1);
 			await session.reload();
 			await session.bindExtensions({});
+			assert.equal(
+				session.resourceLoader
+					.getExtensions()
+					.extensions.filter((extension) => extension.sourceInfo.configurationOrigin === "bundled").length,
+				5,
+			);
 			assert.deepEqual(reasons, ["startup", "reload"]);
 		} finally {
 			session.dispose();
@@ -317,6 +329,60 @@ test("services factory forwards bindings before startup", async () => {
 		} finally {
 			session.dispose();
 		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: resource discovery is not the end of fallible creation finalization.
+test.each([false, true])("prompt finalization failure rolls back once (deferred=%s)", async (deferred) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-finalization-"));
+	const events: string[] = [];
+	let discovered = false;
+	const settingsManager = SettingsManager.inMemory();
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		noContextFiles: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_start", () => {
+					events.push("acquire");
+				});
+				pi.on("resources_discover", () => {
+					discovered = true;
+					return {};
+				});
+				pi.on("session_shutdown", async () => {
+					await Promise.resolve();
+					events.push("release");
+				});
+			},
+		],
+	});
+	await loader.reload();
+	const options = {
+		cwd,
+		agentDir: join(cwd, "agent"),
+		resourceLoader: loader,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+		systemPromptTransform: (prompt: string) => {
+			if (discovered) throw new Error("post-discovery prompt failure");
+			return prompt;
+		},
+	};
+	try {
+		if (deferred) {
+			const { session } = await createUnstartedAgentSession(options);
+			await assert.rejects(session.bindExtensions({}), /post-discovery prompt failure/);
+			await assert.rejects(session.bindExtensions({}), /post-discovery prompt failure/);
+		} else {
+			await assert.rejects(createAgentSession(options), /post-discovery prompt failure/);
+		}
+		assert.deepEqual(events, ["acquire", "release"]);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

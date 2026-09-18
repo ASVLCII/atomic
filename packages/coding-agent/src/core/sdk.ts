@@ -481,7 +481,8 @@ async function constructAgentSession(
 		throw error;
 	});
 	try {
-		for (const failure of resourceLoader.getExtensions().errors) {
+		const extensionsResult = resourceLoader.getExtensions();
+		for (const failure of extensionsResult.errors) {
 			const builtin = getBuiltinPackageLocations().find(({ packageDir }) => {
 				const path = relative(packageDir, failure.path);
 				return path !== ".." && !path.startsWith(`..${sep}`) && !path.startsWith(sep);
@@ -492,15 +493,8 @@ async function constructAgentSession(
 				});
 		}
 		if (!deferStart) await session.bindExtensions(options.extensionBindings ?? {});
+		return { session, extensionsResult, modelFallbackMessage, modelFallbackReason };
 	} catch (error) {
 		return rollbackStartup(session.extensionRunner, error instanceof Error ? error : new Error(String(error)));
 	}
-	const extensionsResult = resourceLoader.getExtensions();
-
-	return {
-		session,
-		extensionsResult,
-		modelFallbackMessage,
-		modelFallbackReason,
-	};
 }

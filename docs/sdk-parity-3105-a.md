@@ -12,12 +12,12 @@ Scope is contract A and issue #3105 section 8.1 A. Later slices B through H are 
 | Actual AgentSession and unchanged result fields | Same test uses `instanceof AgentSession`; inspect sdk-types.ts | Identity passes; optional fields unchanged |
 | Shared CLI/factory defaults, preserve trust/deferred host behavior | Service parity, mounted-host startup, CLI trust/order suites and real CLI `/workflow list` | Passed |
 | Custom loaders retain user resources | Custom parity and resource loader suites | Passed |
-| Builtin identity dedup, descriptor order, immutable caller options/arrays/loader | Repeated-root parity with frozen options and array identity assertions | Passed |
+| Builtin identity dedup, descriptor order, immutable caller options/arrays/loader | Repeated-root parity plus five unique custom-loader builtin registrations before/after reload | Passed after review repair; prior coverage missed duplicate Intercom |
 | Missing enabled shipped assets reject `BuiltinUnavailable` naming package | Missing-assets parity | Passed; RED recorded before repair |
 | Creating to ready only after startup and resource discovery | Default/custom/service parity, deferred publication suites | Passed |
 | Ready to rebound stays same generation, no repeated start | Concurrent binding parity | Passed |
 | Reload creates one new started generation | Parity reasons exactly `["startup", "reload"]`, transactional and Herdr tests | Passed |
-| Failed creation awaits partial rollback before rejection | Eager/deferred failure injection and borrowed-provider rollback | Passed |
+| Failed creation awaits partial rollback before rejection | Eager/deferred startup and post-discovery prompt-finalization failures, borrowed-provider rollback | Passed after review repair; repeated failed binding neither restarts nor repeats cleanup |
 | Preserve tool selection and collisions | SDK defaults and mandatory Intercom suites | Passed; selection redesign belongs to B |
 | User guides and Unreleased behavior | SDK guide/reference and coding-agent/workflows changelogs | Updated; released sections unchanged |
 | Designated checkout/branch, no external writes | Git branch/status | `feat/3105-sdk-a`; no push, PR, merge or release |
@@ -66,6 +66,26 @@ Logs: `/tmp/3105-a-final-build.log`, `/tmp/3105-a-final-check.log`, `/tmp/3105-a
 Debugger diagnosis distinguished authorized additive builtin resources from workflow startup incorrectly removing `ask_user_question` in headless sessions. That removal was dropped; existing missing-UI refusal remains. Caller-only skill tests now assert additive resources and caller-array preservation.
 
 Expanded reload tests exposed user discovery routed only to the builtin overlay. Forwarding to the caller loader now preserves publication errors and rollback. Herdr tests exposed eager headless startup before CLI UI mounting; the internal constructor fixes production ordering, and public SDK Herdr fixtures supply creation-time bindings. A build caught optional-versus-required callback parameters; the concrete callback type was corrected and final build/check passed.
+
+## Consolidated review repair
+
+The first readiness claim was premature. Review reproduced three slice A findings: rollback was removed before prompt finalization, custom-loader composition loaded Intercom twice, and the dynamic-tool test still expected deferred startup. All three were repaired together without changing the contract or weakening acceptance.
+
+Startup now includes fallible prompt finalization and queued-message recovery in its memoized outcome before releasing rollback. Factory result lookup is inside the protected initialization path. An eager or deferred first-bind failure awaits shutdown; a repeated failed binding reuses the rejection without acquiring or releasing again. The overlay marks registrations it actually loaded from shipped roots using the existing trusted mandatory mechanism. Caller-supplied registrations are not granted trust. The dynamic-tool test now expects its startup tool at factory return and retains metadata, active-tool, prompt and rebinding assertions.
+
+Durable regressions in `sdk-builtin-parity.test.ts` failed before repair for both finalization paths and for the custom-loader builtin count. Their green reruns passed alongside mandatory Intercom anti-spoof tests. Existing user guides and Unreleased entries describe the intended behavior accurately; no duplicate release note was added.
+
+Current repair validation:
+
+- `npm run build` and `npm run check`: passed, logs `/tmp/3105-a-repair-build.log` and `/tmp/3105-a-repair-check.log`.
+- The expanded package command above plus `test/agent-session-dynamic-provider.test.ts test/agent-session-dynamic-tools.test.ts test/agent-session-runtime-events.test.ts`: 255 passed in 31 files, no skips; `/tmp/3105-a-repair-affected.log`.
+- `npm run test --workspace=@bastani/atomic -- test/agent-session-dynamic-provider.test.ts test/agent-session-dynamic-tools.test.ts test/agent-session-runtime-events.test.ts test/session-cwd.test.ts`: 18 passed in four files, no skips; `/tmp/3105-a-repair-additional.log`. This deliberately includes the actual `session-cwd.test.ts` filename.
+- The affected workflow command above: 28 passed in three files; `/tmp/3105-a-repair-workflows.log`.
+- `node packages/coding-agent/test/fixtures/sdk-builtin-composition.mjs`: `SDK builtin composition: PASS`, normal exit; `/tmp/3105-a-repair-node.log`.
+- Reviewer probes `node /tmp/3105-a-risk-finalization.mjs` and `node /tmp/3105-a-completion-probe.mjs`: both failed before repair, both passed after rebuilding. Finalization observed exactly `["acquire","release"]`; composition listed exactly five distinct builtin paths in descriptor order. Logs `/tmp/3105-a-repair-{red,green}-{finalization,dedup}.log`. Durable equivalents are in the parity suite rather than relying on temporary probe files.
+- `qlty metrics --functions packages/coding-agent/src/core/builtin-resource-loader.ts packages/coding-agent/src/core/agent-session-extension-bindings.ts`: executed with existing Qlty 0.642.0/configuration; `/tmp/3105-a-repair-qlty.log`. This is supplementary metrics, not a substitute for the repository check.
+
+No findings from this consolidated batch remain deferred. The pre-existing listener warning and later slices remain as documented above. No new live-provider, packed-install, platform or Herdr-transport claim is made.
 
 ## Contract amendments received
 

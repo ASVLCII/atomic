@@ -3,6 +3,7 @@ import { relative, sep } from "node:path";
 import { getBuiltinPackageLocations } from "./builtin-packages.ts";
 import { getExtensionRuntimeEventBus, loadExtensions } from "./extensions/loader.ts";
 import type { LoadExtensionsResult } from "./extensions/types.ts";
+import { markTrustedMandatoryRuntimeExtension } from "./mandatory-runtime-tools.ts";
 import { DefaultPackageManager, type ResolvedResource } from "./package-manager.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import type {
@@ -84,7 +85,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 			{ get: () => resources.workflows, refresh: async () => resources.workflows },
 			target.runtime,
 		);
-		for (const extension of loaded.extensions) extension.sourceInfo.configurationOrigin = "bundled";
+		for (const extension of loaded.extensions) markTrustedMandatoryRuntimeExtension(extension);
 		this.extensions = {
 			...target,
 			extensions: [...extensions, ...loaded.extensions],
