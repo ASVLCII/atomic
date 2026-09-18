@@ -836,6 +836,20 @@ test.each(["bus", "loader", "facade", "subclass"])(
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
 );
 
+// #3105: initial owners and queue admission use the same lifecycle in a real Node process.
+test.each(["owner", "steer", "followUp"])(
+	"built Node review %s lifecycle closes naturally",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-review-lifecycle.mjs", import.meta.url)), mode],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), { mode, closed: true });
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
 // #3105: release admitted callbacks while disposal is pending, then require real cleanup and natural exit.
 test.each(["prompt", "reload", "compact", "compact-provider"] as const)(
 	"built Node drains suspended %s admission before completing disposal",

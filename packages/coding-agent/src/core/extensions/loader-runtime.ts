@@ -221,9 +221,24 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		invalidate: (message) => {
 			if (state.staleMessage) return;
 			state.staleMessage = message ?? STALE_EXTENSION_CONTEXT_MESSAGE;
-			runtime.workflowActivityHub.dispose();
-			for (const unsubscribe of eventBusUnsubscribers) unsubscribe();
+			const failures: unknown[] = [];
+			try {
+				runtime.workflowActivityHub.dispose();
+			} catch (error) {
+				failures.push(error);
+			}
+			for (const unsubscribe of eventBusUnsubscribers) {
+				try {
+					unsubscribe();
+				} catch (error) {
+					failures.push(error);
+				}
+			}
 			eventBusUnsubscribers.clear();
+			if (failures.length)
+				throw Object.assign(new AggregateError(failures, "Extension resource release failed"), {
+					code: "ShutdownFailed",
+				});
 		},
 		trackEventBusSubscription: (unsubscribe) => {
 			let active = true;

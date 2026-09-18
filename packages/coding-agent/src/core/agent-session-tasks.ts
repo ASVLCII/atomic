@@ -15,8 +15,8 @@ import { bindOwnerTaskStore, OwnerTaskStore } from "./tasks/owner-store.js";
 import { taskTranscriptSource } from "./tasks/supervisor.js";
 import { WorkflowStageAdmissionBoundary } from "./workflow-stage-admission.ts";
 
-// Native closed scopes never reopen. Reload replaces only the internal owner
-// identity; the session manager's public identity and borrowed stage owner stay put.
+// Native owners identify live generations, never borrowed persisted storage.
+// Explicit workflow-stage owners remain borrowed across session replacement.
 const replacementOwnerScopes = new WeakMap<object, string>();
 
 export function replaceSessionTaskOwner(session: AgentSession): void {
@@ -130,13 +130,15 @@ export function getAgentTaskHost(this: AgentSession): AgentTaskHost {
 			void outbox.flush();
 		},
 	};
+	if (!this._workflowStageAdmission && !replacementOwnerScopes.has(this))
+		replacementOwnerScopes.set(this, randomUUID());
 	this._agentTaskHost = this._workflowStageAdmission
 		? this._workflowStageAdmission.bindAgentTaskHost(binding)
 		: new AgentTaskHost({
 				...binding,
 				scope: {
 					kind: "session",
-					sessionId: replacementOwnerScopes.get(this) ?? this.sessionManager.getSessionId(),
+					sessionId: replacementOwnerScopes.get(this)!,
 				},
 			});
 	const { supervisor, owner } = this._agentTaskHost.ownerBinding;

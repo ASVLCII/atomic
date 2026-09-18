@@ -12,7 +12,12 @@ import {
 } from "./auth-guidance.ts";
 import { runCallback } from "./callback-activity.ts";
 import { expandPromptTemplate } from "./prompt-templates.ts";
-import { sessionGenerationClosing, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";
+import {
+	assertSessionOpen,
+	sessionGenerationClosing,
+	sessionLifetime,
+	trackSessionWork,
+} from "./session-lifecycle-work.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
 
 type UserMessageDeliveryAction = "prompt" | "steer" | "followUp" | "handled";
@@ -516,6 +521,20 @@ async function queueUserInput(
 	behavior: "steer" | "followUp",
 	source: NonNullable<PromptOptions["source"]>,
 ): Promise<void> {
+	assertSessionOpen(session);
+	const owner = resolveWorkflowStageDeliveryTarget(session);
+	if (owner !== session) return queueUserInput(owner, text, images, behavior, source);
+	return trackSessionWork(session, () => admittedQueueUserInput(session, text, images, behavior, source));
+}
+
+async function admittedQueueUserInput(
+	session: AgentSession,
+	text: string,
+	images: ImageContent[] | undefined,
+	behavior: "steer" | "followUp",
+	source: NonNullable<PromptOptions["source"]>,
+): Promise<void> {
+	const lifetime = sessionLifetime(session);
 	if (text.startsWith("/")) session._throwIfExtensionCommand(text);
 	if (session._extensionRunner?.hasHandlers("input")) {
 		const result = await session._extensionRunner.emitInput(
@@ -524,6 +543,8 @@ async function queueUserInput(
 			source,
 			session.isStreaming ? behavior : undefined,
 		);
+		assertSessionOpen(session);
+		if (lifetime.aborted) throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 		if (result.action === "handled") return;
 		if (result.action === "transform") {
 			text = result.text;

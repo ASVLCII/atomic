@@ -21,6 +21,7 @@ import {
 } from "./agent-session-types.ts";
 import type { SendMessageOptions, SendMessagesOptions } from "./extensions/index.js";
 import type { CustomMessage, StageAdmittedCustomMessage } from "./messages.ts";
+import { assertSessionOpen, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";
 
 export { transferWorkflowStageDeliveriesTo };
 
@@ -37,6 +38,7 @@ function serializeInterruptMutation(owner: AgentSession, operation: () => Promis
 }
 
 export async function _queueSteer(this: AgentSession, text: string, images?: ImageContent[]): Promise<void> {
+	assertSessionOpen(this);
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner._queueSteer(text, images);
 	this._steeringMessages.push(text);
@@ -60,6 +62,7 @@ export async function _queueSteer(this: AgentSession, text: string, images?: Ima
  */
 
 export async function _queueFollowUp(this: AgentSession, text: string, images?: ImageContent[]): Promise<void> {
+	assertSessionOpen(this);
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner._queueFollowUp(text, images);
 	this._followUpMessages.push(text);
@@ -116,6 +119,16 @@ export async function sendCustomMessage<T = unknown>(
 ): Promise<void> {
 	const currentOwner = resolveWorkflowStageDeliveryTarget(this);
 	if (currentOwner !== this) return currentOwner.sendCustomMessage(message, options);
+	assertSessionOpen(this);
+	return trackSessionWork(this, () => admittedCustomMessage.call(this, message, options));
+}
+
+async function admittedCustomMessage<T>(
+	this: AgentSession,
+	message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
+	options?: SendMessageOptions,
+): Promise<void> {
+	const lifetime = sessionLifetime(this);
 	const appMessage = {
 		role: "custom" as const,
 		customType: message.customType,
@@ -129,6 +142,8 @@ export async function sendCustomMessage<T = unknown>(
 	const boundary = this._subagentMessageAdmission ?? this._workflowStageAdmission;
 	const commit = async (): Promise<void> => {
 		if (boundary && options?.stageAdmissionBarrier) await options.stageAdmissionBarrier();
+		assertSessionOpen(this);
+		if (lifetime.aborted) throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 		await commitAdmittedCustomMessage(this, appMessage, options);
 	};
 	// Event hooks may await non-triggering writes while protected input awaits the
@@ -152,6 +167,16 @@ export async function sendCustomMessages<T = unknown>(
 ): Promise<void> {
 	const currentOwner = resolveWorkflowStageDeliveryTarget(this);
 	if (currentOwner !== this) return currentOwner.sendCustomMessages(messages, options);
+	assertSessionOpen(this);
+	return trackSessionWork(this, () => admittedCustomMessages.call(this, messages, options));
+}
+
+async function admittedCustomMessages<T>(
+	this: AgentSession,
+	messages: Array<Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">>,
+	options?: SendMessagesOptions,
+): Promise<void> {
+	const lifetime = sessionLifetime(this);
 	const timestamp = Date.now();
 	const appMessages = messages.map(
 		(message) =>
@@ -170,6 +195,8 @@ export async function sendCustomMessages<T = unknown>(
 	const boundary = this._subagentMessageAdmission ?? this._workflowStageAdmission;
 	const commit = async (): Promise<void> => {
 		if (boundary && options?.stageAdmissionBarrier) await options.stageAdmissionBarrier();
+		assertSessionOpen(this);
+		if (lifetime.aborted) throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 		await commitAdmittedCustomMessages(this, appMessages, options);
 	};
 	const deliver = () =>
@@ -228,6 +255,7 @@ export function _enqueueInterruptCustomMessage<T>(
 ): Promise<void> {
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner._enqueueInterruptCustomMessage(message, forwardedMessageOptions(options));
+	assertSessionOpen(this);
 	this._pendingInterruptDeliveries += 1;
 	// Establish the hold synchronously when the interrupt is enqueued, not when
 	// the serialized delivery callback later starts. Callers commonly fire and
@@ -235,19 +263,21 @@ export function _enqueueInterruptCustomMessage<T>(
 	// before the promise chain gets a microtask; those messages must be captured
 	// in the active interrupt hold instead of pi-agent-core's live queues.
 	this._ensureActiveInterruptQueueHold();
-	const delivery = this._interruptDeliveryQueue.then(async () => {
-		try {
-			await this._sendInterruptCustomMessageNow(message, options);
-		} finally {
-			// Retirement moves the pending count and hold synchronously. Settle the
-			// same live owner so its queue cannot remain stranded on the replacement.
-			const liveOwner = resolveWorkflowStageDeliveryTarget(this);
-			liveOwner._pendingInterruptDeliveries -= 1;
-			if (liveOwner._pendingInterruptDeliveries === 0) {
-				liveOwner._restoreAndClearActiveInterruptQueueHold();
+	const delivery = trackSessionWork(this, () =>
+		this._interruptDeliveryQueue.then(async () => {
+			try {
+				await this._sendInterruptCustomMessageNow(message, options);
+			} finally {
+				// Retirement moves the pending count and hold synchronously. Settle the
+				// same live owner so its queue cannot remain stranded on the replacement.
+				const liveOwner = resolveWorkflowStageDeliveryTarget(this);
+				liveOwner._pendingInterruptDeliveries -= 1;
+				if (liveOwner._pendingInterruptDeliveries === 0) {
+					liveOwner._restoreAndClearActiveInterruptQueueHold();
+				}
 			}
-		}
-	});
+		}),
+	);
 	this._interruptDeliveryQueue = delivery.catch(() => undefined);
 	return delivery;
 }
@@ -257,6 +287,8 @@ async function sendInterruptCustomMessageUnlocked<T>(
 	message: CustomMessage<T>,
 	options?: SendMessageOptions,
 ): Promise<void> {
+	assertSessionOpen(session);
+	const lifetime = sessionLifetime(session);
 	session.abortRetry();
 	session._ensureActiveInterruptQueueHold();
 	if (session.isStreaming) {
@@ -272,6 +304,8 @@ async function sendInterruptCustomMessageUnlocked<T>(
 	}
 	const owner = resolveWorkflowStageDeliveryTarget(session);
 	if (owner !== session) return owner._sendInterruptCustomMessageNow(message, forwardedMessageOptions(options));
+	assertSessionOpen(session);
+	if (lifetime.aborted) throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 	if (session._queuedMessagesPaused) {
 		session._queueAgentMessage(message, "steer");
 		return;

@@ -5,6 +5,12 @@ import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import { lifecycleScopeForOwner } from "../session-lifecycle-scope.ts";
 import {
+	captureRegistrationInvocation as captureInvocation,
+	invocationExtension,
+	invocationRuntime,
+	resolveInvocationRuntime,
+} from "./loader-bindings.ts";
+import {
 	emptyWorkflowResourceProvider,
 	normalizeWorkflowResourceProvider,
 	type ResourceLoaderInheritanceSnapshotProvider,
@@ -39,6 +45,10 @@ export function createExtensionAPI(
 	workflowResourceProvider: WorkflowResourceProviderInput = emptyWorkflowResourceProvider,
 	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider,
 ): { api: ExtensionAPI; commit: () => void; discard: () => void } {
+	const originalRuntime = runtime;
+	const captureRegistrationInvocation = <T>(value: T): T => captureInvocation(value, originalRuntime);
+	runtime = invocationRuntime(runtime);
+	extension = invocationExtension(extension);
 	const workflowResources = normalizeWorkflowResourceProvider(workflowResourceProvider);
 	const pendingRuntimeChanges: Array<{ apply: () => void; rollback: () => void }> = [];
 	const loadingUnsubscribers: Array<() => void> = [];
@@ -65,10 +75,12 @@ export function createExtensionAPI(
 			eventBus.emit(channel, data);
 		},
 		on(channel, handler) {
+			const ownerRuntime = resolveInvocationRuntime(originalRuntime);
+			const deliver = captureRegistrationInvocation(handler);
 			assertActive();
 			const unsubscribe = runtime.trackEventBusSubscription(
 				eventBus.on(channel, (data) => {
-					if (state === "loading" || boundExtensionRuntimes.has(runtime)) handler(data);
+					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime)) deliver(data);
 				}),
 			);
 			if (state === "loading") loadingUnsubscribers.push(unsubscribe);
@@ -76,9 +88,12 @@ export function createExtensionAPI(
 		},
 	};
 	registerCanonicalEventBus(events, canonicalEventBusFor(eventBus));
-	const lifecycleScope = lifecycleScopeForOwner(runtime);
+	// Capture explicit creation/reload lineage before invocation leaves its construction scope.
+	lifecycleScopeForOwner(originalRuntime);
 	const api = {
-		lifecycleScope,
+		get lifecycleScope() {
+			return lifecycleScopeForOwner(resolveInvocationRuntime(originalRuntime));
+		},
 		registerWorkflowActivityPublisher() {
 			assertActive();
 			const publisher = runtime.workflowActivityHub.registerWorkflowActivityPublisher();
@@ -88,7 +103,7 @@ export function createExtensionAPI(
 		on(event: string, handler: HandlerFn): void {
 			assertActive();
 			const list = extension.handlers.get(event) ?? [];
-			list.push(handler);
+			list.push(captureRegistrationInvocation(handler));
 			extension.handlers.set(event, list);
 		},
 
@@ -100,7 +115,7 @@ export function createExtensionAPI(
 					`Tool "${tool.name}" registered by extension "${extension.path}" must define an object parameter schema.`,
 				);
 			}
-			const registration = { definition: tool, sourceInfo: extension.sourceInfo };
+			const registration = { definition: captureRegistrationInvocation(tool), sourceInfo: extension.sourceInfo };
 			if (runtime.stageToolRegistration?.(extension, tool.name, registration)) return;
 			extension.tools.set(tool.name, registration);
 			if (runtime.refreshToolsAfterRegistration) runtime.refreshToolsAfterRegistration();
@@ -110,7 +125,7 @@ export function createExtensionAPI(
 		registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void {
 			assertActive();
 			if (runtime.canRegisterResource?.(extension, "command", name) === false) return;
-			const registration = { name, sourceInfo: extension.sourceInfo, ...options };
+			const registration = { name, sourceInfo: extension.sourceInfo, ...captureRegistrationInvocation(options) };
 			if (runtime.stageCommandRegistration?.(extension, name, registration)) return;
 			extension.commands.set(name, registration);
 		},
@@ -126,7 +141,7 @@ export function createExtensionAPI(
 		): void {
 			assertActive();
 			if (runtime.canRegisterResource?.(extension, "shortcut", shortcut) === false) return;
-			const registration = { shortcut, extensionPath: extension.path, ...options };
+			const registration = { shortcut, extensionPath: extension.path, ...captureRegistrationInvocation(options) };
 			if (runtime.stageShortcutRegistration?.(extension, shortcut, registration)) return;
 			extension.shortcuts.set(shortcut, registration);
 		},
@@ -173,17 +188,17 @@ export function createExtensionAPI(
 
 		registerMessageRenderer<T>(customType: string, renderer: MessageRenderer<T>): void {
 			assertActive();
-			extension.messageRenderers.set(customType, renderer as MessageRenderer);
+			extension.messageRenderers.set(customType, captureRegistrationInvocation(renderer) as MessageRenderer);
 		},
 
 		registerMarkdownTransformer(transformer: MarkdownTransformer): void {
 			assertActive();
-			extension.markdownTransformer = transformer;
+			extension.markdownTransformer = captureRegistrationInvocation(transformer);
 		},
 
 		registerEntryRenderer<T>(customType: string, renderer: EntryRenderer<T>): void {
 			assertActive();
-			extension.entryRenderers.set(customType, renderer as EntryRenderer);
+			extension.entryRenderers.set(customType, captureRegistrationInvocation(renderer) as EntryRenderer);
 		},
 
 		getFlag(name: string): boolean | string | undefined {
@@ -358,12 +373,20 @@ export function createExtensionAPI(
 		discard: () => {
 			if (state !== "loading") return;
 			state = "failed";
-			for (const unsubscribe of loadingUnsubscribers) unsubscribe();
+			const failures: unknown[] = [];
+			for (const unsubscribe of loadingUnsubscribers) {
+				try {
+					unsubscribe();
+				} catch (error) {
+					failures.push(error);
+				}
+			}
 			pendingRuntimeChanges.length = 0;
 			loadingUnsubscribers.length = 0;
 			runtime.flagValues = initialFlagValues;
 			runtime.flagOwners = initialFlagOwners;
 			runtime.flagOwnerOrigins = initialFlagOwnerOrigins;
+			if (failures.length) throw new AggregateError(failures, "Extension subscription rollback failed");
 		},
 	};
 }

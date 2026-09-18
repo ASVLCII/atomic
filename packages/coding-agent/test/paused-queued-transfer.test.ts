@@ -87,8 +87,12 @@ function barrierOptions(
 describe("paused queue stage-session transfer", () => {
 	const harnesses: Harness[] = [];
 
-	afterEach(() => {
-		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+	afterEach(async () => {
+		while (harnesses.length > 0) {
+			const harness = harnesses.pop()!;
+			await harness.session.dispose();
+			harness.cleanup();
+		}
 	});
 
 	test("older source hold and display state transfer before newer source and target traffic", async () => {
@@ -503,7 +507,8 @@ describe("paused queue stage-session transfer", () => {
 		expect(transferred).toBe(true);
 		expect(sourceInternal._protectedStreamingCustomMessages).toHaveLength(0);
 		expect(targetInternal._protectedStreamingCustomMessages).toHaveLength(3);
-		target.session.dispose();
+		// #3105: reconciliation persistence completes at awaited shutdown, not its admission seal.
+		await target.session.dispose();
 
 		const persistedOrder = target.sessionManager
 			.getEntries()

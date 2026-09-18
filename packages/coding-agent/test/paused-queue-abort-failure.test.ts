@@ -36,5 +36,10 @@ describe("paused queue abort failure", () => {
 
 		expect(await harness.session.resumeQueuedMessages()).toBe(true);
 		expect(harness.session.queuedMessagesPaused).toBe(false);
+		// #3105: terminal cleanup reports the deliberately failed event drain; do not leave a rejected close unobserved.
+		await expect(harness.session.dispose()).rejects.toMatchObject({
+			code: "ShutdownFailed",
+			errors: [expect.objectContaining({ cause: abortError })],
+		});
 	});
 });
