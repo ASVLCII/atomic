@@ -121,6 +121,7 @@ export {
 	type VerbatimCompactionResult,
 } from "./core/compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.js";
+export { type ModelRoute, type ModelRoutingContext, routeExecutionModel } from "./core/execution-model-router.js";
 export { areExperimentalFeaturesEnabled } from "./core/experimental.ts";
 export { sessionScopedExtensionState } from "./core/extension-session-state.ts";
 export {
@@ -175,6 +176,13 @@ export {
 	normalizeModelFailureSignal,
 } from "./core/model-fallback-failures.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
+export {
+	eligiblePair,
+	type ModelConstraints,
+	ModelConstraintsSchema,
+	type ModelRouterOutput,
+	parseModelConstraints,
+} from "./core/model-routing-constraints.js";
 export {
 	type CreateModelRuntimeOptions,
 	CredentialSynchronizationError,
@@ -305,6 +313,20 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
+export {
+	DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS,
+	getStructuredOutputProviders,
+	inferRouterDecision,
+	inferStructuredOutput,
+	JEV_STRUCTURED_OUTPUT_PROVIDER,
+	type RouterDecisionRequest,
+	type RouterModelSelectionOptions,
+	resolveRouterModel,
+	type StructuredChoiceQuestion,
+	type StructuredOutputModel,
+	type StructuredOutputRequest,
+	type StructuredOutputResult,
+} from "./core/structured-output/index.js";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Builtin tool definitions reusable by first-party extensions (e.g. workflows
 // invoking the structured ask_user_question UI deterministically).

@@ -111,6 +111,7 @@ export interface Settings {
 	onboardedVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
+	routerModel?: string; // default: ""; prerequisite workflow/subagent router inference only, never "auto"
 	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	modelThinkingLevels?: Record<string, "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max">;
 	fallbackModels?: string[]; // Ordered main-chat fallback models, optionally suffixed with :thinkingLevel

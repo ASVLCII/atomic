@@ -23,6 +23,7 @@ import {
 } from "../../packages/workflows/src/extension/workflow-tool-registration.js";
 import { jobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { createStore, store as workflowStore } from "../../packages/workflows/src/shared/store.js";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import { createMockSdk } from "./durable-dbos-backend-helpers.js";
 
 const READ_ONLY_ACTIONS = ["models", "list", "get", "inputs", "status", "stages", "stage", "transcript"] as const;
@@ -94,10 +95,10 @@ describe("public workflow tool request deadline", () => {
 		const tool = registeredTool(makeExecuteWorkflowTool(runtime, () => undefined));
 		const pending = tool.execute(
 			"auth-rejection",
-			{ action: "run", workflow: definition.name },
+			{ action: "run", workflow: definition.name, state: workflowRouterState() },
 			undefined,
 			undefined,
-			{},
+			workflowRouterContext(definition.normalizedName),
 		);
 		await vi.advanceTimersByTimeAsync(0);
 		const result = await pending;
@@ -159,7 +160,13 @@ describe("public workflow tool request deadline", () => {
 			const tool = registeredTool(makeExecuteWorkflowTool(runtime, () => undefined));
 			let settled = false;
 			const pending = tool
-				.execute(mode, { action: "run", workflow: definition.name }, undefined, undefined, {})
+				.execute(
+					mode,
+					{ action: "run", workflow: definition.name, state: workflowRouterState() },
+					undefined,
+					undefined,
+					workflowRouterContext(definition.normalizedName),
+				)
 				.then((result) => {
 					settled = true;
 					return result;
@@ -402,10 +409,10 @@ describe("public workflow tool request deadline", () => {
 
 		const pending = tool.execute(
 			"delayed-acknowledgement",
-			{ action: "run", workflow: definition.name },
+			{ action: "run", workflow: definition.name, state: workflowRouterState() },
 			undefined,
 			undefined,
-			{},
+			workflowRouterContext(definition.normalizedName),
 		);
 		await vi.advanceTimersByTimeAsync(0);
 		await bodyEntered.promise;
@@ -469,8 +476,8 @@ describe("public workflow tool request deadline", () => {
 		const execute = makeExecuteWorkflowTool(runtime, () => undefined);
 		const controller = new AbortController();
 		const acknowledgement = await execute(
-			{ action: "run", workflow: "public-timeout-background-ack" },
-			{},
+			{ action: "run", workflow: "public-timeout-background-ack", state: workflowRouterState() },
+			workflowRouterContext(definition.normalizedName),
 			controller.signal,
 		);
 		assert.equal(acknowledgement.action, "run");

@@ -1,0 +1,576 @@
+// Shared decision entrypoints for #3089 and #3090. Neither routing consumer is activated here.
+import assert from "node:assert/strict";
+import type { Api, Model } from "@bastani/pi-ai";
+import { createAssistantMessageEventStream } from "@bastani/pi-ai";
+import { Type } from "typebox";
+import { afterEach, test, vi } from "vitest";
+import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
+import { inferRouterDecision } from "../../packages/coding-agent/src/core/structured-output/index.js";
+import {
+	getStructuredOutputProviders,
+	resolveRouterModel,
+} from "../../packages/coding-agent/src/core/structured-output/resolver.js";
+import {
+	decisionMessage,
+	decisionRequest,
+	decisionSchema,
+	jevResponse,
+	messageStream,
+	registeredDecisionRuntime,
+} from "../helpers/structured-output.js";
+
+const chat: Model<Api> = {
+	provider: "test",
+	id: "chat",
+	name: "Chat",
+	api: "openai-completions",
+	baseUrl: "https://example.invalid",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 32000,
+	maxTokens: 4096,
+};
+const alternate = { ...chat, id: "alternate" };
+const modelRegistry = {
+	getAll: () => [chat, alternate],
+	streamSimple: () => {
+		throw new Error("Unexpected inference");
+	},
+};
+afterEach(() => {
+	vi.unstubAllEnvs();
+	vi.unstubAllGlobals();
+	vi.useRealTimers();
+});
+
+for (const [setting, key, expected] of [
+	["test/alternate", "mock-key", "test/alternate"],
+	["typesafe-ai/jev", "", "typesafe-ai/jev"],
+	["", "mock-key", "typesafe-ai/jev"],
+	["", "", "test/chat"],
+	["", "   ", "test/chat"],
+] as const) {
+	test(`resolver precedence: ${JSON.stringify(setting)}, key present=${Boolean(key.trim())}`, () => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", key);
+		const settings = SettingsManager.inMemory({ routerModel: setting });
+		assert.equal(resolveRouterModel({ settings, modelRegistry, currentModel: chat }).fullId, expected);
+		assert.equal(settings.getDefaultModel(), undefined);
+		assert.equal(chat.id, "chat");
+	});
+}
+
+test("empty default reads the current chat model on each invocation", () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	const settings = SettingsManager.inMemory();
+	assert.equal(settings.getRouterModel(), "");
+	assert.equal(resolveRouterModel({ settings, modelRegistry, currentModel: alternate }).fullId, "test/alternate");
+	assert.throws(() => resolveRouterModel({ settings, modelRegistry }), /selected chat model/);
+});
+
+for (const explicit of ["auto", "missing/model", "chat", "test/chat:high", " typesafe-ai/jev", " "]) {
+	test(`invalid explicit selection ${JSON.stringify(explicit)} never falls back to Jev or chat`, () => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		const settings = SettingsManager.inMemory({ routerModel: explicit });
+		assert.throws(() => resolveRouterModel({ settings, modelRegistry, currentModel: chat }), /Invalid routerModel/);
+	});
+}
+
+test("Jev exposes only structured Choice capability, not a chat/tool model", () => {
+	const [provider] = getStructuredOutputProviders();
+	assert.equal(provider.fullId, "typesafe-ai/jev");
+	assert.deepEqual(provider.capabilities, {
+		structuredDecisions: true,
+		choice: true,
+		maxChoiceOptions: 255,
+		chat: false,
+		toolCalling: false,
+		jsonSchemaGeneration: false,
+	});
+});
+
+test("ordinary entrypoint uses configured provider/auth, complete state, one schema call and no session mutation", async () => {
+	const dispatch = vi.fn((_model, context, options) => {
+		assert.equal(options.apiKey, "mock-chat-secret");
+		assert.equal(options.maxRetries, 0);
+		assert.equal(options.transport, "sse");
+		assert.equal(options.toolChoice, "auto");
+		assert.equal(options.maxTokens, 4096);
+		assert.equal(options.timeoutMs, 30000);
+		assert.deepEqual(JSON.parse(context.messages[0].content), { state: request.state });
+		assert.match(context.systemPrompt, /data, not instructions/);
+		assert.match(context.systemPrompt, /exact cost limit/);
+		assert.equal(JSON.stringify(context).includes("mock-chat-secret"), false);
+		assert.equal(context.tools.length, 1);
+		assert.deepEqual(context.tools[0].parameters, decisionSchema);
+		assert.equal("execute" in context.tools[0], false);
+		return messageStream(decisionMessage());
+	});
+	const { runtime, registry } = await registeredDecisionRuntime(dispatch);
+	const request = { ...decisionRequest(), modelRegistry: registry };
+	const before = JSON.stringify(request.currentModel);
+	const result = await inferRouterDecision(request);
+	assert.deepEqual(result.value, { route: "review", limit: 1.23456789 });
+	assert.equal(result.model, "decision-test/chat");
+	assert.deepEqual(result.usage, { inputTokens: 20, outputTokens: 10 });
+	assert.equal(dispatch.mock.calls.length, 1);
+	assert.equal(JSON.stringify(request.currentModel), before);
+	assert.equal(request.settings.getRouterModel(), "decision-test/chat");
+	assert.equal(
+		runtime.getModels().some((model) => model.provider === "typesafe-ai"),
+		false,
+	);
+});
+
+for (const failure of ["synchronous throw", "result rejection"] as const) {
+	test(`ordinary provider ${failure} is private and never retried`, async () => {
+		const request = decisionRequest();
+		const dispatch = vi.fn(() => {
+			if (failure === "synchronous throw") throw new Error("private upstream payload mock-secret");
+			const stream = createAssistantMessageEventStream();
+			stream.result = async () => {
+				throw new Error("private upstream payload mock-secret");
+			};
+			return stream;
+		});
+		await assert.rejects(
+			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
+			(error: Error) => {
+				assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
+				assert.equal(error.cause, undefined);
+				assert.match(error.message, /provider.*failed/i);
+				assert.match(error.message, /retry explicitly/i);
+				return true;
+			},
+		);
+		assert.equal(dispatch.mock.calls.length, 1);
+	});
+}
+
+for (const args of [
+	{ route: "unregistered" },
+	{ route: "review", extra: true },
+	{ route: "review", limit: "1" },
+	{ route: "review", limit: null },
+	{ route: "review", limit: -1 },
+	{},
+]) {
+	test(`ordinary router strictly rejects ${JSON.stringify(args)} after bounded repairs`, async () => {
+		const dispatch = vi.fn(() => messageStream(decisionMessage(args)));
+		const request = decisionRequest();
+		await assert.rejects(
+			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
+			/Invalid structured output/,
+		);
+		assert.equal(dispatch.mock.calls.length, 4);
+	});
+}
+
+for (const limit of [undefined, 0, 1.23456789, Number.MAX_SAFE_INTEGER]) {
+	test(`ordinary decision preserves exact zero, omission and large limits: ${limit}`, async () => {
+		const args = { route: "review", ...(limit === undefined ? {} : { limit }) };
+		const request = decisionRequest();
+		const result = await inferRouterDecision({
+			...request,
+			modelRegistry: { ...request.modelRegistry, streamSimple: () => messageStream(decisionMessage(args)) },
+		});
+		assert.deepEqual(result.value, args);
+		assert.equal(Object.hasOwn(result.value, "limit"), limit !== undefined);
+	});
+}
+
+for (const kind of ["text", "multiple", "wrong-tool", "error", "aborted", "length"] as const) {
+	test(`ordinary ${kind} response fails without executing a requested tool`, async () => {
+		const message = decisionMessage();
+		if (kind === "text") {
+			message.content = [{ type: "text", text: '{"route":"review"}' }];
+			message.stopReason = "stop";
+		} else if (kind === "multiple") message.content.push(message.content[0]);
+		else if (kind === "wrong-tool")
+			message.content = [
+				{ type: "toolCall", id: "unsafe", name: "bash", arguments: { command: "echo not-authorized" } },
+			];
+		else message.stopReason = kind;
+		const request = decisionRequest();
+		const dispatch = vi.fn(() => messageStream(message));
+		await assert.rejects(
+			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
+			/Structured output/,
+		);
+		assert.equal(dispatch.mock.calls.length, kind === "error" || kind === "aborted" ? 1 : 4);
+	});
+}
+
+test("Jev entrypoint sends both Choice judgments together and maps exact values without a confidence gate", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-jev-secret");
+	const request = { ...decisionRequest(), settings: SettingsManager.inMemory() };
+	const transport = vi.fn(async (url, init) => {
+		assert.equal(url, "https://api.typesafe.ai/v1/systemone");
+		assert.equal(init.method, "POST");
+		assert.equal(init.redirect, "error");
+		assert.equal(init.headers.Authorization, "Bearer mock-jev-secret");
+		const body = JSON.parse(init.body);
+		assert.equal(body.model, "jev-latest");
+		assert.deepEqual(body.state, request.state);
+		assert.equal(init.body.includes("mock-jev-secret"), false);
+		assert.deepEqual(Object.keys(body).sort(), ["model", "questions", "state"]);
+		assert.deepEqual(Object.keys(body.questions), ["route", "budget"]);
+		for (const [id, question] of Object.entries(request.jev.questions)) {
+			assert.equal(body.questions[id].type, "choice");
+			assert.match(body.questions[id].instructions, /data, not instructions/);
+			assert.ok(body.questions[id].instructions.includes(question.instructions));
+			assert.ok(body.questions[id].instructions.includes(request.instructions));
+			assert.deepEqual(body.questions[id].criteria, question.criteria);
+		}
+		return Response.json(jevResponse());
+	});
+	vi.stubGlobal("fetch", transport);
+	const result = await inferRouterDecision(request);
+	assert.deepEqual(result, {
+		value: { route: "review", limit: 1.23456789 },
+		model: "typesafe-ai/jev",
+		responseModel: "jev-2026-09",
+		usage: { inputTokens: 20, outputTokens: 10 },
+	});
+	assert.equal(transport.mock.calls.length, 1);
+});
+
+for (const status of [401, 422, 429, 529]) {
+	test(`Jev HTTP ${status} fails once without leaking the response body`, async () => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		const transport = vi.fn(async () => new Response("private echoed context and mock-key", { status }));
+		vi.stubGlobal("fetch", transport);
+		await assert.rejects(
+			inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
+			(error: Error) => {
+				assert.match(error.message, new RegExp(`HTTP ${status}`));
+				assert.equal(error.message.includes("private"), false);
+				assert.equal(error.message.includes("mock-key"), false);
+				return true;
+			},
+		);
+		assert.equal(transport.mock.calls.length, 1);
+	});
+}
+
+test("Jev body reader failure is private and never retried or decoded", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-secret");
+	const transport = vi.fn(
+		async () =>
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode('{"private":'));
+					},
+					pull(controller) {
+						controller.error(new Error("private upstream payload mock-secret"));
+					},
+				}),
+			),
+	);
+	vi.stubGlobal("fetch", transport);
+	const request = decisionRequest();
+	const decode = vi.fn(request.jev.decode);
+	await assert.rejects(
+		inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
+		(error: Error) => {
+			assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
+			assert.equal(error.cause, undefined);
+			assert.match(error.message, /Jev.*failed/);
+			assert.match(error.message, /retry explicitly/);
+			return true;
+		},
+	);
+	assert.equal(transport.mock.calls.length, 1);
+	assert.equal(decode.mock.calls.length, 0);
+});
+
+for (const [kind, code] of Object.entries({
+	"unknown-choice": "choice_key",
+	"wrong-type": "answer_type",
+	"missing-answer": "answer_keys",
+	"extra-answer": "answer_keys",
+	"missing-probability": "probability_keys",
+	"unknown-probability": "probability_keys",
+	"bad-mass": "probability_mass",
+	"not-highest": "choice_not_highest",
+	"bad-confidence": "confidence",
+	"missing-usage": "usage_shape",
+	"bad-model": "model",
+	"invalid-json": "malformed JSON",
+})) {
+	test(`Jev rejects ${kind} and never invokes the mapper`, async () => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		const body = jevResponse();
+		if (kind === "unknown-choice") body.answers.route.choice = "private-response-value";
+		if (kind === "wrong-type") body.answers.route.type = "score";
+		if (kind === "missing-answer") Reflect.deleteProperty(body.answers, "budget");
+		if (kind === "extra-answer") Object.assign(body.answers, { surprise: body.answers.route });
+		if (kind === "missing-probability") Reflect.deleteProperty(body.answers.route.probabilities, "none");
+		if (kind === "unknown-probability") Object.assign(body.answers.route.probabilities, { surprise: 0 });
+		if (kind === "bad-mass") body.answers.route.probabilities.none = 0;
+		if (kind === "not-highest") body.answers.route.choice = "none";
+		if (kind === "bad-confidence") body.answers.route.confidence = 2;
+		if (kind === "missing-usage") Reflect.deleteProperty(body, "usage");
+		if (kind === "bad-model") body.model = "";
+		const transport = vi.fn(async () => (kind === "invalid-json" ? new Response("not json") : Response.json(body)));
+		vi.stubGlobal("fetch", transport);
+		const request = decisionRequest();
+		const decode = vi.fn(request.jev.decode);
+		await assert.rejects(
+			inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
+			(error: Error) => {
+				assert.match(error.message, /[Mm]alformed/);
+				assert.ok(error.message.includes(code));
+				assert.doesNotMatch(error.message, /private-response-value|mock-key/);
+				assert.equal(error.cause, undefined);
+				return true;
+			},
+		);
+		assert.equal(transport.mock.calls.length, 4);
+		assert.equal(decode.mock.calls.length, 0);
+	});
+}
+
+test("Jev decoded result must still satisfy the normalized schema", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubGlobal("fetch", async () => Response.json(jevResponse()));
+	const request = decisionRequest();
+	await assert.rejects(
+		inferRouterDecision({
+			...request,
+			settings: SettingsManager.inMemory(),
+			jev: { ...request.jev, decode: () => ({ route: "review" as const, limit: -1 }) },
+		}),
+		/Invalid structured output/,
+	);
+});
+
+for (const count of [255]) {
+	test(`Jev ${count} candidates are never silently shortened`, async () => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		const criteria = Object.fromEntries(
+			Array.from({ length: count }, (_, index) => [`c${index}`, `Candidate ${index}`]),
+		);
+		const transport = vi.fn(async (_url, init) => {
+			assert.equal(Object.keys(JSON.parse(init.body).questions.route.criteria).length, count);
+			return Response.json({
+				model: "jev-latest",
+				answers: {
+					route: {
+						type: "choice",
+						choice: "c254",
+						confidence: 1,
+						probabilities: Object.fromEntries(Object.keys(criteria).map((key) => [key, key === "c254" ? 1 : 0])),
+					},
+				},
+				usage: { input_tokens: 100, output_tokens: 10 },
+			});
+		});
+		vi.stubGlobal("fetch", transport);
+		const result = inferRouterDecision({
+			...decisionRequest(),
+			settings: SettingsManager.inMemory(),
+			jev: {
+				questions: { route: { instructions: "Select a matching candidate", criteria } },
+				decode: () => ({ route: "review" as const }),
+			},
+		});
+		assert.deepEqual((await result).value, { route: "review" });
+		assert.equal(transport.mock.calls.length, 1);
+	});
+}
+
+for (const kind of ["cancel", "timeout", "pre-cancel"] as const) {
+	for (const provider of ["ordinary", "jev"] as const) {
+		test(`${provider} ${kind} fences late inference and mapping`, async () => {
+			vi.useFakeTimers();
+			vi.stubEnv("TYPESAFE_AI_API_KEY", provider === "jev" ? "mock-key" : "");
+			const controller = new AbortController();
+			const stream = createAssistantMessageEventStream();
+			const lateHttp = Promise.withResolvers<Response>();
+			let requestSignal: AbortSignal | undefined;
+			const transport = vi.fn((_url, init) => {
+				requestSignal = init.signal;
+				return lateHttp.promise;
+			});
+			const dispatch = vi.fn((_model, _context, options) => {
+				requestSignal = options.signal;
+				return stream;
+			});
+			vi.stubGlobal("fetch", transport);
+			const request = decisionRequest();
+			const decode = vi.fn(request.jev.decode);
+			if (kind === "pre-cancel") controller.abort(new Error("pre-cancelled"));
+			let accepted = 0;
+			const pending = inferRouterDecision({
+				...request,
+				settings: SettingsManager.inMemory(),
+				modelRegistry: { ...request.modelRegistry, streamSimple: dispatch },
+				signal: controller.signal,
+				timeoutMs: 50,
+				jev: { ...request.jev, decode },
+			}).then((result) => {
+				accepted++;
+				return result;
+			});
+			const rejected = assert.rejects(pending, /cancel|timed out/);
+			if (kind === "timeout") await vi.advanceTimersByTimeAsync(50);
+			else if (kind === "cancel") controller.abort();
+			await rejected;
+			if (kind !== "pre-cancel") assert.equal(requestSignal?.aborted, true);
+			lateHttp.resolve(Response.json(jevResponse()));
+			stream.push({ type: "done", reason: "toolUse", message: decisionMessage() });
+			await vi.advanceTimersByTimeAsync(0);
+			assert.equal(accepted, 0);
+			assert.equal(decode.mock.calls.length, 0);
+			assert.equal(dispatch.mock.calls.length + transport.mock.calls.length, kind === "pre-cancel" ? 0 : 1);
+		});
+	}
+}
+
+test("independent overlapping decisions cannot share state, candidates or cancellation", async () => {
+	const streams = [createAssistantMessageEventStream(), createAssistantMessageEventStream()];
+	const controller = new AbortController();
+	const request = decisionRequest();
+	const contexts: string[] = [];
+	const dispatch = vi.fn((_model, context) => {
+		contexts.push(JSON.stringify(context));
+		return streams[contexts.length - 1];
+	});
+	const registry = { ...request.modelRegistry, streamSimple: dispatch };
+	const first = inferRouterDecision({
+		...request,
+		modelRegistry: registry,
+		state: { task: "first task" },
+		signal: controller.signal,
+	});
+	const rejected = assert.rejects(first, /cancelled/);
+	const second = inferRouterDecision({ ...request, modelRegistry: registry, state: { task: "second task" } });
+	controller.abort();
+	streams[1].push({ type: "done", reason: "toolUse", message: decisionMessage({ route: "none" }) });
+	await rejected;
+	assert.deepEqual((await second).value, { route: "none" });
+	streams[0].push({ type: "done", reason: "toolUse", message: decisionMessage() });
+	assert.match(contexts[0], /first task/);
+	assert.equal(contexts[0].includes("second task"), false);
+	assert.match(contexts[1], /second task/);
+	assert.equal(dispatch.mock.calls.length, 2);
+});
+
+test("model/effort pairs use one Choice and one closed union, preserving null versus off", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	const pairs = [
+		{ model: "local/plain", effort: null },
+		{ model: "remote/reasoning", effort: "off" },
+	] as const;
+	const schema = Type.Union([
+		Type.Object({ model: Type.Literal(pairs[0].model), effort: Type.Null() }, { additionalProperties: false }),
+		Type.Object(
+			{ model: Type.Literal(pairs[1].model), effort: Type.Literal(pairs[1].effort) },
+			{ additionalProperties: false },
+		),
+	]);
+	for (const index of [0, 1]) {
+		const transport = vi.fn(async (_url, init) => {
+			assert.deepEqual(Object.keys(JSON.parse(init.body).questions), ["pair"]);
+			return Response.json({
+				model: "jev-latest",
+				answers: {
+					pair: {
+						type: "choice",
+						choice: `p${index}`,
+						probabilities: { p0: index === 0 ? 1 : 0, p1: index === 1 ? 1 : 0 },
+						confidence: 1,
+					},
+				},
+				usage: { input_tokens: 10, output_tokens: 3 },
+			});
+		});
+		vi.stubGlobal("fetch", transport);
+		const result = await inferRouterDecision({
+			...decisionRequest(),
+			settings: SettingsManager.inMemory(),
+			schema,
+			state: { task: "Select a low-cost model", pairs: [...pairs] },
+			jev: {
+				questions: {
+					pair: {
+						instructions: "Choose one complete model and effort pair based on task evidence and cost.",
+						criteria: {
+							p0: "local/plain with no configurable effort",
+							p1: "remote/reasoning with supported off effort",
+						},
+					},
+				},
+				decode: (choices) => (choices.pair === "p0" ? pairs[0] : pairs[1]),
+			},
+		});
+		assert.deepEqual(result.value, pairs[index]);
+		assert.equal(transport.mock.calls.length, 1);
+	}
+});
+
+for (const provider of ["ordinary", "jev"] as const) {
+	for (const kind of ["cancel", "timeout"] as const) {
+		test(`${provider} transport rejection during ${kind} preserves the bounded failure`, async () => {
+			vi.useFakeTimers();
+			vi.stubEnv("TYPESAFE_AI_API_KEY", provider === "jev" ? "mock-key" : "");
+			const controller = new AbortController();
+			const started = Promise.withResolvers<void>();
+			const dispatch = vi.fn((_model, _context, options) => {
+				const stream = createAssistantMessageEventStream();
+				stream.result = () =>
+					new Promise((_resolve, reject) => {
+						options.signal.addEventListener(
+							"abort",
+							() => reject(new Error("private upstream payload mock-secret")),
+							{ once: true },
+						);
+						started.resolve();
+					});
+				return stream;
+			});
+			const transport = vi.fn(
+				async (_url, init) =>
+					new Response(
+						new ReadableStream({
+							start(reader) {
+								init.signal.addEventListener(
+									"abort",
+									() => reader.error(new Error("private upstream payload mock-secret")),
+									{ once: true },
+								);
+							},
+							pull() {
+								started.resolve();
+							},
+						}),
+					),
+			);
+			vi.stubGlobal("fetch", transport);
+			const request = decisionRequest();
+			const decode = vi.fn(request.jev.decode);
+			const pending = inferRouterDecision({
+				...request,
+				settings: SettingsManager.inMemory(),
+				modelRegistry: { ...request.modelRegistry, streamSimple: dispatch },
+				jev: { ...request.jev, decode },
+				signal: controller.signal,
+				timeoutMs: 50,
+			});
+			const rejected = assert.rejects(pending, (error: Error) => {
+				assert.match(error.message, kind === "cancel" ? /cancelled/ : /timed out/);
+				assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
+				return true;
+			});
+			await started.promise;
+			if (kind === "cancel") controller.abort();
+			else await vi.advanceTimersByTimeAsync(50);
+			await rejected;
+			await vi.advanceTimersByTimeAsync(0);
+			assert.equal(dispatch.mock.calls.length + transport.mock.calls.length, 1);
+			assert.equal(decode.mock.calls.length, 0);
+		});
+	}
+}

@@ -36,13 +36,13 @@ const workflowDocumentationPaths = [
 ];
 
 describe("workflow-first execution routing", () => {
-	test("restores workflows as the default for non-trivial verifiable work", () => {
+	test("routes neutral task state without assistant preselection", () => {
 		for (const phrase of [
-			"Unless the user explicitly chooses inline execution for this task",
-			"default execution path for non-trivial tasks and requests with structure and a verifiable objective",
-			"implementation, build, debug/diagnosis, bug-fix, migration, new-feature",
-			"multiple steps, dependencies, handoffs, uncertainty",
-			"Without an explicit execution-mode preference, skip workflows for tiny",
+			"without choosing a workflow first",
+			"router owns all semantic selection",
+			"Preserve the user's actual context and preferences",
+			"Do not pre-announce a chosen workflow or duration",
+			"brainstorming",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
 		}
@@ -65,16 +65,13 @@ describe("workflow-first execution routing", () => {
 		}
 	});
 
-	test("treats loop and stop-condition phrasing as a strong workflow signal", () => {
+	test("keeps explicit preferences and suitability router-owned", () => {
 		for (const phrase of [
-			"loop or stop-condition wording as a strong workflow signal",
-			"do X until Y",
-			"repeat until",
-			"iterate until",
-			"review/fix until passing",
-			"run checks and fix until green",
-			"keep going until done",
-			"approval gate or evidence requirement",
+			"Put explicit named-workflow",
+			"Do not implement caller-side keyword selection",
+			"unclear goals",
+			"unjustified orchestration overhead",
+			"None means continue conversation, clarify, or work inline",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
 		}
@@ -155,13 +152,12 @@ describe("workflow-first execution routing", () => {
 		const modelSelection = await readRepositoryFile("packages/coding-agent/docs/models/model-selection.md");
 
 		for (const phrase of [
-			"role, failure cost, primary model, thinking level, and fallback policy",
-			"reserve `max` for high-cost-of-error roles",
-			"use `high` for demanding codebase mapping",
-			"use `medium` for user-impact review and final reporting",
+			"assign every model stage a role and failure cost",
+			"When the user delegates the best-stage-model choice",
+			'author `model: "auto"` on stages or shared chain/parallel options',
+			"actual stage prompt after input interpolation",
+			"supplied context, catalog, and shipped evaluation guidance",
 			"deterministic checks as tool nodes with no model call",
-			"For a mixed workflow, mapping may be `high`, approval `max`, reporting `medium`, and tests tool-only",
-			"never assign `max` to every model stage without a stage-specific reason",
 		]) {
 			expect(authoringGuidance).toContain(phrase);
 		}
@@ -192,8 +188,8 @@ describe("workflow-first execution routing", () => {
 		const modelSelection = await readRepositoryFile("packages/coding-agent/docs/models/model-selection.md");
 
 		for (const phrase of [
-			"An explicit user request for a thinking level always wins over these defaults",
-			"Apply the same role/risk policy to every fallback attempt rather than inheriting `max` mechanically",
+			"Preserve explicit user model, effort, and hard constraint requests",
+			"retain each fallback's effort",
 			"apply the stage role and failure-cost policy independently to the primary and every fallback",
 			"An explicit user request for a level overrides the role default",
 		]) {
@@ -214,10 +210,10 @@ describe("workflow-first execution routing", () => {
 	test("rejects invented thinking levels and requires the compact assignment before launch", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		for (const phrase of [
-			"Print a compact `Stage | Model | Thinking | Role` assignment before launch",
-			"short cost/quality rationale",
-			"choose each primary and fallback level from the configured catalog",
-			"if no selected catalog model supports the role's level, leave the stage unpinned rather than inventing an unsupported level",
+			"report model and thinking as pending until the routing result exists",
+			"For deliberately concrete stages, use catalog-supported models and efforts",
+			"Never invent an unsupported effort",
+			"Do not preselect a concrete model or effort in place of auto",
 			"append a thinking suffix only when that exact level appears in the entry's `availableThinkingLevels`",
 			"treat an absent or empty `availableThinkingLevels` as no suffix support",
 			"never fabricate an unsupported catalog level",
@@ -292,11 +288,10 @@ describe("workflow-first execution routing", () => {
 			"design one custom parent before launch",
 			"Choose the cheapest graph",
 			"Avoid decorative composition and duplicated research or review loops",
-			"state the selected graph",
-			"why one broad builtin is sufficient or insufficient",
-			"evidence each major stage produces",
+			"For an authored graph, document its evidence",
+			"Do not announce that it will run before the router's decision",
+			"definition authoring does not pin model-tool selection",
 			"stop/repair conditions",
-			"simple direct match may use one sentence",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
 		}
@@ -1035,4 +1030,32 @@ describe("workflow-first execution routing", () => {
 		// ever moves, the assumption becomes wrong rather than merely stale.
 		expect(contract).toContain("DEFAULT_WORKFLOW_HEARTBEAT_INTERVAL_MINUTES = 15");
 	});
+
+	for (const path of [
+		"packages/coding-agent/docs/workflows.md",
+		"packages/coding-agent/docs/workflows/reliable-design.md",
+	]) {
+		test(`${path} does not countermand router-owned selection or preannounce results`, async () => {
+			const text = await readRepositoryFile(path);
+			for (const contradiction of [
+				/self-prompt an orchestrating agent should run before the first tool call/i,
+				/Choose the execution shape before starting substantive work/i,
+				/Before launch, state the selected graph/i,
+				/Before launch, report a completion range/i,
+				/override the routing rubric/i,
+				/Treat "quickly" as an inline execution choice/i,
+			])
+				assert.doesNotMatch(text, contradiction, path);
+			assert.match(text, /router owns all semantic selection/i);
+			assert.match(text, /neutral state/);
+			assert.match(text, /only after the router returns/);
+			if (path.endsWith("reliable-design.md")) {
+				assert.match(
+					text,
+					/following architecture pass and scoring rubric apply only to deliberate definition authoring and composition/,
+				);
+				assert.match(text, /For an authored graph, document/);
+			}
+		});
+	}
 });

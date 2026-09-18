@@ -1,4 +1,5 @@
 import type { SkillCatalog } from "@bastani/atomic";
+import { parseModelConstraints } from "../shared/model-constraints.js";
 import type { SubagentToolResult } from "../shared/types.js";
 import type { ManagementContext, ManagementScope } from "./agent-management.js";
 import type { AgentConfig, AgentScope } from "./agents.js";
@@ -89,7 +90,7 @@ export function nameExistsInScope(cwd: string, scope: ManagementScope, name: str
 }
 
 export function modelWarning(ctx: ManagementContext, model: string | undefined): string | undefined {
-	if (!model) return undefined;
+	if (!model || model === "auto") return undefined;
 	const found = ctx.modelRegistry.getAvailable().some((m) => `${m.provider}/${m.id}` === model || m.id === model);
 	return found ? undefined : `Warning: model '${model}' is not in the current model registry.`;
 }
@@ -139,6 +140,13 @@ export function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknow
 		if (cfg.model === false || cfg.model === "") target.model = undefined;
 		else if (typeof cfg.model === "string") target.model = cfg.model.trim() || undefined;
 		else return "config.model must be a string or false when provided.";
+	}
+	if (hasKey(cfg, "modelConstraints")) {
+		try {
+			target.modelConstraints = parseModelConstraints(cfg.modelConstraints);
+		} catch (error) {
+			return error instanceof Error ? error.message : String(error);
+		}
 	}
 	if (hasKey(cfg, "fallbackModels")) {
 		if (cfg.fallbackModels === false || cfg.fallbackModels === "") target.fallbackModels = undefined;

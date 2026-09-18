@@ -210,8 +210,9 @@ describe("renderCall — all action branches", () => {
 		assert.ok(renderCall({ workflow: "wf-a", action: "inputs" }).includes("wf-a"));
 	});
 
-	test("action='run' includes workflow", () => {
-		assert.ok(renderCall({ workflow: "wf-b", action: "run" }).includes("wf-b"));
+	test("action='run' does not pre-announce a workflow before routing", () => {
+		assert.equal(renderCall({ action: "run" }), "workflow: run");
+		assert.equal(renderCall({ workflow: "wf-b", action: "run" }), "workflow: run");
 	});
 
 	test("action='pause' includes runId", () => {
@@ -231,12 +232,12 @@ describe("renderCall — all action branches", () => {
 	});
 
 	test("defaults to 'run' when action omitted", () => {
-		assert.ok(renderCall({ workflow: "wf-c" }).includes("run"));
+		assert.equal(renderCall({ workflow: "wf-c" }), "workflow: run");
 	});
 
 	test("respects host render width", () => {
 		const out = renderCall(
-			{ action: "run", workflow: "repository-analysis-workflow-with-a-long-name" },
+			{ action: "inputs", workflow: "repository-analysis-workflow-with-a-long-name" },
 			{ width: 24 },
 		);
 		assert.ok(visibleWidth(out) <= 24);

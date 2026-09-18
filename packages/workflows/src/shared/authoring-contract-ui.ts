@@ -1,6 +1,6 @@
 /** Workflow authoring UI, builder, run, and result contract types. */
 
-import type { KeybindingsManager, Theme } from "@bastani/atomic";
+import type { KeybindingsManager, ModelRouterOutput, Theme } from "@bastani/atomic";
 import type { Component, OverlayHandle, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 import type {
@@ -376,6 +376,8 @@ export interface StageSnapshot extends WorkflowSerializableObject {
 	readonly status: StageStatus;
 	readonly result?: WorkflowSerializableValue;
 	readonly error?: string;
+	/** Immutable automatic model selection, separate from the actual execution model. */
+	readonly routerSelection?: ModelRouterOutput;
 }
 
 export interface ToolNodeSnapshot extends WorkflowSerializableObject {

@@ -70,6 +70,7 @@ export interface DbosCheckpointEnvelope extends WorkflowSerializableObject {
 	readonly thinkingLevel?: string;
 	readonly attemptedModels?: WorkflowSerializableValue;
 	readonly modelAttempts?: WorkflowSerializableValue;
+	readonly routerSelection?: WorkflowSerializableValue;
 	readonly structured?: WorkflowSerializableValue;
 	readonly artifacts?: WorkflowSerializableValue;
 	readonly warnings?: WorkflowSerializableValue;
@@ -169,6 +170,7 @@ export function encodeCheckpoint(checkpoint: DurableCheckpoint): DbosCheckpointE
 		...(s.thinkingLevel !== undefined ? { thinkingLevel: s.thinkingLevel } : {}),
 		...(s.attemptedModels !== undefined ? { attemptedModels: [...s.attemptedModels] } : {}),
 		...(s.modelAttempts !== undefined ? { modelAttempts: s.modelAttempts as WorkflowSerializableValue } : {}),
+		...(s.routerSelection !== undefined ? { routerSelection: s.routerSelection } : {}),
 		...(s.structured !== undefined ? { structured: s.structured } : {}),
 		...(s.artifacts !== undefined ? { artifacts: s.artifacts as WorkflowSerializableValue } : {}),
 		...(s.warnings !== undefined ? { warnings: [...s.warnings] } : {}),
@@ -303,6 +305,7 @@ function decodeEnvelope(workflowId: string, env: DbosCheckpointEnvelope): Durabl
 		(env.thinkingLevel !== undefined && typeof env.thinkingLevel !== "string") ||
 		(env.attemptedModels !== undefined && !isStringArray(env.attemptedModels)) ||
 		(env.modelAttempts !== undefined && !isModelAttempts(env.modelAttempts)) ||
+		(env.routerSelection !== undefined && !isRouterSelection(env.routerSelection)) ||
 		(env.artifacts !== undefined && !isWorkflowArtifacts(env.artifacts)) ||
 		(env.warnings !== undefined && !isStringArray(env.warnings))
 	)
@@ -326,6 +329,7 @@ function decodeEnvelope(workflowId: string, env: DbosCheckpointEnvelope): Durabl
 		...(Array.isArray(env.modelAttempts)
 			? { modelAttempts: env.modelAttempts as DurableStageCheckpoint["modelAttempts"] }
 			: {}),
+		...(isRouterSelection(env.routerSelection) ? { routerSelection: Object.freeze({ ...env.routerSelection }) } : {}),
 		...(env.structured !== undefined ? { structured: env.structured } : {}),
 		...(isWorkflowArtifacts(env.artifacts) ? { artifacts: env.artifacts } : {}),
 		...(isStringArray(env.warnings) ? { warnings: env.warnings } : {}),
@@ -474,6 +478,16 @@ function stageRunTopology(
 		...(typeof run.parentStageId === "string" ? { parentStageId: run.parentStageId } : {}),
 		...(typeof run.rootRunId === "string" ? { rootRunId: run.rootRunId } : {}),
 	};
+}
+
+export function isRouterSelection(value: unknown): value is import("@bastani/atomic").ModelRouterOutput {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const record = value as Record<string, WorkflowSerializableValue>;
+	return (
+		Object.keys(record).length === 2 &&
+		typeof record.model === "string" &&
+		(record.effort === null || isReasoningLevel(record.effort))
+	);
 }
 
 export function isModelAttempts(value: unknown): boolean {

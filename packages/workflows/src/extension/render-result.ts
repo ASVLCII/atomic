@@ -32,6 +32,7 @@ import { renderStatusList } from "../tui/status-list.js";
 import { truncateToWidth } from "../tui/text-helpers.js";
 import { renderWorkflowList } from "../tui/workflow-list.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
+import type { WorkflowRouterOutput } from "./workflow-router.js";
 import type { WorkflowRunStatusFilter, WorkflowRunStatusSummary } from "./workflow-status-summary.js";
 import { getWorkflowStatusRenderRuns } from "./workflow-status-summary.js";
 
@@ -100,6 +101,10 @@ type GetResult = {
 };
 type RunResult = {
 	action: "run";
+	/** Validated routing decision; absent on inference/validation failure. */
+	routerDecision?: WorkflowRouterOutput;
+	estimatedDuration?: WorkflowRouterOutput["estimatedDuration"];
+	inputContract?: import("../shared/types.js").WorkflowDefinition["inputs"];
 	name?: string;
 	runId: string;
 	status: string;
@@ -323,6 +328,18 @@ function transcriptNoticeText(result: TranscriptResult): string {
 }
 
 export function renderResult(result: WorkflowRegisteredToolResult | null | undefined, opts?: RenderResultOpts): string {
+	const body = renderResultBody(result, opts);
+	if (result?.action !== "run" || !("routerDecision" in result) || !result.routerDecision) return body;
+	const decision = renderNotice(
+		"ROUTER DECISION",
+		JSON.stringify(result.routerDecision, null, 2),
+		opts,
+		opts?.plain !== true,
+	);
+	return `${decision}\n${body}`;
+}
+
+function renderResultBody(result: WorkflowRegisteredToolResult | null | undefined, opts?: RenderResultOpts): string {
 	const partial = opts?.isPartial === true;
 	const themed = opts?.plain !== true;
 
@@ -403,6 +420,15 @@ export function renderResult(result: WorkflowRegisteredToolResult | null | undef
 
 		case "run": {
 			const r = result as RunResult;
+			if (r.status === "not_launched")
+				return renderNotice("WORKFLOW ROUTE", r.message ?? "No workflow launched.", opts, themed);
+			if (r.status === "needs_input")
+				return renderNotice(
+					"WORKFLOW INPUTS",
+					`${r.name ?? "Selected workflow"}: needs input — ${r.message ?? "No workflow was launched."}`,
+					opts,
+					themed,
+				);
 			if (partial) return renderNotice("WORKFLOW RUN", `${r.runId}: ${r.status} (in progress…)`, opts, themed);
 			if (r.status === "failed" && !r.runId) {
 				// Not-found path — render the error verbatim, no fake runId banner.

@@ -174,13 +174,21 @@ export async function runSingleInProcess(
 	const cwd = options.cwd ?? runtimeCwd;
 	if (!existsSync(cwd)) return refusedResult(agent, task, `cwd does not exist: ${cwd}`);
 	if (!statSync(cwd).isDirectory()) return refusedResult(agent, task, `cwd is not a directory: ${cwd}`);
+	options.modelRoute?.assertCurrent();
 	const rawCandidates = buildModelCandidates(
 		options.modelOverride ?? agent.model,
 		agent.fallbackModels,
 		options.availableModels,
 		options.preferredModelProvider,
-		options.currentModel,
+		options.modelRoute && options.currentModel && options.currentThinkingLevel
+			? `${options.currentModel}:${options.currentThinkingLevel}`
+			: options.currentModel,
 		agent.fallbackThinkingLevels,
+	).filter(
+		// Unsuffixed fallbacks inherit the routed session effort; null starts nonreasoning sessions at off.
+		(candidate) =>
+			!options.modelRoute ||
+			options.modelRoute.allowsCandidate(candidate, options.modelRoute.routerSelection.effort ?? "off"),
 	);
 	const filteredCandidates = filterSpawnableModelCandidates({
 		candidates: rawCandidates,
@@ -209,6 +217,10 @@ export async function runSingleInProcess(
 	// session file — which, for a fork-context child, is the parent's model.
 	// Resolving the candidate here is what makes the agent's configured model win.
 	const resolvedCandidate = candidate ? options.resolveCandidateModel?.(candidate) : undefined;
+	if (options.modelRoute && !resolvedCandidate)
+		throw new Error(
+			"Subagent auto-selected model could not be resolved before execution. Retry explicitly with the current catalog.",
+		);
 	const orchestrationContext = workflowOrchestrationContext(options);
 
 	const parent: ParentContext = {
@@ -255,9 +267,11 @@ export async function runSingleInProcess(
 		mcpDirectTools: agent.mcpDirectTools,
 		skills: options.skills ?? agent.skills,
 		model: resolvedCandidate?.model,
-		thinkingLevel: (resolvedCandidate?.thinkingLevel ??
-			agent.thinking ??
-			(inheritsDispatchConfig ? options.currentThinkingLevel : undefined)) as ChildSpec["thinkingLevel"],
+		thinkingLevel: (options.modelRoute && resolvedCandidate?.model.reasoning === false
+			? "off"
+			: (resolvedCandidate?.thinkingLevel ??
+				agent.thinking ??
+				(inheritsDispatchConfig ? options.currentThinkingLevel : undefined))) as ChildSpec["thinkingLevel"],
 		parent,
 		intercom: options.orchestratorIntercomTarget
 			? {
@@ -277,7 +291,8 @@ export async function runSingleInProcess(
 				}
 			: undefined,
 		artifactJsonlPath: options.artifactConfig?.includeJsonl === true ? artifactPaths?.jsonlPath : undefined,
-		...(fallbackCandidates.length ? { fallbackModels: fallbackCandidates } : {}),
+		...(fallbackCandidates.length || options.modelRoute ? { fallbackModels: fallbackCandidates } : {}),
+		...(options.modelRoute ? { isFallbackModelAllowed: options.modelRoute.allowsModel } : {}),
 		onProgress: options.onUpdate
 			? (progress) => {
 					const liveProgress = { ...progress, index: options.index ?? 0 };
@@ -425,6 +440,7 @@ export async function runSingleInProcess(
 	parentAskCleanup();
 	const outcome = winner.value;
 	const result = resultFromOutcome(agent, task, outcome, startedAt, artifactPaths);
+	if (options.modelRoute) result.routerSelection = options.modelRoute.routerSelection;
 	if (filteredCandidates.skippedAttempts.length)
 		result.modelAttempts = [...filteredCandidates.skippedAttempts, ...(result.modelAttempts ?? [])];
 	await control.deliverChildResult(
@@ -485,5 +501,17 @@ export async function runSync(
 			task,
 			`Unknown agent: ${agentName}`,
 		);
-	return runSingleInProcess(runtimeCwd, agent, task, options);
+	const route = options.modelRoute;
+	if (!route) return runSingleInProcess(runtimeCwd, agent, task, options);
+	const selection = route.routerSelection;
+	const result = await runSingleInProcess(runtimeCwd, agent, task, {
+		...options,
+		onUpdate: options.onUpdate
+			? (update) => {
+					for (const result of update.details?.results ?? []) result.routerSelection = selection;
+					options.onUpdate!(update);
+				}
+			: undefined,
+	});
+	return { ...result, routerSelection: selection };
 }

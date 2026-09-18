@@ -49,6 +49,7 @@ See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herd
 |---------|------|---------|-------------|
 | `defaultProvider` | string | - | Startup provider, saved automatically when you switch models interactively |
 | `defaultModel` | string | - | Startup model ID, saved automatically when you switch models interactively |
+| `routerModel` | string | `""` | Inference model for prerequisite workflow and subagent-auto routing only. Exact `provider/model`; empty selects Jev when its credentials are configured through `/login` or `TYPESAFE_AI_API_KEY`, otherwise the current chat model. Does not change chat or `structured_output` tool inference. |
 | `defaultThinkingLevel` | string | - | Startup thinking level, saved automatically on interactive model/thinking changes: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`; clamped to the active model's supported levels |
 | `modelThinkingLevels` | object | - | Per-model startup thinking levels keyed by `"provider/modelId"`; updated automatically on interactive model/thinking changes, or configured from `/settings` → Default thinking level per model |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in output |
@@ -57,6 +58,20 @@ See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herd
 | `fallbackModels` | string[] | - | Ordered fallback models, written as `"provider/model"` with optional model-supported reasoning suffixes such as `:high`, `:xhigh`, or `:max`. Used by main-chat turns and, since compaction fallback rungs, borrowed for compaction planner requests |
 
 `defaultProvider` and `defaultModel` form one exact saved selection when both are present. Atomic waits for built-in, configured, and extension provider registration before classifying that provider. If it remains unsupported, Atomic does not silently switch providers: interactive mode stays live with a generic configuration warning; print and JSON modes write the warning to stderr and exit nonzero before prompting (with JSON stdout remaining JSONL-clean); and RPC rejects `prompt` until a successful explicit `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle does not clear the condition. If the provider is supported but its saved model is unknown or lacks configured authentication, normal automatic selection of an available authenticated model remains enabled; the same is true when either field is omitted. Valid extension-provider defaults can resolve after deferred extension loading. Update an unsupported pair or choose a model with `/model`.
+
+#### routerModel
+
+```json
+{ "routerModel": "" }
+```
+
+Use `/settings` → **Router model** to change the effective selection. If the project already defines `routerModel`, the picker edits that project override; otherwise it saves the global default in `~/.atomic/agent/settings.json`. The picker identifies which scope it will save. Choose **Automatic** to save `""` in that scope, **typesafe-ai/jev** for Jev, or search the available chat models by provider/model ID. Jev is offered here without appearing in `/model`. Run `/reload` or restart Atomic to apply the saved choice to an already-running isolated engine.
+
+A nonempty explicit model takes precedence over automatic Jev selection. Use an exact catalog ID without a reasoning suffix, or the decision-only alias `typesafe-ai/jev`. An invalid explicit ID, `auto`, non-string value or surrounding whitespace fails the decision instead of silently changing providers. An explicit empty project value overrides a global selection and restores the configured-Jev/current-chat precedence.
+
+This setting selects prerequisite inference for [model-invoked workflow launches](/workflows/operations#model-invoked-launch-routing), [workflow-stage `model: "auto"`](/workflows/authoring#automatic-stage-model-selection), and [subagent `model: "auto"`](/subagents/reference#automatic-model-selection). It does not directly select the child execution model or change the selected chat model, `structured_output` tool, or general structured-output inference. The selected router provider receives the routing context, so choose a provider permitted to process that data. Authenticate Jev with `/login typesafe-ai` or `TYPESAFE_AI_API_KEY`, even when selecting it explicitly. See [Structured decisions](/sdk/structured-decisions) and [TypeSafe Jev](/providers#typesafe-jev).
+
+Remove secrets from routing tasks, inputs, and workflow descriptions/contracts before calling the tool. A routing-context credential error stops before inference or launch. Known configured credentials are screened even when they belong to a provider other than the router. Remove the credential from the supplied context or registered definition, reload a changed definition, then retry explicitly. The guard does not detect every possible secret.
 
 #### thinkingBudgets
 

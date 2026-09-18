@@ -13,6 +13,7 @@ import factory, {
 	type ExtensionAPI,
 	makeExecuteWorkflowTool,
 	type PiCommandOptions,
+	type PiExecuteContext,
 	type PiFlagNamedOpts,
 	type PiMessageRendererResult,
 	type PiToolOpts,
@@ -138,8 +139,9 @@ export function makeMock(): ExtensionAPI & {
 export async function runTool(
 	execute: PiToolOpts<WorkflowToolArgs, WorkflowToolResult>["execute"],
 	params: WorkflowToolArgs,
+	ctx: PiExecuteContext = {},
 ): Promise<WorkflowToolResult> {
-	const out = await execute("test-tool-call", params, undefined, undefined, {} as never);
+	const out = await execute("test-tool-call", params, undefined, undefined, ctx);
 	return out.details;
 }
 
@@ -200,8 +202,14 @@ export function expectRegisteredCommand(commands: RegisteredCommand[], name: str
 }
 
 export const EXPECTED_WORKFLOW_DESCRIPTION_TOKENS = [
-	"named builtin, project, user, or package workflows",
-	"Run named",
+	"registered builtin, project, user, or package workflow",
+	"All model-tool selection belongs to the router",
+	"Supply neutral top-level state",
+	"legacy workflow arguments are deprecated and ignored",
+	"routerDecision:{workflowType,maxBudget,estimatedDuration}",
+	"needs_input includes the exact inputContract and no admission",
+	"None means converse, clarify or work inline",
+	"never turn brainstorming into an invented implementation objective",
 	"custom TypeScript workflow",
 	"inline with normal coding tools",
 	"discover with list/get/inputs",

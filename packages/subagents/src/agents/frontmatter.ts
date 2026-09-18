@@ -1,4 +1,5 @@
 import { parseFrontmatter as parseYamlFrontmatter } from "@bastani/atomic";
+import { type ModelConstraints, parseModelConstraints } from "../shared/model-constraints.js";
 
 /**
  * A frontmatter value as a real YAML parser produces it (upstream pi #7598
@@ -35,6 +36,7 @@ function toFrontmatterValue(value: RawFrontmatterValue): FrontmatterValue | unde
 export interface ParsedAgentFrontmatter {
 	frontmatter: Frontmatter;
 	body: string;
+	modelConstraints?: ModelConstraints;
 	/**
 	 * The YAML parser's error message when the document does not parse.
 	 * The switch from a line reader to the real parser made previously
@@ -70,5 +72,9 @@ export function parseFrontmatter(content: string): ParsedAgentFrontmatter {
 		const narrowed = toFrontmatterValue(value);
 		if (narrowed !== undefined) frontmatter[key] = narrowed;
 	}
-	return { frontmatter, body: parsed.body };
+	try {
+		return { frontmatter, body: parsed.body, modelConstraints: parseModelConstraints(raw.modelConstraints) };
+	} catch (error) {
+		return { frontmatter: {}, body: parsed.body, parseError: error instanceof Error ? error.message : String(error) };
+	}
 }

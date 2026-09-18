@@ -152,6 +152,8 @@ export const stream: StreamFunction<"bedrock-converse-stream", BedrockOptions> =
 		const optionsProfile = options.profile || options.env?.AWS_PROFILE;
 		const config: BedrockRuntimeClientConfig = {
 			profile: optionsProfile || getProviderEnvValue("AWS_PROFILE", options.env),
+			// AWS counts the initial request as an attempt; preserve SDK defaults when omitted.
+			...(options.maxRetries !== undefined ? { maxAttempts: options.maxRetries + 1 } : {}),
 		};
 		const configuredRegion = getConfiguredBedrockRegion(options);
 		const hasAmbientConfiguredProfile = Boolean(getProviderEnvValue("AWS_PROFILE"));

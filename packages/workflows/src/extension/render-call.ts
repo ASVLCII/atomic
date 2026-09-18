@@ -73,7 +73,7 @@ export function renderCall(args: WorkflowToolArgs, opts: RenderCallOpts = {}): s
 			line = name === undefined ? "workflow: show inputs" : `workflow: show inputs for ${quoted(name)}`;
 			break;
 		case "run":
-			line = name === undefined ? "workflow: run" : `workflow: run ${quoted(name)}`;
+			line = "workflow: run";
 			break;
 		case "stages":
 			line = name === undefined ? "workflow: list stages" : `workflow: list stages for ${quoted(name)}`;

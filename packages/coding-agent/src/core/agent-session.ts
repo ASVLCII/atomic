@@ -79,6 +79,7 @@ class AgentSessionBase {
 
 	protected _scopedModels: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 	protected _fallbackModels: string[];
+	protected _isFallbackModelAllowed?: (model: Model<Api>, effort: string | undefined) => boolean;
 	protected _fallbackAttemptedKeys: Set<string> = new Set();
 	/** Models condemned for this turn by a failure retrying them cannot repair. */
 	protected _fallbackBlockedModels: Array<Model<Api>> = [];
@@ -202,6 +203,7 @@ class AgentSessionBase {
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._fallbackModels = config.fallbackModels ?? [];
+		this._isFallbackModelAllowed = config.isFallbackModelAllowed;
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;

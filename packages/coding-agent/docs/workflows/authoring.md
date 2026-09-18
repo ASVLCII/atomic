@@ -46,6 +46,22 @@ See [Writing a Workflow](#writing-a-workflow) for the full `workflow({...})` API
 
 ## Writing a Workflow
 
+### Automatic stage model selection
+
+When the user delegates the choice of the best stage model, author `model: "auto"` instead of guessing a concrete model or effort. Keep explicit user model, effort, and constraint requests intact. Omitted model settings retain their existing defaults.
+
+```ts
+const result = await ctx.task("analyze", {
+  model: "auto",
+  prompt: `Analyze ${String(ctx.inputs.path)} against the supplied requirements.`,
+  modelConstraints: { minContextWindow: 32000, maxInputCost: 5 },
+});
+```
+
+`ctx.stage("analyze", { model: "auto" }).prompt(text)` works too. Set `model: "auto"` in chain or parallel shared options to route each stage separately. The decision uses the actual supplied prompt after your input interpolation and chain context expansion, available models, supported reasoning efforts, and Atomic's shipped model-selection and evaluation guides. File references remain references, not guessed file contents.
+
+The shared `routerModel` setting chooses the decision provider. It does not choose which workflow to launch. Jev can make the decision but never executes the stage. See [automatic stage operation](/workflows/operations#automatic-stage-models) for failures and resume behavior.
+
 **A workflow executes inside whichever host is running Atomic, so its code has to work on both.** Standalone binaries are Bun-compiled while npm installs run under Node, and the active host is what loads your workflow file — so a `Bun.*` global reaches a workflow only when Atomic itself is running under Bun, and fails with `Bun is not defined` otherwise. Installing Bun separately does not change this. Write workflow code against APIs both hosts provide: `node:child_process` instead of `Bun.spawn`/`Bun.spawnSync`, `node:fs` instead of `Bun.file`, `node:path` instead of Bun's path helpers. Every example on this page follows that rule; a snippet that deliberately requires one host is marked with a `host-specific:` comment naming it.
 
 Workflow files are TypeScript modules that export a workflow definition:

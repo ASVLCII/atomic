@@ -250,3 +250,14 @@ test("concurrent borrowers keep separate cursors", async () => {
 	assert.equal((await first(new Set(), authFor))?.model.id, "planner-c");
 	assert.equal((await second(new Set(), authFor))?.model.id, "planner-c");
 });
+
+// #3090: compaction may not send child context to a fallback forbidden by routing constraints.
+test("borrowed fallback rechecks hard eligibility after auth resolution", async () => {
+	let allowed = true;
+	const borrow = borrower({ isFallbackModelAllowed: () => allowed });
+	const result = await borrow(new Set(), async (model) => {
+		allowed = false;
+		return authFor(model);
+	});
+	assert.equal(result, undefined);
+});

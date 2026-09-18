@@ -203,6 +203,7 @@
               "extensions/api-reference",
               "custom-provider/api-reference",
               "sdk/reference",
+              "sdk/structured-decisions",
               "rpc/protocol",
               "tui/reference"
             ]

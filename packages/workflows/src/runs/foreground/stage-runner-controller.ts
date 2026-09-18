@@ -2,7 +2,10 @@ import {
 	type AgentSession,
 	type CreateAgentSessionOptions,
 	convertToLlm,
+	type ModelConstraints,
+	type ModelRoute,
 	type PromptOptions,
+	parseModelConstraints,
 	type StructuredOutputCapture,
 } from "@bastani/atomic";
 import { raceAbort } from "../../shared/abort.js";
@@ -254,6 +257,9 @@ export class StageSessionController {
 	private readonly pauseControl = new StageSessionPause(() => this.session ?? this.replacement.retiringSession);
 	private readonly hasExplicitModelFallbackConfig: boolean;
 	private candidatesPromise: Promise<WorkflowResolvedModelCandidate[]> | undefined;
+	private modelRoute: ModelRoute | undefined;
+	private routingPromise: Promise<void> | undefined;
+	private explicitModel: CreateAgentSessionOptions["model"];
 	private activeCandidateIndex: number | undefined;
 	private selectedModel: string | undefined;
 	private sharedModelRuntime: CreateAgentSessionOptions["modelRuntime"];
@@ -415,7 +421,72 @@ export class StageSessionController {
 		this.session?.setThinkingLevel(level);
 	}
 
+	get awaitingAutoPrompt(): boolean {
+		return (
+			this.effectiveStageOptions?.model === "auto" &&
+			this.modelRoute === undefined &&
+			this.explicitModel === undefined
+		);
+	}
+
+	async preparePrompt(text: string): Promise<void> {
+		if (!this.awaitingAutoPrompt && this.routingPromise === undefined) return;
+		if (!this.routingPromise) {
+			this.beginStartup();
+			this.routingPromise = (async () => {
+				const route = this.modelCatalog?.routeModel;
+				if (!route) throw new Error("Workflow stage auto routing requires a routing-capable model catalog.");
+				const options = this.effectiveStageOptions;
+				const thinking = this.pendingThinkingLevel ?? options?.thinkingLevel;
+				const constraints = [
+					...(options?.inheritedModelConstraints ?? []),
+					parseModelConstraints(options?.modelConstraints),
+					...(thinking === undefined ? [] : [{ allowedEfforts: [thinking] }]),
+				].filter((c): c is ModelConstraints => c !== undefined);
+				this.modelRoute = await route({
+					task: text,
+					stageName: this.opts.stageName,
+					instructions: [
+						options?.resourceLoader?.getSystemPrompt(),
+						...(options?.resourceLoader?.getAppendSystemPrompt() ?? []),
+					]
+						.filter((text) => text !== undefined)
+						.join("\n\n"),
+					constraints,
+					signal: this.startupWait.signal,
+					selection: options?.routerSelection,
+				});
+				this.modelRoute.assertCurrent();
+				this.meta.stageOptions = { ...options, model: this.modelRoute.modelOverride };
+				this.opts.onModelFallbackMetaChange?.(this.currentModelFallbackMeta());
+			})();
+		}
+		await this.routingPromise;
+	}
+
+	assertAutoExecutionCurrent(): void {
+		if (!this.modelRoute) return;
+		this.startupWait.signal.throwIfAborted();
+		this.opts.signal?.throwIfAborted();
+		this.modelRoute.assertCurrent();
+	}
+
+	async setModel(model: NonNullable<CreateAgentSessionOptions["model"]>): Promise<void> {
+		if (this.awaitingAutoPrompt && !this.routingPromise) this.explicitModel = model;
+		await (await this.ensureSession()).setModel(model);
+	}
+	private checkedSession(session: StageSessionRuntime): StageSessionRuntime {
+		if (this.modelRoute && (!session.model || !this.modelRoute.allowsModel(session.model, session.thinkingLevel)))
+			throw new Error("Workflow stage execution model no longer satisfies routing constraints.");
+		return session;
+	}
+
 	async ensureSession(consumer: AgentSessionConsumer = "prompt"): Promise<StageSessionRuntime> {
+		if (this.awaitingAutoPrompt && this.routingPromise === undefined)
+			throw new Error(
+				"Workflow stage auto requires prompt text before model-dependent session operations. Call prompt first or set a concrete model.",
+			);
+		if (this.routingPromise !== undefined) await this.routingPromise;
 		if (this.bindingCleanupFailure !== undefined) throw this.bindingCleanupFailure;
 		if (this.sessionShutdownPromise !== undefined) {
 			const generation = this.abortGeneration;
@@ -425,7 +496,7 @@ export class StageSessionController {
 		}
 		if (this.disposed) throw new Error(`atomic-workflows: stage "${this.opts.stageName}" session has been disposed`);
 		this.opts.signal?.throwIfAborted();
-		if (this.session !== undefined && this.activeCreation === undefined) return this.session;
+		if (this.session !== undefined && this.activeCreation === undefined) return this.checkedSession(this.session);
 		if (!this.sessionPromise) {
 			this.beginStartup();
 			const pending = this.createInitialSession(consumer);
@@ -450,7 +521,8 @@ export class StageSessionController {
 				},
 			);
 		}
-		return waitForStageStartup(this.sessionPromise, this.startupWait.signal);
+		const ready = waitForStageStartup(this.sessionPromise, this.startupWait.signal);
+		return this.modelRoute ? this.checkedSession(await ready) : ready;
 	}
 
 	async ensureSessionFromFile(
@@ -480,6 +552,15 @@ export class StageSessionController {
 			preparation?.beforePreparation?.();
 			const sessionFile = preparation?.sessionFile;
 			const deliver = async (activity?: StageDeliveryActivity) => {
+				if (this.effectiveStageOptions?.model === "auto")
+					await this.preparePrompt(
+						typeof content === "string"
+							? content
+							: content
+									.filter((part) => part.type === "text")
+									.map((part) => part.text)
+									.join("\n"),
+					);
 				const activeSession =
 					sessionFile === undefined
 						? await this.ensureSession("prompt")
@@ -537,6 +618,7 @@ export class StageSessionController {
 		sdkOptions: PromptOptions | undefined,
 		consumer: AgentSessionConsumer = "prompt",
 	): Promise<void> {
+		if (this.effectiveStageOptions?.model === "auto") await this.preparePrompt(text);
 		if (
 			this.session !== undefined &&
 			this.activeCreation === undefined &&
@@ -667,9 +749,13 @@ export class StageSessionController {
 
 	currentModelFallbackMeta(): StageModelFallbackMeta {
 		const attemptedModels = this.modelAttempts.map((attempt) => attempt.model);
-		const model = this.selectedModel ?? workflowModelId(this.session?.model);
+		const model =
+			(this.modelRoute ? workflowModelId(this.session?.model) : undefined) ??
+			this.selectedModel ??
+			workflowModelId(this.session?.model);
 		const thinkingLevel = this.session?.thinkingLevel ?? this.pendingThinkingLevel;
 		return {
+			...(this.modelRoute ? { routerSelection: this.modelRoute.routerSelection } : {}),
 			...(model !== undefined ? { model } : {}),
 			...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
 			...(attemptedModels.length > 0 ? { attemptedModels } : {}),
@@ -975,6 +1061,7 @@ export class StageSessionController {
 		let retainedPrompt: StageSessionRuntime["messages"][number] | undefined;
 		let terminalScanStartIndex: number | undefined;
 		while (true) {
+			this.checkedSession(activeSession);
 			// Same-model retries must not accept answers from an earlier failed iteration.
 			this.artifactCapture.beginAttempt(activeSession);
 			const messagesBeforeAttempt = [...activeSession.messages];
@@ -1104,12 +1191,34 @@ export class StageSessionController {
 
 	private modelCandidates(): Promise<WorkflowResolvedModelCandidate[]> {
 		if (!this.candidatesPromise) {
-			this.candidatesPromise = buildModelCandidatesFromCatalog({
-				primaryModel: this.effectiveStageOptions?.model,
+			const resolved = buildModelCandidatesFromCatalog({
+				primaryModel: this.modelRoute?.modelOverride ?? this.explicitModel ?? this.effectiveStageOptions?.model,
 				fallbackModels: this.effectiveStageOptions?.fallbackModels,
 				fallbackThinkingLevels: this.effectiveStageOptions?.fallbackThinkingLevels,
 				catalog: this.modelCatalog,
 			});
+			this.candidatesPromise = this.modelRoute
+				? resolved.then((candidates) => {
+						if (!this.modelRoute) return candidates;
+						this.modelRoute.assertCurrent();
+						const effort = this.modelRoute.routerSelection.effort ?? undefined;
+						const allowed = candidates
+							.filter(
+								(candidate) =>
+									typeof candidate.value !== "string" &&
+									this.modelRoute!.allowsModel(candidate.value, candidate.reasoningLevel ?? effort),
+							)
+							.map((candidate) => ({
+								...candidate,
+								...(candidate.reasoningLevel === undefined && effort !== undefined
+									? { reasoningLevel: effort as StageOptions["thinkingLevel"] }
+									: {}),
+							}));
+						if (allowed.length === 0)
+							throw new Error("Workflow stage auto has no eligible execution candidates.");
+						return allowed;
+					})
+				: resolved;
 		}
 		return this.candidatesPromise;
 	}
@@ -1393,6 +1502,7 @@ export class StageSessionController {
 	): Promise<StageSessionRuntime> {
 		const startGeneration = this.abortGeneration;
 		if (this.disposed || this.opts.signal?.aborted) throw this.staleCreationReason(startGeneration);
+		this.modelRoute?.assertCurrent();
 		this.reportStartupPhase("route-authority");
 		const authority = this.opts.routeAuthorityReady?.();
 		if (authority !== undefined) {
@@ -1416,8 +1526,17 @@ export class StageSessionController {
 			reattachSessionFile: this.reattachSessionFile,
 			sharedModelRuntime: this.sharedModelRuntime,
 		});
+		if (stageOptions && this.modelRoute) stageOptions.isFallbackModelAllowed = this.modelRoute.allowsModel;
 		let created: StageSessionRuntime | StageSessionCreateResult;
 		try {
+			this.modelRoute?.assertCurrent();
+			if (
+				this.modelRoute &&
+				candidate &&
+				(typeof candidate.value === "string" ||
+					!this.modelRoute.allowsModel(candidate.value, candidate.reasoningLevel))
+			)
+				throw new Error("Workflow stage execution candidate is no longer eligible.");
 			created = this.opts.adapters.agentSession
 				? await this.opts.adapters.agentSession.create(
 						stripWorkflowOnlyOptions(
@@ -1580,6 +1699,8 @@ export class StageSessionController {
 			this.unresolvedContextOverflowMessage = undefined;
 			try {
 				this.reportStartupPhase("first-dispatch");
+				// A live resume loops here without returning through the outer retry guard.
+				this.checkedSession(activeSession);
 				await activeSession.prompt(nextText, sdkOptions);
 				const pendingPauseAfterPrompt = this.pauseControl.currentResume();
 				if (pendingPauseAfterPrompt) {
@@ -1742,6 +1863,12 @@ export class StageSessionController {
 	private recordSuccessfulAttempt(candidate: WorkflowResolvedModelCandidate): void {
 		this.artifactCapture.settleAttempt(true);
 		const usage = this.takeAttemptUsage(this.session);
+		if (this.modelRoute && this.session?.model)
+			candidate = {
+				id: workflowModelId(this.session.model)!,
+				value: this.session.model,
+				reasoningLevel: this.session.thinkingLevel,
+			};
 		this.modelAttempts.push({
 			model: candidate.id,
 			success: true,

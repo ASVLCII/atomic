@@ -45,6 +45,8 @@ interface SettingsManagerBasicAccessors {
 	getSessionDir(): string | undefined;
 	getDefaultProvider(): string | undefined;
 	getDefaultModel(): string | undefined;
+	getRouterModel(): string;
+	setRouterModel(model: string, scope?: "global" | "project"): void;
 	setDefaultProvider(provider: string): void;
 	setDefaultModel(modelId: string): void;
 	setDefaultModelAndProvider(provider: string, modelId: string): void;
@@ -154,6 +156,31 @@ const basicAccessors: SettingsManagerBasicAccessors = {
 
 	getDefaultModel() {
 		return settingsInternals(this).settings.defaultModel;
+	},
+
+	getRouterModel() {
+		const value = settingsInternals(this).settings.routerModel;
+		if (value === undefined) return "";
+		if (typeof value !== "string" || value.trim() !== value || value === "auto") {
+			throw new Error("Invalid routerModel: expected an exact provider/model ID or an empty string, not auto.");
+		}
+		return value;
+	},
+
+	setRouterModel(model, scope = "global") {
+		if (typeof model !== "string" || model.trim() !== model || model === "auto") {
+			throw new Error("Invalid routerModel: expected an exact provider/model ID or an empty string, not auto.");
+		}
+		const state = settingsInternals(this);
+		if (scope === "project") {
+			const projectSettings = { ...state.projectSettings, routerModel: model };
+			state.markProjectModified("routerModel");
+			state.saveProjectSettings(projectSettings);
+			return;
+		}
+		state.globalSettings.routerModel = model;
+		state.markModified("routerModel");
+		state.save();
 	},
 
 	setDefaultProvider(provider) {

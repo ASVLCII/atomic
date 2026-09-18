@@ -103,6 +103,7 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
 				artifactOptions = undefined;
 				artifactClosed = false;
 				artifactText = undefined;
+				if (effectiveStageOptions?.model === "auto") await controller.preparePrompt(promptText);
 			}
 			if (hasOutputArtifact && !structuredOutputCapture && !adapters.prompt) artifactOptions = outputOptions;
 			if (adapters.prompt) {
@@ -113,7 +114,10 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
 				}
 				const rawText = await runCallback(
 					{ kind: "workflow.stage_adapter", name: `prompt:${stageName}`, runId, stageId },
-					() => adapters.prompt!.prompt(promptText, meta),
+					() => {
+						controller.assertAutoExecutionCurrent();
+						return adapters.prompt!.prompt(promptText, meta);
+					},
 				);
 				if (typeof rawText !== "string") return rawText as never;
 				adapterMessages = assistantMessage(rawText);
@@ -212,11 +216,16 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
 		async complete(text, completeOpts) {
 			artifactOptions = undefined;
 			if (adapters.complete) {
+				if (effectiveStageOptions?.model === "auto" && completeOpts?.model === undefined)
+					await controller.preparePrompt(text);
 				lastFinalizedOutput = undefined;
 				lastFinalizedMessageCount = undefined;
 				lastAssistantText = await runCallback(
 					{ kind: "workflow.stage_adapter", name: `complete:${stageName}`, runId, stageId },
-					() => adapters.complete!.complete(text, completeOpts, meta),
+					() => {
+						controller.assertAutoExecutionCurrent();
+						return adapters.complete!.complete(text, completeOpts, meta);
+					},
 				);
 				adapterMessages = assistantMessage(lastAssistantText);
 				return lastAssistantText;
@@ -246,10 +255,12 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
 		},
 
 		async steer(text) {
+			if (effectiveStageOptions?.model === "auto") await controller.preparePrompt(text);
 			await (await controller.ensureSession()).steer(text);
 		},
 
 		async followUp(text) {
+			if (effectiveStageOptions?.model === "auto") await controller.preparePrompt(text);
 			await (await controller.ensureSession()).followUp(text);
 		},
 
@@ -270,7 +281,7 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
 		},
 
 		async setModel(model) {
-			await (await controller.ensureSession()).setModel(model);
+			await controller.setModel(model);
 		},
 
 		setThinkingLevel(level) {
@@ -334,6 +345,7 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
 		},
 
 		async __ensureSession() {
+			if (controller.awaitingAutoPrompt) return;
 			await controller.ensureSession();
 		},
 

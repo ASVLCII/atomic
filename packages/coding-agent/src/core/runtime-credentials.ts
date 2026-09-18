@@ -1,4 +1,5 @@
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@bastani/pi-ai";
+import { containsCredential, containsCredentialValue } from "./credential-screening.ts";
 
 interface ReloadableCredentialStore {
 	reload(): void | Promise<void>;
@@ -46,6 +47,19 @@ export class RuntimeCredentials implements CredentialStore {
 	peek(providerId: string): Credential | undefined {
 		const override = this.overrides.get(providerId);
 		return override ? { type: "api_key", key: override } : getSnapshotStore(this.store)?.peek(providerId);
+	}
+
+	/** Keep credential values internal, including stored values shadowed by runtime overrides. */
+	async containsConfiguredCredential(serialized: string): Promise<boolean> {
+		for (const value of this.overrides.values()) {
+			if (containsCredentialValue(serialized, value)) return true;
+		}
+		const snapshot = getSnapshotStore(this.store);
+		for (const { providerId } of await this.store.list()) {
+			const credential = snapshot ? snapshot.peek(providerId) : await this.store.read(providerId);
+			if (containsCredential(serialized, credential)) return true;
+		}
+		return false;
 	}
 
 	async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {

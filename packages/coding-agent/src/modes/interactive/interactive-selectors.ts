@@ -45,6 +45,8 @@ InteractiveModeBase.prototype.showSelector = function (
 
 InteractiveModeBase.prototype.showSettingsSelector = function (this: InteractiveModeBase): void {
 	this.showSelector((done) => {
+		const routerModelScope =
+			this.settingsManager.getProjectSettings().routerModel !== undefined ? "project" : "global";
 		const component = new SettingsSelectorComponent(
 			{
 				autoCompact: this.session.autoCompactionEnabled,
@@ -62,6 +64,8 @@ InteractiveModeBase.prototype.showSettingsSelector = function (this: Interactive
 				availableThinkingLevels: this.session.getAvailableThinkingLevels(),
 				availableDefaultModels: [...this.session.modelRuntime.getAvailableSnapshot()],
 				modelThinkingLevels: this.settingsManager.getAllModelThinkingLevels(),
+				routerModel: this.settingsManager.getRouterModel(),
+				routerModelScope,
 				currentTheme: this.themeController.getThemeSelection() || "dark",
 				terminalTheme: this.themeController.getTerminalTheme(),
 				availableThemes: getAvailableThemes(),
@@ -138,6 +142,9 @@ InteractiveModeBase.prototype.showSettingsSelector = function (this: Interactive
 					this.session.setThinkingLevel(level, { persist: true });
 					this.footer.invalidate();
 					this.updateEditorBorderColor();
+				},
+				onRouterModelChange: (model) => {
+					this.settingsManager.setRouterModel(model, routerModelScope);
 				},
 				onModelThinkingLevelChange: (provider, modelId, level) => {
 					this.settingsManager.setModelThinkingLevel(provider, modelId, level);

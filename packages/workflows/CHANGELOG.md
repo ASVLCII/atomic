@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Workflow UUID selectors accept unique 8-character hexadecimal prefixes across live and durable runs, with explicit collision errors ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 - Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 - Added live, bounded pending-input previews to the BACKGROUND widget, with per-workflow navigation and automatic clearing ([#2700](https://github.com/bastani-inc/atomic/pull/2700) by [@Shreyasd10](https://github.com/Shreyasd10)).
+- Added mandatory bounded routing before model-tool workflow launches, using explicit task state and the full current workflow catalog. Results show validated workflow/budget decisions as formatted JSON; `none` directs the caller to continue inline without launching, and changed registry approvals fail before admission. Routing context containing known configured credentials is rejected before either provider receives it. User `/workflow` commands and authored composition bypass the gate ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
+- Added prompt-based workflow-stage `model: "auto"` selection for stages, chains, and parallel tasks, with hard model constraints, shared router settings, and retained selection metadata across fallback and resume.
+- Model-tool `run` now dispatches the router-selected workflow without a caller-selected name, reports `estimatedDuration`, and returns the selected input contract without launching when values are missing or invalid. Routing considers conversational intent and whether a workflow is warranted.
 
 ### Fixed
 
@@ -38,6 +41,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Request-auth preparation timeouts now block as recoverable `auth_timeout` with source-neutral guidance, instead of asking for `/login`. Established login failures still use `login_required` ([#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 - The BACKGROUND panel stays mounted across top-level `/reload` while a run is still awaiting input; status and connect keep targeting the same pending prompt ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
 - Combining-only pending prompts no longer receive a quoted BACKGROUND preview; they keep general needs-attention guidance ([#2529](https://github.com/bastani-inc/atomic/issues/2529)).
+- Jev launch routing now supports catalogs above 255 choices through bounded tournaments, retaining `none` in the final comparison and preserving exact user budgets. Partial batch results never authorize a launch ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
+- Fixed workflow routing with strict-schema providers such as Codex when budget limits are omitted or partially supplied, preserving exact limits and zero values without introducing null fields.
+- Workflow selection and automatic stage-model selection allow an initial attempt plus up to three repairs for malformed or schema-invalid answers, within the original decision deadline. Authentication/provider errors, cancellation and stale catalogs remain terminal; repairs never duplicate admission.
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

@@ -152,6 +152,10 @@ const builtinsOnly = await ModelRuntime.create({ modelsPath: null });
 
 > See the complete [`ModelRuntime` credential and model configuration example](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/examples/sdk/09-api-keys-and-oauth.ts).
 
+### Bounded structured decisions
+
+Use `inferStructuredOutput()` with an explicit inference model for a single schema-validated semantic decision without starting an agent session or executing tools. It supports ordinary configured models and the decision-only `typesafe-ai/jev` integration, and never reads `routerModel`. The separate `inferRouterDecision()` entrypoint shares `routerModel` resolution for prerequisite workflow/subagent-auto routing only. Neither API changes the selected chat model or the `structured_output` tool; workflow/subagent routing is not enabled yet. See [Structured decisions](/sdk/structured-decisions) for state preparation, examples, provider limits and failure handling.
+
 ### System Prompt
 
 Use a `ResourceLoader` to override the system prompt:
@@ -820,6 +824,12 @@ defineTool
 STRUCTURED_OUTPUT_TOOL_NAME
 createStructuredOutputTool
 createStructuredOutputCapture
+inferStructuredOutput
+inferRouterDecision
+resolveRouterModel
+getStructuredOutputProviders
+JEV_STRUCTURED_OUTPUT_PROVIDER
+DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS
 getAgentDir
 getPackageDir
 getReadmePath
@@ -844,6 +854,12 @@ type CreateAgentSessionOptions
 type CreateAgentSessionResult
 type StructuredOutputCapture
 type StructuredOutputToolOptions
+type StructuredOutputRequest
+type StructuredOutputResult
+type StructuredOutputModel
+type RouterModelSelectionOptions
+type RouterDecisionRequest
+type StructuredChoiceQuestion
 type ExtensionFactory
 type ExtensionAPI
 type ToolDefinition

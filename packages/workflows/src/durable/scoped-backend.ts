@@ -126,6 +126,7 @@ export class ScopedDurableBackend implements DurableWorkflowBackend {
 				sessionFile?: string;
 				startedAt?: number;
 				durationMs?: number;
+				routerSelection?: import("@bastani/atomic").ModelRouterOutput;
 		  }
 		| undefined {
 		return this.inner.getStageSession(this.scope.rootWorkflowId, this.scopeKey(replayKey));

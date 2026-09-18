@@ -35,6 +35,7 @@ export interface FallbackPlannerContext {
 	readonly preferredProvider: string | undefined;
 	/** Session level inherited when a candidate carries no `:level` suffix. */
 	readonly sessionThinkingLevel: ThinkingLevel | undefined;
+	readonly isFallbackModelAllowed?: (model: Model<Api>, effort: string | undefined) => boolean;
 }
 
 /**
@@ -109,6 +110,8 @@ export function createFallbackPlannerBorrower(context: FallbackPlannerContext): 
 				auth = undefined;
 			}
 			if (!auth) continue;
+			if (context.isFallbackModelAllowed && !context.isFallbackModelAllowed(candidate.model, budget.reasoning))
+				continue;
 			return { model: candidate.model, budget, auth };
 		}
 		return undefined;

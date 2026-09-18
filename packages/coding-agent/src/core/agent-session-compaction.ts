@@ -179,6 +179,7 @@ export async function _applyVerbatimCompaction(
 			registry: this._modelRuntime,
 			preferredProvider: model.provider,
 			sessionThinkingLevel: this.thinkingLevel,
+			isFallbackModelAllowed: this._isFallbackModelAllowed,
 		};
 		const run = await runVerbatimCompaction(preparation, model, {
 			...plan,

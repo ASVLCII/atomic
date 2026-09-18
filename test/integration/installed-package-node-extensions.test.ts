@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterAll, test } from "vitest";
-import { moduleDir } from "../helpers/runtime.js";
+import { bunExecutable, moduleDir, spawnSyncCollect } from "../helpers/runtime.js";
 
 const repoRoot = resolve(moduleDir(import.meta.url), "../..");
 const repoNodeModules = join(repoRoot, "node_modules");
@@ -160,6 +160,55 @@ runTest(
 			`installed supervisor construction failed:\n${supervisorProbe.stdout}\n${supervisorProbe.stderr}`,
 		);
 		assert.match(supervisorProbe.stdout, /repeated supervisor construction passed/);
+		// #3089/#3090: exercise the public installed SDK and the host-module map shared
+		// with Bun binaries. No provider inference or real credential is used.
+		for (const executable of [nodeExe, bunExecutable()]) {
+			const probe = spawnSyncCollect(
+				[
+					executable,
+					"--input-type=module",
+					"-e",
+					`
+				import assert from "node:assert/strict";
+				import { Type } from "typebox";
+				import * as sdk from "@bastani/atomic";
+				import { getVirtualModules } from "./dist/core/extensions/loader-host-modules.js";
+				const hosted = (await getVirtualModules())["@bastani/atomic"];
+				assert.equal(hosted.inferStructuredOutput, sdk.inferStructuredOutput);
+				assert.equal(hosted.inferRouterDecision, sdk.inferRouterDecision);
+				assert.equal(hosted.resolveRouterModel, sdk.resolveRouterModel);
+				assert.equal(sdk.SettingsManager.inMemory().getRouterModel(), "");
+				assert.equal(sdk.getStructuredOutputProviders()[0].capabilities.chat, false);
+				process.env.TYPESAFE_AI_API_KEY = "mock-installed-key";
+				let requests = 0;
+				globalThis.fetch = async () => {
+					requests++;
+					return Response.json({model: "jev-latest", answers: {result: {
+						type: "choice", choice: "yes", confidence: 1, probabilities: {yes: 1}
+					}}, usage: {input_tokens: 1, output_tokens: 1}});
+				};
+				const result = await sdk.inferRouterDecision({
+					settings: sdk.SettingsManager.inMemory(),
+					modelRegistry: {getAll: () => [], streamSimple: () => {throw Error("unexpected chat request")}},
+					state: {task: "classify this fixture"}, instructions: "Choose yes.",
+					schema: Type.Object({ok: Type.Literal(true)}, {additionalProperties: false}),
+					jev: {questions: {result: {instructions: "Choose yes.", criteria: {yes: "The fixture matches"}}},
+						decode: () => ({ok: true})}
+				});
+				assert.deepEqual(result.value, {ok: true});
+				assert.equal(requests, 1);
+				console.log("installed structured decision passed");
+			`,
+				],
+				{ cwd: atomicDest, timeout: 30_000 },
+			);
+			assert.equal(
+				probe.exitCode,
+				0,
+				`installed SDK probe failed under ${executable}:\n${probe.stdout}\n${probe.stderr}`,
+			);
+			assert.match(probe.stdout.toString(), /installed structured decision passed/);
+		}
 		const result = spawnSync(nodeExe, [join(atomicDest, "dist", "cli.js"), "--no-session"], {
 			cwd: workDir,
 			input: "",

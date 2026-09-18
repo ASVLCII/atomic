@@ -11,13 +11,17 @@ This page gives workflow authors and runtime policy code a practical way to answ
 - Which model should it use for judgment gates, debugging, planning, research, cheap worker loops, and fallback diversity?
 - Which models are dominated on cost/accuracy and should be avoided unless they have a specific role fit?
 
-It is a **static reference**. It does not change runtime model routing — routing is configured elsewhere. Treat these recommendations as a starting point and validate against your own workflow evals.
+This is a **static reference**, not a live benchmark query. Opt-in [subagent automatic model selection](/subagents/reference#automatic-model-selection) uses the copy shipped with your installed Atomic version, together with the current available model catalog. Treat the recommendations as a starting point and validate against your own task evaluations.
 
 <Note>
 The table below is a snapshot of the [DeepSWE](https://deepswe.datacurve.ai/) leaderboard (v1.1, highest published thinking level per model), a long-horizon coding-agent benchmark reporting `pass@1` and average dollars per task. The source reports 113 tasks and was updated September 3, 2026. DeepSWE's own default table view is **Best** — the best-scoring configuration per model — so four models show a different row there than the highest-effort row used here; the snapshot note below the table names them. Benchmarks and pricing drift and new models ship constantly, so **treat the live leaderboards as authoritative** and refresh this page from them rather than hand-maintaining scores. See [Evals](/models/evals). **Last compiled: 2026-09-03.**
 </Note>
 
 Artificial Analysis was reviewed separately on **2026-09-08** against its **September 7 Intelligence Index v4.3** revision. The DeepSWE table remains the September 3 snapshot and was not revalidated in this refresh; the earlier September 5 browser check confirmed its update date and Gemini 3.8 Flash row, not every configuration.
+
+## Automatic subagent routing
+
+With `model: "auto"`, Atomic supplies this guide and [Evals](/models/evals) as context for one bounded model/effort decision. It does not browse leaderboards or probe providers during routing. The decision must use a current eligible provider/model and a supported effort; benchmark rows cannot add unavailable models or imply credentials work. The [`routerModel`](/settings#routermodel) setting selects the inference provider, separately from the child model it chooses. For interactive model-choice advice, use the live-source process below.
 
 ## Answering model-choice questions
 

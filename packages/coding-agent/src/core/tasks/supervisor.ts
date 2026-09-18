@@ -208,8 +208,12 @@ function observation(value: native.HostObservation): C.HostObservation {
 	if (value.kind === "background" && reason) return { kind: value.kind, reason };
 	throw new Error("Invalid native host observation");
 }
+// Native records own lifecycle and mutable execution metadata. Routing provenance is
+// immutable host metadata, retained for the same environment lifetime as task records.
+const routerSelections = new Map<string, C.RouterSelection>();
 function record(value: native.TaskRecord): C.TaskRecord {
 	if (value.kind !== "agent" && value.kind !== "command") throw new Error(`Invalid native task kind: ${value.kind}`);
+	const routerSelection = routerSelections.get(value.ref.taskId);
 	return {
 		ref: reference(value.ref),
 		launchOperationId: value.launchOperationId as C.OperationId,
@@ -221,6 +225,7 @@ function record(value: native.TaskRecord): C.TaskRecord {
 		...(value.agentName === undefined ? {} : { agentName: value.agentName }),
 		...(value.model === undefined ? {} : { model: value.model }),
 		...(value.thinking === undefined ? {} : { thinking: value.thinking }),
+		...(routerSelection ? { routerSelection } : {}),
 		execution: execution(value.execution),
 		observation: observation(value.observation),
 		...(value.wasBackground === undefined ? {} : { wasBackground: value.wasBackground }),
@@ -744,6 +749,7 @@ export class TaskSupervisor {
 		const id = ref.value.taskId as C.TaskId;
 		const existing = state.tasks.get(id);
 		if (existing) return { ok: true, value: existing };
+		if (intent.routerSelection) routerSelections.set(id, Object.freeze({ ...intent.routerSelection }));
 		const task = new TaskCapability();
 		Object.freeze(task);
 		const taskState: TaskState = {

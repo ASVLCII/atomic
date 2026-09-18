@@ -202,6 +202,10 @@ export interface StageOptions<TSchemaDef extends TSchema | undefined = TSchema |
 	settingsManager?: SettingsManager;
 	/** Internal durable resume hook: reopen this exact Atomic/Pi session file instead of forking. */
 	resumeFromSessionFile?: string;
+	/** Persisted automatic selection; revalidated without another decision on resume. */
+	routerSelection?: import("@bastani/atomic").ModelRouterOutput;
+	/** Restrictions inherited from task/default declarations; all must hold. */
+	inheritedModelConstraints?: readonly import("@bastani/atomic").ModelConstraints[];
 	/** Internal durable replay key used to map a live LM session to durable resume state. */
 	durableReplayKey?: string;
 	/** Internal durable timing baseline accumulated before a process-boundary resume. */

@@ -2,6 +2,14 @@
 
 Run and operate workflows from interactive chat or the workflow tool: identify runs, inspect their graphs, communicate with stages, answer human-input gates, and manage durable execution.
 
+## Automatic stage models
+
+For stages authored with `model: "auto"`, Atomic makes one bounded decision before starting the execution session. The selected model/effort is retained as `routerSelection`, independently of the actual `model`, `thinkingLevel`, and fallback attempts. Unsuffixed fallbacks inherit the selected effort; explicit fallback suffixes retain their own effort. Every automatic fallback must satisfy the stage's hard constraints.
+
+Malformed or schema-invalid routing answers receive up to three repair retries after the initial attempt, within one shared 30-second deadline. Missing guides, an empty eligible catalog, stale decisions, credential-bearing routing context, authentication/provider errors, timeout, and cancellation prevent stage execution without repair. If repairs are exhausted, no stage starts. Correct the issue and retry explicitly; Atomic never silently selects the current chat model. Choose a `routerModel` provider permitted to receive the task and supplied context. Parent chat and sibling settings are unchanged.
+
+Replay reuses recorded results without routing. Resume of a saved auto stage retains its verified selection and revalidates it against the current catalog and restrictions before fresh session admission, without a hidden new decision. If it is no longer eligible, resume fails rather than choosing another model. See [authoring automatic stages](/workflows/authoring#automatic-stage-model-selection).
+
 ## Workflow run identifiers and the BACKGROUND panel
 
 Workflow run identifiers are shown in full in status views, pickers, control messages, and the `BACKGROUND` panel. Selectors accept either the full 36-character UUID or its unique 8-character hexadecimal prefix. Other truncated forms are rejected. Colliding prefixes report the matching full UUIDs and require a full UUID; resolved results retain canonical identifiers.
@@ -74,7 +82,7 @@ workflow({ action: "models" })
 The workflow tool action surface is:
 
 - discovery: `list`, `get`, `inputs`, plus `models` for the configured model catalog
-- execution: named `run` with validated `workflow` and `inputs`
+- execution: named `run` with validated `workflow`, `inputs`, and top-level routing `state`
 - inspection: `status`, `stages`, `stage`, `transcript`
 - prompt response: `answer`; run control: `pause`, `quit`, `resume`; free-form stage communication: ordinary Intercom `send`/live `ask` to `workflow:<rootRunId>/<segment>[/<segment>...]` path targets, including `*` and `**` globs
 - rediscovery: `reload`
@@ -112,17 +120,27 @@ Named launches wait only for **startup admission**, not for workflow completion.
 
 A model may launch in the foreground only when the user explicitly requests it or foreground execution is technically required, and it must tell the user before launching.
 
-Run a named workflow with inputs:
+Let the router choose using task context and known inputs:
 
 ```ts
 workflow({
-  action: "run",
-  workflow: "fan-out-and-synthesize",
+  action: "run", // Omitting action also invokes the launch router.
   inputs: { prompt: "map workflow runtime by subsystem", max_concurrency: 4 },
+  state: {
+    literalRequest: "Map the workflow runtime by subsystem, with parallel research and a synthesis.",
+    intent: "Produce a subsystem map with source references.",
+    conversation: [{ role: "user", text: "Read-only research; do not edit files." }],
+    constraints: ["Read-only; cite source files; do not modify the repository."],
+    executionPreference: "unspecified",
+    documents: [{
+      source: "Approved research brief",
+      content: "Compare discovery, dispatch, execution and persistence. Research independently, then synthesize their boundaries and dependencies.",
+    }],
+  },
 })
 ```
 
-Slash equivalent:
+To deliberately bypass model-tool routing, the user can issue an explicit command:
 
 ```text
 /workflow fan-out-and-synthesize prompt="map workflow runtime by subsystem" max_concurrency=4
@@ -141,6 +159,67 @@ If you copy a HIL workflow example into a headless session, it can pass dispatch
 <p align="center"><img src="../images/workflow-input-picker.png" alt="Workflow Input Picker" width="600" /></p>
 
 Graph node cards show each model stage's effective model and thinking level above its status, including after fallback and durable resume. Long model names are truncated first, preserving the complete thinking level and a canonical `-fast` model suffix. This suffix is model identity, not a separate fast-mode switch or proof of service tier. Thinking `off` is omitted; stages without a model show no model placeholder. Tool nodes retain their `durable tool` body, and the `BACKGROUND` summary is unchanged.
+
+## Model-invoked launch routing
+
+Every model-tool `action: "run"` call, including calls that omit `action`, requires top-level `state`. Atomic makes one bounded logical routing decision before workflow admission or execution. The state belongs to the tool call, not the workflow's `inputs` schema. Inspection and control actions do not route. User-issued `/workflow <name>` commands and programmatic `ctx.workflow(...)` composition bypass the router; workflow stages still cannot call the workflow tool to launch another workflow.
+
+Prepare state before calling the tool:
+
+- Copy the literal request into `literalRequest`, preserve intent and uncertainty in `intent`, and include relevant conversation with actual `{ role, text }` provenance. Do not preselect or advocate a workflow.
+- Include restrictions and actual execution preferences, including explicit named-workflow, inline, no-workflow or quickly requests. The router interprets these; the caller does not select or override the route. Brainstorming, exploratory discussion, unclear goals and unjustified workflow overhead generally favor `none`, meaning continue conversation, clarify or work inline.
+- Include supplied relevant documents as `{ source, content }` with actual text, not paths alone. Conversation and document arrays may be empty when no relevant context exists; do not invent it.
+- If the user specified budget limits, put their exact values in `userBudget.limits` and quote the instruction in `userBudget.provenance`. Omit this field when no override was requested.
+- Remove credentials and other secrets from all supplied text and workflow inputs. The selected router provider receives this context. Credential checks are not a substitute for reviewing what you send.
+
+Call `workflow({ action: "run", state, inputs })` without choosing a workflow name. Atomic supplies every effective registry contract and inherited budget. Legacy model-tool `workflow` names are deprecated and ignored, never treated as user provenance. Actual user-requested workflow names belong in conversation/state. Workflow-specific input values do not bias routing; Atomic validates them against the selected contract afterward. Catalog descriptions cannot establish user preferences or authorization.
+
+### Choose the inference model
+
+Set `routerModel` in [settings.json](/settings#routermodel), not workflow extension config:
+
+```json
+{ "routerModel": "" }
+```
+
+A nonempty exact concrete `provider/model` selection wins. Otherwise configured Jev credentials, saved through `/login typesafe-ai` or supplied by `TYPESAFE_AI_API_KEY`, select `typesafe-ai/jev`; without Jev credentials, Atomic uses the current chat model at invocation time. `"auto"`, unknown explicit selections, and malformed settings fail rather than silently selecting another provider. This setting selects only routing inference: it does not change the chat model, workflow stage models, or the `structured_output` tool. Configured credentials do not prove service access.
+
+The router has one 30-second deadline for the whole decision, including an initial attempt and up to three repair retries for malformed or schema-invalid answers. A valid decision stops repairs; a valid `none` is never rerouted. Authentication/provider failures, invalid inputs, cancellation, timeout, and stale-catalog rejection are not retried. Repairs use the same provider and context, without an agent loop, provider fallback or duplicate launch. Jev packs workflow and budget Choice questions together where context permits, preserving exact budget values rather than generating or rounding numbers. Catalogs above 255 choices use multiple tournament requests: every workflow participates, three candidates survive each batch, and finalists receive a shared comparison. `none` remains available in the final comparison even if eliminated earlier; overflow never forces a workflow launch. Large catalogs and repair attempts can increase latency and usage, and grouping can affect selection. State is never trimmed, and no partial decision can launch a workflow. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits) for estimated context packing and provider context errors.
+
+### Read the decision
+
+Results expose `routerDecision` with `workflowType`, `maxBudget` and `estimatedDuration`, and repeat `estimatedDuration` at top level. Report the selection and estimate only after the tool returns. Duration values are `unknown`, `under_5_minutes`, `5_to_15_minutes`, `15_to_60_minutes`, `1_to_4_hours` or `over_4_hours`. These are unmeasured wall-clock ranges from task/catalog context, not guarantees, `maxDurationMs` or budgets; `unknown` means insufficient evidence.
+
+The tool's visible result also shows a **ROUTER DECISION** panel with indented JSON, followed by the launch status or inline guidance. A launch-setup failure retains the validated decision unless a registry change has made it stale; it does not imply that a workflow started.
+
+| Decision | Result and next step |
+| --- | --- |
+| `workflowType: "none"` | `status: "not_launched"`, `runId: ""`, and guidance to continue inline within the existing authorized scope. No workflow or fallback runs. The router has not done the task; do not automatically reroute. |
+| Any selected registered workflow | Supplied inputs and declared defaults validate before launch. Normal run ID/status, decision and estimate are returned. |
+| Missing or invalid selected inputs | `status: "needs_input"`, `runId: ""`, exact `inputContract`, decision and estimate. Obtain actual missing values or ask the user; a later run routes again and never remaps stale inputs. No admission occurs. |
+
+For example, an inline decision without budget overrides returns:
+
+```json
+{
+  "action": "run",
+  "runId": "",
+  "status": "not_launched",
+  "routerDecision": { "workflowType": "none", "maxBudget": {}, "estimatedDuration": "unknown" },
+  "estimatedDuration": "unknown",
+  "message": "Continue the requested task inline within the existing authorized scope. No workflow was launched; the router has not performed or completed the task. Do not launch a fallback workflow or automatically reroute this decision."
+}
+```
+
+`maxBudget` preserves exact explicit user limits, including zero and omitted fields, even when no workflow launches. An empty object means inherit for a selected workflow, not unlimited execution. No workflow budget is installed for inline work, but the user's limits and authorization still apply. An optional top-level `budget` must match `state.userBudget.limits` exactly; estimates are not permission to add or expand limits.
+
+Missing context, invalid output after the repair allowance, provider errors, timeout and cancellation are failures, not `none` decisions. They prevent launch and expose no fabricated `routerDecision`. Correct the reported problem and retry explicitly when authorized. Cancellation or a late response cannot start a workflow after the routing attempt ends. The separate two-minute workflow-tool request deadline still covers the whole request, including subsequent startup admission.
+
+### Reload and authored workflows
+
+Creating a workflow is an ordinary file-authoring operation. After a successful `/workflow reload` or `/reload`, its actual registered name becomes a routing candidate automatically. Removed and renamed workflows disappear; replacements use their new contracts. There is no special authoring category in router output.
+
+If a reload changes the registry while a decision is pending, Atomic refuses the stale approval before launch, including a definition replaced under the same name. Inspect the current contract and retry with fresh state; Atomic does not make a second inference automatically. A fatal refresh failure retains the previous catalog and its matching routing choices/context. A workflow registered as `none` collides with the inline sentinel and blocks model-tool routing: rename it and reload. Explicit user `/workflow` commands remain available.
 
 ## Workflow Commands
 
@@ -811,6 +890,8 @@ A successful rescan may still contain per-resource diagnostics. Both reload surf
 Set an optional `budget` on workflow extension config, an authored `workflow({...})` definition, a `workflow({ action: "run" })` tool call, or a `workflow({ action: "resume" })` continuation to raise or narrow the ceiling. Each field resolves independently: run override, then definition, then config default. An omitted field falls through; a present `0` disables that dimension.
 
 Budgets are operator-selected. Atomic's agent guidance treats "no budget" as the correct default: the agent passes a `budget` on a `run` or `resume` call only when you asked for a limit, and otherwise omits the field so the definition and config resolve normally. A cap the agent invented would stop an otherwise healthy run at a duration, token, or cost boundary you never chose, and the stop reads as a workflow failure rather than as an added override. When you do state a limit, only the fields you named are passed; the rest keep falling through.
+
+For model-tool launches, declare requested overrides in `state.userBudget` with their exact instruction provenance. If you also pass top-level `budget`, it must contain the same fields and values. The router preserves that declaration rather than inventing a cap, rounding values or converting omissions to zero. See [Model-invoked launch routing](#model-invoked-launch-routing).
 
 ```ts
 export default workflow({

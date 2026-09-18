@@ -200,6 +200,7 @@ export interface ExtensionContextActions {
 	getSystemPrompt: () => string;
 	getSkillCatalog?: () => SkillCatalog;
 	getSystemPromptOptions?: () => BuildSystemPromptOptions;
+	getRouterModel?: () => string;
 }
 
 /**

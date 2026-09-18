@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { beforeEach, describe, test } from "vitest";
+import { beforeEach, describe, test, vi } from "vitest";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import type {
 	ExtensionAPI,
 	PiCommandOptions,
@@ -83,11 +84,16 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 	test("action='run' for fan-out-and-synthesize returns a non-placeholder runId", async () => {
 		const execute = mock.tools[0]!.opts.execute;
 		// Background dispatch returns `status: "running"` synchronously with a real UUID.
-		const result = await runTool(execute, {
-			workflow: "fan-out-and-synthesize",
-			inputs: { prompt: "test query", max_branches: 1 },
-			action: "run",
-		});
+		const result = await runTool(
+			execute,
+			{
+				workflow: "fan-out-and-synthesize",
+				inputs: { prompt: "test query", max_branches: 1 },
+				action: "run",
+				state: workflowRouterState(),
+			},
+			workflowRouterContext("fan-out-and-synthesize"),
+		);
 		assert.equal(result.action, "run");
 		const r = result as {
 			action: "run";
@@ -114,11 +120,16 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 
 	test("action='run' without adapters reports honest failure, not a stub", async () => {
 		const execute = mock.tools[0]!.opts.execute;
-		const result = await runTool(execute, {
-			workflow: "fan-out-and-synthesize",
-			inputs: { prompt: "test", max_branches: 1 },
-			action: "run",
-		});
+		const result = await runTool(
+			execute,
+			{
+				workflow: "fan-out-and-synthesize",
+				inputs: { prompt: "test", max_branches: 1 },
+				action: "run",
+				state: workflowRouterState(),
+			},
+			workflowRouterContext("fan-out-and-synthesize"),
+		);
 		const r = result as {
 			action: "run";
 			runId: string;
@@ -141,14 +152,31 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 		}
 	});
 
-	test("action='run' for unknown workflow returns non-placeholder empty runId string with failed status", async () => {
+	test("action='run' ignores an unknown legacy name and routes before rejecting an invalid decision", async () => {
 		const execute = mock.tools[0]!.opts.execute;
-		const result = await runTool(execute, { workflow: "nonexistent-workflow-xyz", inputs: {}, action: "run" });
+		const ctx = workflowRouterContext("nonexistent-workflow-xyz");
+		const inference = vi.spyOn(ctx.modelRegistry!, "streamSimple");
+		const runsBefore = defaultStore.runs().map((run) => run.id);
+		const result = await runTool(
+			execute,
+			{
+				workflow: "nonexistent-workflow-xyz",
+				inputs: {},
+				action: "run",
+				state: workflowRouterState(),
+			},
+			ctx,
+		);
 		const r = result as { action: "run"; runId: string; status: string; error?: string };
 		assert.equal(r.status, "failed");
-		assert.ok(r.error!.includes("nonexistent-workflow-xyz"));
-		// not-found returns "" as runId (documented behaviour: empty sentinel for not-found)
+		assert.match(r.error ?? "", /Invalid structured output/);
+		// The router's unknown selection is invalid; the legacy argument is not a pre-router gate.
 		assert.equal(r.runId, "");
+		assert.equal(inference.mock.calls.length, 4);
+		assert.deepEqual(
+			defaultStore.runs().map((run) => run.id),
+			runsBefore,
+		);
 	});
 });
 

@@ -9,6 +9,7 @@ export const KNOWN_FIELDS = new Set([
 	"description",
 	"tools",
 	"model",
+	"modelConstraints",
 	"fallbackModels",
 	"fallbackThinkingLevels",
 	"thinking",
@@ -73,6 +74,8 @@ export function serializeAgent(config: AgentConfig): string {
 	if (toolsValue) lines.push(`tools: ${toolsValue}`);
 
 	if (config.model) lines.push(`model: ${config.model}`);
+	if (config.modelConstraints)
+		lines.push(stringify({ modelConstraints: config.modelConstraints }, { lineWidth: 0 }).trimEnd());
 	const fallbackModelsValue = joinComma(config.fallbackModels);
 	if (fallbackModelsValue) lines.push(`fallbackModels: ${fallbackModelsValue}`);
 	const fallbackThinkingLevelsValue = joinComma(config.fallbackThinkingLevels);

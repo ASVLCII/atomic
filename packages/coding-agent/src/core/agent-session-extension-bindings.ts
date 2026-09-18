@@ -374,6 +374,7 @@ export function _bindExtensionCore(
 				else void compact();
 			},
 			getSystemPrompt: () => this.systemPrompt,
+			getRouterModel: () => this.settingsManager.getRouterModel(),
 			getSkillCatalog: () => getSkillCatalog(publication?.resourceLoader ?? this._resourceLoader),
 			getSystemPromptOptions: () => this._baseSystemPromptOptions,
 		},

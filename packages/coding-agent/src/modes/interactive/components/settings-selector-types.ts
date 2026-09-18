@@ -28,6 +28,8 @@ export interface SettingsConfig {
 	thinkingLevel: ThinkingLevel;
 	availableThinkingLevels: ThinkingLevel[];
 	availableDefaultModels?: Model<Api>[];
+	routerModel?: string;
+	routerModelScope?: "global" | "project";
 	modelThinkingLevels?: Record<string, ThinkingLevel>;
 	currentTheme: string;
 	terminalTheme: TerminalTheme;
@@ -67,6 +69,7 @@ export interface SettingsCallbacks {
 	onHttpIdleTimeoutChange: (timeoutMs: number) => void;
 	onBashInterceptorEnabledChange: (enabled: boolean) => void;
 	onThinkingLevelChange: (level: ThinkingLevel) => void;
+	onRouterModelChange?: (model: string) => void;
 	onModelThinkingLevelChange?: (provider: string, modelId: string, level: ThinkingLevel) => void;
 	onModelThinkingLevelRemove?: (provider: string, modelId: string) => void;
 	onThemeChange: (theme: string) => void;

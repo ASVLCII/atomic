@@ -155,6 +155,7 @@ export interface DurableWorkflowBackend {
 				sessionFile?: string;
 				startedAt?: number;
 				durationMs?: number;
+				routerSelection?: import("@bastani/atomic").ModelRouterOutput;
 		  }
 		| undefined;
 
@@ -423,6 +424,7 @@ export class InMemoryDurableBackend implements DurableWorkflowBackend {
 				sessionFile?: string;
 				startedAt?: number;
 				durationMs?: number;
+				routerSelection?: import("@bastani/atomic").ModelRouterOutput;
 		  }
 		| undefined {
 		const checkpoint = this.workflows.get(workflowId)?.stageSessionByReplayKey.get(replayKey);
@@ -432,6 +434,7 @@ export class InMemoryDurableBackend implements DurableWorkflowBackend {
 			...(checkpoint.sessionFile !== undefined ? { sessionFile: checkpoint.sessionFile } : {}),
 			...(checkpoint.startedAt !== undefined ? { startedAt: checkpoint.startedAt } : {}),
 			...(checkpoint.durationMs !== undefined ? { durationMs: checkpoint.durationMs } : {}),
+			...(checkpoint.routerSelection !== undefined ? { routerSelection: checkpoint.routerSelection } : {}),
 		};
 	}
 

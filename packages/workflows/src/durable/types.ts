@@ -257,6 +257,7 @@ export interface DurableStageCheckpoint {
 	readonly thinkingLevel?: string;
 	readonly attemptedModels?: readonly string[];
 	readonly modelAttempts?: readonly WorkflowModelAttempt[];
+	readonly routerSelection?: import("@bastani/atomic").ModelRouterOutput;
 	/** Schema-backed task value; independent of assistant text. */
 	readonly structured?: WorkflowSerializableValue;
 	/** Worktree or output artifacts collected for a completed task. */

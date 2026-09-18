@@ -221,5 +221,14 @@ export function taskWithSharedDefaults(
 	return {
 		...sharedTaskDefaultsFromOptions(options),
 		...withoutUndefinedProperties(taskOptions),
+		...(options.modelConstraints !== undefined && taskOptions.modelConstraints !== undefined
+			? {
+					inheritedModelConstraints: [
+						...(options.inheritedModelConstraints ?? []),
+						options.modelConstraints,
+						...(taskOptions.inheritedModelConstraints ?? []),
+					],
+				}
+			: {}),
 	} as WorkflowTaskExecutionOptions;
 }

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { describe, test } from "vitest";
+import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import type {
 	ExtensionAPI,
 	ExtensionRuntime,
@@ -135,15 +136,16 @@ export default workflow({
 					action: "run",
 					workflow: "tool-headless-lifecycle",
 					inputs: {},
+					state: workflowRouterState(),
 				},
 				undefined,
 				undefined,
-				{ hasUI: false } as never,
+				{ ...workflowRouterContext("tool-headless-lifecycle"), hasUI: false },
 			);
 
 			assert.equal(result.details.action, "run");
 			const run = result.details as Extract<WorkflowToolResult, { action: "run" }>;
-			assert.equal(run.status, "completed");
+			assert.equal(run.status, "completed", run.error);
 			assert.deepEqual(run.result, { ok: true, source: "tool" });
 			assert.equal(
 				resource.sent.some((message) => message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE),

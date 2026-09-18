@@ -2,6 +2,7 @@ import type {
 	Api,
 	AssistantMessage,
 	AssistantMessageEventStream,
+	AuthOperationOptions,
 	AuthResult,
 	Context,
 	Model,
@@ -65,6 +66,11 @@ export class ModelRegistry {
 
 	hasConfiguredAuth(model: Model<Api>): boolean {
 		return this.runtime.hasConfiguredAuth(model.provider);
+	}
+
+	/** Boolean-only access to configured credential screening, without resolving request auth. */
+	containsConfiguredCredential(serialized: string): Promise<boolean> {
+		return this.runtime.containsConfiguredCredential(serialized);
 	}
 
 	async getApiKeyAndHeaders(model: Model<Api>): Promise<ResolvedRequestAuth> {
@@ -133,8 +139,8 @@ export class ModelRegistry {
 		return this.runtime.getProvider(provider)?.name ?? provider;
 	}
 
-	getProviderAuth(provider: string): Promise<AuthResult | undefined> {
-		return this.runtime.getAuth(provider);
+	getProviderAuth(provider: string, options?: AuthOperationOptions): Promise<AuthResult | undefined> {
+		return this.runtime.getAuth(provider, options);
 	}
 
 	async getApiKeyForProvider(provider: string): Promise<string | undefined> {

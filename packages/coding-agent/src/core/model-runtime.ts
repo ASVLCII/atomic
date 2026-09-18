@@ -31,6 +31,8 @@ import { getAgentDir } from "../config.js";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.js";
 import { normalizePath } from "../utils/paths.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
+import { containsAuthConfig } from "./credential-screening.ts";
+import { jevAuthProvider } from "./decision-provider.js";
 import {
 	copilotAdvertisedFastModelIds,
 	copilotAdvertisesModelId,
@@ -186,6 +188,7 @@ export class ModelRuntime implements Models {
 					? provider
 					: withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt),
 			);
+		providers.push(jevAuthProvider());
 		const runtime = new ModelRuntime(
 			credentials,
 			config,
@@ -220,6 +223,19 @@ export class ModelRuntime implements Models {
 			...this.config.getProviderIds(),
 			...this.extensionProviders.keys(),
 		]);
+	}
+
+	/** Privacy boundary: no request auth resolution, credential commands, or OAuth refresh. */
+	async containsConfiguredCredential(serialized: string): Promise<boolean> {
+		if (await this.credentials.containsConfiguredCredential(serialized)) return true;
+		for (const providerId of this.providerIds()) {
+			if (
+				containsAuthConfig(serialized, this.config.getProvider(providerId)) ||
+				containsAuthConfig(serialized, this.extensionProviders.get(providerId))
+			)
+				return true;
+		}
+		return false;
 	}
 	/**
 	 * Overlay derived selectable `-fast` model variants. Applied last so exact `-fast` IDs owned by the
@@ -291,6 +307,7 @@ export class ModelRuntime implements Models {
 		this.snapshot = updateSnapshotModels(this.snapshot, [...this.models.getModels()]);
 	}
 	private async runAvailabilityRefresh(seq: number, errorSeq: number, signal: AbortSignal): Promise<void> {
+		const inputsGeneration = this.catalogInputsGeneration;
 		const providers = this.models.getProviders();
 		const [available, checks, credentials] = await Promise.all([
 			this.models.getAvailable(undefined, { signal }),
@@ -304,7 +321,7 @@ export class ModelRuntime implements Models {
 			),
 			this.credentials.list({ signal }),
 		]);
-		if (seq !== this.availabilityRefreshSeq) return;
+		if (seq !== this.availabilityRefreshSeq || inputsGeneration !== this.catalogInputsGeneration) return;
 		this.snapshot = createModelRuntimeSnapshot([...this.models.getModels()], [...available], checks, credentials);
 		if (errorSeq === this.availabilityErrorSeq) this.availabilityError = undefined;
 	}
@@ -321,6 +338,7 @@ export class ModelRuntime implements Models {
 		});
 	}
 	private async refreshProviderAvailability(providerId: string, signal: AbortSignal): Promise<void> {
+		const inputsGeneration = this.catalogInputsGeneration;
 		++this.availabilityRefreshSeq;
 		const providerSeq = (this.providerAvailabilitySeq.get(providerId) ?? 0) + 1;
 		this.providerAvailabilitySeq.set(providerId, providerSeq);
@@ -332,7 +350,11 @@ export class ModelRuntime implements Models {
 				this.credentials.read(providerId, { signal }),
 			]);
 			signal.throwIfAborted();
-			if (this.providerAvailabilitySeq.get(providerId) !== providerSeq) return;
+			if (
+				this.providerAvailabilitySeq.get(providerId) !== providerSeq ||
+				inputsGeneration !== this.catalogInputsGeneration
+			)
+				return;
 			const configuredProviders = new Set(this.snapshot.configuredProviders),
 				storedProviders = new Set(this.snapshot.storedProviders),
 				storedCredentialTypes = new Map(this.snapshot.storedCredentialTypes),
@@ -708,6 +730,15 @@ export class ModelRuntime implements Models {
 			await this.synchronizeCredentialState(providerId, "saveCredential", credential, async () => {
 				const result = await this.refresh({ providers: [providerId] });
 				this.assertCredentialRefreshSucceeded(providerId, result);
+				// A concurrent catalog refresh can supersede this provider's availability
+				// publication. The committed credential must still be visible when save returns.
+				this.snapshotGeneration += 1;
+				this.externalProviderAuthStatuses.delete(providerId);
+				this.snapshot = {
+					...addStoredCredentialProvider(this.snapshot, providerId, credential.type),
+					// Keep credential-filtered model availability from the refresh intact.
+					available: this.snapshot.available,
+				};
 			});
 		});
 	}

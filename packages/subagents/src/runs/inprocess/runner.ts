@@ -120,6 +120,7 @@ export interface ChildSpec {
 	 * candidate-advancement behavior main chat and workflow stages share.
 	 */
 	readonly fallbackModels?: readonly string[];
+	readonly isFallbackModelAllowed?: CreateAgentSessionOptions["isFallbackModelAllowed"];
 	readonly onProgress?: (progress: AgentProgress) => void;
 	/** Run-scoped progress.md path used to recover partial findings after parent abort. */
 	readonly progressPath?: string;
@@ -991,9 +992,10 @@ export class SubagentControlRuntime {
 							cwd: admitted.policy.cwd,
 							model: candidate.model ?? admitted.policy.model,
 							thinkingLevel: candidate.thinkingLevel ?? admitted.policy.thinkingLevel,
-							...(admitted.spec.fallbackModels?.length
+							...(admitted.spec.fallbackModels !== undefined
 								? { fallbackModels: [...admitted.spec.fallbackModels] }
 								: {}),
+							isFallbackModelAllowed: admitted.spec.isFallbackModelAllowed,
 							tools: admitted.policy.tools ? [...admitted.policy.tools] : undefined,
 							excludedTools: admitted.policy.excludedTools ? [...admitted.policy.excludedTools] : undefined,
 							customTools: admitted.policy.customTools,

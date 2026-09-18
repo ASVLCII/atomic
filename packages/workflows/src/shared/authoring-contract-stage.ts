@@ -1,5 +1,6 @@
 /** Workflow authoring primitives, stage/session contracts, and task option types. */
 
+import type { ModelConstraints, ModelRoute, ModelRouterOutput } from "@bastani/atomic";
 import type { Static, TSchema } from "typebox";
 
 export type { Static, TSchema };
@@ -107,6 +108,14 @@ export interface WorkflowModelInfo {
 
 export interface WorkflowModelCatalogPort {
 	listModels(): Promise<readonly WorkflowModelInfo[]>;
+	routeModel?(input: {
+		task: string;
+		stageName: string;
+		instructions?: string;
+		constraints: readonly ModelConstraints[];
+		signal?: AbortSignal;
+		selection?: ModelRouterOutput;
+	}): Promise<ModelRoute>;
 	readonly currentModel?: WorkflowModelValue;
 	readonly preferredProvider?: string;
 	recordWarning?: (warning: string) => void;
@@ -157,6 +166,8 @@ export interface StageOptions<TSchemaDef extends TSchema | undefined = TSchema |
 	/** Optional structured final-answer schema. When set, the stage receives a schema-specific final-answer tool. */
 	readonly schema?: TSchemaDef;
 	readonly model?: WorkflowModelValue;
+	/** Hard restrictions for automatic model selection and its execution fallbacks. */
+	readonly modelConstraints?: ModelConstraints;
 	readonly mcp?: StageMcpOptions;
 	readonly tools?: readonly string[];
 	readonly noTools?: "all" | "builtin";
@@ -393,6 +404,7 @@ export interface WorkflowTaskResult extends WorkflowTaskContext {
 	readonly artifacts?: readonly WorkflowArtifact[];
 	readonly model?: string;
 	readonly thinkingLevel?: string;
+	readonly routerSelection?: ModelRouterOutput;
 	readonly attemptedModels?: readonly string[];
 	readonly modelAttempts?: readonly WorkflowModelAttempt[];
 	readonly warnings?: readonly string[];

@@ -172,6 +172,7 @@ Remote pi.dev catalogs persist their ETag and are revalidated with `If-None-Matc
 | OpenCode Go                        | `OPENCODE_API_KEY`                                                        | `opencode-go`                |
 | Radius                             | `RADIUS_API_KEY`                                                          | `radius`                     |
 | Hugging Face                       | `HF_TOKEN`                                                                | `huggingface`                |
+| TypeSafe Jev                       | `TYPESAFE_AI_API_KEY`                                                     | `typesafe-ai`                |
 | Fireworks                          | `FIREWORKS_API_KEY`                                                       | `fireworks`                  |
 | Together AI                        | `TOGETHER_API_KEY`                                                        | `together`                   |
 | Baseten                            | `BASETEN_API_KEY`                                                         | `baseten`                    |
@@ -476,6 +477,18 @@ Or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
 ## llama.cpp
 
 For router-mode discovery, load/unload management, and Hugging Face downloads with a local llama.cpp server, see [llama.cpp](/llama-cpp). Configure it with `/login llama.cpp` or `LLAMA_BASE_URL` and manage models with `/llama`.
+
+## TypeSafe Jev
+
+`typesafe-ai/jev` is a built-in structured-decision provider, not a chat or tool-calling model. It is available for [workflow launch routing](/workflows/operations#model-invoked-launch-routing) and [SDK structured decisions](/sdk/structured-decisions), not `/model`, chat `--model`, or child execution model fields. SDK integrations can inspect its supported capabilities with `getStructuredOutputProviders()`.
+
+Use `/login typesafe-ai` to save an API key in `auth.json`, or set `TYPESAFE_AI_API_KEY` in Atomic's process environment. Stored credentials take precedence over the environment key, just as for other API-key providers. `/logout` removes the saved key; an environment key remains active until you unset it. Jev appears in `/login` but not `/model`, because it only makes structured decisions. Do not put the key in prompts, decision state, or `settings.json`.
+
+With an empty `routerModel`, configured Jev credentials select Jev for prerequisite workflow and subagent-auto routing. An explicit router selection takes precedence. General SDK structured-output requests select their inference model explicitly. This does not change the `structured_output` tool's model. User-issued `/workflow` commands bypass launch routing.
+
+Atomic sends `POST https://api.typesafe.ai/v1/systemone` with wire model `jev-latest`, Bearer authentication, shared state and typed Choice questions. It does not send OpenAI chat-completion requests or ask Jev to generate arbitrary JSON Schema. Workflow and automatic model routers allow an initial attempt plus up to three repairs for malformed or schema-invalid answers within one shared deadline; generic SDK structured decisions remain one-shot. Authentication/provider failures, cancellation and stale catalogs are not retried. Choices above 255 options use a bounded multi-request tournament that includes every original candidate, retains three per batch, and compares finalists. Questions are packed using estimated context accounting, not a guaranteed tokenizer fit; state is never trimmed and actual context overflows fail at the provider. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits) for usage, grouping sensitivity and cancellation behavior.
+
+HTTP 401 means check the key saved through `/login typesafe-ai` or `TYPESAFE_AI_API_KEY`, 422 means check the question/state contract, and 429 or 529 means wait before retrying explicitly. Configured credentials do not verify access or quota. See [TypeSafe's API](https://docs.typesafe.ai/api.md) and [Choice reference](https://docs.typesafe.ai/primitives/choice.md).
 
 ## Custom Providers
 

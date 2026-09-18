@@ -1,6 +1,7 @@
 import { getSupportedThinkingLevels } from "@bastani/pi-ai/compat";
 import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
+import { resolveAndValidateInputs } from "../runs/foreground/executor-inputs.js";
 import { workflowDependency } from "../sdk-surface.js";
 import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
 import { store } from "../shared/store.js";
@@ -12,6 +13,7 @@ import { formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.j
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
 import { raceWorkflowRequestAbort } from "./workflow-request-abort.js";
+import { routeWorkflowLaunch, WORKFLOW_INLINE_GUIDANCE } from "./workflow-router.js";
 import { buildWorkflowStatusListing, setWorkflowStatusRenderRuns } from "./workflow-status-summary.js";
 import {
 	isResolvedRunId,
@@ -134,10 +136,87 @@ export function makeExecuteWorkflowTool(
 				return awaitRequest(getRuntime().dispatch(args, { policy, signal }));
 			}
 			case "run": {
-				await ensureWorkflowResourcesVisible();
-				// A tool launch is the agent's own action: it is attributed as such and
-				// the tool result already reports the run, so it raises no chat notice.
-				return awaitRequest(getRuntime().dispatch(args, { policy, origin: "agent", signal, onRunAccepted }));
+				let acceptedRunId: string | undefined;
+				let approvedRoute: Awaited<ReturnType<typeof routeWorkflowLaunch>> | undefined;
+				try {
+					args = structuredClone(args);
+					// Do not turn a missing/failed initial resource load into a partial routing catalog.
+					await awaitRequest(Promise.resolve(ensureWorkflowResourcesLoaded()));
+					const routed = await routeWorkflowLaunch(args, ctx, getRuntime, signal);
+					const { decision } = routed;
+					if (decision.workflowType === "none") {
+						return {
+							action: "run",
+							runId: "",
+							status: "not_launched",
+							routerDecision: decision,
+							estimatedDuration: decision.estimatedDuration,
+							message: WORKFLOW_INLINE_GUIDANCE,
+						};
+					}
+					routed.assertCurrent();
+					approvedRoute = routed;
+					const selected = getRuntime().registry.get(decision.workflowType)!;
+					let inputs: ReturnType<typeof resolveAndValidateInputs>;
+					try {
+						inputs = resolveAndValidateInputs(selected.inputs, args.inputs ?? {}, "selected workflow");
+					} catch {
+						return {
+							action: "run",
+							runId: "",
+							status: "needs_input",
+							name: selected.normalizedName,
+							routerDecision: decision,
+							estimatedDuration: decision.estimatedDuration,
+							inputContract: selected.inputs,
+							message:
+								"Selected workflow inputs are missing or invalid. Supply values matching inputContract from the user's actual context, or ask for required human input. No workflow was launched. A later run routes again; do not assume the same selection or remap stale inputs.",
+						};
+					}
+					const result = await awaitRequest(
+						getRuntime().dispatch(
+							{ ...args, workflow: decision.workflowType, inputs, budget: decision.maxBudget },
+							{
+								policy,
+								origin: "agent",
+								signal,
+								assertRoutingCurrent: routed.assertCurrent,
+								onRunAccepted: (id) => {
+									acceptedRunId = id;
+									onRunAccepted?.(id);
+								},
+							},
+						),
+					);
+					return result.action === "run"
+						? { ...result, routerDecision: decision, estimatedDuration: decision.estimatedDuration }
+						: result;
+				} catch (error) {
+					if (signal?.aborted) throw signal.reason ?? error;
+					// Once accepted, preserve the existing runtime error path rather than claim no launch.
+					if (acceptedRunId !== undefined) throw error;
+					// A setup error does not erase a valid decision, but a registry change does.
+					let routerDecision: NonNullable<typeof approvedRoute>["decision"] | undefined;
+					try {
+						approvedRoute?.assertCurrent();
+						routerDecision = approvedRoute?.decision;
+					} catch {
+						routerDecision = undefined;
+					}
+					return {
+						action: "run",
+						runId: "",
+						status: "failed",
+						stages: [],
+						...(routerDecision === undefined
+							? {}
+							: { routerDecision, estimatedDuration: routerDecision.estimatedDuration }),
+						error:
+							error instanceof Error
+								? error.message
+								: "Workflow routing failed. No workflow was launched; retry explicitly.",
+					};
+				}
 			}
 			case "dependency": {
 				const operation = args.operation ?? "status";
