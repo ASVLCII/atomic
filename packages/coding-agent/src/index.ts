@@ -1,3 +1,4 @@
+export type { ExtensionBindings } from "./core/agent-session-types.js";
 export type {
 	HostDiagnostic,
 	HostInput,

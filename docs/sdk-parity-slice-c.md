@@ -82,3 +82,21 @@ Round 2 reran every build/check/test command in the validation list above, using
 `node test/fixtures/sdk-host-input-consumer.mjs` passed with zero stdout/stderr and normal process exit. The fixture also failed against the pre-repair built code (`/tmp/sdk-c-r2-node-red.log`). Reviewer probes reproduced sparse answer TypeError, accepted sparse selections and accessor-induced Node exit 1 before repair (`/tmp/sdk-c-r2-sparse-before.log`, `/tmp/sdk-c-r2-throw-before.log`). SDK red/green logs are `/tmp/sdk-c-r2-sparse-red.log`, `/tmp/sdk-c-r2-sparse-green.log`, `/tmp/sdk-c-r2-throw-red.log`, `/tmp/sdk-c-r2-green.log`.
 
 `qlty metrics --functions packages/coding-agent/src/core/extensions/host-input.ts` and `qlty smells packages/coding-agent/src/core/extensions/host-input.ts` completed with existing configuration unchanged; logs `/tmp/sdk-c-r2-qlty-{metrics,smells}.log`. Request complexity increased from 21 to 24 for the explicit exception boundary; questionnaire validation remains 22. The prior combined-suite beforeExit listener warning remains, and the standalone Node fixture remains silent. No unrelated cleanup, D–H work or external publication was performed. Existing guide and Unreleased validation guidance remain accurate and need no further change. Only this repair's resolved ISSUES.md section was removed; inherited entries remain untouched.
+
+## Review round 3 repair
+
+All three consolidated P2 findings identify the same missing named `ExtensionBindings` root export. The earlier exact-export claim was incomplete: Vitest erased the parity test's type-only import without checking it. The root now re-exports the original interface from `agent-session-types`, without a wrapper or inferred substitute.
+
+`test/unit/sdk-host-input-contract.test.ts` now imports the named public contract and checks equality with its original definition and `AgentSession.bindExtensions`, non-any identity, exact human-input/diagnostic fields, permitted omitted/null bindings, and rejection of incomplete adapters. This file is included in the authoritative root `tsc --noEmit` gate. Before the export, that command failed with TS2305; after the one-line export it passed. Logs: `/tmp/sdk-c-r3-type-{red,green}.log`.
+
+The independent built-root probe also failed TS2305 before repair and passed after rebuilding:
+
+```sh
+./node_modules/.bin/tsc --ignoreConfig --noEmit --module NodeNext --moduleResolution NodeNext --target ES2023 --strict --types node --typeRoots "$PWD/node_modules/@types" --skipLibCheck true /tmp/sdk-c-completion-e917-export.mts
+```
+
+The probe contains `import type { ExtensionBindings } from '/Users/tonystark/Documents/projects/atomic-sdk-3105-c/packages/coding-agent/dist/index.js'; export type HostBindings = ExtensionBindings;`. Logs: `/tmp/sdk-c-r3-consumer-{red,green}.log`. This is built-checkout type proof, not H's packed-package or full declaration-closure proof.
+
+All validation commands listed above were rerun with `/tmp/sdk-c-r3-` logs: `npm run build` and `npm run check` passed; package groups passed 120 + 20 + 76 tests; root groups passed 20 + 107 + 12 tests, **355 tests in 29 files with no acceptance skips**. The built Node fixture passed with zero output and normal exit. The three duplicate findings are repaired; independent re-review remains separate.
+
+`qlty metrics --functions packages/coding-agent/src/index.ts test/unit/sdk-host-input-contract.test.ts` and `qlty smells` with the same paths completed with no reported findings, using existing configuration. Qlty parsed one file of the two requested paths; no broad lint/coverage claim is made. The combined-package beforeExit listener warning remains disclosed. No runtime, D–H, guide/changelog or external-publication changes were needed. Only this repair's resolved ISSUES.md section was removed; inherited content is unchanged.
