@@ -12,16 +12,19 @@ const root = mkdtempSync(join(tmpdir(), "atomic-shared-bus-"));
 process.env.ATOMIC_FAULT_TEST_HOME = root;
 const eventBus = createEventBus();
 const scopes = [];
+const shared = process.argv[2] === "loader";
+const settingsManager = SettingsManager.inMemory();
+let borrowedLoader;
 async function create(name) {
-	const cwd = join(root, name);
+	const cwd = join(root, shared ? "shared" : name);
 	mkdirSync(join(cwd, ".atomic", "workflows"), { recursive: true });
 	writeFileSync(join(cwd, ".atomic", "workflows", "sdk-host-durable.ts"), readFileSync(new URL("./sdk-host-durable-workflow.ts", import.meta.url)));
-	const settingsManager = SettingsManager.inMemory();
-	const resourceLoader = new DefaultResourceLoader({
+	const resourceLoader = borrowedLoader ?? new DefaultResourceLoader({
 		cwd, agentDir: join(cwd, "agent"), settingsManager, eventBus, noExtensions: true, noContextFiles: true,
-		extensionFactories: [(pi) => { scopes.push(pi.lifecycleScope); }],
+		extensionFactories: [(pi) => { pi.on("session_start", () => { scopes.push(pi.lifecycleScope); }); }],
 	});
-	await resourceLoader.reload();
+	if (!borrowedLoader) await resourceLoader.reload();
+	if (shared) borrowedLoader = resourceLoader;
 	return (await createAgentSession({
 		cwd, agentDir: join(cwd, "agent"), settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(cwd),
 		builtins: { subagents: false, mcp: false, intercom: false, "web-access": false },

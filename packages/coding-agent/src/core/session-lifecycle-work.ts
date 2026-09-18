@@ -7,6 +7,11 @@ const work = new WeakMap<object, Set<Promise<void>>>();
 const lifetimes = new WeakMap<object, AbortController>();
 export const sessionGenerationClosing = new WeakSet<object>();
 
+export function assertSessionOpen(session: { _disposed: boolean }): void {
+	if (session._disposed || sessionGenerationClosing.has(session))
+		throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
+}
+
 export function hasSessionReload(session: object): boolean {
 	return reloads.has(session);
 }

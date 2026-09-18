@@ -1820,7 +1820,9 @@ test("independent loaders sharing an event bus retain distinct scopes across rel
 				noExtensions: true,
 				extensionFactories: [
 					(pi) => {
-						ownerScopes.push(pi.lifecycleScope!);
+						pi.on("session_start", () => {
+							ownerScopes.push(pi.lifecycleScope!);
+						});
 					},
 				],
 			});
@@ -1952,7 +1954,6 @@ test.each([
 			},
 		],
 	});
-	await resourceLoader.reload();
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: join(cwd, "agent"),
@@ -2073,7 +2074,6 @@ test("disposal retains a reload candidate cleanup failure after reload has rejec
 			},
 		],
 	});
-	await resourceLoader.reload();
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: join(cwd, "agent"),
@@ -2126,7 +2126,6 @@ test("reload publication cannot admit an overlapping reload", async () => {
 			},
 		],
 	});
-	await resourceLoader.reload();
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: join(cwd, "agent"),
@@ -2149,6 +2148,127 @@ test("reload publication cannot admit an overlapping reload", async () => {
 	} finally {
 		release.resolve();
 		await first;
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: manual compaction is admitted work, including noncooperative extension preflight.
+test("compaction drains admitted hooks and refuses terminal admission", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-compact-close-"));
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	let effects = 0;
+	const settingsManager = SettingsManager.inMemory();
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_before_compact", async () => {
+					effects++;
+					entered.resolve();
+					await release.promise;
+					return { compactedText: "retained" };
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const sessionManager = SessionManager.inMemory(cwd);
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager,
+		model: getModel("anthropic", "claude-sonnet-4-5")!,
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	sessionManager.appendMessage({
+		role: "user",
+		content: Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"),
+		timestamp: 0,
+	});
+	const before = sessionManager.getEntries().length;
+	const result = session.compact({ preserve_recent: 0 }).catch((error: unknown) => error);
+	try {
+		await entered.promise;
+		let closed = false;
+		const closing = session.dispose().then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(closed, false);
+		release.resolve();
+		await closing;
+		assert.equal(((await result) as { code?: string }).code, "SessionClosed");
+		await assert.rejects(session.compact(), { code: "SessionClosed" });
+		await assert.rejects(session.setModel(session.model!), { code: "SessionClosed" });
+		await assert.rejects(session.cycleModel(), { code: "SessionClosed" });
+		await assert.rejects(session.completeStartupResources(resourceLoader), { code: "SessionClosed" });
+		await assert.rejects(session.extendResourcesFromExtensions("startup"), { code: "SessionClosed" });
+		assert.equal(effects, 1);
+		assert.equal(sessionManager.getEntries().length, before);
+	} finally {
+		release.resolve();
+		await result;
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: tree preflight is also work admission, even without requesting a summary.
+test("tree navigation drains preflight and refuses a retired generation", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-tree-close-"));
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const settingsManager = SettingsManager.inMemory();
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_before_tree", async () => {
+					entered.resolve();
+					await release.promise;
+				});
+			},
+		],
+	});
+	const sessionManager = SessionManager.inMemory(cwd);
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager,
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	const target = sessionManager.appendMessage({ role: "user", content: "first", timestamp: 0 });
+	sessionManager.appendMessage({ role: "user", content: "second", timestamp: 1 });
+	const leaf = sessionManager.getLeafId();
+	const result = session.navigateTree(target).catch((error: unknown) => error);
+	try {
+		await entered.promise;
+		let closed = false;
+		const closing = session.dispose().then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(closed, false);
+		release.resolve();
+		await closing;
+		assert.equal(((await result) as { code?: string }).code, "SessionClosed");
+		assert.equal(sessionManager.getLeafId(), leaf);
+		await assert.rejects(session.navigateTree(target), { code: "SessionClosed" });
+	} finally {
+		release.resolve();
+		await result;
 		await session.dispose();
 		rmSync(cwd, { recursive: true, force: true });
 	}

@@ -398,6 +398,8 @@ Use `await session.dispose()` rather than fire-and-forget cleanup. It seals admi
 
 `AgentSessionRuntime` uses the same awaited close when replacing sessions and transfers configured host bindings before the replacement starts. Reload invalidates old input requests and extension subscriptions while retaining host configuration. Live durable workflows retain their existing runtime ownership across reload and session replacement; final owner disposal waits for their shutdown. A late answer from an old generation cannot authorize replacement work.
 
+Terminal runtime disposal also drains admitted replacement preflight, factory and startup work; it never publishes a late successor. Session disposal drains admitted compaction work and prevents retired hooks/providers from writing new compaction results. Noncooperative callbacks must settle before disposal can finish. Independent sessions can borrow one `DefaultResourceLoader` and event bus: ownership belongs to each session, not the borrowed discovery object.
+
 Extensions can register tools, subscribe to events, add commands, and more. See [Extensions](/extensions) for the full API.
 
 **Event Bus:** Extensions can communicate via `pi.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:

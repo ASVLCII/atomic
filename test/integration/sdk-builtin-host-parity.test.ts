@@ -819,11 +819,11 @@ test(
 );
 
 // #3105: supported shared buses do not transfer workflow lifetime ownership.
-test(
-	"built Node shared-bus sibling reload and disposal preserve a pending workflow and exit naturally",
-	() => {
+test.each(["bus", "loader"])(
+	"built Node shared-%s sibling reload and disposal preserve a pending workflow and exit naturally",
+	(shared) => {
 		const result = spawnSyncCollect(
-			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-shared-bus.mjs", import.meta.url))],
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-shared-bus.mjs", import.meta.url)), shared],
 			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
 		);
 		assert.equal(result.exitCode, 0, result.stderr.toString());
@@ -837,7 +837,7 @@ test(
 );
 
 // #3105: release admitted callbacks while disposal is pending, then require real cleanup and natural exit.
-test.each(["prompt", "reload"] as const)(
+test.each(["prompt", "reload", "compact", "compact-provider"] as const)(
 	"built Node drains suspended %s admission before completing disposal",
 	(scenario) => {
 		const result = spawnSyncCollect(
@@ -852,7 +852,40 @@ test.each(["prompt", "reload"] as const)(
 		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
 			scenario,
 			drained: true,
-			providerCalls: 0,
+			providerCalls: scenario === "compact-provider" ? 1 : 0,
+			active: 0,
+		});
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
+// #3105: all existing replacement paths share terminal admission and tracked rollback.
+test.each([
+	...["preflight", "factory", "startup"].flatMap((phase) =>
+		["new", "resume", "fork", "import"].map((operation) => ({ phase, operation, failure: "none" })),
+	),
+	{ phase: "prepare", operation: "resume", failure: "none" },
+	{ phase: "factory", operation: "new", failure: "cleanup" },
+	{ phase: "startup", operation: "new", failure: "rollback" },
+])(
+	"built Node drains $operation replacement suspended in $phase with $failure failure",
+	({ phase, operation, failure }) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-replacement-drain.mjs", import.meta.url)),
+				phase,
+				operation,
+				failure,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
+			phase,
+			operation,
+			failure,
+			drained: true,
 			active: 0,
 		});
 	},

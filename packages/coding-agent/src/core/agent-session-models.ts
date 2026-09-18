@@ -6,6 +6,7 @@ import type { AgentSessionInternalSurface as AgentSession } from "./agent-sessio
 import { type ModelCycleResult, type ModelMutationOptions, THINKING_LEVELS } from "./agent-session-types.ts";
 import { formatNoApiKeyFoundMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { assertSessionOpen, trackSessionWork } from "./session-lifecycle-work.ts";
 
 export async function _getRequiredRequestAuth(
 	this: AgentSession,
@@ -110,27 +111,30 @@ export async function setModel(
 	model: Model<Api>,
 	options: ModelMutationOptions = {},
 ): Promise<void> {
-	if (!this._modelRuntime.hasConfiguredAuth(model.provider)) {
-		throw new Error(`No API key for ${model.provider}/${model.id}`);
-	}
-	this._clearFallbackModelScope?.();
+	assertSessionOpen(this);
+	return trackSessionWork(this, async () => {
+		if (!this._modelRuntime.hasConfiguredAuth(model.provider)) {
+			throw new Error(`No API key for ${model.provider}/${model.id}`);
+		}
+		this._clearFallbackModelScope?.();
 
-	const previousModel = this.model;
-	const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
-	const nextModel = model;
-	this.agent.state.model = nextModel;
-	this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-	if (options.persist) {
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
-		addPersistedDefaultToNonEmptyScope(this, nextModel);
-	}
+		const previousModel = this.model;
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
+		const nextModel = model;
+		this.agent.state.model = nextModel;
+		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
+		if (options.persist) {
+			this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
+			addPersistedDefaultToNonEmptyScope(this, nextModel);
+		}
 
-	// Re-clamp thinking level for new model's capabilities
-	this.setThinkingLevel(thinkingLevel, options);
-	this._refreshBaseSystemPromptFromActiveTools();
+		// Re-clamp thinking level for new model's capabilities
+		this.setThinkingLevel(thinkingLevel, options);
+		this._refreshBaseSystemPromptFromActiveTools();
 
-	this._emitModelChanged(nextModel, previousModel, "set");
-	await this._emitModelSelect(nextModel, previousModel, "set");
+		this._emitModelChanged(nextModel, previousModel, "set");
+		await this._emitModelSelect(nextModel, previousModel, "set");
+	});
 }
 
 /**
@@ -145,10 +149,13 @@ export async function cycleModel(
 	direction: "forward" | "backward" = "forward",
 	options: ModelMutationOptions = {},
 ): Promise<ModelCycleResult | undefined> {
-	if (this._scopedModels.length > 0) {
-		return this._cycleScopedModel(direction, options);
-	}
-	return this._cycleAvailableModel(direction, options);
+	assertSessionOpen(this);
+	return trackSessionWork(this, async () => {
+		if (this._scopedModels.length > 0) {
+			return this._cycleScopedModel(direction, options);
+		}
+		return this._cycleAvailableModel(direction, options);
+	});
 }
 
 export async function _cycleScopedModel(
@@ -199,6 +206,7 @@ export async function _cycleAvailableModel(
 	options: ModelMutationOptions,
 ): Promise<ModelCycleResult | undefined> {
 	const availableModels = await this._modelRuntime.getAvailableSnapshot();
+	assertSessionOpen(this);
 	if (availableModels.length <= 1) return undefined;
 
 	const currentModel = this.model;

@@ -118,10 +118,7 @@ function createScopedSession(
 			{ ...options, extensionBindings: options.extensionBindings ?? context.bindings },
 			deferStart,
 		);
-		sessionLifecycleScopes.set(
-			result.session,
-			sessionLifecycleScopes.get(result.extensionsResult.runtime) ?? context.scope,
-		);
+		sessionLifecycleScopes.set(result.session, context.scope);
 		return result;
 	});
 }
@@ -133,6 +130,9 @@ async function constructAgentSession(
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
+	if (resourceLoader instanceof DefaultResourceLoader) {
+		resourceLoader = await resourceLoader.createSessionLoader(sessionLifecycleCreation.getStore()!.scope);
+	}
 
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;

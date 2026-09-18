@@ -9,7 +9,7 @@ User amendments carried forward: "make sure that you create PRs and loop until C
 ## Decisions
 
 - Durable workflows retain their existing runtime ownership across reload/new/resume/fork. Generation-owned provider calls, auth, input, shell work, child admission and subscriptions close. Actual final owner disposal drains retained workflow roots/stages and releases the last owned DBOS lease. Injected durability remains borrowed.
-- The internal optional `pi.lifecycleScope` identifies a runtime across replacement. It is not a host setting or control API. SDK children receive independent scope identities. Separate loaders sharing a borrowed event bus also have independent owners; workflow stores and lifetime cleanup use that explicit identity. Reload transfers the loader's rightful scope. Existing host bindings transfer before successor startup.
+- The internal optional `pi.lifecycleScope` identifies a runtime across replacement. It is not a host setting or control API. Independent session creation originates a fresh identity, including SDK children and sessions borrowing the same loader, event bus or settings. Only explicit reload/runtime lineage transfers it. Borrowed default loaders supply discovery configuration/assets, not a shared live extension generation. Existing host bindings transfer before successor startup.
 - Mutable workflow stores, registries and tool/status/control helpers capture the owning session's concrete resources rather than the latest process-global facade.
 - Native closed task-owner scopes never reopen. Reload creates a fresh internal owner identity without changing the public session ID or a borrowed workflow-stage owner.
 - Closed ordinary input, prompt, shell and auth admission refuse rather than accepting work into a retired generation. Raw payloads and tool result formats are unchanged; no new text normalization or duplicate policy.
@@ -18,16 +18,16 @@ User amendments carried forward: "make sure that you create PRs and loop until C
 
 | Required clause | Evidence |
 | --- | --- |
-| Awaited idempotent disposal, synchronous admission seal | `sdk-builtin-parity.test.ts`: public disposal Promise identity, pending shutdown, immediate prompt/binding/reload/input refusal, repeated success/failure outcome |
-| Ordered cancellation/drain/settlement and no replay | Public shell/input drain, active-provider/OAuth and queued-child tests; suspended `input`/`before_agent_start` hooks remain owned until settlement and cannot enter a retired provider turn |
+| Awaited idempotent disposal, synchronous admission seal | `sdk-builtin-parity.test.ts`: public disposal Promise identity, pending shutdown, immediate prompt/binding/reload/input/compact/tree/model/startup-resource refusal; replacement fixture checks repeated runtime success/failure outcome |
+| Ordered cancellation/drain/settlement and no replay | Public shell/input drain, active-provider/OAuth and queued-child tests; suspended prompt, compaction hook/provider and tree preflight remain owned until settlement and cannot write retired results or enter a retired provider turn |
 | Every cleanup attempted; aggregate component causes | Public two-extension plus settings-flush failure test proves later session persistence runs; MCP final-close aggregate/deadline and real-adapter failure fixtures |
 | Persistence and subscription release | Protected-shutdown, runtime event subscriptions, RPC shell-source persistence suites; shutdown explicitly flushes session/settings persistence before lease release |
 | Startup rollback | SDK eager/deferred startup and post-discovery failure cases; workflow partial DBOS startup cleanup regression |
-| Replacement binding and identity | Runtime replacement startup receives inherited input; retired session refuses work; sibling scope differs |
+| Replacement binding and identity | Runtime replacement startup receives inherited input; new/resume/fork/import × preflight/factory/startup Node matrix proves terminal drain and no successor publication; prepared resume and candidate cleanup/rollback failures covered |
 | Reload invalidation and fresh admission | Transactional reload disposal races at `beforeSessionStart`, `session_start`, `resources_discover` and retiring shutdown; candidate rollback, callback rejection and aggregate cleanup failure; slash-command reload avoids draining itself; strict reload, Herdr, shell-owner and OAuth suites |
 | Borrowed stage resources survive replacement | Stage-runner public adapter ownership, shell-wait workflow-stage cases and workflow retained-generation tests |
 | Borrowed managers/model runtime | Public sibling uses the same settings manager after peer close; OAuth disposal retains caller's registered provider; injected workflow backend survives final lease release |
-| Sibling workflow survival | Built Node fixtures start/close siblings with independent buses and with one borrowed shared bus. Shared-bus fixture reloads both rightful owners, retains pending input and exits naturally; original fixture still completes exactly one guarded effect |
+| Sibling workflow survival | Built Node fixtures start/close siblings with independent buses, one borrowed shared bus, and one borrowed default loader plus shared bus/settings. Shared-resource fixture reloads both rightful owners, retains pending input and exits naturally; original fixture still completes exactly one guarded effect |
 | Last-owned runtime closes, no process-exit mask | Built non-TTY Node fixture exits naturally after public `session.dispose()`; no manual DBOS cleanup or `process.exit`; workflow beforeExit fallback removed |
 | Normal process state/architecture | No workflows build pipeline or new runtime service; no cwd mutation, signal handler or console suppression added; workflow owner resources passed explicitly |
 | Exact existing API identity and payload behavior | Prior A–E SDK and host parity suites rerun in full; `dispose` alone changes to `Promise<void>`; existing authored workflow hash remains `aee794cfa82fe248928ab07ec0964752c59a0bfc8ff685f814f710f9c4c61db2` |
@@ -75,7 +75,7 @@ Existing affected test fixtures were migrated, not weakened: concurrency cases n
 
 RED logs: `/tmp/3105-f-batch-{scope,prompt,reload,rollback,overlap}-red.log`; broader fixture failures: `/tmp/3105-f-batch-{core,unit}.log`. Exact reproducible commands are in `/tmp/3105-f-batch-commands.txt`.
 
-### Current verified acceptance
+### Previous round verified acceptance (baseline `2b21a7f3a`)
 
 - Unmodified `npm run build` and `npm run check`: exit 0; `/tmp/3105-f-batch-{build,check}-final.log`.
 - `npm run test --workspace=@bastani/atomic -- sdk-builtin-parity agent-session herdr-reload paused-protected-shutdown oauth-cancellation provider-oauth-login-signal interactive-engine-shutdown rpc-oauth-login rpc-bash interactive-deferred-startup-first-prompt session-temp-protection-lifecycle extensions-runner`: 54 files passed, 434 tests passed, including all 73 SDK parity tests; `/tmp/3105-f-batch-core-green.log`. Fourteen existing skips remain: live-provider branching/tree cases require credentials, and one real-PowerShell case requires its applicable platform/executable. No tests were newly skipped or failures filtered from the final run.
@@ -84,3 +84,37 @@ RED logs: `/tmp/3105-f-batch-{scope,prompt,reload,rollback,overlap}-red.log`; br
 - Exact shared-bus review probe: exit 0; `/tmp/3105-f-batch-shared-green.log`. Independent public Node admission oracles: both exit 0 with `drained: true`, `providerCalls: 0`, `active: 0`; `/tmp/3105-f-batch-{prompt,reload}-node-green.log`. Original sequential-release probes now exit 13 for unsettled top-level await, recorded as a noncompletion observation, not a success.
 - Supplemental qlty smells/metrics completed: `/tmp/3105-f-batch-{qlty,metrics}.log`. No lifecycle-helper smells; existing large prompt/binding modules still report complexity. Build/check remain authoritative.
 - All executed required local gates are green. Packed-consumer H, unexecuted platforms/live-provider cases, cumulative exact-head CI and actionable Greptile disposition remain parent/later-slice work; no remote results are claimed.
+
+## Latest consolidated F repair and disposition
+
+This section supersedes the previous round's completeness claim. All eight latest consolidated findings reduce to three reproduced P1 roots; none is deferred as an implementation follow-up:
+
+| Review finding / root | RED evidence on `2b21a7f3a` | Repair and current GREEN |
+| --- | --- | --- |
+| Compaction admission (completion/risk/evidence reviewers) | Both exact probes invoked retired hooks after awaited disposal and appended entries (3→4 and 12→13) | `compact()` seals admission, tracks hook/provider work and fences results after awaits; both exact probes now report `SessionClosed`, zero hooks and unchanged entries |
+| Replacement close race (completion/evidence/risk reviewers) | Suspended factory outlived runtime close and published a successor accepting `replacement-alive` | Runtime owns a terminal seal, shared close receipt, admitted-operation drain and candidate cleanup; exact probe observes close pending then no surviving successor |
+| Borrowed same-loader ownership (completion/evidence/risk reviewers) | Closing idle B paused A's pending workflow with `exitReason: quit` | Fresh factory scope plus session-local default-loader generations preserve discovery/deferral options and added assets without mutating the borrowed loader; explicit lineage alone transfers ownership. Exact probe retains A running; durable fixture also reloads both owners |
+
+Prepared but unbound extension runtimes no longer receive live session bus delivery. This prevents borrowed discovery callbacks from acting as a session owner. Existing deferred-startup regressions caught lost loader deferral options during repair; those options are now preserved. Fixture updates use actual started generations, await cleanup before removing directories and retain original behavioral assertions. No added skips, relaxed assertions, loader uniqueness restriction, manager API, forced process exit or private DBOS teardown was introduced. `ISSUES.md` remains untouched; no unresolved local debug note was added.
+
+### Analogous lifecycle audit
+
+- Manual compaction's hook and provider paths both drain; provider completion cannot append a retired transcript result. Tree navigation fences preflight/auth/summary completion and retains its existing branch-summary drain.
+- Async model selection/cycling and startup/resource extension now participate in admission/drain. Runtime startup and provider login/logout participate in runtime admission. Existing prompt, queue, input, OAuth, shell, child admission and transactional reload coverage remains green.
+- All four replacement APIs are exercised at preflight, factory and startup suspension, plus prepared resume. Disposal stays pending until independently released callbacks settle; no candidate publishes after closure. Candidate cleanup and startup rollback failures remain visible as `ShutdownFailed`, including repeated close.
+- Same-loader, same-bus and same-settings identities do not confer ownership. Sibling/reload and borrowed workflow-stage tests remain green. Session-local loader candidates retain configuration, resources and deferred startup behavior; caller-owned managers/model runtimes are not globally closed.
+
+### Current local evidence
+
+RED: `/tmp/3105-f-latest-{completion-admission,completion-replacement,risk-compact,risk-shared-loader}-red.log` capture exact probe assertion failures; durable regressions are recorded in `/tmp/3105-f-latest-{compact,tree,doors,loader-durable,replacement-durable}-red.log`. No timeout or unsettled-await exit is counted as GREEN.
+
+- Fresh unmodified `npm run build`: exit 0, `/tmp/3105-f-handoff-build.log`.
+- Fresh unmodified `npm run check`: exit 0, `/tmp/3105-f-handoff-check.log`; Biome, both coding-agent typecheck passes and shrinkwrap verification succeeded.
+- Exact `node /tmp/3105-f-{completion-admission,risk-compact,completion-replacement,risk-shared-loader}.mjs`: all exit 0 on the fresh build; individual `/tmp/3105-f-handoff-*.log` receipts.
+- Fresh direct built-Node compact/compact-provider drain and shared-loader fixtures also exit 0: zero active generations; provider counts 0/1 respectively; shared-loader sibling remains running after reload/close.
+- Full SDK parity plus affected coding-agent suites: 63 files passed, 481 tests passed, 14 pre-existing credential/PowerShell skips; `/tmp/3105-f-latest-core-second.log`. Command: `npm run test --workspace=@bastani/atomic -- sdk-builtin-parity agent-session herdr-reload paused-protected-shutdown oauth-cancellation provider-oauth-login-signal interactive-engine-shutdown rpc-oauth-login rpc-bash interactive-deferred-startup-first-prompt session-temp-protection-lifecycle extensions-runner extensions-loader resource-loader`.
+- Affected root suites: 45 files, 460 tests passed; `/tmp/3105-f-latest-unit.log`. Same root unit selectors as `/tmp/3105-f-batch-commands.txt`.
+- Full host parity: `npx vitest --run --project integration test/integration/sdk-builtin-host-parity.test.ts`: 65/65 passed; `/tmp/3105-f-latest-integration.log`. Includes natural built-Node exit for compaction hook/provider drain, shared-loader reload/sibling survival and the 15-case replacement matrix. No source/test changes followed those suite runs; this continuation changes documentation only.
+- Supplemental `qlty smells --no-upgrade-check --no-duplication` on lifecycle work/runtime/compaction/resource-loader and `qlty metrics --no-upgrade-check --functions` on lifecycle work/runtime: exit 0; `/tmp/3105-f-handoff-{qlty,metrics}.log`. Existing large modules and `fork` complexity (28) remain reported, not suppressed; no lifecycle-work helper smell.
+
+Local evidence uses macOS arm64 Node 26.8.2, deterministic inference/auth fixtures and built workspace exports. It does not claim paid-provider, other-platform, packed-consumer H or remote CI results. Noncooperative callbacks must settle; disposal does not invent a successful timeout. G/H scope and parent-owned exact-head CI/Greptile conditional-merge gates remain unchanged.

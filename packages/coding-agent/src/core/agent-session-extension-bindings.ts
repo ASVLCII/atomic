@@ -14,11 +14,13 @@ import type { PathMetadata } from "./package-manager.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import {
 	abortSessionWork,
+	assertSessionOpen,
 	drainSessionWork,
 	hasSessionReload,
 	renewSessionWork,
 	sessionGenerationClosing,
 	trackSessionReload,
+	trackSessionWork,
 } from "./session-lifecycle-work.ts";
 import { completeStartup, rollbackStartup } from "./session-startup-rollback.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
@@ -131,6 +133,7 @@ async function extendRunnerResources(
 ): Promise<void> {
 	if (!runner.hasHandlers("resources_discover")) return;
 	const { skillPaths, promptPaths, themePaths } = await runner.emitResourcesDiscover(session._cwd, reason);
+	if (session._disposed) throw hostInputError("SessionClosed");
 	if (skillPaths.length === 0 && promptPaths.length === 0 && themePaths.length === 0) return;
 	const extensionPaths: ResourceExtensionPaths = {
 		skillPaths: buildExtensionResourcePathsForLoader(session, loader, skillPaths),
@@ -207,6 +210,7 @@ export async function bindExtensions(this: AgentSession, bindings: ExtensionBind
 
 	this._applyExtensionBindings(this._extensionRunner);
 	await startExtensions(this, this._extensionRunner, this._resourceLoader, this._sessionStartEvent, async () => {
+		if (this._disposed) throw hostInputError("SessionClosed");
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 		if (recoverProtectedStreamingCustomMessages(this) > 0) {
@@ -216,9 +220,13 @@ export async function bindExtensions(this: AgentSession, bindings: ExtensionBind
 }
 
 export async function extendResourcesFromExtensions(this: AgentSession, reason: "startup" | "reload"): Promise<void> {
-	await extendRunnerResources(this, this._extensionRunner, this._resourceLoader, reason);
-	this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-	this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	assertSessionOpen(this);
+	return trackSessionWork(this, async () => {
+		await extendRunnerResources(this, this._extensionRunner, this._resourceLoader, reason);
+		assertSessionOpen(this);
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	});
 }
 
 export function buildExtensionResourcePaths(
@@ -646,16 +654,20 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 
 /** Publish approved startup resources without replacing the session or restarting safe reporters. */
 export async function completeStartupResources(this: AgentSession, resourceLoader: ResourceLoader): Promise<void> {
-	this._resourceLoader = resourceLoader;
-	const startNewcomers = this._extensionRunner.attachStartupExtensions(resourceLoader.getExtensions().extensions);
-	this._buildRuntime({
-		activeToolNames: this.getActiveToolNames(),
-		includeAllExtensionTools: true,
-		preserveRunner: true,
+	assertSessionOpen(this);
+	return trackSessionWork(this, async () => {
+		this._resourceLoader = resourceLoader;
+		const startNewcomers = this._extensionRunner.attachStartupExtensions(resourceLoader.getExtensions().extensions);
+		this._buildRuntime({
+			activeToolNames: this.getActiveToolNames(),
+			includeAllExtensionTools: true,
+			preserveRunner: true,
+		});
+		this.refreshCurrentModelFromRegistry();
+		await startNewcomers();
+		assertSessionOpen(this);
+		await this.extendResourcesFromExtensions("startup");
 	});
-	this.refreshCurrentModelFromRegistry();
-	await startNewcomers();
-	await this.extendResourcesFromExtensions("startup");
 }
 
 // =========================================================================

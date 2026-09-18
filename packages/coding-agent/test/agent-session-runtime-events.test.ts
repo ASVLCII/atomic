@@ -44,7 +44,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 	async function createRuntimeHost(
 		extensionFactory: ExtensionFactory,
-		options: { eventBus?: EventBus; beforeCreate?: () => void } = {},
+		options: { eventBus?: EventBus; beforeCreate?: () => void; shutdownFails?: boolean } = {},
 	) {
 		const tempDir = join(tmpdir(), `pi-runtime-events-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
@@ -114,7 +114,9 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 		await runtimeHost.session.bindExtensions({});
 
 		cleanups.push(async () => {
-			await runtimeHost.dispose();
+			if (options.shutdownFails)
+				await expect(runtimeHost.dispose()).rejects.toMatchObject({ code: "ShutdownFailed" });
+			else await runtimeHost.dispose();
 			faux.unregister();
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true, force: true });
@@ -258,6 +260,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 					});
 				},
 				{
+					shutdownFails: true,
 					beforeCreate: () => {
 						if (rejectCreation) throw failure;
 					},
@@ -286,7 +289,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 			expect((error as AggregateError).errors[0]).toBe(failure);
 			expect(String((error as AggregateError).errors[1].errors)).toContain("first cleanup failed");
 			expect(String((error as AggregateError).errors[1].errors)).toContain("second cleanup failed");
-			await runtimeHost.dispose();
+			await expect(runtimeHost.dispose()).rejects.toMatchObject({ code: "ShutdownFailed" });
 			expect(events).toHaveLength(4);
 			expect(models.getAvailableSnapshot().length).toBeGreaterThan(0);
 			await sibling.session.prompt("still open");

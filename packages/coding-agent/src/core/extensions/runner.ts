@@ -20,7 +20,7 @@ import {
 	HostInputBridge,
 	hostInputError,
 } from "./host-input.js";
-import { runResourceRegistrationBatch } from "./loader-runtime.ts";
+import { boundExtensionRuntimes, runResourceRegistrationBatch } from "./loader-runtime.ts";
 import {
 	createExtensionCommandContext,
 	createExtensionContext,
@@ -237,6 +237,7 @@ export class ExtensionRunner {
 		this.runtime.sendMessage = actions.sendMessage;
 		this.runtime.sendMessages = actions.sendMessages;
 		this.runtime.sendUserMessage = actions.sendUserMessage;
+		boundExtensionRuntimes.add(this.runtime);
 		this.runtime.appendEntry = actions.appendEntry;
 		this.runtime.setSessionName = actions.setSessionName;
 		this.runtime.getSessionName = actions.getSessionName;

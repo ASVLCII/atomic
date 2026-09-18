@@ -1,6 +1,7 @@
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { collectEntriesForBranchSummary, generateBranchSummary } from "./compaction/index.ts";
 import type { SessionBeforeTreeResult, TreePreparation } from "./extensions/index.js";
+import { assertSessionOpen } from "./session-lifecycle-work.ts";
 import type { BranchSummaryEntry } from "./session-manager.ts";
 import { createSummarizationRetryCallbacks } from "./summarization-retry.ts";
 
@@ -32,6 +33,7 @@ export async function navigateTree(
 	targetId: string,
 	options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string } = {},
 ): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
+	assertSessionOpen(this);
 	// Navigating away mid-response would strand the in-flight turn's tool calls on
 	// the abandoned branch. Callers abort first, then navigate.
 	if (this.isStreaming) {
@@ -111,6 +113,7 @@ export async function navigateTree(
 				signal: this._branchSummaryAbortController.signal,
 			})) as SessionBeforeTreeResult | undefined;
 
+			assertSessionOpen(this);
 			if (result?.cancel) {
 				return { cancelled: true };
 			}
@@ -139,6 +142,7 @@ export async function navigateTree(
 		if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
 			const model = this.model!;
 			const { apiKey, headers, baseUrl } = await this._getRequiredRequestAuth(model);
+			assertSessionOpen(this);
 			const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
 			const result = await generateBranchSummary(entriesToSummarize, {
 				model,
@@ -171,6 +175,7 @@ export async function navigateTree(
 			summaryDetails = extensionSummary.details;
 		}
 
+		assertSessionOpen(this);
 		// Determine the new leaf position based on target type
 		let newLeafId: string | null;
 		let editorText: string | undefined;

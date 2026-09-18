@@ -9,6 +9,9 @@ import type {
 } from "./types.ts";
 import { WorkflowActivityHub } from "./workflow-activity-hub.js";
 
+/** Prepared generations do not own session event delivery until bound by a runner. */
+export const boundExtensionRuntimes = new WeakSet<ExtensionRuntime>();
+
 export async function runResourceRegistrationBatch<T>(runtime: ExtensionRuntime, run: () => Promise<T>): Promise<T> {
 	if (!runtime.beginResourceRegistrationBatch || !runtime.endResourceRegistrationBatch) return run();
 	runtime.beginResourceRegistrationBatch();

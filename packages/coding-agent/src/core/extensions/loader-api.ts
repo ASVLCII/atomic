@@ -10,6 +10,7 @@ import {
 	type ResourceLoaderInheritanceSnapshotProvider,
 	type WorkflowResourceProviderInput,
 } from "./loader-resources.ts";
+import { boundExtensionRuntimes } from "./loader-runtime.ts";
 import type {
 	EntryRenderer,
 	Extension,
@@ -65,7 +66,11 @@ export function createExtensionAPI(
 		},
 		on(channel, handler) {
 			assertActive();
-			const unsubscribe = runtime.trackEventBusSubscription(eventBus.on(channel, handler));
+			const unsubscribe = runtime.trackEventBusSubscription(
+				eventBus.on(channel, (data) => {
+					if (state === "loading" || boundExtensionRuntimes.has(runtime)) handler(data);
+				}),
+			);
 			if (state === "loading") loadingUnsubscribers.push(unsubscribe);
 			return unsubscribe;
 		},
