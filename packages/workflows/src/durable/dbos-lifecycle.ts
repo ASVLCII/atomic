@@ -94,12 +94,33 @@ export async function configureDbosOnce(): Promise<ConfiguredDbosDurability> {
 	return await slot.configured;
 }
 
+/** Retain the shared executor for one host lineage, including retained runs. */
+export function acquireDbosLease(): () => Promise<void> {
+	const slot = owner();
+	const token = {};
+	slot.leases.add(token);
+	if (slot.state === "shut_down") {
+		slot.state = "configured";
+		slot.launchPromise = undefined;
+		slot.shutdownPromise = undefined;
+	}
+	let released: Promise<void> | undefined;
+	return () =>
+		(released ??= (async () => {
+			slot.leases.delete(token);
+			if (slot.leases.size === 0) await shutdownDbos();
+		})());
+}
+
 export async function launchDbosOnce(): Promise<void> {
 	const slot = owner();
 	if (slot.failure !== undefined) throw slot.failure;
-	// The executor is process-scoped and stops exactly once, at process exit.
-	// Post-shutdown launches must fail loudly instead of returning a backend
-	// whose SDK launched marker has been cleared.
+	if (slot.shutdownPromise !== undefined && slot.leases.size > 0) {
+		await slot.shutdownPromise;
+		slot.state = "configured";
+		slot.launchPromise = undefined;
+		slot.shutdownPromise = undefined;
+	}
 	if (slot.state === "shutting_down" || slot.state === "shut_down") throw new DbosShutdownError();
 	const durability = await configureDbosOnce();
 	slot.launchPromise ??= (async () => {
@@ -139,7 +160,7 @@ export async function getReadyDbosBackend(): Promise<DbosDurableBackend> {
 
 export function getReadyDbosBackendSync(): DbosDurableBackend | undefined {
 	const slot = owner();
-	return slot.state === "ready" ? slot.active?.backend : undefined;
+	return slot.state === "ready" && slot.shutdownPromise === undefined ? slot.active?.backend : undefined;
 }
 
 export async function shutdownDbos(): Promise<void> {
@@ -157,13 +178,16 @@ export async function shutdownDbos(): Promise<void> {
 			return;
 		}
 		if (slot.launchPromise !== undefined) await slot.launchPromise.catch(() => undefined);
-		if (slot.state !== "ready") {
-			await shutdownLocalDbos();
-			return;
-		}
-		slot.state = "shutting_down";
+		const wasReady = slot.state === "ready";
+		if (wasReady) slot.state = "shutting_down";
 		const errors: unknown[] = [];
-		for (const shutdown of [() => durability.backend.flush(), () => durability.shutdown(), shutdownLocalDbos]) {
+		// A rejected SDK launch may already own pools and timers.
+		const actions = [
+			...(wasReady ? [() => durability.backend.flush()] : []),
+			...(slot.launchPromise !== undefined ? [() => durability.shutdown()] : []),
+			shutdownLocalDbos,
+		];
+		for (const shutdown of actions) {
 			try {
 				await shutdown();
 			} catch (error) {
@@ -171,7 +195,7 @@ export async function shutdownDbos(): Promise<void> {
 			}
 		}
 		if (errors.length > 0) throw combinedShutdownFailure(errors);
-		slot.state = "shut_down";
+		if (wasReady) slot.state = "shut_down";
 	})().catch(async (error: unknown) => {
 		slot.failure = await durabilityFailure("shutdown", error);
 		slot.state = "failed";
@@ -192,7 +216,8 @@ export async function flushDbos(): Promise<void> {
 }
 
 export function dbosLifecycleState(): DbosLifecycleState {
-	return owner().state;
+	const slot = owner();
+	return slot.state === "ready" && slot.shutdownPromise !== undefined ? "shutting_down" : slot.state;
 }
 
 /** Reset the process singleton with an explicit configurator for unit tests. */

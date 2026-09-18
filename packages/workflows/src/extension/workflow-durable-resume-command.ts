@@ -7,7 +7,7 @@ import { type DurableWorkflowDeleteOutcome, deleteDurableWorkflowIfSafe } from "
 import type { ResumableWorkflowEntry } from "../durable/types.js";
 import { resolveRunIdTarget } from "../shared/run-id.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
-import { store } from "../shared/store.js";
+import { store as defaultStore, type Store } from "../shared/store.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import { workflowRunResumeCandidate } from "../shared/workflow-artifacts.js";
 import type { GraphOverlayPort } from "../tui/overlay-adapter.js";
@@ -16,6 +16,7 @@ import type { ExtensionAPI, PiCommandContext } from "./public-types.js";
 import type { ExtensionRuntime } from "./runtime.js";
 import { formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.js";
 import type { WorkflowCommandReporter } from "./workflow-command-utils.js";
+import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import { overlaySurfaceFromContext } from "./workflow-targets.js";
 
@@ -26,6 +27,7 @@ export interface WorkflowRunControlDeps {
 	ensureWorkflowResourcesLoaded: () => Promise<void> | void;
 	/** Seed lifecycle state before the direct completed-inspection fallback restores history. */
 	beforeRestoreCompleted?: (snapshots: readonly RunSnapshot[]) => void;
+	owner?: WorkflowOwnerResources;
 }
 
 export interface WorkflowResumeCatalog {
@@ -76,7 +78,10 @@ export async function prepareWorkflowResumeCatalog(
 	};
 }
 
-export function deleteWorkflowResumeEntry(workflowId: string): Promise<DurableWorkflowDeleteOutcome> {
+export function deleteWorkflowResumeEntry(
+	workflowId: string,
+	store: Store = defaultStore,
+): Promise<DurableWorkflowDeleteOutcome> {
 	return deleteDurableWorkflowIfSafe(getDurableBackend(), workflowId, (candidateId) => {
 		const run = store.runs().find((candidate) => candidate.id === candidateId);
 		return run !== undefined && run.status !== "completed" && (run.endedAt === undefined || run.status === "paused");
@@ -90,6 +95,8 @@ export async function handleDurableResume(
 	deps: WorkflowRunControlDeps,
 	preparedCatalog?: WorkflowResumeCatalog,
 ): Promise<boolean> {
+	const owner = deps.owner ?? captureWorkflowOwnerResources();
+	deps = { ...deps, owner };
 	const print = (message: string): void => reporter.info(message);
 	const fail = (message: string): void => reporter.error(message);
 	try {
@@ -122,7 +129,13 @@ export async function handleDurableResume(
 			return await resumeDurableTarget(resolved.workflowId, ctx, reporter, deps, runtime);
 		}
 
-		const completedAttempt = openCompleted(runtime, target, catalog.completed, deps.beforeRestoreCompleted);
+		const completedAttempt = openCompleted(
+			runtime,
+			target,
+			catalog.completed,
+			deps.beforeRestoreCompleted,
+			owner.store,
+		);
 		if (!completedAttempt.ok && completedAttempt.reason !== "not_found") {
 			fail(completedAttempt.message);
 			return true;
@@ -152,7 +165,7 @@ export async function handleDurableResume(
 			[],
 			// Catalog already prepared above; resolve it immediately with no rescan.
 			() => Promise.resolve({ durable: catalog.resumable, completed: catalog.completed }),
-			{ deleteWorkflow: deleteWorkflowResumeEntry },
+			{ deleteWorkflow: (workflowId) => deleteWorkflowResumeEntry(workflowId, owner.store) },
 		);
 	} catch (error) {
 		// No fallback: a host without the session-picker capability fails the
@@ -247,7 +260,7 @@ function openCompletedTarget(
 	deps: WorkflowRunControlDeps,
 	runtime: ExtensionRuntime,
 ): boolean {
-	const result = openCompleted(runtime, workflowId, catalog, deps.beforeRestoreCompleted);
+	const result = openCompleted(runtime, workflowId, catalog, deps.beforeRestoreCompleted, deps.owner?.store);
 	if (!result.ok) reporter.error(result.message);
 	else {
 		reporter.info(result.message);
@@ -263,6 +276,7 @@ function openCompleted(
 	workflowId: string,
 	catalog: readonly ResumableWorkflowEntry[],
 	beforeRestoreCompleted?: (snapshots: readonly RunSnapshot[]) => void,
+	store: Store = defaultStore,
 ) {
 	return (
 		runtime.openCompletedDurableWorkflow?.(workflowId, catalog) ??

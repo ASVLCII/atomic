@@ -42,7 +42,10 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 		}
 	});
 
-	async function createRuntimeHost(extensionFactory: ExtensionFactory, options: { eventBus?: EventBus } = {}) {
+	async function createRuntimeHost(
+		extensionFactory: ExtensionFactory,
+		options: { eventBus?: EventBus; beforeCreate?: () => void } = {},
+	) {
 		const tempDir = join(tmpdir(), `pi-runtime-events-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 
@@ -87,6 +90,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 			},
 		};
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
+			options.beforeCreate?.();
 			const services = await createAgentSessionServices({
 				...runtimeOptions,
 				cwd,
@@ -119,6 +123,175 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 		return { runtimeHost, faux, createRuntime };
 	}
+
+	// #3105: disposal waits for the active provider turn's abort settlement.
+	it("public disposal aborts an active provider without starting another turn", async () => {
+		const { runtimeHost, faux } = await createRuntimeHost(() => {});
+		let entered!: () => void;
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		let aborted = false;
+		faux.setResponses([
+			async (_context, options) => {
+				entered();
+				await new Promise<void>((resolve) => {
+					options!.signal!.addEventListener(
+						"abort",
+						() => {
+							aborted = true;
+							resolve();
+						},
+						{ once: true },
+					);
+				});
+				return fauxAssistantMessage("cancelled", { stopReason: "aborted" });
+			},
+		]);
+		const prompting = runtimeHost.session.prompt("controlled provider");
+		await started;
+		await runtimeHost.session.dispose();
+		await prompting;
+		expect(aborted).toBe(true);
+		expect(runtimeHost.session.isStreaming).toBe(false);
+		await expect(runtimeHost.session.prompt("cannot replay")).rejects.toMatchObject({ code: "SessionClosed" });
+	});
+
+	// #3105: public owner disposal cancels active auth without destroying borrowed model state.
+	it.each(["dispose", "reload"] as const)(
+		"%s settles active OAuth login and preserves the borrowed model runtime",
+		async (boundary) => {
+			const { runtimeHost } = await createRuntimeHost(() => {});
+			const models = runtimeHost.session.modelRuntime;
+			let entered!: () => void;
+			const started = new Promise<void>((resolve) => {
+				entered = resolve;
+			});
+			let observed: AbortSignal | undefined;
+			let completeNext = false;
+			models.registerProvider("shutdown-auth", {
+				baseUrl: "https://example.test",
+				api: "openai-completions",
+				models: [],
+				oauth: {
+					name: "Shutdown auth",
+					login: async (_callbacks, signal) => {
+						if (completeNext)
+							return { access: "fixture-access", refresh: "fixture-refresh", expires: Date.now() + 60_000 };
+						observed = signal;
+						entered();
+						await new Promise<void>((resolve) => {
+							signal!.addEventListener("abort", () => resolve(), { once: true });
+						});
+						throw new DOMException("Cancelled", "AbortError");
+					},
+					refreshToken: async (credential) => credential,
+					getApiKey: (credential) => credential.access,
+				},
+			});
+			const login = runtimeHost.loginOAuthProvider("shutdown-auth", { onAuth: () => {}, onPrompt: async () => "" });
+			const rejected = expect(login).rejects.toThrow("Login cancelled");
+			await started;
+			await runtimeHost.session[boundary]();
+			await rejected;
+			expect(observed?.aborted).toBe(true);
+			expect(models.getRegisteredProviderConfig("shutdown-auth")).toBeDefined();
+			if (boundary === "reload") {
+				completeNext = true;
+				await runtimeHost.loginOAuthProvider("shutdown-auth", { onAuth: () => {}, onPrompt: async () => "" });
+				await runtimeHost.session.dispose();
+			}
+			await expect(
+				runtimeHost.loginOAuthProvider("shutdown-auth", { onAuth: () => {}, onPrompt: async () => "" }),
+			).rejects.toMatchObject({ code: "SessionClosed" });
+		},
+	);
+
+	// #3105: replacement retains one owner identity and binds input before startup.
+	it("retains runtime ownership and host input across replacement without sharing sibling ownership", async () => {
+		const scopes: object[] = [];
+		const answers: string[] = [];
+		const { runtimeHost } = await createRuntimeHost((pi) => {
+			if (pi.lifecycleScope) scopes.push(pi.lifecycleScope);
+			pi.on("session_start", async (event, ctx) => {
+				if (event.reason !== "startup") answers.push((await ctx.ui.input("replacement"))!);
+			});
+		});
+		await runtimeHost.session.bindExtensions({
+			humanInput: {
+				confirm: async () => false,
+				select: async () => undefined,
+				input: async () => " retained ",
+				editor: async () => undefined,
+				questionnaire: async () => ({ answers: [], cancelled: true }),
+			},
+		});
+		const old = runtimeHost.session;
+		await runtimeHost.newSession();
+		expect(runtimeHost.session).not.toBe(old);
+		expect(answers).toEqual([" retained "]);
+		expect(scopes).toHaveLength(2);
+		expect(scopes[1]).toBe(scopes[0]);
+		await expect(old.prompt("closed")).rejects.toMatchObject({ code: "SessionClosed" });
+		let siblingScope: object | undefined;
+		await createRuntimeHost((pi) => {
+			siblingScope = pi.lifecycleScope;
+		});
+		expect(siblingScope).not.toBe(scopes[0]);
+	});
+
+	it.each(["new", "resume", "fork"] as const)(
+		"finalizes retained shutdown handlers when %s creation rejects before constructing a session",
+		async (reason) => {
+			let rejectCreation = false;
+			const events: string[] = [];
+			const failure = new Error("replacement factory rejected");
+			const { runtimeHost } = await createRuntimeHost(
+				(pi) => {
+					pi.on("session_shutdown", (event) => {
+						events.push(`first:${event.reason}`);
+						if (event.reason === "quit") throw new Error("first cleanup failed");
+					});
+					pi.on("session_shutdown", (event) => {
+						events.push(`second:${event.reason}`);
+						if (event.reason === "quit") throw new Error("second cleanup failed");
+					});
+				},
+				{
+					beforeCreate: () => {
+						if (rejectCreation) throw failure;
+					},
+				},
+			);
+			const { runtimeHost: sibling } = await createRuntimeHost(() => {});
+			const target = SessionManager.create(runtimeHost.cwd);
+			target.appendMessage(fauxAssistantMessage("saved"));
+			const entry = runtimeHost.session.sessionManager.appendMessage({
+				role: "user",
+				content: "fork",
+				timestamp: Date.now(),
+			});
+			runtimeHost.session.sessionManager.appendMessage(fauxAssistantMessage("saved"));
+			const models = runtimeHost.session.modelRuntime;
+			rejectCreation = true;
+			const replacement =
+				reason === "new"
+					? runtimeHost.newSession()
+					: reason === "resume"
+						? runtimeHost.switchSession(target.getSessionFile()!)
+						: runtimeHost.fork(entry);
+			const error = await replacement.catch((error: unknown) => error);
+			expect(events).toEqual([`first:${reason}`, `second:${reason}`, "first:quit", "second:quit"]);
+			expect(error).toBeInstanceOf(AggregateError);
+			expect((error as AggregateError).errors[0]).toBe(failure);
+			expect(String((error as AggregateError).errors[1].errors)).toContain("first cleanup failed");
+			expect(String((error as AggregateError).errors[1].errors)).toContain("second cleanup failed");
+			await runtimeHost.dispose();
+			expect(events).toHaveLength(4);
+			expect(models.getAvailableSnapshot().length).toBeGreaterThan(0);
+			await sibling.session.prompt("still open");
+		},
+	);
 
 	it("prepares resume with a live outgoing context and preserves it on preflight failure", async () => {
 		let shutdowns = 0;
@@ -408,7 +581,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 			"3:message",
 		);
 
-		runtimeHost.session.dispose();
+		await runtimeHost.session.dispose();
 		expect(await emit()).toEqual({ extension: 0, host: 1 });
 	});
 

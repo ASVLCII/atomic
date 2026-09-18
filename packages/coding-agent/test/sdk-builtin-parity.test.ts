@@ -53,7 +53,7 @@ test("default SDK creation returns an Atomic AgentSession with builtin tools and
 			assert.equal(extensionsResult.errors.length, 0);
 			assert.ok(session.systemPrompt.includes("<available_skills>"));
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -118,7 +118,7 @@ test("custom loaders retain their resources and factories while startup runs onc
 			);
 			assert.deepEqual(reasons, ["startup", "reload"]);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -139,7 +139,7 @@ test("CLI service creation supplies the same default builtin families", async ()
 			for (const name of ["workflow", "subagent", "mcp", "intercom", "web_search"])
 				assert.ok(session.getActiveToolNames().includes(name), name);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -166,7 +166,7 @@ test("missing shipped builtin assets reject with the package identity", async ()
 			assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
 			assert.ok(session.getActiveToolNames().includes("read"));
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		packageDir.mockRestore();
@@ -267,7 +267,7 @@ test("repeated shipped roots and loader identities compose once without rewritin
 				loaded.extensions.map((extension) => extension.resolvedPath),
 			);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -317,7 +317,7 @@ for (const fail of [false, true]) {
 					assert.deepEqual(events, ["tui:true"]);
 				}
 			} finally {
-				session.dispose();
+				await session.dispose();
 			}
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
@@ -351,7 +351,7 @@ test("services factory forwards bindings before startup", async () => {
 		try {
 			assert.deepEqual(modes, ["rpc"]);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -482,7 +482,7 @@ test("noTools all suppresses Intercom and remains empty after reload", async () 
 			await session.reload();
 			assert.deepEqual(session.getActiveToolNames(), []);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -528,7 +528,7 @@ test.each(["inherited getter", "nonenumerable"])("builtin %s false flags survive
 				if (generation === 0) await session.reload();
 			}
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -587,7 +587,7 @@ test.each(["preferred", "dist"])(
 					}
 				}
 			} finally {
-				session.dispose();
+				await session.dispose();
 			}
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
@@ -681,7 +681,7 @@ test.each<{
 				assert.equal(session.getToolDefinition(excluded), undefined);
 			assert.deepEqual(options, snapshot);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -722,7 +722,7 @@ test.each<Partial<Record<AtomicBuiltin, boolean>>>([
 				if (generation === 0) await session.reload();
 			}
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -776,7 +776,7 @@ test("SDK host callback answers a questionnaire without rendering", async () => 
 			const result = await tool.execute("question", params, new AbortController().signal);
 			assert.deepEqual(result.details, answer);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -833,8 +833,8 @@ async function hostSession(bindings: ExtensionBindings = {}, options: CreateAgen
 			session,
 			contexts,
 			loader,
-			close: () => {
-				session.dispose();
+			close: async () => {
+				await session.dispose();
 				rmSync(cwd, { recursive: true, force: true });
 			},
 		};
@@ -869,7 +869,7 @@ test("SDK abort cancels host input and ignores late approval", async () => {
 		await fixture.session.bindExtensions({ humanInput: callbackHost() });
 		assert.equal(await fixture.contexts[0].ui.confirm("Again", "Run?"), false);
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -903,7 +903,7 @@ test("SDK human capability is separate from rendering and binding preserves pend
 		await fixture.session.bindExtensions({ uiContext: ui });
 		assert.equal(context.hasHumanInput, false);
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -969,7 +969,7 @@ test("SDK dialogs preserve raw arguments and reject malformed host replies", asy
 			{ code: "HumanInputUnavailable" },
 		);
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -1002,7 +1002,7 @@ test("SDK pending host requests settle at each cancellation boundary", async () 
 			if (boundary === "signal") controller.abort();
 			if (boundary === "withdraw") await fixture.session.bindExtensions({ humanInput: null });
 			if (boundary === "reload") await fixture.session.reload();
-			if (boundary === "dispose") fixture.session.dispose();
+			if (boundary === "dispose") await fixture.session.dispose();
 			await rejected;
 			assert.equal(identity.signal.aborted, true);
 			answer(true);
@@ -1013,7 +1013,7 @@ test("SDK pending host requests settle at each cancellation boundary", async () 
 		}
 		await assert.rejects(fixture.session.bindExtensions({}), { code: "SessionClosed" });
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 	const failure = new Error("adapter refused");
 	const rejected = await hostSession({
@@ -1026,7 +1026,7 @@ test("SDK pending host requests settle at each cancellation boundary", async () 
 	try {
 		await assert.rejects(rejected.contexts[0].ui.confirm("", ""), (error) => error === failure);
 	} finally {
-		rejected.close();
+		await rejected.close();
 	}
 });
 
@@ -1118,7 +1118,7 @@ test("SDK questionnaire preserves rich answers and rejects malformed results and
 		await fixture.session.bindExtensions({ humanInput: null });
 		assert.deepEqual((await execute(params)).details, { answers: [], cancelled: true, error: "no_ui" });
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -1139,8 +1139,8 @@ test("SDK diagnostic sinks are session attributed and remain separate", async ()
 		await b.session.prompt("/diagnostic-test");
 		assert.equal(second[0].sessionId, b.session.sessionId);
 	} finally {
-		a.close();
-		b.close();
+		await a.close();
+		await b.close();
 	}
 });
 
@@ -1189,7 +1189,7 @@ test("SDK questionnaire preserves multi-selection and empty custom answers", asy
 		controller.abort();
 		await assert.rejects(tool.execute("cancelled", params, controller.signal), { code: "HumanInputCancelled" });
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -1233,7 +1233,7 @@ test("SDK startup hooks can await human input without rendering", async () => {
 			await session.reload();
 			assert.deepEqual(calls, ["  initial ", "  initial "]);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -1275,7 +1275,7 @@ test("SDK questionnaire rejects sparse answers and selections", async () => {
 				code: "InvalidHostInput",
 			});
 		} finally {
-			fixture.close();
+			await fixture.close();
 		}
 	}
 });
@@ -1325,7 +1325,7 @@ test("SDK questionnaire settles throwing reply validation and releases the reque
 		malformed = false;
 		assert.equal((await tool.execute("valid", params, new AbortController().signal)).details, valid);
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 }, 1000);
 
@@ -1354,10 +1354,10 @@ test("child session inherits callback and config without resurrecting disabled b
 			assert.equal(requests[0]!.sessionId, child.sessionManager.getSessionId());
 			assert.notEqual(requests[0]!.sessionId, fixture.session.sessionManager.getSessionId());
 		} finally {
-			child.dispose();
+			await child.dispose();
 		}
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -1386,9 +1386,9 @@ test.each([
 		assert.deepEqual(child.getActiveToolNames(), []);
 		assert.deepEqual(input.tools, ["read", "bash", "intercom"]);
 	} finally {
-		child?.dispose();
-		parent.dispose();
-		fixture.close();
+		await child?.dispose();
+		await parent.dispose();
+		await fixture.close();
 	}
 });
 
@@ -1445,8 +1445,8 @@ test("child callbacks, diagnostics and relative cwd stay owner-local across rebi
 		assert.equal(await children[1]!.extensionRunner.createContext().ui.input("raw"), "right");
 		assert.equal(diagnostics[1]!.length, 1);
 	} finally {
-		for (const child of children) child.dispose();
-		for (const fixture of fixtures) fixture.close();
+		for (const child of children) await child.dispose();
+		for (const fixture of fixtures) await fixture.close();
 	}
 });
 
@@ -1470,7 +1470,7 @@ test("child working directory honors manager before inherited default", async ()
 			}
 		}
 	} finally {
-		fixture.close();
+		await fixture.close();
 	}
 });
 
@@ -1530,6 +1530,274 @@ test("undefined child configuration retains inherited values and callback identi
 			await session.dispose();
 		}
 	} finally {
-		fixture.close();
+		await fixture.close();
+	}
+});
+
+// #3105: public disposal owns awaited shutdown and closes admission immediately.
+test("public disposal awaits shutdown once and seals admission synchronously", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-close-"));
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let shutdowns = 0;
+	const settingsManager = SettingsManager.inMemory();
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_shutdown", async () => {
+					shutdowns++;
+					await gate;
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		resourceLoader,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		const closing = session.dispose();
+		assert.ok(closing instanceof Promise);
+		assert.equal(session.dispose(), closing);
+		await assert.rejects(session.prompt("must not start"), { code: "SessionClosed" });
+		await assert.rejects(session.bindExtensions({}), { code: "SessionClosed" });
+		await assert.rejects(session.reload(), { code: "SessionClosed" });
+		await assert.rejects(session.extensionRunner.createContext().ui.input("cannot ask"), { code: "SessionClosed" });
+		let settled = false;
+		void closing.then(() => {
+			settled = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(settled, false);
+		assert.equal(shutdowns, 1);
+		release();
+		await closing;
+		assert.equal(session.dispose(), closing);
+	} finally {
+		release();
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: one failed extension must not skip sibling cleanup or close borrowed settings.
+test.each(["none", "diagnostic", "error"] as const)(
+	"public disposal aggregates failures with %s observer failure and preserves a sibling",
+	async (observerFailure) => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-close-failure-"));
+		const settingsManager = SettingsManager.inMemory();
+		const attempts: string[] = [];
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_shutdown", () => {
+						attempts.push("first");
+						throw new Error("first cleanup failed");
+					});
+				},
+				(pi) => {
+					pi.on("session_shutdown", () => {
+						attempts.push("second");
+						throw new Error("second cleanup failed");
+					});
+				},
+			],
+		});
+		await resourceLoader.reload();
+		const builtins = { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false };
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			resourceLoader,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(cwd),
+			builtins,
+			extensionBindings: {
+				onDiagnostic:
+					observerFailure === "diagnostic"
+						? () => {
+								throw new Error("diagnostic observer failed");
+							}
+						: undefined,
+				onError:
+					observerFailure === "error"
+						? () => {
+								throw new Error("error observer failed");
+							}
+						: undefined,
+			},
+		});
+		const { session: sibling } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager,
+			sessionManager: SessionManager.inMemory(cwd),
+			builtins,
+		});
+		const flushSettings = vi.spyOn(settingsManager, "flush").mockImplementationOnce(async () => {
+			attempts.push("settings");
+			throw new Error("settings flush failed");
+		});
+		const flushSession = vi.spyOn(session.sessionManager, "flush").mockImplementationOnce(() => {
+			attempts.push("session");
+		});
+		try {
+			const closing = session.dispose();
+			await assert.rejects(closing, (error: Error & { code?: string }) => {
+				assert.equal(error.code, "ShutdownFailed");
+				assert.ok(error instanceof AggregateError);
+				assert.equal(error.errors.length, observerFailure === "none" ? 3 : 5);
+				return true;
+			});
+			assert.deepEqual(attempts, ["first", "second", "settings", "session"]);
+			assert.equal(session.dispose(), closing);
+			await assert.rejects(session.bindExtensions({}), { code: "SessionClosed" });
+			await sibling.bindExtensions({
+				humanInput: {
+					confirm: async () => true,
+					select: async () => undefined,
+					input: async () => "alive",
+					editor: async () => undefined,
+					questionnaire: async () => ({ answers: [], cancelled: true }),
+				},
+			});
+			assert.equal(await sibling.extensionRunner.createContext().ui.input("still live"), "alive");
+			assert.equal(sibling.settingsManager, settingsManager);
+		} finally {
+			flushSettings.mockRestore();
+			flushSession.mockRestore();
+			await sibling.dispose();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: cancellation is not settlement; close must await the shell's drain.
+test("public disposal aborts and drains active shell work and pending human input", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-close-active-"));
+	let inputSignal: AbortSignal | undefined;
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		sessionManager: SessionManager.inMemory(cwd),
+		settingsManager: SettingsManager.inMemory(),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		extensionBindings: {
+			humanInput: {
+				confirm: async () => false,
+				select: async () => undefined,
+				input: (_title, _placeholder, options) => {
+					inputSignal = options.signal;
+					return new Promise(() => {});
+				},
+				editor: async () => undefined,
+				questionnaire: async () => ({ answers: [], cancelled: true }),
+			},
+		},
+	});
+	let release!: () => void;
+	const drain = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let aborted = false;
+	const input = session.extensionRunner.createContext().ui.input("pending");
+	const inputRejected = assert.rejects(input, { code: "HumanInputCancelled" });
+	const shell = session.executeBash("controlled", undefined, {
+		operations: {
+			exec: async (_command, _cwd, options) => {
+				await new Promise<void>((resolve) => {
+					options.signal!.addEventListener(
+						"abort",
+						() => {
+							aborted = true;
+							resolve();
+						},
+						{ once: true },
+					);
+				});
+				await drain;
+				throw new Error("aborted");
+			},
+		},
+	});
+	try {
+		const closing = session.dispose();
+		let closed = false;
+		void closing.then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(aborted, true);
+		assert.equal(inputSignal?.aborted, true);
+		assert.equal(closed, false);
+		await assert.rejects(session.executeBash("cannot start"), { code: "SessionClosed" });
+		release();
+		await shell;
+		await inputRejected;
+		await closing;
+	} finally {
+		release();
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: queued admission is owned even before the child runner starts.
+test("public disposal cancels a queued child without dispatching it", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-close-queued-"));
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		sessionManager: SessionManager.inMemory(cwd),
+		settingsManager: SettingsManager.inMemory(),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	let dispatch!: () => Promise<void>;
+	let started = 0;
+	try {
+		const host = session.getAgentTaskHost();
+		const admitted = await host.startAgentTask(
+			{ kind: "agent", agent: "fixture", task: "must remain queued" },
+			"queued-close" as Parameters<typeof host.startAgentTask>[1],
+			() => {
+				started++;
+				return {
+					result: Promise.resolve({ kind: "completed", output: "unexpected" }),
+					cleanup: Promise.resolve({ kind: "reaped" }),
+				};
+			},
+			(run) => {
+				dispatch = run;
+			},
+		);
+		assert.ok(admitted.ok);
+		await session.dispose();
+		await dispatch();
+		assert.equal(started, 0);
+		const terminal = await host.close("session-close");
+		assert.ok(terminal.ok, JSON.stringify(terminal));
+		assert.equal(terminal.value.state, "closed");
+		assert.equal(terminal.value.tasks.length, 1);
+		const execution = terminal.value.tasks[0]!.execution;
+		assert.equal(execution.kind, "settled");
+		if (execution.kind === "settled") assert.equal(execution.result.kind, "cancelled");
+	} finally {
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
 	}
 });

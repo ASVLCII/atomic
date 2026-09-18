@@ -1,6 +1,5 @@
 import { inspectRun, type RunDetail } from "../runs/background/status.js";
 import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
-import { store } from "../shared/store.js";
 import type { WorkflowInputValues } from "../shared/types.js";
 import { emitChatSurface } from "../tui/chat-surface-message.js";
 import { renderRunDetail } from "../tui/run-detail.js";
@@ -8,6 +7,7 @@ import type { ConfigLoadResult } from "./config-loader.js";
 import type { DiscoveryResult } from "./discovery.js";
 import type { ExtensionAPI } from "./public-types.js";
 import type { WorkflowToolResult } from "./render-result.js";
+import { captureWorkflowOwnerResources } from "./workflow-owner-resources.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
 import { isRunStatus } from "./workflow-targets.js";
 
@@ -41,8 +41,10 @@ export function emitTerminalRunDetailSurface(
 	workflowName: string,
 	inputs: Readonly<WorkflowInputValues>,
 	result: Extract<WorkflowToolResult, { action: "run"; runId: string }>,
+	owner = captureWorkflowOwnerResources(),
 ): void {
-	const inspected = inspectRun(result.runId);
+	const { store } = owner;
+	const inspected = inspectRun(result.runId, owner);
 	const detail = inspected.ok ? inspected.detail : fallbackRunDetailFromResult(workflowName, inputs, result);
 	const graphRuns = store.graphSnapshot().runs;
 	const owningRunStatuses = Object.fromEntries(graphRuns.map((run) => [run.id, run.status] as const));

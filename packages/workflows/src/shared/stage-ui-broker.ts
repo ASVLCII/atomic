@@ -11,7 +11,7 @@ import type { StageQuestionnaireInput } from "../extension/workflow-human-input.
 import { createSessionScopedSingleton } from "./session-scoped-singleton.js";
 import type { StageInputAnswer, StagePromptAdapter } from "./stage-prompt.js";
 import type { StagePromptAnswerSource, Store } from "./store.js";
-import { store as defaultStore } from "./store.js";
+import { currentWorkflowStore } from "./store-factory.js";
 import type { StageInputRequest } from "./store-types.js";
 
 export interface StageCustomUiRequest<T = unknown> {
@@ -68,7 +68,7 @@ export class StageUiBroker {
 	private readonly resolvedPromptIds = new Map<string, string>();
 	private readonly resolvedListeners = new Set<StagePromptResolvedListener>();
 
-	constructor(store: Store = defaultStore) {
+	constructor(store: Store = currentWorkflowStore()) {
 		this.store = store;
 	}
 
@@ -366,4 +366,8 @@ export function adoptStageUiBroker(scope: object, preserveCurrentWhenTargetExist
 	return singleton.adopt(scope, {
 		preserveCurrentWhenTargetExists: preserveCurrentWhenTargetExists ? () => true : undefined,
 	});
+}
+
+export function currentStageUiBroker(): StageUiBroker {
+	return singleton.current();
 }

@@ -29,6 +29,7 @@ import type { StageControlRegistry } from "../foreground/stage-control-registry.
 import { stageControlRegistry as defaultStageControlRegistry } from "../foreground/stage-control-registry.js";
 import type { CancellationRegistry } from "./cancellation-registry.js";
 import { markDurableResumed } from "./durable-resume-transition.js";
+import type { JobTracker } from "./job-tracker.js";
 import { quitRunWithAction } from "./quit.js";
 import {
 	resumeAcknowledgementMessage,
@@ -546,6 +547,7 @@ export async function pauseRun(
 		store?: Store;
 		stageControlRegistry?: StageControlRegistry;
 		toolControlRegistry?: ToolControlRegistry;
+		jobs?: JobTracker;
 		stageId?: string;
 	},
 ): Promise<PauseResult> {
@@ -564,6 +566,7 @@ export async function pauseRun(
 					store: activeStore,
 					stageControlRegistry: opts?.stageControlRegistry,
 					toolControlRegistry: toolControls,
+					jobs: opts?.jobs,
 				},
 				"pause",
 			);
@@ -579,6 +582,7 @@ export async function pauseAllRuns(opts?: {
 	store?: Store;
 	stageControlRegistry?: StageControlRegistry;
 	toolControlRegistry?: ToolControlRegistry;
+	jobs?: JobTracker;
 }): Promise<PauseResult[]> {
 	const activeStore = opts?.store ?? defaultStore;
 	const inFlight = topLevelWorkflowRuns(activeStore.runs()).filter((run) => run.endedAt === undefined);
@@ -588,6 +592,7 @@ export async function pauseAllRuns(opts?: {
 				store: activeStore,
 				stageControlRegistry: opts?.stageControlRegistry,
 				toolControlRegistry: opts?.toolControlRegistry,
+				jobs: opts?.jobs,
 			}),
 		),
 	);

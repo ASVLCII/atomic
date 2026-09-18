@@ -29,7 +29,7 @@ import {
 import type { StageAdapters, StageSessionCreateResult, StageSessionRuntime } from "../runs/foreground/stage-runner.js";
 import { cleanupFailedStageSessionBinding } from "../runs/foreground/stage-runner-session.js";
 import { resolveStageGroup, stageHasIntercomAccess } from "../shared/intercom-group.js";
-import { type StageUiBroker, stageUiBroker } from "../shared/stage-ui-broker.js";
+import { currentStageUiBroker, type StageUiBroker } from "../shared/stage-ui-broker.js";
 import type { StageExecutionMeta, StageOptions } from "../shared/types.js";
 import type { PiCodingAgentSdk, PrepareAtomicStageSessionOptions } from "./atomic-stage-session.js";
 import { prepareAtomicStageSessionOptions } from "./atomic-stage-session.js";
@@ -421,7 +421,9 @@ function makeStageExtensionUiContext(
 						questionnaireInput = {
 							ui: childUi,
 							usesOwnBinding: () =>
-								explicitInput || workflowInputBridge(childUi)?.bindingRevision() !== inheritedBindingRevision,
+								explicitInput ||
+								(workflowInputBridge(childUi)?.bindingRevision() ?? inheritedBindingRevision) !==
+									inheritedBindingRevision,
 						};
 					},
 		select: ui.select ?? (async () => undefined),
@@ -510,7 +512,7 @@ export function buildRuntimeAdapters(
 						},
 						options.sdk,
 					));
-	const broker = options.stageUiBroker ?? stageUiBroker;
+	const broker = options.stageUiBroker ?? currentStageUiBroker();
 	const adapters: StageAdapters = {
 		agentSession: {
 			async create(

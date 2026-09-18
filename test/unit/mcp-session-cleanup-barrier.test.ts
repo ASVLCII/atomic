@@ -18,7 +18,24 @@ test("cleanup deadline does not let a never-settling task poison later generatio
 	assert.equal(performance.now() - started < 50, true);
 });
 
-test("a replacement session waits for the retired initializer and its cleanup before starting", () => {
+// #3105: final close reports failure only after attempting every owned cleanup.
+test("final cleanup aggregates failures and refuses successful timeout", async () => {
+	const barrier = new McpSessionCleanupBarrier(10);
+	const failure = new Error("connection close failed");
+	await assert.rejects(
+		barrier.close([Promise.reject(failure), new Promise<void>(() => {})]),
+		(error: AggregateError) => {
+			assert.ok(error instanceof AggregateError);
+			assert.equal(error.errors.length, 2);
+			assert.equal(error.errors[0], failure);
+			assert.match(error.errors[1].message, /deadline/);
+			return true;
+		},
+	);
+});
+
+// #3105: real adapter shutdown propagates failures after attempting both owned cleanup paths.
+test.each([false, true])("replacement waits for cleanup and final shutdown reports failure=%s", (failFinal) => {
 	const fixtureDir = mkdtempSync(join(repoRoot, ".mcp-cleanup-barrier-"));
 	try {
 		writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ type: "module" }));
@@ -59,6 +76,7 @@ export async function shutdownOAuth(reason) {
   resets += 1;
   globalThis.events.push("oauth-reset:" + reason + ":" + resets);
   if (resets === 2) await globalThis.oldOAuthResetGate;
+  if (${failFinal} && reason === "session_shutdown") throw new Error("OAuth cleanup failed");
 }
 `,
 		);
@@ -84,6 +102,7 @@ export async function initializeMcp() {
     lifecycle: { async gracefulShutdown() {
       globalThis.events.push("cleanup:" + generation);
       if (generation === 1) await globalThis.oldCleanupGate;
+      if (${failFinal} && generation === 2) throw new Error("connection cleanup failed");
     } },
   };
 }
@@ -132,8 +151,13 @@ const beforeOAuthRelease = [...events];
 releaseOldOAuthReset();
 await replacementStart;
 await waitFor("replacement initializer", () => events.includes("init:2"));
-await handlers.get("session_shutdown")({}, secondCtx);
-console.log(JSON.stringify({ beforeRelease, duringCleanup, beforeOAuthRelease, events }));
+let cleanupFailures = 0;
+try { await handlers.get("session_shutdown")({}, secondCtx); }
+catch (error) {
+  if (!(error instanceof AggregateError)) throw error;
+  cleanupFailures = error.errors[0].errors.length;
+}
+console.log(JSON.stringify({ beforeRelease, duringCleanup, beforeOAuthRelease, events, cleanupFailures }));
 `;
 		const result = spawnSync("bun", ["--eval", script], { cwd: repoRoot, encoding: "utf8", timeout: 10_000 });
 		assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -142,6 +166,7 @@ console.log(JSON.stringify({ beforeRelease, duringCleanup, beforeOAuthRelease, e
 			duringCleanup: string[];
 			beforeOAuthRelease: string[];
 			events: string[];
+			cleanupFailures: number;
 		};
 		assert.deepEqual(output.beforeRelease, [
 			"oauth-reset:session_restart:1",
@@ -156,6 +181,9 @@ console.log(JSON.stringify({ beforeRelease, duringCleanup, beforeOAuthRelease, e
 		]);
 		assert.deepEqual(output.beforeOAuthRelease, output.duringCleanup);
 		assert.equal(output.events.indexOf("init:2") > output.events.indexOf("oauth-reset:session_restart:2"), true);
+		assert.equal(output.cleanupFailures, failFinal ? 2 : 0);
+		assert.ok(output.events.includes("cleanup:2"));
+		assert.ok(output.events.includes("oauth-reset:session_shutdown:3"));
 	} finally {
 		rmSync(fixtureDir, { recursive: true, force: true });
 	}

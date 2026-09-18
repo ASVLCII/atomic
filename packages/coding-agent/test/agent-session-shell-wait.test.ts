@@ -69,7 +69,7 @@ async function release(session: AgentSession, id: TaskId) {
 
 for (const name of ["bash", "powershell"] as const) {
 	// PR #2972: a yielded wait must advance beyond the first retained 8 KiB page.
-	test(`registered ${name} progresses retained output across yielded waits and reload`, async () => {
+	test(`registered ${name} progresses retained output across yielded waits`, async () => {
 		const harness = await createHarness({
 			settings: { bashInterceptor: { enabled: false } },
 			initialActiveToolNames: ["bash", "powershell"],
@@ -107,7 +107,6 @@ for (const name of ["bash", "powershell"] as const) {
 			const first = await tool(session, name).execute("first-page", { action: "wait", id, budgetMs: 0 });
 			assert.equal((first.details as BashToolDetails).observation?.kind, "yielded");
 			assert.match(first.content[0].type === "text" ? first.content[0].text : "", /^a{8192}\n\[Additional output/);
-			await session.reload();
 			const second = await tool(session, name).execute("second-page", { action: "wait", id, budgetMs: 0 });
 			assert.equal((second.details as BashToolDetails).observation?.kind, "yielded");
 			assert.equal((second.details as BashToolDetails).observation?.taskId, id);
@@ -141,7 +140,6 @@ for (const name of ["bash", "powershell"] as const) {
 				assert.equal(observation?.kind, "yielded");
 				assert.equal(observation?.taskId, id);
 			}
-			await session.reload();
 			await release(session, id);
 			const result = await tool(session, name).execute("settle", { action: "wait", id, budgetMs: 10000 });
 			const details = result.details as BashToolDetails;
@@ -158,6 +156,35 @@ for (const name of ["bash", "powershell"] as const) {
 			tasks.value.dispose();
 		} finally {
 			await session.closeSessionTasks();
+			harness.cleanup();
+		}
+	});
+	// #3105: reload cancels session-owned commands rather than reviving their closed native owner.
+	test(`registered ${name} receives a fresh owner after reload cancels its old command`, async () => {
+		const harness = await createHarness({
+			settings: { bashInterceptor: { enabled: false } },
+			initialActiveToolNames: ["bash", "powershell"],
+		});
+		const { session } = harness;
+		session.pauseQueuedMessages();
+		try {
+			const oldId = await start(session);
+			const oldOwner = session.getAgentTaskHost();
+			await session.reload();
+			assert.notEqual(session.getAgentTaskHost(), oldOwner);
+			const closed = await oldOwner.close("session-close");
+			assert.ok(closed.ok);
+			assert.equal(closed.value.state, "closed");
+			const execution = closed.value.tasks[0]!.execution;
+			assert.equal(execution.kind, "settled");
+			if (execution.kind === "settled") assert.equal(execution.result.kind, "cancelled");
+			await assert.rejects(tool(session, name).execute("old", { action: "wait", id: oldId }), /UnknownTask/);
+			const newId = await start(session);
+			await release(session, newId);
+			const result = await tool(session, name).execute("new", { action: "wait", id: newId, budgetMs: 10000 });
+			assert.equal((result.details as BashToolDetails).exitCode, 7);
+		} finally {
+			await session.dispose();
 			harness.cleanup();
 		}
 	});
@@ -209,9 +236,10 @@ for (const name of ["bash", "powershell"] as const) {
 				controller.signal,
 			);
 			const aborted = assert.rejects(waiting, /aborted/);
-			session.dispose();
+			const closing = session.dispose();
 			controller.abort();
 			await aborted;
+			await closing;
 		} finally {
 			await session.closeSessionTasks();
 			harness.cleanup();

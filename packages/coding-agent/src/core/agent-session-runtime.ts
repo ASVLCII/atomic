@@ -5,7 +5,6 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.js";
 import type { AgentSessionInternalSurface } from "./agent-session-methods.ts";
-import { prepareProtectedStreamingCustomMessagesForDisposal } from "./agent-session-persistent-custom-messages.ts";
 import { type AtomicOAuthLoginCallbacks, loginRuntimeOAuthProvider } from "./agent-session-runtime-auth.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
 import type {
@@ -19,6 +18,7 @@ import type { ModelFallbackReason } from "./model-resolver-types.ts";
 import type { AuthStatus } from "./provider-composer.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
+import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { SessionManager } from "./session-manager.ts";
 
 /**
@@ -130,10 +130,52 @@ export class AgentSessionRuntime {
 	) {
 		this._session = _session;
 		this._services = _services;
-		this.createRuntime = createRuntime;
+		const scope = sessionLifecycleScopes.get(_session) ?? {};
+		const context = () => {
+			const current = this._session as unknown as AgentSessionInternalSurface;
+			return {
+				scope,
+				bindings: {
+					...this._session.extensionRunner.getChildHostBindings(),
+					uiContext: current._extensionUIContext,
+					mode: current._extensionMode,
+					commandContextActions: current._extensionCommandContextActions,
+					shutdownHandler: current._extensionShutdownHandler,
+					onError: current._extensionErrorListener,
+				},
+			};
+		};
+		this.createRuntime = (options) =>
+			this.createReplacement(() => sessionLifecycleCreation.run(context(), () => createRuntime(options)));
+		this.createRuntime.prepareResume = (options) =>
+			sessionLifecycleCreation.run(context(), async () => {
+				const complete = createRuntime.prepareResume
+					? await createRuntime.prepareResume(options)
+					: () => createRuntime(options);
+				return () => this.createReplacement(() => sessionLifecycleCreation.run(context(), complete));
+			});
 		this._diagnostics = _diagnostics;
 		this._modelFallbackMessage = _modelFallbackMessage;
 		this._modelFallbackReason = _modelFallbackReason;
+	}
+
+	private async createReplacement(
+		create: () => Promise<CreateAgentSessionRuntimeResult>,
+	): Promise<CreateAgentSessionRuntimeResult> {
+		try {
+			return await create();
+		} catch (cause) {
+			// Replacement shutdown retained workflow ownership for a successor. If
+			// creation fails, no successor can deliver its final quit. The outgoing
+			// session's cached close is already settled, so finalize its handlers
+			// explicitly without re-running disposal or reviving its stale context.
+			try {
+				await emitSessionShutdownEvent(this.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
+			} catch (cleanupError) {
+				throw new AggregateError([cause, cleanupError], "Session replacement and retained cleanup failed");
+			}
+			throw cause;
+		}
 	}
 
 	get services(): AgentSessionServices {
@@ -251,10 +293,8 @@ export class AgentSessionRuntime {
 		return { cancelled: result?.cancel === true };
 	}
 
-	private disposeCurrentSession(): void {
-		prepareProtectedStreamingCustomMessagesForDisposal(this.session as unknown as AgentSessionInternalSurface);
-		this.beforeSessionInvalidate?.();
-		this.session.dispose();
+	private disposeCurrentSession(event: SessionShutdownEvent): Promise<void> {
+		return (this.session as unknown as AgentSessionInternalSurface)._close(event, this.beforeSessionInvalidate);
 	}
 
 	/**
@@ -280,12 +320,7 @@ export class AgentSessionRuntime {
 		if (timedOut) {
 			console.error("Warning: UI prompt observers did not settle within 1,000 ms; continuing session replacement.");
 		}
-		await emitSessionShutdownEvent(this.session.extensionRunner, {
-			type: "session_shutdown",
-			reason,
-			targetSessionFile,
-		});
-		this.disposeCurrentSession();
+		await this.disposeCurrentSession({ type: "session_shutdown", reason, targetSessionFile });
 	}
 
 	private apply(result: CreateAgentSessionRuntimeResult): void {
@@ -516,13 +551,8 @@ export class AgentSessionRuntime {
 		return { cancelled: false };
 	}
 
-	async dispose(): Promise<void> {
-		await this.session.closeSessionTasks();
-		await emitSessionShutdownEvent(this.session.extensionRunner, {
-			type: "session_shutdown",
-			reason: "quit",
-		});
-		this.disposeCurrentSession();
+	dispose(): Promise<void> {
+		return this.disposeCurrentSession({ type: "session_shutdown", reason: "quit" });
 	}
 }
 

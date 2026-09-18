@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "vitest";
 import { createEventBus } from "../../packages/coding-agent/src/core/event-bus.ts";
+import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
+import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import {
 	type ConfiguredDbosDurability,
 	DbosDurableBackend,
@@ -10,11 +12,14 @@ import {
 } from "../../packages/workflows/src/durable/dbos-backend.js";
 import { dbosLifecycleState, resetDbosLifecycleForTests } from "../../packages/workflows/src/durable/dbos-lifecycle.js";
 import { initializeDurableBackend, setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
+import { adoptWorkflowSessionRunState } from "../../packages/workflows/src/extension/adopt-session-run-state.js";
 import { registerWorkflowLifecycleHandlers } from "../../packages/workflows/src/extension/extension-lifecycle.js";
 import type { WorkflowExtensionRuntimeState } from "../../packages/workflows/src/extension/extension-runtime-state.js";
 import { createWorkflowHilAnswerNotificationState } from "../../packages/workflows/src/extension/hil-answer-notifications.js";
 import { createWorkflowLifecycleNotificationState } from "../../packages/workflows/src/extension/lifecycle-notifications.js";
 import type { ExtensionAPI } from "../../packages/workflows/src/extension/public-types.js";
+import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
+import { currentJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { inspectRun, statusRuns } from "../../packages/workflows/src/runs/background/status.js";
 import {
 	adoptStageControlRegistry,
@@ -24,13 +29,27 @@ import {
 	stageControlRegistry,
 } from "../../packages/workflows/src/runs/foreground/stage-control-registry.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
-import { adoptStore } from "../../packages/workflows/src/shared/store-factory.js";
+import { adoptStore, currentWorkflowStore } from "../../packages/workflows/src/shared/store-factory.js";
 import type { RunSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 
 type SessionEventHandler = (event?: unknown, ctx?: unknown) => Promise<unknown>;
 
 const PRESERVE = ["reload", "fork", "new", "resume"] as const;
 const CLEAR_ON_START = ["startup", "mystery"] as const;
+
+// #3105: a known empty host must never reclaim another host's live store on reload.
+test("owner-scoped reload does not reclaim the latest sibling's workflow state", () => {
+	const scope = {};
+	adoptWorkflowSessionRunState(scope, true);
+	const original = currentWorkflowStore();
+	adoptWorkflowSessionRunState({}, true);
+	const sibling = currentWorkflowStore();
+	startBareRun("sibling-live", "sibling");
+	adoptWorkflowSessionRunState(scope, true);
+	assert.equal(currentWorkflowStore(), original);
+	assert.equal(original.runs().length, 0);
+	assert.equal(sibling.runs().length, 1);
+});
 
 function bindScope(scope: object): void {
 	adoptStore(scope);
@@ -79,10 +98,11 @@ async function readyDurability() {
 	return harness;
 }
 
-function captureHandlers(): Map<string, SessionEventHandler> {
+function captureHandlers(lifecycleScope: object = {}): Map<string, SessionEventHandler> {
 	const handlers = new Map<string, SessionEventHandler>();
 	registerWorkflowLifecycleHandlers(
 		{
+			lifecycleScope,
 			on: (type: string, handler: SessionEventHandler) => {
 				handlers.set(type, handler);
 			},
@@ -108,7 +128,7 @@ function captureHandlers(): Map<string, SessionEventHandler> {
 function makeHandle(
 	runId: string,
 	stageId: string,
-	opts: { status?: StageControlStatus; dispose?: () => void } = {},
+	opts: { status?: StageControlStatus; dispose?: () => void | Promise<void> } = {},
 ): StageControlHandle {
 	let status: StageControlStatus = opts.status ?? "running";
 	return {
@@ -139,6 +159,136 @@ function makeHandle(
 		...(opts.dispose === undefined ? {} : { dispose: opts.dispose }),
 	};
 }
+
+// #3105: actual execution remains with its retained owner after another host adopts state.
+test("a live workflow survives replacement and sibling quit, then settles on owner quit", async () => {
+	const backend = new InMemoryDurableBackend();
+	setDurableBackend(backend);
+	const owner = {};
+	adoptWorkflowSessionRunState({});
+	const first = captureHandlers(owner);
+	const ownedStore = currentWorkflowStore();
+	const jobs = currentJobTracker();
+	let entered!: () => void;
+	const started = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	let aborted = false;
+	const runtime = createExtensionRuntime({
+		definitions: [
+			workflow({
+				name: "retained-owner",
+				description: "",
+				inputs: {},
+				outputs: {},
+				run: async (ctx) => {
+					await ctx.tool("wait", {}, async ({ signal }) => {
+						entered();
+						await new Promise<void>((resolve) =>
+							signal.addEventListener("abort", () => resolve(), { once: true }),
+						);
+						aborted = true;
+						return "stopped";
+					});
+					return {};
+				},
+			}),
+		],
+	});
+	adoptWorkflowSessionRunState({});
+	const sibling = captureHandlers();
+	const siblingStore = currentWorkflowStore();
+	const accepted = await runtime.dispatch({ workflow: "retained-owner", action: "run", inputs: {} });
+	await started;
+	assert.ok("status" in accepted);
+	assert.equal(accepted.status, "running");
+	assert.equal(ownedStore.runs().length, 1);
+	assert.equal(siblingStore.runs().length, 0);
+	await first.get("session_shutdown")!({ reason: "reload" });
+	await sibling.get("session_shutdown")!({ reason: "quit" });
+	assert.equal(aborted, false);
+	adoptWorkflowSessionRunState({});
+	const successor = captureHandlers(owner);
+	await successor.get("session_shutdown")!({ reason: "quit" });
+	assert.equal(aborted, true);
+	assert.equal(ownedStore.runs()[0]?.status, "paused");
+	assert.equal(backend.getWorkflow(ownedStore.runs()[0]!.id)?.status, "paused");
+	assert.deepEqual(jobs.runIds(), []);
+});
+
+// #3105: cleanup captures the adopted generation, never the newest singleton facade.
+test("owner quit drains retained generations, preserves sibling and borrowed backend", async () => {
+	const backend = new InMemoryDurableBackend();
+	setDurableBackend(backend);
+	const owner = {};
+	bindScope({});
+	const first = captureHandlers(owner);
+	let firstDisposed = false;
+	stageControlRegistry.register(
+		makeHandle("old", "stage", {
+			dispose: async () => {
+				firstDisposed = true;
+			},
+		}),
+	);
+	await first.get("session_shutdown")!({ reason: "new" });
+	assert.equal(firstDisposed, false);
+	bindScope({});
+	const successor = captureHandlers(owner);
+	let successorDisposed = false;
+	stageControlRegistry.register(
+		makeHandle("new", "stage", {
+			dispose: async () => {
+				successorDisposed = true;
+			},
+		}),
+	);
+	bindScope({});
+	const sibling = captureHandlers();
+	let siblingDisposed = false;
+	stageControlRegistry.register(
+		makeHandle("sibling", "stage", {
+			dispose: async () => {
+				siblingDisposed = true;
+			},
+		}),
+	);
+	await successor.get("session_shutdown")!({ reason: "quit" });
+	assert.equal(firstDisposed, true);
+	assert.equal(successorDisposed, true);
+	assert.equal(siblingDisposed, false);
+	assert.equal(await initializeDurableBackend(), backend);
+	await sibling.get("session_shutdown")!({ reason: "quit" });
+	assert.equal(siblingDisposed, true);
+	assert.equal(await initializeDurableBackend(), backend);
+});
+
+test("owner quit attempts all generation cleanup after a disposal failure", async () => {
+	setDurableBackend(new InMemoryDurableBackend());
+	const owner = {};
+	bindScope({});
+	const first = captureHandlers(owner);
+	stageControlRegistry.register(
+		makeHandle("old", "stage", {
+			dispose: async () => {
+				throw new Error("old stage failed");
+			},
+		}),
+	);
+	await first.get("session_shutdown")!({ reason: "reload" });
+	bindScope({});
+	const successor = captureHandlers(owner);
+	let disposed = false;
+	stageControlRegistry.register(
+		makeHandle("new", "stage", {
+			dispose: async () => {
+				disposed = true;
+			},
+		}),
+	);
+	await assert.rejects(successor.get("session_shutdown")!({ reason: "quit" }), /old stage failed/);
+	assert.equal(disposed, true);
+});
 
 function startBareRun(id: string, name: string): void {
 	store.recordRunStart({ id, name, inputs: {}, status: "running", stages: [], startedAt: 1 } satisfies RunSnapshot);

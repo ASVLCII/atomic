@@ -394,6 +394,10 @@ Pass `extensionBindings` to `createAgentSession()` to install `uiContext`, `mode
 
 Strict reloads (`failOnExtensionErrors: true`) require the loader's transactional `prepareReload()` support so a failed candidate cannot mutate live state before validation. `DefaultResourceLoader` provides that support. Custom loaders without it remain compatible with ordinary reloads, but strict reload fails before calling their mutating `reload()` method.
 
+Use `await session.dispose()` rather than fire-and-forget cleanup. It seals admission immediately and waits for owned work, extension shutdown, persistence and lease release. Concurrent disposal calls return the same promise. Catch `ShutdownFailed` to inspect its component `errors`; a rejected close is not successful cleanup, and the session stays closed. Do not add a manual MCP, Intercom or workflow teardown sequence. Caller-supplied settings, storage and model runtimes remain caller-owned.
+
+`AgentSessionRuntime` uses the same awaited close when replacing sessions and transfers configured host bindings before the replacement starts. Reload invalidates old input requests and extension subscriptions while retaining host configuration. Live durable workflows retain their existing runtime ownership across reload and session replacement; final owner disposal waits for their shutdown. A late answer from an old generation cannot authorize replacement work.
+
 Extensions can register tools, subscribe to events, add commands, and more. See [Extensions](/extensions) for the full API.
 
 **Event Bus:** Extensions can communicate via `pi.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:

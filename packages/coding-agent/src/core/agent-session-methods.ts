@@ -155,7 +155,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	_emitExtensionEvent(event: AgentEvent): Promise<void>;
 	subscribe(listener: AgentSessionEventListener): () => void;
 	_disconnectFromAgent(): void;
-	dispose(): void;
+	dispose(): Promise<void>;
 	getAgentTaskHost(): import("./tasks/agent-adapter.js").AgentTaskHost;
 	closeSessionTasks(): Promise<void>;
 	/** Internal workflow pause: cancel owned execution without closing message admission. */
@@ -507,6 +507,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_extensionDiagnosticListener?: (diagnostic: import("./extensions/host-input.js").HostDiagnostic) => void;
 	_extensionMode: ExtensionMode;
 	_disposed: boolean;
+	_close(event: import("./extensions/types.ts").SessionShutdownEvent, beforeInvalidate?: () => void): Promise<void>;
 	_sessionSummaryAbortController: AbortController | undefined;
 	_sessionSummaryToken: number;
 	_sessionSummaryRun: import("./agent-session-summary.ts").SessionSummaryRun | undefined;

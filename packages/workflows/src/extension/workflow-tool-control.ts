@@ -1,14 +1,13 @@
 import { getDurableBackend } from "../durable/factory.js";
 import { isWorkflowRunResumable } from "../durable/resume-eligibility.js";
 import type { ResumableWorkflowEntry } from "../durable/types.js";
-import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { quitAllRuns, quitRun } from "../runs/background/quit.js";
 import { abortToolNode } from "../runs/background/quit-tool-node.js";
 import { pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
 import { workflowHasPausedStages, workflowHasPausedState } from "../runs/background/workflow-lifecycle-aggregate.js";
 import { isRunIdPrefix } from "../shared/run-id.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
-import { store } from "../shared/store.js";
+import type { Store } from "../shared/store.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import type { WorkflowExecutionPolicy, WorkflowToolNodeIdentity } from "../shared/types.js";
 import { workflowRunResumeCandidate } from "../shared/workflow-artifacts.js";
@@ -17,6 +16,7 @@ import type { WorkflowToolResult } from "./render-result.js";
 import type { ExtensionRuntime } from "./runtime.js";
 import { formatWorkflowReloadReport, formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.js";
 import { resolveWorkflowResumeTarget, stageScopedDurableResumeMessage } from "./workflow-durable-resume-command.js";
+import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { normalizeWorkflowReloadReport, type WorkflowReloadReport } from "./workflow-reload-report.js";
 import { classifyDurableResumeShadow } from "./workflow-resume-shadow.js";
 import {
@@ -35,6 +35,7 @@ export interface WorkflowControlActionDeps {
 	ensureWorkflowResourcesLoaded: () => Promise<void> | void;
 	signal?: AbortSignal;
 	onRunAccepted?: (runId: string) => void;
+	owner?: WorkflowOwnerResources;
 }
 
 function controlFailure(action: "pause" | "quit" | "resume", runId: string, error: unknown): WorkflowToolResult {
@@ -46,7 +47,7 @@ function controlFailure(action: "pause" | "quit" | "resume", runId: string, erro
 	};
 }
 
-function resumeControlFailure(runId: string, error: unknown): WorkflowToolResult {
+function resumeControlFailure(runId: string, error: unknown, store: Store): WorkflowToolResult {
 	const run = store.runs().find((candidate) => candidate.id === runId);
 	const visiblyRunning =
 		run?.status === "running" ||
@@ -145,8 +146,10 @@ async function quitToolNodeAction(
 	runId: string,
 	nodeId: string,
 	action: "quit" | "pause",
+	owner: WorkflowOwnerResources,
 ): Promise<WorkflowToolResult> {
-	const aborted = await abortToolNode(runId, nodeId);
+	const { store } = owner;
+	const aborted = await abortToolNode(runId, nodeId, owner);
 	if (!aborted.ok) {
 		return {
 			action,
@@ -177,14 +180,18 @@ async function quitToolNodeAction(
 	};
 }
 
-export async function workflowQuitAction(args: WorkflowToolArgs): Promise<WorkflowToolResult> {
-	const target = resolveToolRunTarget(args, "No in-flight runs to quit.");
+export async function workflowQuitAction(
+	args: WorkflowToolArgs,
+	owner = captureWorkflowOwnerResources(),
+): Promise<WorkflowToolResult> {
+	const { store } = owner;
+	const target = resolveToolRunTarget(args, "No in-flight runs to quit.", store);
 	const action = "quit";
 	if (target.kind === "all") {
 		if (args.stageId !== undefined && args.stageId.length > 0) {
 			return { action, runId: "--all", status: "noop", message: allStageConflictMessage("quit") };
 		}
-		const results = await quitAllRuns({ actor: "agent" });
+		const results = await quitAllRuns({ ...owner, actor: "agent" });
 		const successes = results.filter((result) => result.ok);
 		const quitCount = successes.length;
 		const failures = results.filter((result) => !result.ok);
@@ -205,11 +212,11 @@ export async function workflowQuitAction(args: WorkflowToolArgs): Promise<Workfl
 	if (target.kind === "malformed" || target.kind === "not_found") {
 		return { action, runId: target.target, status: "noop", message: target.message };
 	}
-	const controlNode = resolveControlNodeTarget(target.runId, args.stageId);
+	const controlNode = resolveControlNodeTarget(target.runId, args.stageId, store);
 	if (!controlNode.ok) return { action, runId: target.runId, status: "noop", message: controlNode.message };
-	if (controlNode.kind === "tool") return quitToolNodeAction(controlNode.runId, controlNode.nodeId, action);
+	if (controlNode.kind === "tool") return quitToolNodeAction(controlNode.runId, controlNode.nodeId, action, owner);
 	try {
-		const result = await quitRun(target.runId, { actor: "agent" });
+		const result = await quitRun(target.runId, { ...owner, actor: "agent" });
 		if (result.ok) {
 			return {
 				action,
@@ -236,15 +243,19 @@ export async function workflowQuitAction(args: WorkflowToolArgs): Promise<Workfl
 	}
 }
 
-export async function workflowPauseAction(args: WorkflowToolArgs): Promise<WorkflowToolResult> {
-	const target = resolveToolRunTarget(args, "No in-flight runs to pause.");
+export async function workflowPauseAction(
+	args: WorkflowToolArgs,
+	owner = captureWorkflowOwnerResources(),
+): Promise<WorkflowToolResult> {
+	const { store } = owner;
+	const target = resolveToolRunTarget(args, "No in-flight runs to pause.", store);
 	const action = "pause";
 	if (target.kind === "all") {
 		if (args.stageId !== undefined && args.stageId.length > 0) {
 			return { action, runId: "--all", status: "noop", message: allStageConflictMessage("pause") };
 		}
 		try {
-			const results = await pauseAllRuns();
+			const results = await pauseAllRuns(owner);
 			const paused = results.filter((result) => result.ok).length;
 			return {
 				action,
@@ -261,14 +272,14 @@ export async function workflowPauseAction(args: WorkflowToolArgs): Promise<Workf
 	}
 	if (target.kind === "malformed" || target.kind === "not_found")
 		return { action, runId: target.target, status: "noop", message: target.message };
-	const controlNode = resolveControlNodeTarget(target.runId, args.stageId);
+	const controlNode = resolveControlNodeTarget(target.runId, args.stageId, store);
 	if (!controlNode.ok) return { action, runId: target.runId, status: "noop", message: controlNode.message };
-	if (controlNode.kind === "tool") return quitToolNodeAction(controlNode.runId, controlNode.nodeId, action);
-	const stage = resolveToolStageTarget(target.runId, args.stageId);
+	if (controlNode.kind === "tool") return quitToolNodeAction(controlNode.runId, controlNode.nodeId, action, owner);
+	const stage = resolveToolStageTarget(target.runId, args.stageId, store);
 	if (!stage.ok) return { action, runId: target.runId, status: "noop", message: stage.message };
 	const stageRunId = stage.runId ?? target.runId;
 	try {
-		const result = await pauseRun(stageRunId, { stageId: stage.stageId });
+		const result = await pauseRun(stageRunId, { ...owner, stageId: stage.stageId });
 		if (result.ok) {
 			return {
 				action,
@@ -296,7 +307,7 @@ async function resumeDurableShadow(
 	runId: string,
 	deps: Pick<
 		WorkflowControlActionDeps,
-		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted"
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner"
 	>,
 	budget?: WorkflowToolArgs["budget"],
 ): Promise<WorkflowToolResult> {
@@ -369,7 +380,7 @@ async function resolveExplicitDurableTarget(
 	args: WorkflowToolArgs,
 	deps: Pick<
 		WorkflowControlActionDeps,
-		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted"
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner"
 	>,
 	liveRuns: readonly RunSnapshot[] = [],
 ): Promise<WorkflowToolResult> {
@@ -435,9 +446,12 @@ export async function workflowResumeAction(
 	args: WorkflowToolArgs,
 	deps: Pick<
 		WorkflowControlActionDeps,
-		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted"
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner"
 	>,
 ): Promise<WorkflowToolResult> {
+	const owner = deps.owner ?? captureWorkflowOwnerResources();
+	deps = { ...deps, owner };
+	const { store, toolControlRegistry } = owner;
 	deps.signal?.throwIfAborted();
 	const explicitTarget = args.runId?.trim();
 	if (explicitTarget !== undefined && isRunIdPrefix(explicitTarget)) {
@@ -445,7 +459,7 @@ export async function workflowResumeAction(
 		// local precedence can select a run.
 		return resolveExplicitDurableTarget(explicitTarget, args, deps, topLevelWorkflowRuns(store.runs()));
 	}
-	const target = resolveToolRunTarget(args, "No active run to resume.");
+	const target = resolveToolRunTarget(args, "No active run to resume.", store);
 	if (target.kind === "all")
 		return { action: "resume", runId: "--all", status: "noop", message: "Resume does not support --all." };
 	if (target.kind === "malformed") {
@@ -460,12 +474,20 @@ export async function workflowResumeAction(
 	// Any exact id or unique prefix has been normalized to the canonical full id,
 	// so it cannot disagree with the resolved run; the old re-resolution branch
 	// here is unreachable.
-	const requestedStage = resolveToolStageTarget(target.runId, args.stageId);
+	const requestedStage = resolveToolStageTarget(target.runId, args.stageId, store);
 	if (!requestedStage.ok)
 		return { action: "resume", runId: target.runId, status: "noop", message: requestedStage.message };
 	const backend = getDurableBackend();
 	const exact = store.runs().find((run) => run.id === target.runId);
-	const shadow = exact === undefined ? "not_shadow" : classifyDurableResumeShadow(exact, store, { backend });
+	const shadow =
+		exact === undefined
+			? "not_shadow"
+			: classifyDurableResumeShadow(exact, store, {
+					backend,
+					jobs: owner.jobs,
+					stageControls: owner.stageControlRegistry,
+					toolControls: toolControlRegistry,
+				});
 	if (shadow === "eligible") {
 		const refusal = refuseStageScopedDurableResume(target.runId, args);
 		if (refusal !== undefined) return refusal;
@@ -497,7 +519,7 @@ export async function workflowResumeAction(
 		}
 	}
 	let warning: string | undefined;
-	const stage = resolveToolStageTarget(target.runId, args.stageId);
+	const stage = resolveToolStageTarget(target.runId, args.stageId, store);
 	if (!stage.ok) return { action: "resume", runId: target.runId, status: "noop", message: stage.message };
 	const stageRunId = stage.runId ?? target.runId;
 	const run = store.runs().find((candidate) => candidate.id === stageRunId);
@@ -538,7 +560,12 @@ export async function workflowResumeAction(
 		};
 	}
 	try {
-		const result = await resumeRun(stageRunId, { stageId: stage.stageId, message: args.message, actor: "agent" });
+		const result = await resumeRun(stageRunId, {
+			...owner,
+			stageId: stage.stageId,
+			message: args.message,
+			actor: "agent",
+		});
 		if (result.ok) {
 			const runLevelResumed =
 				hadPausedRunState &&
@@ -563,6 +590,6 @@ export async function workflowResumeAction(
 		}
 		return { action: "resume", runId: stageRunId, status: "noop", message: `Run not found: ${stageRunId}` };
 	} catch (error) {
-		return resumeControlFailure(stageRunId, error);
+		return resumeControlFailure(stageRunId, error, store);
 	}
 }

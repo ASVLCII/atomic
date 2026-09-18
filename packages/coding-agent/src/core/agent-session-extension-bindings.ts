@@ -2,6 +2,7 @@ import { basename, dirname } from "node:path";
 import { resetApiProviders } from "@bastani/pi-ai/compat";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { recoverProtectedStreamingCustomMessages } from "./agent-session-persistent-custom-messages.ts";
+import { replaceSessionTaskOwner } from "./agent-session-tasks.ts";
 import type { AgentSessionReloadOptions, ExtensionBindings } from "./agent-session-types.ts";
 import { hostInputError } from "./extensions/host-input.js";
 import { ExtensionRunner } from "./extensions/index.js";
@@ -11,6 +12,12 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ExtensionProviderTransaction, ModelRuntime } from "./model-runtime.js";
 import type { PathMetadata } from "./package-manager.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import {
+	abortSessionWork,
+	drainSessionWork,
+	renewSessionWork,
+	sessionGenerationClosing,
+} from "./session-lifecycle-work.ts";
 import { completeStartup, rollbackStartup } from "./session-startup-rollback.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
 import type { SlashCommandInfo } from "./slash-commands.js";
@@ -468,6 +475,25 @@ export function _bindExtensionCore(
 }
 
 export async function reload(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
+	if (this._disposed || sessionGenerationClosing.has(this)) throw hostInputError("SessionClosed");
+	sessionGenerationClosing.add(this);
+	try {
+		abortSessionWork(this);
+		this.abortBash();
+		this._extensionRunner.cancelHostInput();
+		if (this.isStreaming || this._activePromptCount > 0) await this.abort();
+		await this.closeSessionTasks();
+		await drainSessionWork(this);
+		renewSessionWork(this);
+		replaceSessionTaskOwner(this);
+		if (this._disposed) throw hostInputError("SessionClosed");
+		await reloadGeneration.call(this, options);
+	} finally {
+		sessionGenerationClosing.delete(this);
+	}
+}
+
+async function reloadGeneration(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
 	const reason = options?.reason ?? "reload";
 	const oldRunner = this._extensionRunner;
 	const previousFlagValues = oldRunner.getExplicitFlagValues();
@@ -477,14 +503,19 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 		if (options?.failOnExtensionErrors) {
 			throw new Error("Strict extension reload requires a transactional resource loader");
 		}
-		if (reason === "reload")
-			await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
-		oldRunner.invalidate();
+		try {
+			if (reason === "reload")
+				await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
+		} finally {
+			oldRunner.invalidate();
+		}
 		await this.settingsManager.reload();
 		resetApiProviders();
 		await this._resourceLoader.reload();
 		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
 		await options?.beforeSessionStart?.();
+		if (this._disposed) throw hostInputError("SessionClosed");
+		sessionGenerationClosing.delete(this);
 		await startExtensions(this, this._extensionRunner, this._resourceLoader, { type: "session_start", reason });
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
@@ -565,10 +596,17 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 		includeAllExtensionTools: true,
 		preserveRunner: true,
 	});
-	// Publish reporter claims only after fallible preparation, before old shutdown or queued user effects.
+	try {
+		if (reason === "reload")
+			await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
+	} finally {
+		oldRunner.invalidate();
+	}
+	if (this._disposed) throw hostInputError("SessionClosed");
+	sessionGenerationClosing.delete(this);
+	// Startup observers need the successor task host. Keep admission sealed until
+	// retiring callbacks are invalidated, then publish reporters before queued user effects.
 	await publication.activateStarts();
-	if (reason === "reload") await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
-	oldRunner.invalidate();
 	await publication.release();
 }
 

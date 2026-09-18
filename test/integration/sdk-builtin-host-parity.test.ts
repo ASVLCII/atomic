@@ -769,11 +769,11 @@ export default workflow({ name: "host-budget", description: "budget boundary", i
 	}
 });
 
-// Real Node process imports built package assets and naturally exits after existing runtime shutdown.
+// Real Node imports built assets and exits normally after awaited public session disposal.
 const BUILT_NODE_HOST_PROCESS_TIMEOUT_MS = 60_000;
 // #3105: source-alias tests are not executable package host-routing evidence.
 test(
-	"built non-TTY Node routes the unchanged workflow through the public factory",
+	"built non-TTY Node routes the unchanged workflow and exits after public session disposal",
 	() => {
 		const result = spawnSyncCollect(
 			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-built-node.mjs", import.meta.url))],
@@ -792,6 +792,28 @@ test(
 		);
 		assert.deepEqual(receipt.result, { text: "  durable text  ", approved: true });
 		assert.equal(receipt.effects, 1);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
+test(
+	"built non-TTY Node finalizes a pending workflow when replacement creation rejects before a new session",
+	() => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-built-node.mjs", import.meta.url)),
+				"--replacement-failure",
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
+			host: "built-node",
+			replacementFailed: true,
+			initiallyPending: true,
+			disposed: true,
+		});
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
 );

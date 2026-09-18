@@ -138,3 +138,7 @@ export function adoptCancellationRegistry(
 		preserveCurrentWhenTargetExists: preserveCurrentWhenTargetExists ? () => true : undefined,
 	});
 }
+
+export function currentCancellationRegistry(): CancellationRegistry {
+	return singleton.current();
+}

@@ -130,10 +130,26 @@ test("SDK transactional reload retains the new reporter through retiring shutdow
 			await session.bindExtensions({ mode: "tui", uiContext: { ...noOpUIContext } });
 			await fake.waitFor(1);
 			const retiring = session.extensionRunner;
+			const sessionId = sessionManager.getSessionId();
+			const retiringContext = retiring.createContext();
+			const retiringHost = session.getAgentTaskHost();
 			await session.reload({ failOnExtensionErrors: true });
 			assert.equal(committed, true, "the real SDK transaction committed");
 			assert.notEqual(session.extensionRunner, retiring);
 			assert.equal(session.extensionRunner.createContext().sessionManager, sessionManager);
+			assert.equal(sessionManager.getSessionId(), sessionId, "reload preserves the public session identity");
+			assert.notEqual(session.getAgentTaskHost(), retiringHost, "reload installs a fresh task owner");
+			assert.throws(() => retiringContext.getAgentTaskHost!(), /stale|closed|invalid/i);
+			await assert.rejects(
+				retiringHost.startAgentTask(
+					{ kind: "agent", agent: "retired", task: "must not launch" },
+					"retired-reload-owner",
+					() => {
+						throw new Error("Retired owner dispatched work");
+					},
+				),
+				/Task owner is closed/,
+			);
 			await fake.waitFor(2);
 			assert.deepEqual(
 				(await fake.calls()).filter((call) => call.phase === "start").map((call) => call.args[1]),

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Final session shutdown now reports MCP cleanup failures and timeouts after attempting all cleanup, instead of silently treating them as success ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+
 ## [0.9.19] - 2026-09-13
 
 Cumulative release of the `0.9.19-alpha.2` prerelease. Per-change details remain in the unchanged prerelease section below.

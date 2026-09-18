@@ -154,6 +154,8 @@ type StageLateMessageRouter = NonNullable<
 >;
 
 export interface ExtensionAPI {
+	/** @internal Stable ownership identity across host generation replacement. */
+	readonly lifecycleScope?: object;
 	registerWorkflowActivityPublisher?: () => WorkflowActivityPublisher;
 	/** Present only when this extension instance belongs to an admitted in-process subagent child. */
 	readonly subagentPolicy?: CreateAgentSessionOptions["subagentPolicy"];

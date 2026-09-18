@@ -92,9 +92,10 @@ function launchEnforcingHarness() {
 type SessionEventHandler = (event: unknown, ctx?: unknown) => Promise<unknown>;
 
 /** Register the real lifecycle handlers and capture `session_shutdown`. */
-function captureSessionShutdownHandler(): SessionEventHandler {
+function captureSessionShutdownHandler(lifecycleScope: object = {}): SessionEventHandler {
 	const handlers = new Map<string, SessionEventHandler>();
 	const pi = {
+		lifecycleScope,
 		on: (type: string, handler: SessionEventHandler) => {
 			handlers.set(type, handler);
 		},
@@ -157,6 +158,23 @@ describe("issue #1957 — DBOS survives host-session replacement", () => {
 			assert.equal(events.filter((event) => event === "start").length, 2);
 		});
 	}
+
+	// #3105: a retained predecessor and its successor have one owner, not a sibling's lease.
+	test.sequential("closing a sibling preserves the retained owner until its successor quits", async () => {
+		const { events, durability } = launchEnforcingHarness();
+		setDurableBackend(undefined);
+		resetDbosLifecycleForTests(async () => durability);
+		const scope = {};
+		const predecessor = captureSessionShutdownHandler(scope);
+		const sibling = captureSessionShutdownHandler();
+		await initializeDurableBackend();
+		await predecessor({ reason: "new" });
+		const successor = captureSessionShutdownHandler(scope);
+		await sibling({ reason: "quit" });
+		assert.equal(dbosLifecycleState(), "ready");
+		await successor({ reason: "quit" });
+		assert.equal(events.filter((event) => event === "shutdown").length, 1);
+	});
 
 	test.sequential("session_shutdown(quit) flushes and shuts DBOS down exactly once", async () => {
 		const { events, durability, isLaunched } = launchEnforcingHarness();

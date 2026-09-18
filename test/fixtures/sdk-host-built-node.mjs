@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createAgentSession, createAgentSessionRuntime, SessionManager, SettingsManager } from "@bastani/atomic";
+import { AgentSessionRuntime, createAgentSession, createAgentSessionServices, SessionManager, SettingsManager } from "@bastani/atomic";
 
 // #3105: actual package export and built builtin assets under non-TTY Node.
 assert.equal(process.versions.bun, undefined);
@@ -36,19 +36,12 @@ const bindings = {
 		questionnaire: async () => ({ answers: [], cancelled: true }),
 	},
 };
-// D isolates host routing. Existing runtime shutdown emits session_shutdown;
-// session.dispose alone does not yet release DBOS (tracked for F/H).
-const runtime = await createAgentSessionRuntime(async (target) => {
-	const result = await createAgentSession({ ...options, ...target });
-	return { ...result, diagnostics: [], services: {
-		cwd: target.cwd, agentDir: target.agentDir,
-		modelRuntime: result.session.modelRuntime,
-		settingsManager: options.settingsManager,
-		resourceLoader: result.session.resourceLoader,
-		diagnostics: [],
-	} };
-}, options);
-const { session } = runtime;
+// #3105: only public session disposal may release this host's workflow resources.
+const replacementFailure = process.argv.includes("--replacement-failure");
+const services = replacementFailure ? await createAgentSessionServices(options) : undefined;
+const { session } = await createAgentSession({ ...options, ...(services ? { resourceLoader: services.resourceLoader, modelRuntime: services.modelRuntime } : {}) });
+const failure = new Error("replacement rejected before session construction");
+const runtime = services ? new AgentSessionRuntime(session, services, async () => { throw failure; }) : undefined;
 try {
 	await session.prompt("/workflow sdk-host-durable --no-picker");
 	const tool = session.agent.state.tools.find((entry) => entry.name === "workflow");
@@ -64,26 +57,38 @@ try {
 	assert.equal(pending.runs[0]?.status, "running");
 	assert.match(JSON.stringify(pending), /"promptKind":"input"/);
 	assert.equal(existsSync(join(cwd, "effects.jsonl")), false);
-	await session.bindExtensions(bindings);
-	const deadline = Date.now() + 10_000;
-	let details;
-	do {
-		details = (await tool.execute("status", { action: "status" }, new AbortController().signal)).details;
-		if (details.runs[0]?.status === "completed") break;
-		await sleep(20);
-	} while (Date.now() < deadline);
-	assert.equal(details.runs[0]?.status, "completed", JSON.stringify(details));
-	assert.deepEqual(details.snapshots[0].result, { text, approved: true });
-	assert.equal(identities.length, 2);
-	assert.notEqual(identities[0].requestId, identities[1].requestId);
-	for (const identity of identities) {
-		assert.ok(identity.sessionId && identity.workflowRunId && identity.workflowStageId);
+	if (runtime) {
+		await assert.rejects(runtime.newSession(), (error) => error === failure);
+		await runtime.dispose();
+		console.log(JSON.stringify({ host: "built-node", replacementFailed: true, initiallyPending: true, disposed: true }));
+	} else {
+		// #3105: starting and closing a sibling must leave this pending owner alive.
+		const { session: sibling } = await createAgentSession({ ...options, sessionManager: SessionManager.inMemory(cwd) });
+		await sibling.dispose();
+		const retained = (await tool.execute("retained", { action: "status" }, new AbortController().signal)).details;
+		assert.equal(retained.runs[0]?.status, "running", JSON.stringify(retained));
+		assert.equal(retained.runs[0]?.awaitingInputCount, 1, JSON.stringify(retained));
+		await session.bindExtensions(bindings);
+		const deadline = Date.now() + 10_000;
+		let details;
+		do {
+			details = (await tool.execute("status", { action: "status" }, new AbortController().signal)).details;
+			if (details.runs[0]?.status === "completed") break;
+			await sleep(20);
+		} while (Date.now() < deadline);
+		assert.equal(details.runs[0]?.status, "completed", JSON.stringify(details));
+		assert.deepEqual(details.snapshots[0].result, { text, approved: true });
+		assert.equal(identities.length, 2);
+		assert.notEqual(identities[0].requestId, identities[1].requestId);
+		for (const identity of identities) {
+			assert.ok(identity.sessionId && identity.workflowRunId && identity.workflowStageId);
+		}
+		assert.equal(readFileSync(join(cwd, "receipts.jsonl"), "utf8"), `${JSON.stringify({ text })}\n`);
+		assert.equal(readFileSync(join(cwd, "effects.jsonl"), "utf8"), `${JSON.stringify({ text })}\n`);
+		assert.equal(createHash("sha256").update(readFileSync(definition)).digest("hex"), hash);
+		console.log(JSON.stringify({ host: "built-node", initiallyPending: true, hash, result: details.snapshots[0].result, effects: 1 }));
 	}
-	assert.equal(readFileSync(join(cwd, "receipts.jsonl"), "utf8"), `${JSON.stringify({ text })}\n`);
-	assert.equal(readFileSync(join(cwd, "effects.jsonl"), "utf8"), `${JSON.stringify({ text })}\n`);
-	assert.equal(createHash("sha256").update(readFileSync(definition)).digest("hex"), hash);
-	console.log(JSON.stringify({ host: "built-node", initiallyPending: true, hash, result: details.snapshots[0].result, effects: 1 }));
 } finally {
-	await runtime.dispose();
+	await session.dispose();
 	rmSync(cwd, { recursive: true, force: true });
 }

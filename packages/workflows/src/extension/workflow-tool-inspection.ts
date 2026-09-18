@@ -1,4 +1,4 @@
-import { stageControlRegistry } from "../runs/foreground/stage-control-registry.js";
+import { type StageControlRegistry, stageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import { expandWorkflowGraph } from "../shared/expanded-workflow-graph.js";
 import { type Store, store } from "../shared/store.js";
 import { readGraphStoreSnapshot } from "../shared/store-observation.js";
@@ -19,6 +19,7 @@ import { resolveToolRunTarget, resolveToolStageTarget } from "./workflow-targets
 export interface WorkflowInspectionSource {
 	readonly store?: Store;
 	readonly allowLiveHandles?: boolean;
+	readonly stageControlRegistry?: StageControlRegistry;
 }
 
 export function workflowStagesResult(args: WorkflowToolArgs, source?: WorkflowInspectionSource): WorkflowToolResult {
@@ -118,7 +119,9 @@ export function workflowTranscriptResult(
 	const run = activeStore.runs().find((r) => r.id === stageRunId);
 	const snapshot = run?.stages.find((s) => s.id === stage.stageId);
 	const liveHandle =
-		source?.allowLiveHandles === false ? undefined : stageControlRegistry.get(stageRunId, stage.stageId);
+		source?.allowLiveHandles === false
+			? undefined
+			: (source?.stageControlRegistry ?? stageControlRegistry).get(stageRunId, stage.stageId);
 	if (liveHandle !== undefined) {
 		const sessionFile = liveHandle.sessionFile ?? snapshot?.sessionFile;
 		const sessionId = liveHandle.sessionId ?? snapshot?.sessionId;

@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { getExtensionRuntimeEventBus } from "./extensions/loader-core.js";
+import { sessionGenerationClosing } from "./session-lifecycle-work.ts";
 import { AgentTaskHost } from "./tasks/agent-adapter.js";
 import { COMMAND_DETAIL_TAIL_BYTES, taskOutputText } from "./tasks/command-output.js";
 import {
@@ -13,8 +15,20 @@ import { bindOwnerTaskStore, OwnerTaskStore } from "./tasks/owner-store.js";
 import { taskTranscriptSource } from "./tasks/supervisor.js";
 import { WorkflowStageAdmissionBoundary } from "./workflow-stage-admission.ts";
 
+// Native closed scopes never reopen. Reload replaces only the internal owner
+// identity; the session manager's public identity and borrowed stage owner stay put.
+const replacementOwnerScopes = new WeakMap<object, string>();
+
+export function replaceSessionTaskOwner(session: AgentSession): void {
+	if (session._workflowStageAdmission) return;
+	replacementOwnerScopes.set(session, randomUUID());
+	session._agentTaskHost = undefined;
+	session._taskAdmission = undefined;
+	session._taskCompletionOutbox = undefined;
+}
+
 export function getAgentTaskHost(this: AgentSession): AgentTaskHost {
-	if (this._disposed) throw new Error("Task owner is closed");
+	if (this._disposed || sessionGenerationClosing.has(this)) throw new Error("Task owner is closed");
 	if (this._agentTaskHost) return this._agentTaskHost;
 	const admission =
 		this._workflowStageAdmission ?? WorkflowStageAdmissionBoundary.restore(this.sessionManager.getEntries());
@@ -102,7 +116,8 @@ export function getAgentTaskHost(this: AgentSession): AgentTaskHost {
 	this._taskCompletionOutbox = outbox;
 	const binding = {
 		authorizeLaunch: () => {
-			if (this._disposed || !admission.isOpen()) throw new Error("Task owner is closed");
+			if (this._disposed || sessionGenerationClosing.has(this) || !admission.isOpen())
+				throw new Error("Task owner is closed");
 			// Top-level sessions (main chat, workflow stages) may carry a policy without `depth`;
 			// only an admitted in-process child (depth >= 1) is refused delegation.
 			if ((this._subagentPolicy?.depth ?? 0) >= 1)
@@ -117,7 +132,13 @@ export function getAgentTaskHost(this: AgentSession): AgentTaskHost {
 	};
 	this._agentTaskHost = this._workflowStageAdmission
 		? this._workflowStageAdmission.bindAgentTaskHost(binding)
-		: new AgentTaskHost({ ...binding, scope: { kind: "session", sessionId: this.sessionManager.getSessionId() } });
+		: new AgentTaskHost({
+				...binding,
+				scope: {
+					kind: "session",
+					sessionId: replacementOwnerScopes.get(this) ?? this.sessionManager.getSessionId(),
+				},
+			});
 	const { supervisor, owner } = this._agentTaskHost.ownerBinding;
 	const store = new OwnerTaskStore(supervisor, owner);
 	const connected = store.connect();

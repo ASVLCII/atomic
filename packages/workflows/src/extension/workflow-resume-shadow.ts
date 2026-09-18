@@ -2,7 +2,7 @@ import type { DurableWorkflowBackend } from "../durable/backend.js";
 import { getDurableBackend } from "../durable/factory.js";
 import { isDurableWorkflowResumable } from "../durable/resume-eligibility.js";
 import { getLoadableDurableWorkflow } from "../durable/workflow-status-transition.js";
-import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
+import { type ToolControlRegistry, toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { type JobTracker, jobTracker } from "../runs/background/job-tracker.js";
 import { type StageControlRegistry, stageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import { expandWorkflowGraph } from "../shared/expanded-workflow-graph.js";
@@ -10,10 +10,11 @@ import { readGraphStoreSnapshot } from "../shared/store-observation.js";
 import type { Store } from "../shared/store-public-types.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 
-interface DurableResumeShadowDeps {
+export interface DurableResumeShadowDeps {
 	readonly backend?: DurableWorkflowBackend;
 	readonly jobs?: JobTracker;
 	readonly stageControls?: StageControlRegistry;
+	readonly toolControls?: ToolControlRegistry;
 }
 
 export type DurableResumeShadowClassification = "eligible" | "ineligible" | "not_shadow";
@@ -25,13 +26,11 @@ export function classifyDurableResumeShadow(
 	deps: DurableResumeShadowDeps = {},
 ): DurableResumeShadowClassification {
 	const backend = deps.backend ?? getDurableBackend();
+	const toolControls = deps.toolControls ?? toolControlRegistry;
 	// Quit may detach an abandoned executor before its finally unregisters the
 	// run control. Only an open admission boundary still represents a live owner;
 	// surviving paused stages/jobs are checked separately below.
-	if (
-		toolControlRegistry.runControl(run.id) !== undefined &&
-		toolControlRegistry.admissionBoundary(run.id)?.closed !== true
-	)
+	if (toolControls.runControl(run.id) !== undefined && toolControls.admissionBoundary(run.id)?.closed !== true)
 		return "not_shadow";
 	const handle = getLoadableDurableWorkflow(backend, run.id);
 	const jobs = deps.jobs ?? jobTracker;

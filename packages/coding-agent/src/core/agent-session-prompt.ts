@@ -12,6 +12,7 @@ import {
 } from "./auth-guidance.ts";
 import { runCallback } from "./callback-activity.ts";
 import { expandPromptTemplate } from "./prompt-templates.ts";
+import { sessionGenerationClosing } from "./session-lifecycle-work.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
 
 type UserMessageDeliveryAction = "prompt" | "steer" | "followUp" | "handled";
@@ -35,6 +36,8 @@ export async function tryExecuteSessionSlashCommand(
 }
 
 export async function prompt(this: AgentSession, text: string, options?: PromptOptions): Promise<void> {
+	if (this._disposed || sessionGenerationClosing.has(this))
+		throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 	this._activePromptCount += 1;
 	try {
 		await promptInternal.call(this, text, options);

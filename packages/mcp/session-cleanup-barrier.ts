@@ -40,4 +40,17 @@ export class McpSessionCleanupBarrier {
     this.settled = next;
     return next;
   }
+
+  async close(tasks: readonly (CleanupTask | null | undefined)[]): Promise<void> {
+    const pending = [this.settled, ...tasks.filter((task): task is CleanupTask => task != null)];
+    const results = await Promise.allSettled(pending.map((task) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("MCP cleanup did not settle within its deadline")), this.deadlineMs);
+      });
+      return Promise.race([task, deadline]).finally(() => { if (timer) clearTimeout(timer); });
+    }));
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length) throw new AggregateError(failures, "MCP cleanup failed");
+  }
 }

@@ -1,10 +1,17 @@
-import { flushDbos, shutdownDbos } from "../durable/dbos-lifecycle.js";
-import { cancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { sessionScopedExtensionState } from "@bastani/atomic";
+import { getDurableBackendProcessOwner } from "../durable/backend-process-owner.js";
+import { acquireDbosLease, flushDbos } from "../durable/dbos-lifecycle.js";
+import { getDurableBackend } from "../durable/factory.js";
+import { settleAdmissionControls } from "../engine/run-durable-admission.js";
+import { currentToolControlRegistry } from "../engine/run-tool-control-registry.js";
+import { currentCancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { currentJobTracker } from "../runs/background/job-tracker.js";
 import { quitAllRuns } from "../runs/background/quit.js";
 import { killAllRuns } from "../runs/background/status.js";
-import { stageControlRegistry } from "../runs/foreground/stage-control-registry.js";
+import { currentStageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import { installCompactionHook } from "../shared/persistence-compaction-policy.js";
-import { store } from "../shared/store.js";
+import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
+import { currentWorkflowStore } from "../shared/store-factory.js";
 import { clearForms } from "../tui/inline-form-store.js";
 import { installStoreWidget } from "../tui/store-widget-installer.js";
 import type { WorkflowExtensionRuntimeState } from "./extension-runtime-state.js";
@@ -12,39 +19,23 @@ import { resetWorkflowHilAnswerNotificationState } from "./hil-answer-notificati
 import { resetWorkflowLifecycleNotificationState } from "./lifecycle-notifications.js";
 import type { ExtensionAPI } from "./public-types.js";
 import { formatStartupDiagnostics } from "./workflow-command-surfaces.js";
-import { inFlightRunCount } from "./workflow-targets.js";
 
-let processShutdownInstalled = false;
-
-/**
- * Session dispose and process exit must never crash on durability teardown:
- * a genuine flush/stop failure is diagnostic, not fatal, and an unhandled
- * rejection here turns an otherwise-successful run into a nonzero exit.
- */
-function shutdownDbosQuietly(): Promise<void> {
-	return shutdownDbos().catch((error: unknown) => {
-		const detail = error instanceof Error ? error.message : String(error);
-		console.error(`atomic-workflows: DBOS durability shutdown failed: ${detail}`);
-	});
+interface WorkflowLifetime {
+	readonly generations: Set<() => Promise<void>>;
+	readonly release: () => Promise<void>;
+	closing?: Promise<void>;
 }
 
-/**
- * Process-preserving host-session boundaries (`/new`, `/resume`, `/fork`,
- * `/reload`) must NOT stop the process-scoped DBOS executor: the replacement
- * session reuses it for subsequent workflow runs. Flush pending durable
- * writes instead, and reserve SDK shutdown for actual process exit.
- */
-function flushDbosQuietly(): Promise<void> {
-	return flushDbos().catch((error: unknown) => {
-		const detail = error instanceof Error ? error.message : String(error);
-		console.error(`atomic-workflows: DBOS durability flush failed: ${detail}`);
-	});
-}
-
-function installDbosProcessShutdown(): void {
-	if (processShutdownInstalled) return;
-	processShutdownInstalled = true;
-	process.once("beforeExit", () => void shutdownDbosQuietly());
+async function attemptAll(actions: readonly (() => unknown | Promise<unknown>)[]): Promise<void> {
+	const errors: unknown[] = [];
+	for (const action of actions) {
+		try {
+			await action();
+		} catch (error) {
+			errors.push(error);
+		}
+	}
+	if (errors.length > 0) throw new AggregateError(errors, errors.map(String).join("; "));
 }
 
 /**
@@ -67,7 +58,58 @@ export interface WorkflowLifecycleRegistrationDeps {
 
 export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: WorkflowLifecycleRegistrationDeps): void {
 	if (typeof pi.on !== "function") return;
-	installDbosProcessShutdown();
+	const store = currentWorkflowStore();
+	const cancellationRegistry = currentCancellationRegistry();
+	const stageControlRegistry = currentStageControlRegistry();
+	const toolControlRegistry = currentToolControlRegistry();
+	const jobs = currentJobTracker();
+	const lifetime = sessionScopedExtensionState<WorkflowLifetime>(
+		pi.lifecycleScope ?? pi.events ?? pi,
+		"workflows:lifecycle:v1",
+		() => ({
+			generations: new Set(),
+			// Injected backends are borrowed: never stop caller-owned durability.
+			release: getDurableBackendProcessOwner().injectedBackend === undefined ? acquireDbosLease() : async () => {},
+		}),
+	);
+	lifetime.generations.add(async () => {
+		await attemptAll([
+			async () => {
+				const results = await quitAllRuns({
+					store,
+					stageControlRegistry,
+					toolControlRegistry,
+					jobs,
+					awaitSettlement: true,
+				});
+				const abandoned = results.flatMap((result) => (result.ok ? result.abandonedTools : []));
+				if (abandoned.length > 0)
+					throw new Error(
+						`Workflow cleanup left uncooperative tools: ${abandoned.map((tool) => `${tool.runId}/${tool.nodeId}`).join(", ")}`,
+					);
+				const failures = results.filter((result) => !result.ok);
+				if (failures.length > 0)
+					throw new Error(
+						failures
+							.map(
+								(result) =>
+									`${result.runId}: ${result.reason}${"message" in result ? ` (${result.message})` : ""}`,
+							)
+							.join("; "),
+					);
+			},
+			async () => {
+				if (store.runs().length === 0) return;
+				const backend = getDurableBackend();
+				const runIds = store.runs().map((run) => run.id);
+				await attemptAll([
+					() => settleAdmissionControls(backend, runIds),
+					...runIds.map((runId) => () => backend.flush(runId)),
+				]);
+			},
+			() => stageControlRegistry.clear(),
+		]);
+	});
 	const { runtimeState } = deps;
 	pi.on("session_before_switch", async (event, ctx) => {
 		const reason =
@@ -75,7 +117,9 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 				? (event as { readonly reason?: string }).reason
 				: undefined;
 		if (reason !== "new" && reason !== "resume") return undefined;
-		const inFlightWorkflowCount = inFlightRunCount();
+		const inFlightWorkflowCount = topLevelWorkflowRuns(store.runs()).filter(
+			(run) => run.endedAt === undefined,
+		).length;
 		if (inFlightWorkflowCount === 0) return undefined;
 		const confirmSessionSwitch = ctx?.ui?.confirm;
 		if (typeof confirmSessionSwitch !== "function") return undefined;
@@ -110,8 +154,8 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 		clearForms();
 		resetWorkflowLifecycleNotificationState(runtimeState.lifecycleNotificationState);
 		resetWorkflowHilAnswerNotificationState(runtimeState.hilAnswerNotificationState);
-		if (replacementStopsWorkflows(reason)) stageControlRegistry.clear();
-		else stageControlRegistry.clearDetached();
+		if (replacementStopsWorkflows(reason)) await stageControlRegistry.clear();
+		else await stageControlRegistry.clearDetached();
 		// Named workflows publish lifecycle notices through the normal notification path.
 		runtimeState.setNotificationsActive(true);
 		runtimeState.startWorkflowDiscoveryWarmup(() => {
@@ -136,40 +180,32 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 			typeof event === "object" && event !== null && "reason" in event
 				? (event as { readonly reason?: string }).reason
 				: undefined;
-		deps.intercomControlRef.current?.();
-		deps.intercomControlRef.current = null;
-		if (reason === "quit") {
-			// CLI/orchestrator quit is a resumable process boundary, not destructive
-			// cancellation. Durable-progress workflows stay available through
-			// `/workflow resume`; stage handles are disposed after being paused.
-			try {
-				const results = await quitAllRuns({ store, stageControlRegistry });
-				const failures = results.filter((result) => !result.ok);
-				if (failures.length > 0) {
-					console.error(
-						"atomic-workflows: session shutdown could not gracefully quit every run:",
-						failures
-							.map(
-								(result) =>
-									`${result.runId}: ${result.reason}${"message" in result ? ` (${result.message})` : ""}`,
-							)
-							.join(", "),
-					);
-				}
-			} finally {
-				stageControlRegistry.clear();
-			}
-		} else if (replacementStopsWorkflows(reason)) {
-			stageControlRegistry.clear();
+		const closeGeneration = () =>
+			attemptAll([
+				() => {
+					deps.intercomControlRef.current?.();
+					deps.intercomControlRef.current = null;
+				},
+				() => {
+					deps.storeWidgetRef.current?.();
+					deps.storeWidgetRef.current = null;
+				},
+				() => runtimeState.resetWorkflowDiscoveryForSession(),
+				() => runtimeState.setNotificationsActive(false),
+				() => deps.disposeObservation?.(),
+			]);
+		if (replacementStopsWorkflows(reason)) {
+			lifetime.closing ??= attemptAll([
+				closeGeneration,
+				...lifetime.generations,
+				() => {
+					lifetime.generations.clear();
+				},
+				lifetime.release,
+			]);
+			await lifetime.closing;
 		} else {
-			stageControlRegistry.clearDetached();
+			await attemptAll([closeGeneration, () => stageControlRegistry.clearDetached(), flushDbos]);
 		}
-		deps.storeWidgetRef.current?.();
-		deps.storeWidgetRef.current = null;
-		runtimeState.resetWorkflowDiscoveryForSession();
-		runtimeState.setNotificationsActive(false);
-		if (reason === "quit") await shutdownDbosQuietly();
-		else await flushDbosQuietly();
-		deps.disposeObservation?.();
 	});
 }

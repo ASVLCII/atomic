@@ -11,7 +11,6 @@ import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
 import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
-import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { getModelFastRoute, streamWithFastRoute, withFastRouteStreamOptions } from "./fast-model-routing.ts";
 import { markLifecycleTiming } from "./lifecycle-timings.ts";
 import { isMandatoryResourceLoader, withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
@@ -24,6 +23,7 @@ import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import { scrubPreCompactionAssistantUsage } from "./provider-context-usage.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
+import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { registerStartupRollback, rollbackStartup } from "./session-startup-rollback.ts";
 import { SettingsManager } from "./settings-manager.ts";
@@ -99,12 +99,31 @@ function removeUnownedModelHeaders(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
-	return constructAgentSession(options, false);
+	return createScopedSession(options, false);
 }
 
 /** Internal CLI assembly seam. Not exported from the package entrypoint. */
 export function createUnstartedAgentSession(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
-	return constructAgentSession(options, true);
+	return createScopedSession(options, true);
+}
+
+function createScopedSession(
+	options: CreateAgentSessionOptions,
+	deferStart: boolean,
+): Promise<CreateAgentSessionResult> {
+	const inherited = sessionLifecycleCreation.getStore();
+	const context = inherited && !inherited.claimed ? inherited : { scope: {} };
+	return sessionLifecycleCreation.run({ ...context, claimed: true }, async () => {
+		const result = await constructAgentSession(
+			{ ...options, extensionBindings: options.extensionBindings ?? context.bindings },
+			deferStart,
+		);
+		sessionLifecycleScopes.set(
+			result.session,
+			sessionLifecycleScopes.get(result.extensionsResult.runtime) ?? context.scope,
+		);
+		return result;
+	});
 }
 
 async function constructAgentSession(
@@ -508,28 +527,8 @@ async function constructAgentSession(
 		throw error;
 	}
 	registerStartupRollback(session.extensionRunner, async (error) => {
-		const cleanupErrors: Error[] = [];
-		const unsubscribe = session.extensionRunner.onError((failure) => {
-			cleanupErrors.push(new Error(`${failure.extensionPath}: ${failure.error}`));
-		});
-		const record = (results: PromiseSettledResult<unknown>[]) => {
-			for (const result of results) {
-				if (result.status === "rejected")
-					cleanupErrors.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
-			}
-		};
-		try {
-			record(await Promise.allSettled([session.abort(), session.closeSessionTasks()]));
-			record(
-				await Promise.allSettled([
-					emitSessionShutdownEvent(session.extensionRunner, { type: "session_shutdown", reason: "quit" }),
-				]),
-			);
-			record(await Promise.allSettled([providerRollback.commit(), settingsManager.flush()]));
-		} finally {
-			unsubscribe();
-			session.dispose();
-		}
+		const results = await Promise.allSettled([session.dispose(), providerRollback.commit()]);
+		const cleanupErrors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
 		if (cleanupErrors.length)
 			throw new AggregateError([error, ...cleanupErrors], "Extension startup failed and rollback reported errors");
 		throw error;

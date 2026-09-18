@@ -1,10 +1,8 @@
-import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
 import { workflowDependency } from "../sdk-surface.js";
 import { renderInputsSchema } from "../shared/render-inputs-schema.js";
 import { resolveRunIndicatorStatuses } from "../shared/run-indicator-status.js";
 import { schemaIsRequired } from "../shared/schema-introspection.js";
-import { store } from "../shared/store.js";
 import type { WorkflowExecutionPolicy } from "../shared/types.js";
 import { emitChatSurface } from "../tui/chat-surface-message.js";
 import { deriveGraphTheme } from "../tui/graph-theme.js";
@@ -35,6 +33,7 @@ import {
 	type WorkflowCommandHandler,
 	type WorkflowCommandOutputDetails,
 } from "./workflow-command-utils.js";
+import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import { normalizeWorkflowReloadReport, type WorkflowReloadReport } from "./workflow-reload-report.js";
 import { handleRunControlCommand, type WorkflowRunControlDeps } from "./workflow-run-control-command.js";
@@ -48,6 +47,7 @@ export interface WorkflowSlashCommandDeps {
 	ensureWorkflowResourcesLoaded: () => Promise<void> | void;
 	runWithLifecycleSuppressedForPolicy: <T>(policy: WorkflowExecutionPolicy, fn: () => Promise<T>) => Promise<T>;
 	runControl: WorkflowRunControlDeps;
+	owner?: WorkflowOwnerResources;
 }
 
 export function registerWorkflowSlashCommand(
@@ -55,6 +55,8 @@ export function registerWorkflowSlashCommand(
 	workflowCommands: Map<string, WorkflowCommandHandler>,
 	deps: WorkflowSlashCommandDeps,
 ): void {
+	const owner = deps.owner ?? captureWorkflowOwnerResources();
+	deps = { ...deps, owner, runControl: { ...deps.runControl, owner } };
 	registerWorkflowCommand(
 		pi,
 		"workflow",
@@ -66,7 +68,7 @@ export function registerWorkflowSlashCommand(
 				partial: string,
 			): PiArgumentCompletionResult | Promise<PiArgumentCompletionResult> => {
 				const buildCompletions = (): PiArgumentCompletionResult =>
-					workflowArgumentCompletions(partial, deps.runtimeProxy);
+					workflowArgumentCompletions(partial, deps.runtimeProxy, owner.store);
 				if (!workflowArgumentCompletionsNeedWorkflowResources(partial)) return buildCompletions();
 				return Promise.resolve(deps.ensureWorkflowResourcesLoaded()).then(buildCompletions).catch(buildCompletions);
 			},
@@ -93,6 +95,8 @@ async function workflowSlashHandler(
 	pi: ExtensionAPI,
 	deps: WorkflowSlashCommandDeps,
 ): Promise<void> {
+	const owner = deps.owner ?? captureWorkflowOwnerResources();
+	const { store } = owner;
 	const policy = workflowPolicyFromContext(ctx);
 	const reporter = createWorkflowCommandReporter(ctx, policy, pi);
 	const print = (msg: string): void => reporter.info(msg);
@@ -154,7 +158,7 @@ async function workflowSlashHandler(
 	if (subcommand === "status") {
 		const target = parts[1];
 		if (target && !target.startsWith("--")) {
-			const resolved = resolveRunId(target);
+			const resolved = resolveRunId(target, store);
 			if (resolved.kind === "malformed" || resolved.kind === "ambiguous") return fail(resolved.message);
 			if (resolved.kind === "not_found") {
 				const durable = await deps.runtimeForContext(ctx).inspectDurableWorkflow(target);
@@ -162,7 +166,7 @@ async function workflowSlashHandler(
 				emitChatSurface(pi, { kind: "detail", detail: durable.detail });
 				return;
 			}
-			const inspected = inspectRun(resolved.runId, { toolControlRegistry });
+			const inspected = inspectRun(resolved.runId, owner);
 			if (!inspected.ok) return fail(`Run not found: ${target}`);
 			const owningRunStatuses = Object.fromEntries(
 				store.graphSnapshot().runs.map((run) => [run.id, run.status] as const),
@@ -298,7 +302,7 @@ async function workflowSlashHandler(
 		return;
 	}
 	if (ctx.hasUI === false || policy.mode === "non_interactive") {
-		emitTerminalRunDetailSurface(pi, workflowName, mergedInputs, runResult);
+		emitTerminalRunDetailSurface(pi, workflowName, mergedInputs, runResult, owner);
 		return;
 	}
 	emitChatSurface(pi, { kind: "dispatch", workflowName, runId: runResult.runId, inputs: mergedInputs });

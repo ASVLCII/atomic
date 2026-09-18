@@ -209,3 +209,7 @@ export async function settleAbortedToolNodes(
 export function sameToolNodeIdentity(left: WorkflowToolNodeIdentity, right: WorkflowToolNodeIdentity): boolean {
 	return left.runId === right.runId && left.nodeId === right.nodeId;
 }
+
+export function currentToolControlRegistry(): ToolControlRegistry {
+	return singleton.current();
+}

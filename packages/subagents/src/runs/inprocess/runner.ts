@@ -1287,7 +1287,7 @@ export class SubagentControlRuntime {
 				);
 			} else {
 				try {
-					session?.dispose();
+					await session?.dispose();
 				} catch {
 					// Session teardown must not replace the attempt result.
 				}

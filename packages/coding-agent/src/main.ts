@@ -745,7 +745,7 @@ export async function main(argv: string[], options?: MainOptions) {
 					}));
 			}
 			if (deferInteractiveEngineResources && !services.completeStartup && !created.session.model) {
-				created.session.dispose();
+				await created.session.dispose();
 				forceEagerInteractiveEngineResources = true;
 				return createRuntime({ cwd, agentDir, sessionManager, sessionStartEvent, projectTrustContext });
 			}

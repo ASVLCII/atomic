@@ -114,10 +114,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
     } catch (error) {
       failures.push(error);
     }
-    for (const error of failures.slice(1)) {
-      console.error("MCP: additional state shutdown failure", error);
-    }
-    if (failures.length > 0) throw failures[0];
+    if (failures.length > 0) throw new AggregateError(failures, "MCP state shutdown failed");
   }
 
   async function cleanupSessionResources(currentState: McpExtensionState | null, reason: string, label: string): Promise<void> {
@@ -125,9 +122,8 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       shutdownState(currentState, reason),
       shutdownOAuthFlow(reason),
     ]);
-    for (const result of results) {
-      if (result.status === "rejected") console.error(label, result.reason);
-    }
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, label);
   }
 
   const earlyConfigPath = getConfigPathFromArgv();
@@ -323,7 +319,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       "session_shutdown",
       "MCP: session shutdown cleanup failed",
     );
-    await cleanupBarrier.retain([retiredInitialization, stateCleanup]);
+    await cleanupBarrier.close([retiredInitialization?.catch(() => undefined), stateCleanup]);
   });
 
   registerMcpCommands(pi, earlyConfigPath, async () => {

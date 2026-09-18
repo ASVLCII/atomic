@@ -3,12 +3,19 @@ import type { AgentSessionInternalSurface as AgentSession } from "./agent-sessio
 import type { BashResult } from "./bash-executor.ts";
 import { executeBashWithOperations } from "./bash-executor.ts";
 import type { BashExecutionMessage } from "./messages.ts";
+import { sessionGenerationClosing, trackSessionWork } from "./session-lifecycle-work.ts";
 import { type BashOperations, type BashOutputChannel, createLocalBashOperations } from "./tools/bash.js";
 import { applyBashSessionEnvironment, snapshotBashSessionEnvironment } from "./tools/bash-session-environment.ts";
 import { createLocalPowerShellOperations } from "./tools/powershell.ts";
 import { resolveSessionTempDirPath } from "./tools/session-temp-dir.ts";
 
-export async function executeBash(
+export function executeBash(this: AgentSession, ...args: Parameters<typeof executeBashOperation>): Promise<BashResult> {
+	if (this._disposed || sessionGenerationClosing.has(this))
+		return Promise.reject(Object.assign(new Error("Session is closed"), { code: "SessionClosed" }));
+	return trackSessionWork(this, () => executeBashOperation.call(this, ...args));
+}
+
+async function executeBashOperation(
 	this: AgentSession,
 	command: string,
 	onChunk?: (chunk: string, channel: BashOutputChannel) => void,

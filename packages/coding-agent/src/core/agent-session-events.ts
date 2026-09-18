@@ -1,6 +1,7 @@
 import type { AssistantMessage, Message, TextContent } from "@bastani/pi-ai/compat";
 import { cleanupSessionResources } from "@bastani/pi-ai/compat";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import { abortBash } from "./agent-session-bash.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import {
 	isProtectedStreamingCustomMessage,
@@ -10,6 +11,7 @@ import {
 	prepareProtectedStreamingCustomMessagesForDisposal,
 	retryConsumedProtectedStreamingCustomMessages,
 } from "./agent-session-persistent-custom-messages.ts";
+import { abortCurrentGeneration } from "./agent-session-queue-pause.ts";
 import {
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
@@ -28,9 +30,12 @@ import type {
 	TurnEndEvent,
 	TurnStartEvent,
 } from "./extensions/index.js";
+import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./extensions/stale-context.ts";
+import type { SessionShutdownEvent } from "./extensions/types.ts";
 import type { StageAdmittedCustomMessage } from "./messages.ts";
 import { normalizeMessageContent } from "./messages.ts";
+import { abortSessionWork, drainSessionWork } from "./session-lifecycle-work.ts";
 
 export function _emit(this: AgentSession, event: AgentSessionEvent): void {
 	for (const l of this._eventListeners) {
@@ -512,32 +517,62 @@ export function _disconnectFromAgent(this: AgentSession): void {
  * Call this when completely done with the session.
  */
 
-export function dispose(this: AgentSession): void {
-	// Terminal and idempotent: callers legitimately dispose more than once (an explicit dispose
-	// followed by a harness teardown), and the steps below are not all safe to repeat.
-	if (this._disposed) return;
-	// Summary work queued before its AbortController exists cannot be reached by
-	// abortSessionSummary(), so disposal is recorded as state that every checkpoint consults.
-	this._disposed = true;
-	void this.closeSessionTasks().catch((error) =>
-		this._extensionRunner.emitError({
-			extensionPath: "<runtime>",
-			event: "task_owner_close",
-			error: error instanceof Error ? error.message : String(error),
-		}),
-	);
-	// A background summary must never keep the process alive past shutdown.
-	this.abortSessionSummary();
-	// Fail closed while protected input remains queued, or flush a consumed
-	// reconciliation before invalidation can discard its recovery state.
-	prepareProtectedStreamingCustomMessagesForDisposal(this);
-	this._extensionRunner.invalidate(STALE_EXTENSION_CONTEXT_MESSAGE);
-	this._disconnectFromAgent();
-	this._eventListeners = [];
-	cleanupSessionResources(this.sessionId);
-	// Releasing the session lease stops protecting a tree that is no longer in use.
-	this._tempStorageLease?.release();
-	this._tempStorageLease = undefined;
+const sessionClosures = new WeakMap<AgentSession, Promise<void>>();
+
+/** Shared terminal boundary for direct SDK disposal and runtime replacement. */
+export function closeAgentSession(
+	session: AgentSession,
+	event: SessionShutdownEvent = { type: "session_shutdown", reason: "quit" },
+	beforeInvalidate?: () => void,
+): Promise<void> {
+	const existing = sessionClosures.get(session);
+	if (existing) return existing;
+	session._disposed = true;
+	const closing = Promise.resolve().then(async () => {
+		const errors: Error[] = [];
+		const attempt = async (component: string, cleanup: () => void | Promise<void>) => {
+			try {
+				await cleanup();
+			} catch (cause) {
+				if (cause instanceof AggregateError)
+					errors.push(...cause.errors.map((error) => new Error(component, { cause: error })));
+				else errors.push(new Error(component, { cause }));
+			}
+		};
+		await attempt("lifetime", () => abortSessionWork(session));
+		await attempt("shell abort", () => abortBash.call(session));
+		await attempt("abort", () => abortCurrentGeneration.call(session));
+		await attempt("tasks", () => session.closeSessionTasks());
+		await attempt("summary", () => session.abortSessionSummary());
+		await attempt("active work", () => drainSessionWork(session));
+		await attempt("extensions", async () => {
+			await emitSessionShutdownEvent(session._extensionRunner, event);
+		});
+		await attempt("messages", () => prepareProtectedStreamingCustomMessagesForDisposal(session));
+		await attempt("shell persistence", () => session._flushPendingBashMessages());
+		await attempt("settings", () => session.settingsManager.flush());
+		await attempt("session persistence", () => session.sessionManager.flush());
+		await attempt("host subscriptions", () => beforeInvalidate?.());
+		await attempt("generation", () => session._extensionRunner.invalidate(STALE_EXTENSION_CONTEXT_MESSAGE));
+		await attempt("subscriptions", () => {
+			session._disconnectFromAgent();
+			session._eventListeners = [];
+		});
+		await attempt("provider", () => cleanupSessionResources(session.sessionId));
+		await attempt("storage", () => {
+			session._tempStorageLease?.release();
+			session._tempStorageLease = undefined;
+		});
+		if (errors.length)
+			throw Object.assign(new AggregateError(errors, "Session shutdown failed"), { code: "ShutdownFailed" });
+	});
+	sessionClosures.set(session, closing);
+	session._extensionRunner.sealHostInput();
+	return closing;
+}
+
+export function dispose(this: AgentSession): Promise<void> {
+	return closeAgentSession(this);
 }
 
 // =========================================================================
@@ -547,6 +582,9 @@ export function dispose(this: AgentSession): void {
 /** Full agent state */
 
 export const agentSessionEventsMethods = {
+	_close(this: AgentSession, event: SessionShutdownEvent, beforeInvalidate?: () => void) {
+		return closeAgentSession(this, event, beforeInvalidate);
+	},
 	_emit,
 	_emitQueueUpdate,
 	_handleAgentEvent,

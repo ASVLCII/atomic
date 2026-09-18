@@ -121,7 +121,21 @@ export async function emitSessionShutdownEvent(
 	event: SessionShutdownEvent,
 ): Promise<boolean> {
 	if (extensionRunner.hasHandlers("session_shutdown")) {
-		await extensionRunner.emit(event);
+		const failures: Error[] = [];
+		const unsubscribe = extensionRunner.onError((failure) => {
+			if (failure.event === "session_shutdown")
+				failures.push(new Error(`${failure.extensionPath}: ${failure.error}`));
+		});
+		try {
+			await extensionRunner.emit(event);
+		} catch (error) {
+			const causes = error instanceof AggregateError ? error.errors : [error];
+			failures.push(...causes.map((cause) => (cause instanceof Error ? cause : new Error(String(cause)))));
+		} finally {
+			unsubscribe();
+		}
+		if (failures.length)
+			throw Object.assign(new AggregateError(failures, "Extension shutdown failed"), { code: "ShutdownFailed" });
 		return true;
 	}
 	return false;
@@ -328,6 +342,10 @@ export class ExtensionRunner {
 
 	cancelHostInput(): void {
 		this.inputBridge.cancel();
+	}
+	/** @internal Seal input admission without invalidating shutdown handlers. */
+	sealHostInput(): void {
+		this.inputBridge.close();
 	}
 
 	private refreshHostInput(): void {
@@ -676,9 +694,31 @@ export class ExtensionRunner {
 		event: TEvent,
 		isCurrent?: () => boolean,
 	): Promise<RunnerEmitResult<TEvent>> {
-		return runResourceRegistrationBatch(this.runtime, () =>
-			runGenericHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error), isCurrent),
+		const observerFailures: Error[] = [];
+		const result = await runResourceRegistrationBatch(this.runtime, () =>
+			runGenericHandlers(
+				this.extensions,
+				this.createContext(),
+				event,
+				(error) => {
+					try {
+						this.emitError(error);
+					} catch (cause) {
+						if (event.type !== "session_shutdown") throw cause;
+						observerFailures.push(
+							new Error(`${error.extensionPath}: ${error.error}`),
+							new Error("Shutdown observer failed", { cause }),
+						);
+					}
+				},
+				isCurrent,
+			),
 		);
+		if (observerFailures.length)
+			throw Object.assign(new AggregateError(observerFailures, "Shutdown observers failed"), {
+				code: "ShutdownFailed",
+			});
+		return result;
 	}
 
 	async emitMessageEnd(event: MessageEndEvent): Promise<AgentMessage | undefined> {

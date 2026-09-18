@@ -77,6 +77,12 @@ export function abort(this: AgentSession): Promise<void> {
 	this._extensionRunner.cancelHostInput();
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner.abort();
+	return abortCurrentGeneration.call(this);
+}
+
+/** Internal teardown never redirects cancellation into a replacement generation. */
+export function abortCurrentGeneration(this: AgentSession): Promise<void> {
+	this._extensionRunner.cancelHostInput();
 	if (this._subagentMessageAdmission) {
 		// Cancellation is terminal for a child. Hold even deliveries whose
 		// protocol-safe persistence is still pending so they cannot restart it.
@@ -88,9 +94,11 @@ export function abort(this: AgentSession): Promise<void> {
 		// A stage's generation remains host-owned; only explicit resume releases it.
 		this.pauseQueuedMessages();
 	}
-	this.abortRetry();
-	this.abortCompaction();
-	this.abortBranchSummary();
+	this._retryAbortController?.abort();
+	this._resolveRetry();
+	this._compactionAbortController?.abort();
+	this._autoCompactionAbortController?.abort();
+	this._branchSummaryAbortController?.abort();
 	this.agent.abort();
 	const manualCompaction = this._manualCompactionPromise;
 	const automaticCompaction = this._autoCompactionCompletion;

@@ -43,8 +43,8 @@ export function inFlightRunCount(): number {
 	return topLevelWorkflowRuns(store.runs()).filter((run) => run.endedAt === undefined).length;
 }
 
-export function topLevelExpandedSnapshots() {
-	const snapshot = store.snapshot();
+export function topLevelExpandedSnapshots(activeStore: Store = store) {
+	const snapshot = activeStore.snapshot();
 	return topLevelWorkflowRuns(snapshot.runs).map((run) => {
 		const graph = expandWorkflowGraph(snapshot, run.id);
 		return {
@@ -200,10 +200,14 @@ export type ControlNodeTarget =
 	| { ok: true; kind: "tool"; runId: string; nodeId: string; name: string }
 	| { ok: false; message: string };
 
-export function resolveControlNodeTarget(runId: string, stageTarget?: string): ControlNodeTarget {
+export function resolveControlNodeTarget(
+	runId: string,
+	stageTarget?: string,
+	activeStore: Store = store,
+): ControlNodeTarget {
 	const target = stageTarget?.trim();
 	if (!target) return { ok: true, kind: "run" };
-	const graph = expandWorkflowGraph(readGraphStoreSnapshot(store), runId);
+	const graph = expandWorkflowGraph(readGraphStoreSnapshot(activeStore), runId);
 	const nodes = graph.renderStages;
 	const candidates: Array<readonly ExpandedWorkflowStage[]> = [
 		nodes.filter((node) => node.id === target),

@@ -1,11 +1,14 @@
 import { type DurabilityWarningSink, getDurableBackend } from "../durable/factory.js";
 import { readWorkflowHeartbeatAnchor, recordWorkflowHeartbeatAnchor } from "../durable/workflow-heartbeat-anchor.js";
-import { cancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { currentToolControlRegistry } from "../engine/run-tool-control-registry.js";
+import { currentCancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { currentJobTracker } from "../runs/background/job-tracker.js";
+import { currentStageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import type { StageAdapters } from "../runs/foreground/stage-runner.js";
 import type { SessionManager } from "../shared/persistence-restore.js";
 import { resolveBuiltinDefinitionSource } from "../shared/possible-stages.js";
-import { stageUiBroker } from "../shared/stage-ui-broker.js";
-import { store } from "../shared/store.js";
+import { currentStageUiBroker } from "../shared/stage-ui-broker.js";
+import { currentWorkflowStore } from "../shared/store-factory.js";
 import { readGraphStoreSnapshot } from "../shared/store-observation.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import type {
@@ -133,6 +136,15 @@ export function createWorkflowExtensionRuntimeState(
 	adapters: StageAdapters,
 	resolveHostCwd?: () => string,
 ): WorkflowExtensionRuntimeState {
+	const store = currentWorkflowStore();
+	const stageUiBroker = currentStageUiBroker();
+	const cancellationRegistry = currentCancellationRegistry();
+	const scopedRunOptions = {
+		store,
+		jobs: currentJobTracker(),
+		stageControlRegistry: currentStageControlRegistry(),
+		toolControlRegistry: currentToolControlRegistry(),
+	};
 	// #3105: discovery follows the SDK session, never the process working directory.
 	let contextCwd: string | undefined;
 	const resolveCwd = (): string => resolveHostCwd?.() ?? contextCwd ?? pi.sessionManager?.getCwd?.() ?? process.cwd();
@@ -160,6 +172,13 @@ export function createWorkflowExtensionRuntimeState(
 		},
 	};
 	let statusWriterRef: StatusWriter = createStatusWriter(store, runtimeConfigRef.current);
+	pi.on?.("session_shutdown", async () => {
+		try {
+			await statusWriterRef.flush();
+		} finally {
+			statusWriterRef.unsubscribe();
+		}
+	});
 	let lifecycleNotificationsUnsubscribe: (() => void) | null = null;
 	let hilAnswerNotificationsUnsubscribe: (() => void) | null = null;
 	let workflowHeartbeatScheduler: WorkflowHeartbeatScheduler | null = null;
@@ -308,6 +327,7 @@ export function createWorkflowExtensionRuntimeState(
 			cwd: resolveCwd(),
 			adapters,
 			cancellation: cancellationRegistry,
+			...scopedRunOptions,
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
@@ -376,6 +396,7 @@ export function createWorkflowExtensionRuntimeState(
 			cwd: resolveCwd(),
 			adapters,
 			cancellation: cancellationRegistry,
+			...scopedRunOptions,
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
@@ -419,6 +440,7 @@ export function createWorkflowExtensionRuntimeState(
 			cwd: resolveCwd(),
 			adapters,
 			cancellation: cancellationRegistry,
+			...scopedRunOptions,
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,

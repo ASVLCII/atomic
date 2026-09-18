@@ -7,6 +7,7 @@
 - Intercom now respects tool allowlists and exclusions. `tools: []` and `noTools: "all"` expose no tools; `noTools: "all"` also overrides nonempty allowlists. Select `"intercom"` explicitly when using an allowlist. SDK `builtins` flags can disable individual shipped packages and resources without reload restoring them ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Extension dialogs without human-input support now reject with `HumanInputUnavailable` instead of returning empty defaults. Check `ctx.hasHumanInput` for questions; `ctx.hasUI` remains a presentation capability. Pending dialogs are cancelled on adapter withdrawal, abort, reload and disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Headless workflow launches now return an accepted run identity instead of waiting for completion. Inspect workflow status for results. Required durable gates remain pending even when no human host was initially bound; absent UI is no longer inferred as an execution restriction. Explicit runtime policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- `AgentSession.dispose()` now returns a promise. Await it to cancel and drain owned work, flush persistence and release builtin resources. Repeated calls share the same outcome; partial cleanup rejects with `ShutdownFailed` rather than reporting success. Runtime replacement uses the same shutdown and preserves host bindings ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Added
 
