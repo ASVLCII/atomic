@@ -1,4 +1,4 @@
-import type { QuestionnaireResult, QuestionParams } from "@bastani/atomic";
+import type { HostInput, QuestionnaireResult, QuestionParams } from "@bastani/atomic";
 import { stageUiBroker } from "../shared/stage-ui-broker.js";
 import type { Store } from "../shared/store.js";
 import type { PendingPrompt } from "../shared/store-types.js";
@@ -14,6 +14,9 @@ export interface WorkflowHumanInputContext {
 // identity, validation and cancellation ownership across adapter changes.
 const WORKFLOW_INPUT = Symbol.for("atomic-coding-agent/workflow-input@1");
 interface WorkflowInputBridge {
+	active(): boolean;
+	available(): boolean;
+	matchesBinding(input: HostInput | null | undefined): boolean;
 	subscribe(listener: () => void): () => void;
 	scope(
 		runId: string,
@@ -24,8 +27,14 @@ interface WorkflowInputBridge {
 		questionnaire(params: QuestionParams, signal?: AbortSignal): Promise<QuestionnaireResult>;
 	};
 }
-function bridge(ui: PiUISurface | undefined): WorkflowInputBridge | undefined {
+export function workflowInputBridge(ui: PiUISurface | undefined): WorkflowInputBridge | undefined {
 	return (ui as (PiUISurface & { [WORKFLOW_INPUT]?: WorkflowInputBridge }) | undefined)?.[WORKFLOW_INPUT];
+}
+
+/** Live routing only; callbacks are never written into persisted prompt descriptors. */
+export interface StageQuestionnaireInput {
+	ui: PiUISurface;
+	usesOwnBinding(): boolean;
 }
 
 /**
@@ -34,10 +43,22 @@ function bridge(ui: PiUISurface | undefined): WorkflowInputBridge | undefined {
  * host; background runs must not open dialogs in the main chat.
  */
 export function bindWorkflowHumanInput(store: Store, ctx: WorkflowHumanInputContext): () => void {
-	const requests = new Map<string, AbortController>();
+	const ownerInput = workflowInputBridge(ctx.ui);
+	const requests = new Map<string, { controller: AbortController; ownBinding: boolean }>();
+	const childSubscriptions = new Map<string, () => void>();
+	const bindingChanged = (childKey?: string): void => {
+		for (const [key, request] of requests) {
+			// Rebind only this child, or inherited requests when the parent changes.
+			// Closing the workflow owner still retires every live presentation.
+			if (childKey === undefined ? request.ownBinding && ownerInput?.active() : key !== childKey) continue;
+			request.controller.abort();
+			requests.delete(key);
+		}
+		refresh();
+	};
 	let disposed = false;
 	const refresh = (): void => {
-		if (disposed) return;
+		if (disposed || ownerInput?.active() === false) return;
 		const pending = new Set<string>();
 		for (const run of store.runs()) {
 			if (run.status !== "running") continue;
@@ -48,14 +69,22 @@ export function bindWorkflowHumanInput(store: Store, ctx: WorkflowHumanInputCont
 				if (!prompt && !questionnaire) continue;
 				const key = `${run.id}\0${stage.id}\0${questionnaire?.requestId ?? prompt!.id}`;
 				pending.add(key);
-				if (requests.has(key) || ctx.hasUI !== false || ctx.hasHumanInput !== true) continue;
+				const childInput = questionnaire?.humanInput;
+				if (childInput && !childSubscriptions.has(key)) {
+					const unsubscribe = workflowInputBridge(childInput.ui)?.subscribe(() => bindingChanged(key));
+					if (unsubscribe) childSubscriptions.set(key, unsubscribe);
+				}
+				const ownBinding = childInput?.usesOwnBinding() === true;
+				const input = ownBinding ? workflowInputBridge(childInput.ui) : ownerInput;
+				const available = ownBinding ? input?.available() : ctx.hasUI === false && ctx.hasHumanInput === true;
+				if (requests.has(key) || !available) continue;
 				const controller = new AbortController();
-				requests.set(key, controller);
+				requests.set(key, { controller, ownBinding });
 				// Defer presentation until the publisher has installed its pending waiter.
 				void Promise.resolve().then(async () => {
 					if (controller.signal.aborted) return;
 					try {
-						const scoped = bridge(ctx.ui)?.scope(run.id, stage.id, questionnaire?.sessionId);
+						const scoped = input?.scope(run.id, stage.id, questionnaire?.sessionId);
 						if (questionnaire) {
 							const answer = await scoped?.questionnaire(questionnaire.params, controller.signal);
 							if (controller.signal.aborted || !answer || answer.cancelled || answer.error) return;
@@ -81,24 +110,27 @@ export function bindWorkflowHumanInput(store: Store, ctx: WorkflowHumanInputCont
 				});
 			}
 		}
-		for (const [key, controller] of requests) {
+		for (const [key, { controller }] of requests) {
 			if (pending.has(key)) continue;
 			controller.abort();
 			requests.delete(key);
 		}
+		for (const [key, unsubscribe] of childSubscriptions) {
+			if (pending.has(key)) continue;
+			unsubscribe();
+			childSubscriptions.delete(key);
+		}
 	};
 	const unsubscribe = store.subscribeInvalidation(refresh);
-	const unsubscribeBinding = bridge(ctx.ui)?.subscribe(() => {
-		for (const controller of requests.values()) controller.abort();
-		requests.clear();
-		refresh();
-	});
+	const unsubscribeBinding = ownerInput?.subscribe(bindingChanged);
 	refresh();
 	return () => {
 		disposed = true;
 		unsubscribe();
 		unsubscribeBinding?.();
-		for (const controller of requests.values()) controller.abort();
+		for (const unsubscribe of childSubscriptions.values()) unsubscribe();
+		childSubscriptions.clear();
+		for (const { controller } of requests.values()) controller.abort();
 		requests.clear();
 	};
 }

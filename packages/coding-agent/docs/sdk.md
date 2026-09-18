@@ -182,6 +182,10 @@ Child tool selections can narrow the parent's selection, not expand it. Disabled
 
 Callbacks may be shared, but request and diagnostic `sessionId` values identify the originating child. Workflow questions also carry their run/stage identity. Group overrides retain the normal Intercom authorization rules. Disabling or excluding Intercom does not create a substitute supervisor grant. Reopening conversation history does not restore child authority.
 
+An explicit child `extensionBindings.humanInput` overrides the inherited host, including for durable stage questionnaires. Setting it to `null` leaves those questions pending; rebinding the parent cannot answer on that child's behalf. Rebind the child to an authorized adapter to continue. Without a child override, pending stage questions follow parent host withdrawal and reattachment.
+
+The inherited `isFallbackModelAllowed` predicate also applies when a workflow replaces its stage session to try a fallback. A rejected candidate is not executed. This predicate restricts fallback choices, not an explicitly selected primary model.
+
 ### AgentSession
 
 The session manages agent lifecycle, message history, model state, compaction, and event streaming.

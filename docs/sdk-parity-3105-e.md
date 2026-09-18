@@ -50,6 +50,36 @@ U1 from the prior tracked issues file is resolved: typed child executions no lon
 
 The tracked `ISSUES.md` remains because unrelated unresolved issues predate E; only resolved E/U1 entries were removed. Build/check/test logs retain the existing `beforeExit` listener warning without suppression. Signed commit and clean-tree evidence are recorded in the worker receipt.
 
+## Consolidated E review repair (baseline `c02d826df`)
+
+Frozen goal: respect the effective child host or withdrawal without removing durable broker ownership, persistence, detach/rebind or child identity; enforce inherited model restrictions on controller-selected fallback replacements without narrowing explicit primaries or widening candidates.
+
+The four P1 review entries reduce to two repaired causes:
+
+1. Stage questionnaires previously bypassed the child's host bridge. The broker now retains a live, non-persisted child binding reference alongside its existing waiter. Explicit overrides and withdrawals take precedence, including over an attached parent renderer. Inherited requests still follow parent detach/rebind. Binding changes invalidate only the applicable requests; retired owner bridges cannot dispatch child callbacks.
+2. The controller previously promoted fallback candidates into unmarked replacement primaries. It now marks fallback attempts, and the existing adapter checks the composed inherited predicate before creating that session. Forbidden candidates never reach inference; a later permitted candidate can run, and explicit primary semantics are unchanged.
+
+`test/integration/sdk-builtin-host-parity.test.ts` contains real factory/Store/StageUiBroker/host-consumer regressions for child override, initial null, later withdrawal, inherited parent rebind, explicit-child independence from parent rebind, attached-renderer precedence, and fallback replacement. No test replaces the failing runtime boundary. Model responses are deterministic local inference fixtures, not live provider verification.
+
+Evidence in `/tmp/atomic-sdk-e-evidence/`:
+
+- Original reviewer probes reproduced both defects: `repair-precedence-before.log` (parent answered both override/null; child callback never called) and `repair-fallback-before.log` (forbidden inference; predicate called zero times).
+- Persisted RED→GREEN: `repair-precedence-red.log`, `repair-precedence-green.log`, `repair-fallback-red.log`, `repair-fallback-green.log`; attached renderer and owner-local rebinding refinements: `repair-attached-red.log`, `repair-owner-rebind-red.log`, `repair-owner-green.log`.
+- First complete gates exposed duplicate retired-owner callbacks (`repair-host-full.log`) and close-notification access to stale contexts (`repair-agent-full2.log`). Both were repaired, not suppressed; subsequent complete host and coding-agent gates passed (`repair-host-final.log`, `repair-agent-final.log`). The first combined command's coding-agent invocation exceeded its outer shell budget; its incomplete output is retained as `repair-agent-full.log`, not counted as a pass.
+- The copied reviewer scripts `stage-precedence-after.mjs` and `stage-fallback-after.mjs` change only contract expectations: child answers, null pending until child rebind, and forbidden fallback refusal. Their built-Node runs pass (`repair-precedence-after.log`, `repair-fallback-after.log`). Originals remain unchanged.
+- Final current-repair gates: 35 host tests (`npm run test:integration -- test/integration/sdk-builtin-host-parity.test.ts`), 71 coding-agent tests in six files, 32 extension-runner tests under the existing temporary explicit config, and 225 unit tests in 25 files all passed; `repair-{host,agent,extensions,unit}-final3.log` retain results and file lists. No tests were suppressed. The original reviewer scripts also reran: precedence exits 1 because it asserts the old parent answer but gets the correct child answer; fallback exits 1 because the forbidden replacement is now rejected before inference. Adapted contract assertions both exit 0 (`repair-final3-*.mjs.log`).
+- Supplemental qlty metrics/smells ran on host input and workflow wiring. Complexity/return-count findings are advisory, not clean lint/security claims. Repository build/check remain mandatory. No qlty configuration or suppression changed.
+
+Only resolved E entries were removed from `ISSUES.md`; unrelated warnings and F/G/H boundaries remain. The reviewer-reported pi-ai TS1543 strict declaration closure issue is H, not repaired or independently verified by this E change.
+
+### Final build/check: controlled external catalog condition
+
+Unmodified `npm run build` and `npm run check` failed in `repair-{build,check}-final2.log`: live models.dev omitted `kimi-for-coding`, so generation deleted the tracked `kimi-coding` shard and unchanged provider import failed TS2307. `repair-generated-drift.patch` records the entire AI drift: only `packages/ai/src/models.generated.ts` and `packages/ai/src/providers/kimi-coding.models.ts`. Those two files were restored from HEAD; no generator/provider behavior was changed.
+
+With supervisor approval, final `npm run build` and `npm run check` both exited 0 using `NODE_OPTIONS=--import=/tmp/atomic-sdk-e-evidence/catalog-preload.mjs` (`repair-{build,check}-final3-controlled.log`). The preload delegates every fetch normally, then replaces only `models.dev/api.json`'s `kimi-for-coding` entry. Other providers remain live. This is controlled-catalog validation, **not an unconditioned live build/check pass or a provider repair**.
+
+Fixture provenance: copied preexisting `packages/ai/dist/providers/data/kimi-coding.json` before rebuilding to `kimi-coding-built-source.json`; SHA-256 `202d4b9a3e3327cebb01626fb1818f92627e59800f27858902c4ce69105f0bd7`. Evidence-only `construct-catalog-fixture.mjs` flattens its API groups, preserves ID/name/reasoning/input/cost/limits, translates cache cost and limit names to models.dev shape, and sets `tool_call: true` for the four known coding models. The resulting `kimi-models-dev-fixture.json` hash is `a68861a52b2f3a78ace276cd07a48f00841627a080a7add5f623f4d20bcf9b2d`; constructor hash `bb2d646b70a2743d0a910cc09924065f8ec86402f9c7f6706627a7596d4ae9e9`; preload hash `d9567fdd85148f966d04f9529fee1f998e61478de5b6642a6dd31b51b4831677`. All are retained in the evidence directory and `catalog-hashes.log`. This reconstructs generator input from local built values, not a historical raw API snapshot. Ordinary commit hooks use the same disclosed preload, without skips. Final tracked AI diff is empty. Live-catalog stability and exact-head parent CI remain outstanding external gates.
+
 ## Deferred work
 
 F must fix public `await session.dispose()` leaving DBOS ready and keeping Node alive. H must demonstrate normal packed-consumer exit without manual DBOS cleanup or forced exit. No lifecycle success is claimed here.

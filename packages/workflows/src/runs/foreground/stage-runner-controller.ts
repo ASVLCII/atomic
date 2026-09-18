@@ -1542,6 +1542,7 @@ export class StageSessionController {
 						{
 							...this.meta,
 							startupSignal: this.startupWait.signal,
+							isFallbackAttempt: candidate !== undefined && candidate !== (await this.modelCandidates())[0],
 							onStartupPhase: (phase) => {
 								if (this.abortGeneration === startGeneration) this.reportStartupPhase(phase);
 							},

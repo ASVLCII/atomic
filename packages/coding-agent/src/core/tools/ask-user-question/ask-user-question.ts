@@ -107,9 +107,11 @@ Preview content is rendered as markdown in a monospace box. Multi-line text with
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const typed = params as unknown as QuestionParams;
-			const stageOwned = (ctx.ui as ExtensionUIContext & { [STAGE_QUESTIONNAIRE]?: (sessionId: string) => void })[
-				STAGE_QUESTIONNAIRE
-			];
+			const stageOwned = (
+				ctx.ui as ExtensionUIContext & {
+					[STAGE_QUESTIONNAIRE]?: (sessionId: string, ui: ExtensionUIContext) => void;
+				}
+			)[STAGE_QUESTIONNAIRE];
 			if (typeof stageOwned !== "function" && !(ctx.hasHumanInput ?? ctx.hasUI))
 				return buildToolResult(ERROR_NO_UI, { answers: [], cancelled: true, error: "no_ui" });
 
@@ -123,7 +125,7 @@ Preview content is rendered as markdown in a monospace box. Multi-line text with
 			}
 
 			if (typeof stageOwned === "function") {
-				stageOwned(ctx.sessionManager.getSessionId());
+				stageOwned(ctx.sessionManager.getSessionId(), ctx.ui);
 				return buildQuestionnaireResponse(
 					await presentQuestionnaire(ctx.ui, typed, signal, options?.chatAsOption),
 					typed,

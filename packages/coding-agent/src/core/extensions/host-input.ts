@@ -58,6 +58,7 @@ type WorkflowIdentity = Pick<HostInputOptions, "workflowRunId" | "workflowStageI
 /** One runner owns request settlement; host promises cannot revive a retired request. */
 export class HostInputBridge {
 	private adapter: HostInput | undefined;
+	private configuredInput: HostInput | null | undefined;
 	private closed = false;
 	private readonly pending = new Set<AbortController>();
 	private readonly bindingListeners = new Set<() => void>();
@@ -69,7 +70,7 @@ export class HostInputBridge {
 		this.signal = signal;
 	}
 
-	bind(adapter: HostInput | undefined): void {
+	bind(adapter: HostInput | undefined, configuredInput?: HostInput | null): void {
 		if (
 			adapter !== undefined &&
 			["confirm", "select", "input", "editor", "questionnaire"].some(
@@ -78,7 +79,9 @@ export class HostInputBridge {
 		) {
 			throw hostInputError("InvalidHostInput");
 		}
-		if (adapter === this.adapter) return;
+		const bindingChanged = this.configuredInput !== configuredInput;
+		this.configuredInput = configuredInput;
+		if (adapter === this.adapter && !bindingChanged) return;
 		this.cancel();
 		this.adapter = adapter;
 		for (const listener of this.bindingListeners) queueMicrotask(listener);
@@ -95,6 +98,7 @@ export class HostInputBridge {
 	close(): void {
 		this.closed = true;
 		this.cancel();
+		for (const listener of this.bindingListeners) queueMicrotask(listener);
 	}
 
 	wrap(ui: ExtensionUIContext, presentationHost?: HostInput, scope: WorkflowIdentity = {}): ExtensionUIContext {
@@ -135,6 +139,9 @@ export class HostInputBridge {
 		);
 		Object.assign(wrapped, {
 			[WORKFLOW_INPUT]: {
+				active: () => !this.closed,
+				available: () => this.available,
+				matchesBinding: (input: HostInput | null | undefined) => this.configuredInput === input,
 				subscribe: (listener: () => void) => {
 					this.bindingListeners.add(listener);
 					return () => this.bindingListeners.delete(listener);

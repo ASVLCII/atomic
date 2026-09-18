@@ -7,6 +7,7 @@ import type {
 	PiKeybindings,
 	PiTheme,
 } from "../extension/wiring.js";
+import type { StageQuestionnaireInput } from "../extension/workflow-human-input.js";
 import { createSessionScopedSingleton } from "./session-scoped-singleton.js";
 import type { StageInputAnswer, StagePromptAdapter } from "./stage-prompt.js";
 import type { StagePromptAnswerSource, Store } from "./store.js";
@@ -21,6 +22,7 @@ export interface StageCustomUiRequest<T = unknown> {
 	readonly options?: PiCustomOverlayOptions;
 	readonly createdAt: number;
 	readonly sessionId?: string;
+	readonly humanInput?: StageQuestionnaireInput;
 	resolve(value: T): void;
 	reject(reason: unknown): void;
 }
@@ -135,6 +137,7 @@ export class StageUiBroker {
 			params: adapter.questionnaireParams,
 			prompt: adapter.prompt,
 			sessionId: request.sessionId,
+			humanInput: request.humanInput,
 		};
 	}
 
@@ -187,6 +190,7 @@ export class StageUiBroker {
 	}
 
 	private showHostOrReject(host: StageCustomUiHost, request: StageCustomUiRequest): void {
+		if (request.humanInput?.usesOwnBinding()) return;
 		try {
 			host.showCustomUi(request);
 		} catch (error) {
@@ -223,6 +227,7 @@ export class StageUiBroker {
 		options?: PiCustomOverlayOptions,
 		signal?: AbortSignal,
 		sessionId?: string,
+		humanInput?: StageQuestionnaireInput,
 	): Promise<T> {
 		// Session pause aborts the tool, not the stage (which remains resumable).
 		// Either owner must be able to dismiss its outstanding custom UI request.
@@ -245,6 +250,7 @@ export class StageUiBroker {
 				factory,
 				...(options !== undefined ? { options } : {}),
 				...(sessionId === undefined ? {} : { sessionId }),
+				...(humanInput === undefined ? {} : { humanInput }),
 				createdAt: Date.now(),
 				resolve,
 				reject,
@@ -324,6 +330,7 @@ export async function mountStageCustomUi(
 		theme,
 		keybindings,
 		(result: unknown) => {
+			if (request.humanInput?.usesOwnBinding()) return;
 			if (canResolve?.() === false) return;
 			broker.resolve(request, result);
 			onDone?.();

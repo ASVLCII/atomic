@@ -33,6 +33,7 @@ import { type StageUiBroker, stageUiBroker } from "../shared/stage-ui-broker.js"
 import type { StageExecutionMeta, StageOptions } from "../shared/types.js";
 import type { PiCodingAgentSdk, PrepareAtomicStageSessionOptions } from "./atomic-stage-session.js";
 import { prepareAtomicStageSessionOptions } from "./atomic-stage-session.js";
+import { type StageQuestionnaireInput, workflowInputBridge } from "./workflow-human-input.js";
 
 export type {
 	AtomicCreateAgentSessionOptions,
@@ -402,14 +403,26 @@ function shouldBindStageUiContext(pi: RuntimeWiringSurface, meta: StageExecution
 	return pi.ui !== undefined || meta !== undefined;
 }
 
-function makeStageExtensionUiContext(ui: PiUISurface, meta: StageExecutionMeta | undefined, broker: StageUiBroker) {
+function makeStageExtensionUiContext(
+	ui: PiUISurface,
+	meta: StageExecutionMeta | undefined,
+	broker: StageUiBroker,
+	inheritedInput: NonNullable<CreateAgentSessionOptions["extensionBindings"]>["humanInput"],
+	explicitInput: boolean,
+) {
 	let questionnaireSessionId: string | undefined;
+	let questionnaireInput: StageQuestionnaireInput | undefined;
 	return {
 		[Symbol.for("atomic-coding-agent/stage-questionnaire@1")]:
 			meta === undefined
 				? undefined
-				: (sessionId: string) => {
+				: (sessionId: string, childUi: PiUISurface) => {
 						questionnaireSessionId = sessionId;
+						questionnaireInput = {
+							ui: childUi,
+							usesOwnBinding: () =>
+								explicitInput || workflowInputBridge(childUi)?.matchesBinding(inheritedInput) === false,
+						};
 					},
 		select: ui.select ?? (async () => undefined),
 		confirm: ui.confirm ?? (async () => false),
@@ -437,6 +450,7 @@ function makeStageExtensionUiContext(ui: PiUISurface, meta: StageExecutionMeta |
 					options,
 					meta.signal,
 					questionnaireSessionId,
+					questionnaireInput,
 				);
 			}
 			if (ui.custom) {
@@ -514,9 +528,22 @@ export function buildRuntimeAdapters(
 					pi.getChildSessionOptions?.(stripWorkflowOnlyOptions(stageOptions) ?? {}) ??
 					stripWorkflowOnlyOptions(stageOptions) ??
 					{};
+				if (
+					meta?.isFallbackAttempt &&
+					inheritedOptions.model &&
+					inheritedOptions.isFallbackModelAllowed?.(inheritedOptions.model, inheritedOptions.thinkingLevel) ===
+						false
+				)
+					throw new Error("Workflow stage fallback model unavailable under inherited policy.");
 				const sessionOptions = withWorkflowStageSessionOptions(inheritedOptions, meta, pi);
 				const stageUi = shouldBindStageUiContext(pi, meta)
-					? makeStageExtensionUiContext(pi.ui ?? {}, meta, broker)
+					? makeStageExtensionUiContext(
+							pi.ui ?? {},
+							meta,
+							broker,
+							inheritedOptions.extensionBindings?.humanInput,
+							stageOptions.extensionBindings?.humanInput !== undefined,
+						)
 					: undefined;
 				if (stageUi)
 					sessionOptions.extensionBindings = {

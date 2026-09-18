@@ -985,3 +985,264 @@ test.each([false, true])(
 		}
 	},
 );
+
+// #3105: exercise the real child session, broker waiter and workflow host consumer.
+test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as const)(
+	"stage questionnaire respects child host precedence and durable rebind: %s",
+	async (mode) => {
+		const { buildRuntimeAdapters } = await import("../../packages/workflows/src/extension/wiring.js");
+		const { bindWorkflowHumanInput } = await import("../../packages/workflows/src/extension/workflow-human-input.js");
+		const { store } = await import("../../packages/workflows/src/shared/store.js");
+		const { stageUiBroker } = await import("../../packages/workflows/src/shared/stage-ui-broker.js");
+		const { buildStagePromptAdapter } = await import("../../packages/workflows/src/shared/stage-prompt.js");
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-child-questionnaire-"));
+		const params = {
+			questions: [
+				{ question: "Private decision", header: "Private", options: [{ label: "parent" }, { label: "child" }] },
+			],
+		};
+		const calls: string[] = [];
+		const identities: HostInputOptions[] = [];
+		const answerReady = Promise.withResolvers<void>();
+		const host = (label: string) => ({
+			input: async () => "",
+			select: async () => undefined,
+			confirm: async () => false,
+			editor: async () => "",
+			questionnaire: async (_params: typeof params, identity: HostInputOptions) => {
+				calls.push(label);
+				identities.push(identity);
+				if (mode === "parent-change") await answerReady.promise;
+				return {
+					cancelled: false,
+					answers: [
+						{ questionIndex: 0, question: params.questions[0]!.question, kind: "option" as const, answer: label },
+					],
+				};
+			},
+		});
+		const { session: parent } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory(),
+			builtins: { workflows: false, subagents: false, intercom: false, mcp: false, "web-access": false },
+			tools: ["ask_user_question"],
+			extensionBindings: { humanInput: host("parent") },
+		});
+		const unbind = bindWorkflowHumanInput(
+			store,
+			parent.extensionRunner!.createContext() as unknown as import("../../packages/workflows/src/extension/workflow-human-input.js").WorkflowHumanInputContext,
+		);
+		const runId = `child-precedence-${crypto.randomUUID()}`;
+		const stageId = "private";
+		store.recordRunStart({
+			id: runId,
+			name: "precedence",
+			inputs: {},
+			status: "running",
+			stages: [],
+			startedAt: Date.now(),
+		});
+		store.recordStageStart(runId, { id: stageId, name: stageId, status: "running", parentIds: [], toolEvents: [] });
+		const adapters = buildRuntimeAdapters(
+			{ getChildSessionOptions: parent.extensionRunner!.createContext().getChildSessionOptions },
+			{
+				createAgentSession: async (options) =>
+					(await createAgentSession(
+						options,
+					)) as unknown as import("../../packages/workflows/src/runs/foreground/stage-runner.js").StageSessionCreateResult,
+			},
+		);
+		const result = await adapters.agentSession!.create(
+			{
+				sessionManager: SessionManager.inMemory(cwd),
+				...(mode === "override" || mode === "null" || mode === "parent-change"
+					? { extensionBindings: { humanInput: mode === "null" ? null : host("child") } }
+					: {}),
+			},
+			{ runId, stageId, stageName: stageId, executionMode: "interactive", signal: new AbortController().signal },
+		);
+		const child = "session" in result ? result.session : result;
+		let presentations = 0;
+		const detachPresentation =
+			mode === "parent-rebind"
+				? () => {}
+				: stageUiBroker.registerHost(runId, stageId, {
+						showCustomUi: () => {
+							presentations++;
+						},
+					});
+		try {
+			stageUiBroker.provideStagePrompt(
+				runId,
+				stageId,
+				buildStagePromptAdapter("private-question", "ask_user_question", params, Date.now())!,
+			);
+			const session = child as import("../../packages/coding-agent/src/index.js").AgentSession;
+			if (mode === "withdrawn") await session.bindExtensions({ humanInput: null });
+			if (mode === "parent-rebind") await parent.bindExtensions({ humanInput: null });
+			const tool = session.agent.state.tools.find((entry) => entry.name === "ask_user_question")!;
+			let settled = false;
+			const pending = tool.execute("private-question", params, AbortSignal.timeout(5000)).then((reply) => {
+				settled = true;
+				return reply;
+			});
+			if (mode === "parent-change") {
+				await vi.waitFor(() => assert.deepEqual(calls, ["child"]));
+				await parent.bindExtensions({ humanInput: host("parent") });
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(
+					identities[0]!.signal.aborted,
+					false,
+					"parent rebinding must not retire an explicit child host request",
+				);
+				answerReady.resolve();
+			} else if (mode !== "override") {
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(settled, false, "withdrawal must leave the broker waiter pending");
+				assert.deepEqual(calls, [], "the parent must not answer a withdrawn child request");
+				assert.ok(stageUiBroker.peekStageQuestionnaire(runId, stageId));
+				if (mode !== "parent-rebind") assert.equal(session.extensionRunner!.createContext().hasHumanInput, false);
+				await (mode === "parent-rebind" ? parent : session).bindExtensions({ humanInput: host("child") });
+			}
+			const reply = await pending;
+			assert.equal((reply.details as { answers: { answer: string }[] }).answers[0]!.answer, "child");
+			assert.deepEqual(calls, ["child"]);
+			assert.equal(presentations, 0, "an attached parent renderer must not bypass child host precedence");
+			assert.equal(identities[0]!.sessionId, session.sessionId);
+			assert.equal(identities[0]!.workflowRunId, runId);
+			assert.equal(identities[0]!.workflowStageId, stageId);
+		} finally {
+			answerReady.resolve();
+			detachPresentation();
+			await child.dispose?.();
+			unbind();
+			await parent.dispose();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: the production controller must not launder fallback models into unrestricted primaries.
+test("workflow fallback replacement enforces the inherited gate but explicit primary remains valid", async () => {
+	const { getModel, createAssistantMessageEventStream } = await import("@bastani/pi-ai/compat");
+	const { AuthStorage, ModelRuntime } = await import("../../packages/coding-agent/src/index.js");
+	const { buildRuntimeAdapters } = await import("../../packages/workflows/src/extension/wiring.js");
+	const { createStageContext } = await import("../../packages/workflows/src/runs/foreground/stage-runner.js");
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-stage-fallback-policy-"));
+	const primary = {
+		...getModel("anthropic", "claude-sonnet-4-5")!,
+		provider: "stage-inheritance-fixture",
+		id: "primary",
+	};
+	const forbidden = { ...primary, id: "forbidden" };
+	const allowed = { ...primary, id: "allowed" };
+	const runtime = await ModelRuntime.create({
+		credentials: AuthStorage.inMemory(),
+		modelsPath: null,
+		allowModelNetwork: false,
+	});
+	const calls: string[] = [];
+	const checked: string[] = [];
+	runtime.registerProvider(primary.provider, {
+		api: primary.api,
+		baseUrl: primary.baseUrl,
+		apiKey: "fixture-key",
+		models: [primary, forbidden, allowed],
+		streamSimple: (model) => {
+			calls.push(model.id);
+			const stream = createAssistantMessageEventStream();
+			const fail = model.id === "primary";
+			const message: import("@bastani/pi-ai/compat").AssistantMessage = {
+				role: "assistant",
+				content: fail ? [] : [{ type: "text", text: model.id }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: fail ? "error" : "stop",
+				...(fail ? { errorMessage: "model not found" } : {}),
+				timestamp: Date.now(),
+			};
+			stream.push(
+				fail ? { type: "error", reason: "error", error: message } : { type: "done", reason: "stop", message },
+			);
+			stream.end(message);
+			return stream;
+		},
+	});
+	const { session: parent } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		sessionManager: SessionManager.inMemory(cwd),
+		modelRuntime: runtime,
+		model: primary,
+		settingsManager: SettingsManager.inMemory({ retry: { enabled: false } }),
+		builtins: { workflows: false, subagents: false, intercom: false, mcp: false, "web-access": false },
+		tools: [],
+		fallbackModels: [],
+		isFallbackModelAllowed: (model) => {
+			checked.push(model.id);
+			return model.id !== "forbidden";
+		},
+	});
+	const adapters = buildRuntimeAdapters(
+		{ getChildSessionOptions: parent.extensionRunner!.createContext().getChildSessionOptions },
+		{
+			createAgentSession: async (options) =>
+				(await createAgentSession(
+					options,
+				)) as unknown as import("../../packages/workflows/src/runs/foreground/stage-runner.js").StageSessionCreateResult,
+		},
+	);
+	const models = {
+		listModels: async () =>
+			[primary, forbidden, allowed].map((model) => ({
+				id: model.id,
+				provider: model.provider,
+				fullId: `${model.provider}/${model.id}`,
+				model,
+			})),
+	};
+	const stage = createStageContext({
+		stageId: "fallback",
+		stageName: "fallback",
+		runId: "policy",
+		adapters,
+		models,
+		stageOptions: {
+			model: primary,
+			fallbackModels: [`${primary.provider}/forbidden`, `${primary.provider}/allowed`],
+		},
+	});
+	const explicit = createStageContext({
+		stageId: "explicit",
+		stageName: "explicit",
+		runId: "policy",
+		adapters,
+		models,
+		stageOptions: { model: forbidden },
+	});
+	try {
+		assert.equal(await stage.prompt("reply once"), "allowed");
+		assert.deepEqual(calls, ["primary", "allowed"]);
+		assert.ok(checked.includes("forbidden"));
+		assert.ok(checked.includes("allowed"));
+		assert.equal(await explicit.prompt("explicit primary"), "forbidden");
+		assert.deepEqual(calls, ["primary", "allowed", "forbidden"]);
+	} finally {
+		await stage.__dispose();
+		await explicit.__dispose();
+		await parent.dispose();
+		runtime.unregisterProvider(primary.provider);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

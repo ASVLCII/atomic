@@ -329,7 +329,10 @@ export class ExtensionRunner {
 
 	private refreshHostInput(): void {
 		const ui = this.presentationUI;
-		this.inputBridge.bind(this.humanInput === undefined ? this.presentationInput : (this.humanInput ?? undefined));
+		this.inputBridge.bind(
+			this.humanInput === undefined ? this.presentationInput : (this.humanInput ?? undefined),
+			this.humanInput,
+		);
 		const bridged = this.inputBridge.wrap(
 			ui ?? {
 				...noOpUIContext,
