@@ -480,6 +480,52 @@ test("noTools all suppresses Intercom and remains empty after reload", async () 
 	}
 });
 
+// #3105: flag lookup must not require own enumerable properties, including after reload.
+test.each(["inherited getter", "nonenumerable"])("builtin %s false flags survive reload", async (shape) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-flag-shape-"));
+	class Selection {
+		workflows = false;
+		mcp = false;
+		"web-access" = false;
+		intercom = false;
+		get subagents() {
+			return false;
+		}
+	}
+	const builtins: Partial<Record<AtomicBuiltin, boolean>> = new Selection();
+	if (shape === "nonenumerable") Object.defineProperty(builtins, "subagents", { value: false, enumerable: false });
+	Object.freeze(builtins);
+	const descriptors = Object.getOwnPropertyDescriptors(builtins);
+	const prototype = Object.getPrototypeOf(builtins);
+	try {
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			builtins,
+			settingsManager: SettingsManager.inMemory(),
+			sessionManager: SessionManager.inMemory(cwd),
+		});
+		try {
+			for (let generation = 0; generation < 2; generation++) {
+				assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
+				assert.equal(session.resourceLoader.getSkills().skills.length, 0);
+				assert.ok(session.getActiveToolNames().includes("read"));
+				assert.equal(
+					session.getAllTools().some((tool) => tool.name === "subagent"),
+					false,
+				);
+				assert.deepEqual(Object.getOwnPropertyDescriptors(builtins), descriptors);
+				assert.equal(Object.getPrototypeOf(builtins), prototype);
+				if (generation === 0) await session.reload();
+			}
+		} finally {
+			session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 // #3105: package suppression removes resources as well as tools across generations.
 test.each(["preferred", "dist"])(
 	"disabled builtins stay absent with %s custom discovery and reload",

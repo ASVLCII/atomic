@@ -88,3 +88,27 @@ Repair validation (all successful):
 - `qlty metrics --functions packages/coding-agent/src/core/builtin-resource-loader.ts packages/coding-agent/src/core/builtin-packages.ts` and `qlty smells` on those same paths: `/tmp/b-review-qlty-metrics.log`, `/tmp/b-review-qlty-smells.log`; no smells reported. Existing Qlty configuration unchanged; authoritative lint/typecheck remains `npm run check`.
 
 Signed conventional repair commit uses normal hooks; raw hook/commit output is retained at `/tmp/b-review-commit.log`, with SHA/signature/clean-tree verification in `/tmp/b-review-commit-receipt.log`. Exact commit SHA is returned in the handoff rather than self-embedded in the commit. Existing `beforeExit` MaxListeners warnings remain visible and unsuppressed. No forced process exit was added. Built workspace Node proof is not packed-install proof; C–H, native Windows/remote CI and cumulative PR/Greptile/merge gates remain explicitly deferred to the parent.
+
+## Review round 2: resolved flag snapshots
+
+| Finding | Disposition | Evidence |
+| --- | --- | --- |
+| Completion reviewer: preserve false flags when snapshotting | Resolved | Public factory inherited getter regression, creation and reload |
+| Evidence reviewer: preserve accessor flags | Resolved, same root cause | Unchanged `getter.mjs` now reports `loaded: []` |
+| Risk reviewer: inherited/nonenumerable flags | Resolved, same root cause | Public factory nonenumerable regression, creation and reload |
+
+Object spread copied only own enumerable properties. The constructor now reads each present supported flag into its private snapshot, including inherited and nonenumerable values. Absent keys remain absent; values are not normalized. Public types, caller descriptors/prototype, Windows containment and alternate shipped-root suppression are unchanged. Both regression cases freeze caller input and verify its descriptors/prototype remain unchanged. A built Node supplement also changes caller values after creation and confirms reload uses the captured values.
+
+Validation commands and results (logs under `/tmp/b-review-r2-`):
+
+- `node /tmp/3105-b-evidence-r2/getter.mjs`: reproduced `1 !== 0` before repair (`getter-red.log`); passed after rebuild (`getter-green.log`).
+- `npm run test --workspace=@bastani/atomic -- test/sdk-builtin-parity.test.ts -t 'false flags survive reload'`: both variants RED then GREEN (`tests-red.log`, `tests-green.log`); 32 unrelated cases unselected, not suppressed.
+- `npm run build`: passed (`build.log`). `npm run check`: passed (`check.log`); initial test formatting failure retained in `check-format-red.log`, corrected without changing assertions.
+- Exact affected package command from the earlier repair (validation command above plus `test/builtin-packages test/builtin-extension-entry-labels test/native-builtin`): **433 passed in 38 files**, no skips (`affected.log`), including both new cases and Windows/dist-root regressions.
+- Root affected command above: **34 passed in four files**, no skips (`unit.log`).
+- `node packages/coding-agent/test/fixtures/sdk-builtin-composition.mjs`: composition and suppression PASS (`node.log`).
+- `node /tmp/b-review-r2-flag-shapes.mjs`: inherited getter and nonenumerable creation plus caller-mutation/reload scenarios PASS (`flag-shapes.log`).
+- `node /tmp/sdk-b-evidence-probe.mjs`: all five reviewer scenarios PASS (`runtime.log`). `node /tmp/3105-b-risk-windows-green.mjs`: all four injected win32 cases PASS (`windows.log`).
+- `qlty metrics --functions packages/coding-agent/src/core/builtin-resource-loader.ts` and `qlty smells packages/coding-agent/src/core/builtin-resource-loader.ts`: passed, no smells (`qlty-metrics.log`, `qlty-smells.log`); Qlty 0.642.0, existing configuration unchanged. Supplemental analysis, not a replacement lint gate.
+
+Temporary round-2 issue entry was tracked then removed after successful validation; baseline `ISSUES.md` is unchanged. No new user guidance or changelog is needed for this correction to the documented suppression contract. Normal signed commit/hook output: `/tmp/b-review-r2-commit.log`; receipt: `/tmp/b-review-r2-commit-receipt.log`. Existing unsuppressed `beforeExit` listener warnings remain. Local built-workspace and injected-win32 evidence is not native Windows, packed-install or remote CI proof. Parent-owned exact-head CI/protection/Greptile and eventual PR/merge gates remain deferred; no push, PR, merge or release was performed.

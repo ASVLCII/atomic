@@ -48,7 +48,10 @@ class BuiltinResourceLoader implements ResourceLoader {
 		this.delegate = delegate;
 		this.cwd = cwd;
 		this.agentDir = agentDir;
-		this.builtins = { ...builtins };
+		this.builtins = {};
+		for (const name of ["workflows", "subagents", "mcp", "web-access", "intercom"] as const) {
+			if (builtins && name in builtins) this.builtins[name] = builtins[name];
+		}
 		this.disabledRoots = getAllBuiltinPackageLocations()
 			.filter((location) => this.builtins[location.distDirName] === false)
 			.map((location) => canonical(location.packageDir));
