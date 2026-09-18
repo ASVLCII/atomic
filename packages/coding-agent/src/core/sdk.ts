@@ -4,6 +4,7 @@ import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from
 import { getAgentDir } from "../config.js";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.js";
+import type { AgentSessionInternalSurface } from "./agent-session-methods.ts";
 import { restoreAnthropicReplayThinkingBlocks } from "./anthropic-thinking-guard.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
@@ -11,6 +12,11 @@ import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
 import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
+import {
+	factoryAcquisitions,
+	factoryRollbackError,
+	rollbackFactoryAcquisitions,
+} from "./extensions/loader-rollback.ts";
 import { getModelFastRoute, streamWithFastRoute, withFastRouteStreamOptions } from "./fast-model-routing.ts";
 import { markLifecycleTiming } from "./lifecycle-timings.ts";
 import {
@@ -31,6 +37,7 @@ import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-life
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { registerStartupRollback, rollbackStartup } from "./session-startup-rollback.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { ownedSettingsManagers } from "./settings-write-ownership.ts";
 import { time } from "./timings.ts";
 import { allToolNames, getDefaultToolNames } from "./tools/index.ts";
 
@@ -118,9 +125,18 @@ function createScopedSession(
 	const inherited = sessionLifecycleCreation.getStore();
 	const context = inherited && !inherited.claimed ? inherited : { scope: {} };
 	return sessionLifecycleCreation.run({ ...context, claimed: true }, async () => {
-		const result = await constructAgentSession(
-			{ ...options, extensionBindings: options.extensionBindings ?? context.bindings },
-			deferStart,
+		const result = await factoryAcquisitions.run(
+			{ pending: new Map(), replacement: context.replacement },
+			async () => {
+				try {
+					return await constructAgentSession(
+						{ ...options, extensionBindings: options.extensionBindings ?? context.bindings },
+						deferStart,
+					);
+				} catch (error) {
+					throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
+				}
+			},
 		);
 		sessionLifecycleScopes.set(result.session, context.scope);
 		return result;
@@ -534,8 +550,19 @@ async function constructAgentSession(
 			throw new AggregateError([error, ...failures], "Session construction failed and rollback reported errors");
 		throw error;
 	}
+	// Ownership transfers to the session; startup rollback now uses its shared close.
+	const acquisitions = factoryAcquisitions.getStore();
+	if (acquisitions) delete acquisitions.pending;
+	if (!options.settingsManager) ownedSettingsManagers.set(settingsManager, session);
+	const rollbackReason = sessionLifecycleCreation.getStore()?.replacement ? "new" : "quit";
 	registerStartupRollback(session.extensionRunner, async (error) => {
-		const results = await Promise.allSettled([session.dispose(), providerRollback.commit()]);
+		const results = await Promise.allSettled([
+			(session as unknown as AgentSessionInternalSurface)._close({
+				type: "session_shutdown",
+				reason: rollbackReason,
+			}),
+			providerRollback.commit(),
+		]);
 		const cleanupErrors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
 		if (cleanupErrors.length)
 			throw new AggregateError([error, ...cleanupErrors], "Extension startup failed and rollback reported errors");

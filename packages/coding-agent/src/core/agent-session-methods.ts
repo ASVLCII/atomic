@@ -484,7 +484,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_retryAttempt: number;
 	_retryPromise: Promise<void> | undefined;
 	_retryResolve: (() => void) | undefined;
-	_bashAbortControllers: Map<string | symbol, AbortController>;
+	_bashAbortControllers: Map<string | symbol, Set<AbortController>>;
 	_pendingBashMessages: BashExecutionMessage[];
 	_extensionRunner: ExtensionRunner;
 	_turnIndex: number;

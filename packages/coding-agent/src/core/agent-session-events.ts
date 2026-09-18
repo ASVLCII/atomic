@@ -36,6 +36,7 @@ import type { SessionShutdownEvent } from "./extensions/types.ts";
 import type { StageAdmittedCustomMessage } from "./messages.ts";
 import { normalizeMessageContent } from "./messages.ts";
 import { abortSessionWork, drainSessionReload, drainSessionWork } from "./session-lifecycle-work.ts";
+import { assertSettingsWrites, ownedSettingsManagers } from "./settings-write-ownership.ts";
 
 export function _emit(this: AgentSession, event: AgentSessionEvent): void {
 	for (const l of this._eventListeners) {
@@ -551,8 +552,13 @@ export function closeAgentSession(
 		});
 		await attempt("messages", () => prepareProtectedStreamingCustomMessagesForDisposal(session));
 		await attempt("shell persistence", () => session._flushPendingBashMessages());
-		await attempt("settings", () => session.settingsManager.flush());
+		await attempt("settings", async () => {
+			await session.settingsManager.flush();
+			assertSettingsWrites(session);
+		});
 		await attempt("session persistence", () => session.sessionManager.flush());
+		if (ownedSettingsManagers.get(session.settingsManager) === session)
+			ownedSettingsManagers.delete(session.settingsManager);
 		await attempt("host subscriptions", () => beforeInvalidate?.());
 		await attempt("generation", () => session._extensionRunner.invalidate(STALE_EXTENSION_CONTEXT_MESSAGE));
 		await attempt("subscriptions", () => {

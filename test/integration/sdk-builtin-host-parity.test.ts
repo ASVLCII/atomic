@@ -1510,3 +1510,79 @@ test("workflow fallback replacement enforces the inherited gate but explicit pri
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: every admitted successor remains owned through reverse publication and failure.
+test.each(
+	["new", "resume", "fork", "import"].flatMap((operation) =>
+		["success", "failure", "both-fail", "dispose", "cleanup", "startup"].map((outcome) => ({ operation, outcome })),
+	),
+)(
+	"built Node concurrent replacement $operation $outcome",
+	({ operation, outcome }) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-concurrent-replacements.mjs", import.meta.url)),
+				operation,
+				outcome,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"active":0/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+test.each(["acquisition", "shell", "settings"])(
+	"built Node owned cleanup %s",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-acquisition-persistence.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+test.each(["success", "failure", "both-fail", "dispose", "cleanup", "startup"])(
+	"built Node overlapping retained workflow %s",
+	(outcome) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-concurrent-replacements.mjs", import.meta.url)),
+				"new",
+				outcome,
+				"workflow",
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"active":0/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+test.each(["overlap", "nested"])(
+	"built Node replacement binding remains live without deadlock (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-replacement-binding-overlap.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"active":0/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

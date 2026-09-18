@@ -7,6 +7,7 @@ import { type ModelCycleResult, type ModelMutationOptions, THINKING_LEVELS } fro
 import { formatNoApiKeyFoundMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { assertSessionOpen, trackSessionWork } from "./session-lifecycle-work.ts";
+import { settingsWriteOwner } from "./settings-write-ownership.ts";
 
 export async function _getRequiredRequestAuth(
 	this: AgentSession,
@@ -97,7 +98,7 @@ function addPersistedDefaultToNonEmptyScope(session: AgentSession, model: Model<
 
 	const modelReference = `${model.provider}/${model.id}`;
 	if (enabledModels.some((pattern) => pattern.toLowerCase() === modelReference.toLowerCase())) return;
-	session.settingsManager.setEnabledModels([...enabledModels, modelReference]);
+	settingsWriteOwner.run(session, () => session.settingsManager.setEnabledModels([...enabledModels, modelReference]));
 }
 
 /**
@@ -124,7 +125,9 @@ export async function setModel(
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		if (options.persist) {
-			this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
+			settingsWriteOwner.run(this, () =>
+				this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id),
+			);
 			addPersistedDefaultToNonEmptyScope(this, nextModel);
 		}
 
@@ -183,7 +186,9 @@ export async function _cycleScopedModel(
 	this.agent.state.model = nextModel;
 	this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 	if (options.persist) {
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
+		settingsWriteOwner.run(this, () =>
+			this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id),
+		);
 		addPersistedDefaultToNonEmptyScope(this, nextModel);
 	}
 
@@ -223,7 +228,9 @@ export async function _cycleAvailableModel(
 	this.agent.state.model = selectedModel;
 	this.sessionManager.appendModelChange(selectedModel.provider, selectedModel.id);
 	if (options.persist) {
-		this.settingsManager.setDefaultModelAndProvider(selectedModel.provider, selectedModel.id);
+		settingsWriteOwner.run(this, () =>
+			this.settingsManager.setDefaultModelAndProvider(selectedModel.provider, selectedModel.id),
+		);
 		addPersistedDefaultToNonEmptyScope(this, selectedModel);
 	}
 
@@ -249,9 +256,11 @@ export async function _cycleAvailableModel(
 
 function persistThinkingLevel(session: AgentSession, level: ThinkingLevel): void {
 	if (session.model) {
-		session.settingsManager.setModelThinkingLevel(session.model.provider, session.model.id, level);
+		settingsWriteOwner.run(session, () =>
+			session.settingsManager.setModelThinkingLevel(session.model!.provider, session.model!.id, level),
+		);
 	}
-	session.settingsManager.setDefaultThinkingLevel(level);
+	settingsWriteOwner.run(session, () => session.settingsManager.setDefaultThinkingLevel(level));
 }
 
 export function setThinkingLevel(this: AgentSession, level: ThinkingLevel, options: ModelMutationOptions = {}): void {

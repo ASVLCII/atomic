@@ -22,6 +22,7 @@ import {
 import type { SendMessageOptions, SendMessagesOptions } from "./extensions/index.js";
 import type { CustomMessage, StageAdmittedCustomMessage } from "./messages.ts";
 import { assertSessionOpen, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";
+import { settingsWriteOwner } from "./settings-write-ownership.ts";
 
 export { transferWorkflowStageDeliveriesTo };
 
@@ -474,7 +475,7 @@ export function getFollowUpMessages(this: AgentSession): readonly string[] {
 
 export function setSteeringMode(this: AgentSession, mode: "all" | "one-at-a-time"): void {
 	this.agent.steeringMode = mode;
-	this.settingsManager.setSteeringMode(mode);
+	settingsWriteOwner.run(this, () => this.settingsManager.setSteeringMode(mode));
 }
 
 /**
@@ -484,7 +485,7 @@ export function setSteeringMode(this: AgentSession, mode: "all" | "one-at-a-time
 
 export function setFollowUpMode(this: AgentSession, mode: "all" | "one-at-a-time"): void {
 	this.agent.followUpMode = mode;
-	this.settingsManager.setFollowUpMode(mode);
+	settingsWriteOwner.run(this, () => this.settingsManager.setFollowUpMode(mode));
 }
 
 // =========================================================================

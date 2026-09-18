@@ -19,7 +19,7 @@ import {
 	type ResourceLoaderInheritanceSnapshotProvider,
 	type WorkflowResourceProviderInput,
 } from "./loader-resources.ts";
-import { factoryRollbackError, rollbackExtensionFactories } from "./loader-rollback.ts";
+import { factoryAcquisitions, factoryRollbackError, rollbackExtensionFactories } from "./loader-rollback.ts";
 import { createExtensionRuntime } from "./loader-runtime.ts";
 import { type ExtensionCacheToken, loadExtensionModule, useExtensionCacheCwd } from "./loader-virtual-modules.js";
 import type { Extension, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult } from "./types.ts";
@@ -196,6 +196,7 @@ async function loadExtension(
 			workflowResourceProvider,
 			resourceLoaderInheritanceSnapshotProvider,
 		});
+		factoryAcquisitions.getStore()?.pending?.set(extension, { cwd, runtime });
 		return { extension, error: null };
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -244,6 +245,7 @@ export async function loadExtensionFromFactory(
 		workflowResourceProvider,
 		resourceLoaderInheritanceSnapshotProvider,
 	});
+	factoryAcquisitions.getStore()?.pending?.set(extension, { cwd: resolvedCwd, runtime });
 	return extension;
 }
 

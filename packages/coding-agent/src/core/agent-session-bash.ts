@@ -30,7 +30,9 @@ async function executeBashOperation(
 ): Promise<BashResult> {
 	const requestKey = options?.id ?? Symbol("bash-request");
 	const abortController = new AbortController();
-	this._bashAbortControllers.set(requestKey, abortController);
+	const controllers = this._bashAbortControllers.get(requestKey) ?? new Set<AbortController>();
+	controllers.add(abortController);
+	this._bashAbortControllers.set(requestKey, controllers);
 	// Apply command prefix if configured (e.g., "shopt -s expand_aliases" for alias support)
 	const prefix = this.settingsManager.getShellCommandPrefix();
 	const shellPath = this.settingsManager.getShellPath();
@@ -63,7 +65,8 @@ async function executeBashOperation(
 		if (options?.recordResult !== false) this.recordBashResult(command, result, options);
 		return result;
 	} finally {
-		if (this._bashAbortControllers.get(requestKey) === abortController) this._bashAbortControllers.delete(requestKey);
+		controllers.delete(abortController);
+		if (controllers.size === 0) this._bashAbortControllers.delete(requestKey);
 	}
 }
 
@@ -107,12 +110,14 @@ export function recordBashResult(
 /** Cancel one correlated bash request, or all active requests for legacy callers. */
 export function abortBash(this: AgentSession, id?: string): void {
 	if (id !== undefined) {
-		this._bashAbortControllers.get(id)?.abort();
+		for (const controller of [...(this._bashAbortControllers.get(id) ?? [])]) controller.abort();
 		return;
 	}
 	// Snapshot first: aborting settles owners, and a listener that removes its own
 	// entry must not shorten the cancellation sweep.
-	for (const controller of [...this._bashAbortControllers.values()]) controller.abort();
+	for (const controllers of [...this._bashAbortControllers.values()]) {
+		for (const controller of [...controllers]) controller.abort();
+	}
 }
 
 /** Whether a bash command is currently running */

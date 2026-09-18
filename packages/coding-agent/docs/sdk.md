@@ -253,6 +253,12 @@ Sharing a `SessionManager` shares persisted conversation identity, not live shel
 
 If outgoing extension shutdown fails during replacement, no successor is created and retained workflow cleanup is still attempted. The operation rejects with its original failure and any additional cleanup causes; repeated runtime disposal retains the failed outcome.
 
+Overlapping replacement factories may finish out of order. Runtime retirement, publication and host rebinding are coordinated; displaced successors are closed, and a failed candidate cannot shut down a surviving successor's workflows. If every replacement fails, retained workflow cleanup still runs. Creation also rolls back owned extension acquisitions when context transforms or resource setup fail before the session constructor completes; borrowed discovery is not shut down.
+
+Settings writes made through session APIs (for example, `setThinkingLevel(level, { persist: true })`) are attributed to that session. Unrecovered write failures make disposal reject with `ShutdownFailed`, even though the normal `SettingsManager.flush()` resolves and exposes errors through `drainErrors()`. Disposal does not consume that caller-owned error channel or attribute another borrower's writes to an idle sibling. Correct the storage fault and persist again before closing to recover.
+
+Caller-supplied `executeBash()` IDs remain correlation IDs, not unique operation IDs. `abortBash(id)` cancels every active call with that exact ID; disposal cancels every owned call, including duplicates.
+
 `compact()` serializes older context to numbered lines, asks the session model for JSON deleted ranges, validates them, and mechanically reconstructs a durable verbatim transcript string. It appends a `compaction` entry with `details.strategy: "verbatim-lines"`; the recent tail remains ordinary messages. The model never authors replacement context text.
 
 `session.navigateTree()` rejects during streaming, compaction, or branch summarization rather than queueing the navigation. The active branch stays unchanged. Wait for the operation to finish before retrying.

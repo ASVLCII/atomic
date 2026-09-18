@@ -6,6 +6,8 @@ export interface SessionLifecycleContext {
 	scope: object;
 	bindings?: ExtensionBindings;
 	claimed?: boolean;
+	/** Runtime retains lineage if an unpublished replacement rolls back. */
+	replacement?: boolean;
 }
 export const sessionLifecycleCreation = new AsyncLocalStorage<SessionLifecycleContext>();
 export const sessionLifecycleScopes = new WeakMap<object, object>();

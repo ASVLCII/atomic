@@ -13,6 +13,7 @@ import {
 	normalizeModelFailureSignal,
 } from "./model-fallback-failures.ts";
 import { nextRetryDecision } from "./retry-policy.ts";
+import { settingsWriteOwner } from "./settings-write-ownership.ts";
 
 function modelLabel(model: Model<Api> | undefined): string {
 	return model ? `${model.provider}/${model.id}` : "unknown model";
@@ -500,7 +501,7 @@ export async function waitForRetry(this: AgentSession): Promise<void> {
 /** Whether auto-retry is currently in progress */
 
 export function setAutoRetryEnabled(this: AgentSession, enabled: boolean): void {
-	this.settingsManager.setRetryEnabled(enabled);
+	settingsWriteOwner.run(this, () => this.settingsManager.setRetryEnabled(enabled));
 }
 
 // =========================================================================

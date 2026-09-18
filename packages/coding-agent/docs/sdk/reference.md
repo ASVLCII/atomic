@@ -398,6 +398,10 @@ Use `await session.dispose()` rather than fire-and-forget cleanup. It seals admi
 
 `AgentSessionRuntime` uses the same awaited close when replacing sessions and transfers configured host bindings before the replacement starts. Reload invalidates old input requests and extension subscriptions while retaining host configuration. Live durable workflows retain their existing runtime ownership across reload and session replacement; final owner disposal waits for their shutdown. A late answer from an old generation cannot authorize replacement work.
 
+Concurrent replacement factories remain supported. Publication and rebinding retire any displaced successor; failed candidates unwind without terminating a live successor's retained workflows. Factory rollback includes pre-constructor resource/context setup, preserves cleanup causes and leaves borrowed discovery untouched.
+
+Session-attributed settings persistence faults are reported by disposal without draining `SettingsManager.drainErrors()` or blaming an idle borrower. `flush()` retains its normal resolving/error-channel behavior. Repair storage and repeat the write before close to recover. Duplicate `executeBash()` correlation IDs in `options.id` are preserved; `abortBash(id)` cancels all active calls with that exact ID, while disposal cancels all owned calls.
+
 Terminal runtime disposal also drains admitted replacement preflight, factory and startup work; it never publishes a late successor. Session disposal drains admitted compaction work and prevents retired hooks/providers from writing new compaction results. Noncooperative callbacks must settle before disposal can finish. Independent sessions can borrow one `DefaultResourceLoader` and event bus: ownership belongs to each session, not the borrowed discovery object.
 
 Extensions can register tools, subscribe to events, add commands, and more. See [Extensions](/extensions) for the full API.

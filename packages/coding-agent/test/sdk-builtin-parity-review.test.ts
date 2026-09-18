@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -433,3 +433,224 @@ for (const method of ["steer", "followUp"] as const) {
 		}
 	});
 }
+
+// #3105: caller correlation IDs are not operation identities.
+for (const cancel of ["dispose", "id", "settled-peer"] as const) {
+	test(`review F duplicate shell IDs cancel every operation (${cancel})`, async () => {
+		const f = await fixture();
+		const { session } = await createAgentSession(f.options);
+		const signals: AbortSignal[] = [];
+		const finish: Array<() => void> = [];
+		const operations = {
+			exec: async (_command: string, _cwd: string, { signal }: { signal?: AbortSignal }) =>
+				new Promise<{ exitCode: number }>((resolve) => {
+					assert.ok(signal);
+					signals.push(signal);
+					finish.push(() => resolve({ exitCode: 0 }));
+					signal.addEventListener("abort", () => resolve({ exitCode: 0 }), { once: true });
+				}),
+		};
+		const id = "  same raw id  ";
+		const first = session.executeBash("first", undefined, { id, operations });
+		const second = session.executeBash("second", undefined, { id, operations });
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			if (cancel === "settled-peer") {
+				finish[0]!();
+				await first;
+			}
+			if (cancel === "dispose") void session.dispose();
+			else session.abortBash(id);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			assert.deepEqual(
+				signals.map((signal) => signal.aborted),
+				[cancel !== "settled-peer", true],
+			);
+		} finally {
+			for (const done of finish) done();
+			await Promise.all([first, second]);
+			await session.dispose();
+			f.remove();
+		}
+	});
+}
+
+// #3105: ownership begins at acquisition, not at AgentSession construction.
+for (const failCleanup of [false, true]) {
+	test(`review F preconstructor setup rolls back only owned acquisitions (${failCleanup})`, async () => {
+		let acquired = 0;
+		const active = new Set<number>();
+		const f = await fixture([
+			(pi) => {
+				const id = ++acquired;
+				active.add(id);
+				pi.on("session_shutdown", () => {
+					active.delete(id);
+					if (failCleanup) throw new Error("owned cleanup failed");
+				});
+			},
+		]);
+		const cause = new Error("context transform failed");
+		try {
+			await assert.rejects(
+				createAgentSession({
+					...f.options,
+					initialContextTransform: () => {
+						throw cause;
+					},
+				}),
+				(error: unknown) =>
+					failCleanup ? error instanceof AggregateError && error.errors.includes(cause) : error === cause,
+			);
+			assert.deepEqual([...active], [1]);
+		} finally {
+			f.remove();
+		}
+	});
+}
+
+// #3105: real storage faults remain attributable without consuming shared errors.
+for (const borrowed of [false, true]) {
+	for (const recover of [false, true]) {
+		test(`review F real settings persistence failure borrowed=${borrowed} recovery=${recover}`, async () => {
+			const f = await fixture();
+			const manager = SettingsManager.create(f.options.cwd, f.options.agentDir);
+			const { session } = await createAgentSession({
+				...f.options,
+				settingsManager: borrowed ? manager : undefined,
+			});
+			const { session: sibling } = await createAgentSession({
+				...f.options,
+				settingsManager: session.settingsManager,
+			});
+			const path = join(f.options.agentDir, "settings.json");
+			try {
+				await session.settingsManager.flush();
+				rmSync(path, { force: true });
+				mkdirSync(path, { recursive: true });
+				session.setThinkingLevel("off", { persist: true });
+				await session.settingsManager.flush();
+				if (recover) {
+					rmSync(path, { recursive: true });
+					session.setThinkingLevel("off", { persist: true });
+				}
+				await sibling.dispose();
+				if (recover) await session.dispose();
+				else await assert.rejects(session.dispose(), { code: "ShutdownFailed" });
+				assert.ok(session.settingsManager.drainErrors().some(({ error }) => /EISDIR/.test(error.message)));
+			} finally {
+				await Promise.allSettled([session.dispose(), sibling.dispose()]);
+				f.remove();
+			}
+		});
+	}
+}
+
+// #3105: a delegated resource getter can fail during construction, after acquisition.
+test("review F resource setup failure rolls back owned factory and subscriptions", async () => {
+	let acquired = 0;
+	const active = new Set<number>();
+	const cause = new Error("resource policy failed");
+	const f = await fixture([
+		(pi) => {
+			const id = ++acquired;
+			active.add(id);
+			pi.on("session_shutdown", () => {
+				active.delete(id);
+			});
+		},
+	]);
+	f.loader.getSkills = () => {
+		throw cause;
+	};
+	try {
+		await assert.rejects(createAgentSession(f.options), (error) => error === cause);
+		assert.deepEqual([...active], [1]);
+	} finally {
+		f.remove();
+	}
+});
+
+// #3105: draining normal errors cannot hide lease failure; caller writes remain caller-owned.
+for (const writer of ["session", "caller"] as const) {
+	test(`review F borrowed settings error channel remains independent (${writer})`, async () => {
+		const f = await fixture();
+		const manager = SettingsManager.create(f.options.cwd, f.options.agentDir);
+		const { session } = await createAgentSession({ ...f.options, settingsManager: manager });
+		const path = join(f.options.agentDir, "settings.json");
+		try {
+			mkdirSync(path, { recursive: true });
+			if (writer === "session") session.setThinkingLevel("off", { persist: true });
+			else manager.setDefaultThinkingLevel("off");
+			await manager.flush();
+			assert.ok(manager.drainErrors().some(({ error }) => /EISDIR/.test(error.message)));
+			if (writer === "session") await assert.rejects(session.dispose(), { code: "ShutdownFailed" });
+			else await session.dispose();
+			assert.deepEqual(manager.drainErrors(), []);
+		} finally {
+			await Promise.allSettled([session.dispose()]);
+			f.remove();
+		}
+	});
+}
+
+// #3105: constructor cleanup must not replace the setup cause or skip remaining releases.
+test("review F constructor failure retains setup and every cleanup cause", async () => {
+	const f = await fixture();
+	const cause = new Error("constructor setup failed");
+	let generations = 0;
+	const released: string[] = [];
+	const active = new Set<number>();
+	class HostLoader extends DefaultResourceLoader {}
+	const loader = new HostLoader({
+		...f.options,
+		noExtensions: true,
+		eventBus: {
+			emit() {},
+			on(channel) {
+				return () => {
+					released.push(channel);
+					throw new Error(`release ${channel}`);
+				};
+			},
+		},
+		extensionFactories: [
+			(pi) => {
+				const id = ++generations;
+				active.add(id);
+				pi.events.on(`${id}:first`, () => {});
+				pi.events.on(`${id}:second`, () => {});
+				pi.on("session_shutdown", () => {
+					active.delete(id);
+					throw new Error(`shutdown ${id}`);
+				});
+			},
+		],
+	});
+	await loader.reload();
+	const errors = (error: unknown): unknown[] =>
+		error instanceof AggregateError ? error.errors.flatMap(errors) : [error];
+	try {
+		await assert.rejects(
+			createAgentSession({
+				...f.options,
+				resourceLoader: loader,
+				systemPromptTransform() {
+					throw cause;
+				},
+			}),
+			(error) => {
+				const causes = errors(error);
+				assert.ok(causes.includes(cause));
+				assert.match(String(causes), /release 2:first/);
+				assert.match(String(causes), /release 2:second/);
+				assert.match(String(causes), /shutdown 2/);
+				return true;
+			},
+		);
+		assert.deepEqual([...active], [1]);
+		assert.deepEqual(released.sort(), ["2:first", "2:second"]);
+	} finally {
+		f.remove();
+	}
+});

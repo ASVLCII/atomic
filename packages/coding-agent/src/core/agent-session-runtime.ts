@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { constants, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, parse, resolve } from "node:path";
 import { type Api, type Model, modelsAreEqual } from "@bastani/pi-ai/compat";
@@ -103,6 +104,45 @@ export class AgentSessionRuntime {
 	private closing?: Promise<void>;
 	private cleanupFailures: unknown[] = [];
 	private candidates = new Set<AgentSession>();
+	private replacements = 0;
+	private publication: Promise<void> = Promise.resolve();
+	private publicationContext = new AsyncLocalStorage<{ active: boolean }>();
+	private retained = new Set<AgentSession>();
+
+	private async finalizeRetained(): Promise<void> {
+		if (!this.retained.delete(this.session)) return;
+		await emitSessionShutdownEvent(this.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
+	}
+
+	private replace<T>(operation: () => Promise<T>): Promise<T> {
+		return this.admit(async () => {
+			this.replacements++;
+			let outcome: { value: T } | { error: unknown };
+			try {
+				outcome = { value: await operation() };
+			} catch (error) {
+				outcome = { error };
+				this.retainCleanupFailures(error);
+			}
+			this.replacements--;
+			if (this.replacements === 0 && (this.session as unknown as AgentSessionInternalSurface)._disposed) {
+				try {
+					await this.finalizeRetained();
+				} catch (error) {
+					this.cleanupFailures.push(error);
+					throw Object.assign(
+						new AggregateError(
+							"error" in outcome ? [outcome.error, error] : [error],
+							"Retained session cleanup failed",
+						),
+						{ code: "ShutdownFailed" },
+					);
+				}
+			}
+			if ("error" in outcome) throw outcome.error;
+			return outcome.value;
+		});
+	}
 
 	private assertOpen(): void {
 		if (this.closed) throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
@@ -155,6 +195,7 @@ export class AgentSessionRuntime {
 			const current = this._session as unknown as AgentSessionInternalSurface;
 			return {
 				scope,
+				replacement: true,
 				bindings: {
 					...this._session.extensionRunner.getChildHostBindings(),
 					uiContext: current._extensionUIContext,
@@ -206,16 +247,8 @@ export class AgentSessionRuntime {
 			return candidate;
 		} catch (cause) {
 			this.retainCleanupFailures(cause);
-			// Replacement shutdown retained workflow ownership for a successor. If
-			// creation fails, no successor can deliver its final quit. The outgoing
-			// session's cached close is already settled, so finalize its handlers
-			// explicitly without re-running disposal or reviving its stale context.
-			try {
-				await emitSessionShutdownEvent(this.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
-			} catch (cleanupError) {
-				this.cleanupFailures.push(cleanupError);
-				throw new AggregateError([cause, cleanupError], "Session replacement and retained cleanup failed");
-			}
+			// The last admitted replacement finalizes retained scope only if no
+			// live successor exists. A failed peer must not shut down a winner.
 			throw cause;
 		}
 	}
@@ -342,6 +375,7 @@ export class AgentSessionRuntime {
 	}
 
 	private disposeCurrentSession(event: SessionShutdownEvent): Promise<void> {
+		if (event.reason !== "quit") this.retained.add(this.session);
 		return (this.session as unknown as AgentSessionInternalSurface)._close(event, this.beforeSessionInvalidate);
 	}
 
@@ -360,55 +394,90 @@ export class AgentSessionRuntime {
 		await this.session.abort();
 	}
 
-	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
-		this.assertOpen();
-		await this.settleActiveResponseBeforeTeardown();
-		this.assertOpen();
-		const { timedOut } = await this.session.extensionRunner.flushUIPromptNotifications(
-			SESSION_REPLACEMENT_UI_PROMPT_SETTLEMENT_TIMEOUT_MS,
-		);
-		this.assertOpen();
-		if (timedOut) {
-			console.error("Warning: UI prompt observers did not settle within 1,000 ms; continuing session replacement.");
-		}
+	private async serializePublication(operation: () => Promise<void>): Promise<void> {
+		// Host callbacks may themselves await another supported replacement.
+		if (this.publicationContext.getStore()?.active) return operation();
+		const previous = this.publication;
+		let release!: () => void;
+		this.publication = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const context = { active: true };
 		try {
-			await this.disposeCurrentSession({ type: "session_shutdown", reason, targetSessionFile });
-		} catch (cause) {
-			this.retainCleanupFailures(cause);
-			try {
-				await emitSessionShutdownEvent(this.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
-			} catch (cleanupError) {
-				this.cleanupFailures.push(cleanupError);
-				throw Object.assign(
-					new AggregateError([cause, cleanupError], "Session retirement and retained cleanup failed"),
-					{
-						code: "ShutdownFailed",
-					},
+			await previous;
+			await this.publicationContext.run(context, operation);
+		} finally {
+			context.active = false;
+			release();
+		}
+	}
+	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
+		return this.serializePublication(async () => {
+			this.assertOpen();
+			await this.settleActiveResponseBeforeTeardown();
+			this.assertOpen();
+			const { timedOut } = await this.session.extensionRunner.flushUIPromptNotifications(
+				SESSION_REPLACEMENT_UI_PROMPT_SETTLEMENT_TIMEOUT_MS,
+			);
+			this.assertOpen();
+			if (timedOut) {
+				console.error(
+					"Warning: UI prompt observers did not settle within 1,000 ms; continuing session replacement.",
 				);
 			}
-			throw cause;
-		}
+			await this.disposeCurrentSession({ type: "session_shutdown", reason, targetSessionFile });
+		});
 	}
 
-	private apply(result: CreateAgentSessionRuntimeResult): void {
-		this.assertOpen();
-		this.candidates.delete(result.session);
-		this._session = result.session;
-		this._services = result.services;
-		this._diagnostics = result.diagnostics;
-		this._modelFallbackMessage = result.modelFallbackMessage;
-		this._modelFallbackReason = result.modelFallbackReason;
-	}
-
-	private async finishSessionReplacement(withSession?: (ctx: ReplacedSessionContext) => Promise<void>): Promise<void> {
-		this.assertOpen();
-		if (this.rebindSession) {
-			await this.rebindSession(this.session);
-			this.assertOpen();
-		}
-		if (withSession) {
-			await withSession(this.session.createReplacedSessionContext());
-		}
+	private async apply(
+		result: CreateAgentSessionRuntimeResult,
+		withSession?: (ctx: ReplacedSessionContext) => Promise<void>,
+		setup?: (sessionManager: SessionManager) => Promise<void>,
+	): Promise<void> {
+		return this.serializePublication(async () => {
+			try {
+				this.assertOpen();
+				// A concurrently admitted factory may have published since preflight.
+				// Retire that successor before displacing it, retaining workflow lineage.
+				await this.disposeCurrentSession({ type: "session_shutdown", reason: "new" });
+				this.assertOpen();
+				this.candidates.delete(result.session);
+				this.retained.delete(this.session);
+				this._session = result.session;
+				this._services = result.services;
+				this._diagnostics = result.diagnostics;
+				this._modelFallbackMessage = result.modelFallbackMessage;
+				this._modelFallbackReason = result.modelFallbackReason;
+				if (setup) {
+					await setup(result.session.sessionManager);
+					this.assertOpen();
+					if (this.session !== result.session) return;
+					result.session.agent.state.messages = result.session.sessionManager.buildSessionContext().messages;
+				}
+				if (this.rebindSession) {
+					await this.rebindSession(result.session);
+					this.assertOpen();
+					if (this.session !== result.session) return;
+				}
+				if (withSession) await withSession(result.session.createReplacedSessionContext());
+			} catch (cause) {
+				if (this.candidates.delete(result.session)) {
+					try {
+						await (result.session as unknown as AgentSessionInternalSurface)._close({
+							type: "session_shutdown",
+							reason: this.closed ? "quit" : "new",
+						});
+					} catch (error) {
+						this.cleanupFailures.push(error);
+						throw Object.assign(
+							new AggregateError([cause, error], "Replacement publication and candidate cleanup failed"),
+							{ code: "ShutdownFailed" },
+						);
+					}
+				}
+				throw cause;
+			}
+		});
 	}
 
 	async switchSession(
@@ -419,7 +488,7 @@ export class AgentSessionRuntime {
 			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
 		},
 	): Promise<{ cancelled: boolean }> {
-		return this.admit(async () => {
+		return this.replace(async () => {
 			const beforeResult = await this.emitBeforeSwitch("resume", sessionPath);
 			this.assertOpen();
 			if (beforeResult.cancelled) {
@@ -443,8 +512,7 @@ export class AgentSessionRuntime {
 			const complete = await this.createRuntime.prepareResume?.(runtimeOptions);
 			this.assertOpen();
 			await this.teardownCurrent("resume", sessionManager.getSessionFile());
-			this.apply(await (complete ? complete() : this.createRuntime(runtimeOptions)));
-			await this.finishSessionReplacement(options?.withSession);
+			await this.apply(await (complete ? complete() : this.createRuntime(runtimeOptions)), options?.withSession);
 			return { cancelled: false };
 		});
 	}
@@ -454,7 +522,7 @@ export class AgentSessionRuntime {
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
-		return this.admit(async () => {
+		return this.replace(async () => {
 			const beforeResult = await this.emitBeforeSwitch("new");
 			this.assertOpen();
 			if (beforeResult.cancelled) {
@@ -469,20 +537,16 @@ export class AgentSessionRuntime {
 			}
 
 			await this.teardownCurrent("new", sessionManager.getSessionFile());
-			this.apply(
+			await this.apply(
 				await this.createRuntime({
 					cwd: this.cwd,
 					agentDir: this.services.agentDir,
 					sessionManager,
 					sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
 				}),
+				options?.withSession,
+				options?.setup,
 			);
-			if (options?.setup) {
-				await options.setup(this.session.sessionManager);
-				this.assertOpen();
-				this.session.agent.state.messages = this.session.sessionManager.buildSessionContext().messages;
-			}
-			await this.finishSessionReplacement(options?.withSession);
 			return { cancelled: false };
 		});
 	}
@@ -491,7 +555,7 @@ export class AgentSessionRuntime {
 		entryId: string,
 		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
-		return this.admit(async () => {
+		return this.replace(async () => {
 			const position = options?.position ?? "before";
 			const beforeResult = await this.emitBeforeFork(entryId, { position });
 			this.assertOpen();
@@ -527,15 +591,15 @@ export class AgentSessionRuntime {
 					const sessionManager = SessionManager.create(this.cwd, sessionDir);
 					sessionManager.newSession({ parentSession: currentSessionFile });
 					await this.teardownCurrent("fork", sessionManager.getSessionFile());
-					this.apply(
+					await this.apply(
 						await this.createRuntime({
 							cwd: this.cwd,
 							agentDir: this.services.agentDir,
 							sessionManager,
 							sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 						}),
+						options?.withSession,
 					);
-					await this.finishSessionReplacement(options?.withSession);
 					return { cancelled: false, selectedText };
 				}
 
@@ -550,15 +614,15 @@ export class AgentSessionRuntime {
 					throw new Error("Failed to create forked session");
 				}
 				await this.teardownCurrent("fork", sessionManager.getSessionFile());
-				this.apply(
+				await this.apply(
 					await this.createRuntime({
 						cwd: sessionManager.getCwd(),
 						agentDir: this.services.agentDir,
 						sessionManager,
 						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 					}),
+					options?.withSession,
 				);
-				await this.finishSessionReplacement(options?.withSession);
 				return { cancelled: false, selectedText };
 			}
 
@@ -569,15 +633,15 @@ export class AgentSessionRuntime {
 			} else {
 				sessionManager.createBranchedSession(targetLeafId);
 			}
-			this.apply(
+			await this.apply(
 				await this.createRuntime({
 					cwd: this.cwd,
 					agentDir: this.services.agentDir,
 					sessionManager,
 					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 				}),
+				options?.withSession,
 			);
-			await this.finishSessionReplacement(options?.withSession);
 			return { cancelled: false, selectedText };
 		});
 	}
@@ -590,7 +654,7 @@ export class AgentSessionRuntime {
 	 * @throws {MissingSessionCwdError} When the imported session cwd cannot be resolved and no override is provided.
 	 */
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
-		return this.admit(async () => {
+		return this.replace(async () => {
 			const resolvedPath = resolvePath(inputPath);
 			if (!existsSync(resolvedPath)) {
 				throw new SessionImportFileNotFoundError(resolvedPath);
@@ -624,7 +688,7 @@ export class AgentSessionRuntime {
 			const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
 			assertSessionCwdExists(sessionManager, this.cwd);
 			await this.teardownCurrent("resume", sessionManager.getSessionFile());
-			this.apply(
+			await this.apply(
 				await this.createRuntime({
 					cwd: sessionManager.getCwd(),
 					agentDir: this.services.agentDir,
@@ -632,7 +696,6 @@ export class AgentSessionRuntime {
 					sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 				}),
 			);
-			await this.finishSessionReplacement();
 			return { cancelled: false };
 		});
 	}
@@ -654,6 +717,11 @@ export class AgentSessionRuntime {
 			this.candidates.clear();
 			try {
 				await current;
+			} catch (error) {
+				this.cleanupFailures.push(error);
+			}
+			try {
+				await this.finalizeRetained();
 			} catch (error) {
 				this.cleanupFailures.push(error);
 			}
