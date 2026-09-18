@@ -12,18 +12,31 @@ const root = mkdtempSync(join(tmpdir(), "atomic-shared-bus-"));
 process.env.ATOMIC_FAULT_TEST_HOME = root;
 const eventBus = createEventBus();
 const scopes = [];
-const shared = process.argv[2] === "loader";
+const kind = process.argv[2] ?? "bus";
+const shared = kind !== "bus";
+const policy = "Respect caller custom loader policy  \n";
+class HostLoader extends DefaultResourceLoader {
+	getSystemPrompt() { return policy; }
+}
 const settingsManager = SettingsManager.inMemory();
 let borrowedLoader;
 async function create(name) {
 	const cwd = join(root, shared ? "shared" : name);
 	mkdirSync(join(cwd, ".atomic", "workflows"), { recursive: true });
 	writeFileSync(join(cwd, ".atomic", "workflows", "sdk-host-durable.ts"), readFileSync(new URL("./sdk-host-durable-workflow.ts", import.meta.url)));
-	const resourceLoader = borrowedLoader ?? new DefaultResourceLoader({
+	let resourceLoader = borrowedLoader ?? new (kind === "subclass" ? HostLoader : DefaultResourceLoader)({
 		cwd, agentDir: join(cwd, "agent"), settingsManager, eventBus, noExtensions: true, noContextFiles: true,
 		extensionFactories: [(pi) => { pi.on("session_start", () => { scopes.push(pi.lifecycleScope); }); }],
 	});
 	if (!borrowedLoader) await resourceLoader.reload();
+	if (!borrowedLoader && kind === "facade") {
+		const delegate = resourceLoader;
+		resourceLoader = Object.fromEntries([
+			"getExtensions", "getSkills", "getSkillCatalog", "getPrompts", "getThemes", "getAgentsFiles",
+			"getSystemPrompt", "getSystemPromptSource", "getAppendSystemPrompt", "getAppendSystemPromptSources",
+			"extendResources", "reload", "supportsTransactionalReload", "prepareReload",
+		].filter((key) => typeof delegate[key] === "function").map((key) => [key, delegate[key].bind(delegate)]));
+	}
 	if (shared) borrowedLoader = resourceLoader;
 	return (await createAgentSession({
 		cwd, agentDir: join(cwd, "agent"), settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(cwd),
@@ -35,6 +48,7 @@ let b;
 try {
 	b = await create("b");
 	assert.notEqual(scopes[0], scopes[1]);
+	if (kind === "subclass") assert.equal(a.resourceLoader.getSystemPrompt(), policy);
 	await a.prompt("/workflow sdk-host-durable --no-picker");
 	let tool = a.agent.state.tools.find((entry) => entry.name === "workflow");
 	assert.ok(tool);
@@ -57,6 +71,7 @@ try {
 	tool = a.agent.state.tools.find((entry) => entry.name === "workflow");
 	assert.ok(tool);
 	assert.equal(scopes[3], scopes[0]);
+	if (kind === "subclass") assert.equal(a.resourceLoader.getSystemPrompt(), policy);
 	assert.equal((await status()).runs[0]?.status, "running");
 	console.log(JSON.stringify({ distinctOwners: true, siblingReloadedAndClosed: true, retained: "running" }));
 } finally {

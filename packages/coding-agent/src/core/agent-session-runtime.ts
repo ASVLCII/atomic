@@ -371,7 +371,23 @@ export class AgentSessionRuntime {
 		if (timedOut) {
 			console.error("Warning: UI prompt observers did not settle within 1,000 ms; continuing session replacement.");
 		}
-		await this.disposeCurrentSession({ type: "session_shutdown", reason, targetSessionFile });
+		try {
+			await this.disposeCurrentSession({ type: "session_shutdown", reason, targetSessionFile });
+		} catch (cause) {
+			this.retainCleanupFailures(cause);
+			try {
+				await emitSessionShutdownEvent(this.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
+			} catch (cleanupError) {
+				this.cleanupFailures.push(cleanupError);
+				throw Object.assign(
+					new AggregateError([cause, cleanupError], "Session retirement and retained cleanup failed"),
+					{
+						code: "ShutdownFailed",
+					},
+				);
+			}
+			throw cause;
+		}
 	}
 
 	private apply(result: CreateAgentSessionRuntimeResult): void {

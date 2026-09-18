@@ -1,13 +1,15 @@
 import { getMandatoryBuiltinExtensionPaths } from "./builtin-packages.ts";
-import { getExtensionRuntimeEventBus, loadExtensions } from "./extensions/loader.ts";
+import { getExtensionRuntimeEventBus, instantiateExtensions, loadExtensions } from "./extensions/loader.ts";
 import type { Extension, LoadExtensionsResult } from "./extensions/types.ts";
 import { isTrustedMandatoryRuntimeTool, markTrustedMandatoryRuntimeExtension } from "./mandatory-runtime-tools.ts";
+import { canCloneDefaultResourceDiscovery } from "./resource-loader.ts";
 import type {
 	ResourceExtensionPaths,
 	ResourceLoader,
 	ResourceLoaderReloadOptions,
 	ResourceLoaderReloadTransaction,
 } from "./resource-loader-types.ts";
+import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import { buildSkillCatalog } from "./skill-catalog.ts";
 
@@ -64,6 +66,25 @@ class MandatoryResourceLoader implements ResourceLoader {
 
 	getExtensions(): LoadExtensionsResult {
 		return this.extensionsResult;
+	}
+
+	async createSessionLoader(): Promise<ResourceLoader> {
+		const scope = sessionLifecycleCreation.getStore()!.scope;
+		if (sessionLifecycleScopes.get(this.extensionsResult.runtime) === scope) return this;
+		const delegate = canCloneDefaultResourceDiscovery(this.delegate)
+			? await this.delegate.createSessionLoader(scope)
+			: this.delegate;
+		const discovery =
+			delegate === this.delegate
+				? this.extensionsResult
+				: await restoreMandatoryExtensions(delegate.getExtensions(), this.cwd);
+		const extensions =
+			sessionLifecycleScopes.get(discovery.runtime) === scope
+				? discovery
+				: await instantiateExtensions(discovery, this.cwd);
+		const candidate = new MandatoryResourceLoader(delegate, this.cwd, extensions);
+		if (this.toolOnly) candidate.limitToTool();
+		return candidate;
 	}
 
 	getSkills(): ReturnType<ResourceLoader["getSkills"]> {
@@ -173,4 +194,9 @@ export function limitMandatoryIntercomToTool(loader: ResourceLoader): void {
 /** Services have already selected their resources, including deferred CLI startup. */
 export function isMandatoryResourceLoader(loader: ResourceLoader): boolean {
 	return loader instanceof MandatoryResourceLoader;
+}
+
+/** Service discovery is borrowed too, including deferred CLI generations. */
+export function isolateMandatoryResourceLoader(loader: ResourceLoader): Promise<ResourceLoader> {
+	return loader instanceof MandatoryResourceLoader ? loader.createSessionLoader() : Promise.resolve(loader);
 }

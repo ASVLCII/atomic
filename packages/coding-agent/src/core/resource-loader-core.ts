@@ -442,3 +442,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		void this.loaded;
 	}
 }
+
+/** @internal Only unmodified concrete discovery can be recreated without losing caller policy. */
+export function canCloneDefaultResourceDiscovery(loader: ResourceLoader | undefined): loader is DefaultResourceLoader {
+	return (
+		loader instanceof DefaultResourceLoader &&
+		loader.constructor === DefaultResourceLoader &&
+		Object.getOwnPropertyNames(DefaultResourceLoader.prototype).every((name) => !Object.hasOwn(loader, name))
+	);
+}

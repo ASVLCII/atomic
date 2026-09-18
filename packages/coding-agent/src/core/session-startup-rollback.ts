@@ -11,8 +11,12 @@ export function completeStartup(runner: ExtensionRunner): void {
 	rollbacks.delete(runner);
 }
 
-export async function rollbackStartup(runner: ExtensionRunner, error: Error): Promise<never> {
-	const rollback = rollbacks.get(runner);
+export async function rollbackStartup(
+	runner: ExtensionRunner,
+	error: Error,
+	fallback?: (error: Error) => Promise<never>,
+): Promise<never> {
+	const rollback = rollbacks.get(runner) ?? fallback;
 	rollbacks.delete(runner);
 	if (rollback) return rollback(error);
 	throw error;

@@ -13,7 +13,11 @@ import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
 import { getModelFastRoute, streamWithFastRoute, withFastRouteStreamOptions } from "./fast-model-routing.ts";
 import { markLifecycleTiming } from "./lifecycle-timings.ts";
-import { isMandatoryResourceLoader, withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
+import {
+	isMandatoryResourceLoader,
+	isolateMandatoryResourceLoader,
+	withMandatoryResourceLoader,
+} from "./mandatory-resource-loader.ts";
 import { convertToLlm, repairOrphanToolResults } from "./messages.ts";
 import { findInitialModel, resolveRestoredModelReference } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.js";
@@ -21,7 +25,7 @@ import { type ModelRuntimeSimpleStreamOptions, mergeHeaders } from "./model-runt
 import { sanitizeOpenAIResponsesPayload } from "./openai-responses-payload-sanitizer.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import { scrubPreCompactionAssistantUsage } from "./provider-context-usage.ts";
-import { DefaultResourceLoader } from "./resource-loader.ts";
+import { canCloneDefaultResourceDiscovery, DefaultResourceLoader } from "./resource-loader.ts";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
 import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
@@ -130,9 +134,13 @@ async function constructAgentSession(
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
-	if (resourceLoader instanceof DefaultResourceLoader) {
+	// The concrete default can rediscover into private storage (including deferred
+	// CLI configuration). Custom discovery stays delegated; composition instantiates
+	// its extensions independently without replacing overridden resource policy.
+	if (canCloneDefaultResourceDiscovery(resourceLoader)) {
 		resourceLoader = await resourceLoader.createSessionLoader(sessionLifecycleCreation.getStore()!.scope);
 	}
+	if (resourceLoader) resourceLoader = await isolateMandatoryResourceLoader(resourceLoader);
 
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;

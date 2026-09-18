@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@bastani/pi-ai/compat";
+import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { test, vi } from "vitest";
 import * as config from "../src/config.js";
@@ -2273,3 +2274,132 @@ test("tree navigation drains preflight and refuses a retired generation", async 
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: caller policies are resources, not replaceable extension-generation state.
+test.each(["subclass", "instance"])(
+	"borrowed %s policy and facade generations preserve exact resources",
+	async (kind) => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-loader-policy-"));
+		const raw = "Respect caller custom loader policy  \n";
+		const settingsManager = SettingsManager.inMemory();
+		const active = new Set<object>();
+		class HostLoader extends DefaultResourceLoader {
+			override getSystemPrompt() {
+				return raw;
+			}
+		}
+		const loader = new (kind === "subclass" ? HostLoader : DefaultResourceLoader)({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					const owner = {};
+					pi.on("session_start", () => {
+						active.add(owner);
+					});
+					pi.on("session_shutdown", () => {
+						active.delete(owner);
+					});
+				},
+			],
+		});
+		if (kind === "instance") loader.getSystemPrompt = () => raw;
+		await loader.reload();
+		const discovery = loader.getExtensions();
+		const facade = new Proxy(loader, {
+			get(target, key) {
+				const value = Reflect.get(target, key);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const create = async (resourceLoader: CreateAgentSessionOptions["resourceLoader"]) =>
+			(
+				await createAgentSession({
+					cwd,
+					agentDir: cwd,
+					settingsManager,
+					resourceLoader,
+					sessionManager: SessionManager.inMemory(cwd),
+					builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+				})
+			).session;
+		const a = await create(loader);
+		const b = await create(facade);
+		try {
+			assert.ok(a instanceof AgentSession);
+			assert.equal(a.resourceLoader.getSystemPrompt(), raw);
+			assert.equal(b.resourceLoader.getSystemPrompt(), raw);
+			assert.equal(active.size, 2);
+			await b.dispose();
+			assert.equal(active.size, 1);
+			assert.equal(loader.getExtensions(), discovery);
+			assert.equal(loader.getSystemPrompt(), raw);
+		} finally {
+			await a.dispose();
+			await b.dispose();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+		assert.equal(active.size, 0);
+	},
+);
+
+test.each([false, true])(
+	"direct initial binding drains and rolls back suspended startup (failure=%s)",
+	async (fail) => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-initial-bind-"));
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const settingsManager = SettingsManager.inMemory();
+		const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: null });
+		let active = false;
+		let stops = 0;
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_start", async () => {
+						entered.resolve();
+						await release.promise;
+						active = true;
+						if (fail) throw new Error("startup failed");
+					});
+					pi.on("session_shutdown", () => {
+						active = false;
+						stops++;
+					});
+				},
+			],
+		});
+		await resourceLoader.reload();
+		const session = new AgentSession({
+			agent: new Agent(),
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager,
+			cwd,
+			modelRuntime,
+			resourceLoader,
+		});
+		const startup = session.bindExtensions({}).catch((error: unknown) => error);
+		await entered.promise;
+		let settled = false;
+		const closing = session.dispose();
+		void closing.then(() => {
+			settled = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(settled, false);
+		assert.equal(stops, 0);
+		release.resolve();
+		assert.ok((await startup) instanceof Error);
+		await closing;
+		assert.equal(active, false);
+		assert.equal(stops, 1);
+		assert.equal(session.dispose(), closing);
+		rmSync(cwd, { recursive: true, force: true });
+	},
+);

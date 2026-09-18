@@ -2,6 +2,7 @@ import * as path from "node:path";
 import { yieldToEventLoop } from "../../utils/event-loop.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.js";
+import { isTrustedMandatoryRuntimeTool, markTrustedMandatoryRuntimeExtension } from "../mandatory-runtime-tools.ts";
 import { createSyntheticSourceInfo } from "../source-info.ts";
 import { endTimingSpan, startTimingSpan } from "../timings.ts";
 import { createExtensionAPI } from "./loader-api.ts";
@@ -16,6 +17,60 @@ import type { Extension, ExtensionFactory, ExtensionRuntime, LoadExtensionsResul
 
 /** Associate extension runtimes with the event bus used to construct their APIs. */
 const runtimeEventBuses = new WeakMap<ExtensionRuntime, EventBus>();
+
+interface ExtensionSource {
+	factory: ExtensionFactory;
+	workflowResourceProvider: WorkflowResourceProviderInput;
+	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider;
+}
+// Discovery records construction inputs, never a session ownership identity.
+// The symbol survives the supported built/source extension-loader boundary.
+const extensionSource = Symbol.for("atomic.extension-source.v1");
+type DiscoveredExtension = Extension & { [extensionSource]?: ExtensionSource };
+
+export async function instantiateExtensions(target: LoadExtensionsResult, cwd: string): Promise<LoadExtensionsResult> {
+	const runtime = createExtensionRuntime();
+	const eventBus = getExtensionRuntimeEventBus(target.runtime);
+	runtimeEventBuses.set(runtime, eventBus);
+	const extensions: Extension[] = [];
+	for (const source of target.extensions) {
+		const recipe = (source as DiscoveredExtension)[extensionSource];
+		if (!recipe) {
+			// Hand-authored ResourceLoader registrations have no factory recipe.
+			// Their callbacks remain caller code, but registration containers and
+			// the runtime bindings still belong to this session generation.
+			extensions.push({
+				...source,
+				handlers: new Map([...source.handlers].map(([event, handlers]) => [event, [...handlers]])),
+				tools: new Map(source.tools),
+				commands: new Map(source.commands),
+				flags: new Map(source.flags),
+				shortcuts: new Map(source.shortcuts),
+				messageRenderers: new Map(source.messageRenderers),
+				entryRenderers: new Map(source.entryRenderers),
+			});
+			continue;
+		}
+		const extension = await loadExtensionFromFactory(
+			recipe.factory,
+			cwd,
+			eventBus,
+			runtime,
+			source.path,
+			recipe.workflowResourceProvider,
+			recipe.resourceLoaderInheritanceSnapshotProvider,
+			source,
+		);
+		if ([...source.tools.values()].some(isTrustedMandatoryRuntimeTool))
+			markTrustedMandatoryRuntimeExtension(extension);
+		extensions.push(extension);
+	}
+	for (const name of target.runtime.explicitFlagNames ?? []) {
+		runtime.explicitFlagNames?.add(name);
+		if (target.runtime.flagValues.has(name)) runtime.flagValues.set(name, target.runtime.flagValues.get(name)!);
+	}
+	return { extensions, runtime, errors: [...target.errors] };
+}
 
 export function getExtensionRuntimeEventBus(runtime: ExtensionRuntime): EventBus {
 	let eventBus = runtimeEventBuses.get(runtime);
@@ -92,7 +147,9 @@ async function loadExtension(
 			throw error;
 		}
 		endTimingSpan(factorySpan);
-
+		Object.defineProperty(extension, extensionSource, {
+			value: { factory, workflowResourceProvider, resourceLoaderInheritanceSnapshotProvider },
+		});
 		return { extension, error: null };
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -111,8 +168,10 @@ export async function loadExtensionFromFactory(
 	extensionPath = "<inline>",
 	workflowResourceProvider: WorkflowResourceProviderInput = emptyWorkflowResourceProvider,
 	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider,
+	source?: Pick<Extension, "resolvedPath" | "sourceInfo">,
 ): Promise<Extension> {
-	const extension = createExtension(extensionPath, extensionPath);
+	const extension = createExtension(extensionPath, source?.resolvedPath ?? extensionPath);
+	if (source) extension.sourceInfo = source.sourceInfo;
 	const resolvedCwd = resolvePath(cwd);
 	const transaction = createExtensionAPI(
 		extension,
@@ -129,6 +188,9 @@ export async function loadExtensionFromFactory(
 		transaction.discard();
 		throw error;
 	}
+	Object.defineProperty(extension, extensionSource, {
+		value: { factory, workflowResourceProvider, resourceLoaderInheritanceSnapshotProvider },
+	});
 	return extension;
 }
 

@@ -472,6 +472,9 @@ describe("clearDetached disposes only detached handles", () => {
 describe("quit still pauses, clears, and shuts DBOS down once", () => {
 	test("session_shutdown(quit) pauses the run, clears every handle, and shuts DBOS down exactly once", async () => {
 		const { events, isLaunched } = await readyDurability();
+		// #3105: a started session owns durability; discovery alone must not.
+		const handlers = captureHandlers();
+		await handlers.get("session_start")!({ reason: "startup" });
 		startBareRun("quit-run", "quit-boundary");
 		store.recordStageStart("quit-run", {
 			id: "live",
@@ -488,7 +491,7 @@ describe("quit still pauses, clears, and shuts DBOS down once", () => {
 				},
 			}),
 		);
-		const shutdown = captureHandlers().get("session_shutdown");
+		const shutdown = handlers.get("session_shutdown");
 		assert.ok(shutdown);
 		await shutdown({ reason: "quit" });
 		await shutdown({ reason: "quit" });

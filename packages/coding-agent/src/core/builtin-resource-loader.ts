@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 import { getAllBuiltinPackageLocations, getBuiltinPackageLocations } from "./builtin-packages.ts";
-import { getExtensionRuntimeEventBus, loadExtensions } from "./extensions/loader.ts";
+import { getExtensionRuntimeEventBus, instantiateExtensions, loadExtensions } from "./extensions/loader.ts";
 import type { LoadExtensionsResult } from "./extensions/types.ts";
 import { markTrustedMandatoryRuntimeExtension } from "./mandatory-runtime-tools.ts";
 import { DefaultPackageManager, type ResolvedResource } from "./package-manager.ts";
@@ -13,6 +13,7 @@ import type {
 	ResourceLoaderReloadTransaction,
 } from "./resource-loader-types.ts";
 import type { AtomicBuiltin } from "./sdk-types.ts";
+import { lifecycleScopeForOwner, sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { buildSkillCatalog } from "./skill-catalog.ts";
 
@@ -34,6 +35,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 	private readonly builtins: Partial<Record<AtomicBuiltin, boolean>>;
 	private readonly disabledRoots: string[];
 	private readonly disableWorkflowExtension: boolean;
+	private readonly ownsDiscovery: boolean;
 	private isDisabledPath(path: string): boolean {
 		return this.disabledRoots.some((root) => {
 			const child = relative(root, canonical(path));
@@ -46,7 +48,12 @@ class BuiltinResourceLoader implements ResourceLoader {
 		agentDir: string,
 		builtins?: Partial<Record<AtomicBuiltin, boolean>>,
 		disableWorkflowExtension = false,
+		ownsDiscovery?: boolean,
 	) {
+		const scope = sessionLifecycleCreation.getStore()?.scope;
+		this.ownsDiscovery =
+			ownsDiscovery ??
+			(scope !== undefined && sessionLifecycleScopes.get(delegate.getExtensions().runtime) === scope);
 		this.disableWorkflowExtension = disableWorkflowExtension;
 		this.delegate = delegate;
 		this.cwd = cwd;
@@ -71,9 +78,10 @@ class BuiltinResourceLoader implements ResourceLoader {
 	}
 	async initialize(): Promise<void> {
 		const locations = getBuiltinPackageLocations(true, this.builtins);
-		const target = this.delegate.getExtensions();
+		const discovered = this.delegate.getExtensions();
+		const scope = lifecycleScopeForOwner(this);
 		const identities = new Set<string>();
-		const extensions = target.extensions.filter((extension) => {
+		const selected = discovered.extensions.filter((extension) => {
 			if (this.isDisabledPath(extension.resolvedPath)) return false;
 			const path = canonical(extension.resolvedPath);
 			const builtin = locations.find((location) => {
@@ -86,6 +94,13 @@ class BuiltinResourceLoader implements ResourceLoader {
 			identities.add(builtin.packageName);
 			return true;
 		});
+		const discovery = { ...discovered, extensions: selected };
+		const target =
+			sessionLifecycleScopes.get(discovered.runtime) === scope
+				? discovery
+				: await sessionLifecycleCreation.run({ scope, claimed: true }, () =>
+						instantiateExtensions(discovery, this.cwd),
+					);
 		const manager = new DefaultPackageManager({
 			cwd: this.cwd,
 			agentDir: this.agentDir,
@@ -115,7 +130,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 		for (const extension of loaded.extensions) markTrustedMandatoryRuntimeExtension(extension);
 		this.extensions = {
 			...target,
-			extensions: [...extensions, ...loaded.extensions],
+			extensions: [...target.extensions, ...loaded.extensions],
 			errors: [...target.errors, ...loaded.errors],
 		};
 		const entries = (items: ResolvedResource[]) =>
@@ -194,7 +209,14 @@ class BuiltinResourceLoader implements ResourceLoader {
 				(entry) => !this.isDisabledPath(entry.path) && entry.metadata.configurationOrigin !== "bundled",
 			);
 		}
-		await this.delegate.extendResources(caller);
+		if (this.ownsDiscovery) {
+			await this.delegate.extendResources(caller);
+		} else {
+			// Extension-discovered assets belong to this session, not borrowed discovery.
+			for (const kind of ["skillPaths", "promptPaths", "themePaths"] as const) {
+				bundled[kind] = [...(bundled[kind] ?? []), ...(caller[kind] ?? [])];
+			}
+		}
 		await this.assets.extendResources(bundled);
 	}
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
@@ -222,7 +244,9 @@ class BuiltinResourceLoader implements ResourceLoader {
 			this.agentDir,
 			this.builtins,
 			this.disableWorkflowExtension,
+			true,
 		);
+		sessionLifecycleScopes.set(candidate, lifecycleScopeForOwner(this));
 		await candidate.initialize();
 		const publish = () => {
 			this.extensions = candidate.extensions;
@@ -260,7 +284,13 @@ export async function withBuiltinResourceLoader(
 	builtins?: Partial<Record<AtomicBuiltin, boolean>>,
 	disableWorkflowExtension = false,
 ): Promise<ResourceLoader> {
-	if (loader instanceof BuiltinResourceLoader && builtins === undefined && !disableWorkflowExtension) return loader;
+	if (
+		loader instanceof BuiltinResourceLoader &&
+		builtins === undefined &&
+		!disableWorkflowExtension &&
+		sessionLifecycleScopes.get(loader) === sessionLifecycleCreation.getStore()?.scope
+	)
+		return loader;
 	const composed = new BuiltinResourceLoader(loader, cwd, agentDir, builtins, disableWorkflowExtension);
 	await composed.initialize();
 	return composed;

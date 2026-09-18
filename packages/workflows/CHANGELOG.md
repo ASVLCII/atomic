@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - SDK workflow discovery and project configuration now follow the session's working directory rather than the process working directory ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Stage sessions inherit SDK configuration, callbacks and capability restrictions before startup. Questionnaires retain the originating child identity and stay pending through host withdrawal; tool suppression also removes Intercom group access without restoring recursive workflow tooling ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Awaited SDK disposal now drains the owning host's workflow stages and persistence before releasing its runtime resources. Closing or reloading one host no longer clears a sibling host's runs, including separate loaders sharing a caller-supplied event bus; bus sharing does not transfer lifecycle ownership. Borrowed durability backends remain caller-owned ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Borrowed resource discovery no longer acquires a durability lease before session startup. Final cleanup releases the last started owner's lease even when outgoing session retirement fails ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

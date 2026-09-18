@@ -157,25 +157,36 @@ function startExtensions(
 ): Promise<void> {
 	const existing = extensionStarts.get(runner);
 	if (existing) return finalize ? existing.then(finalize) : existing;
-	const start = Promise.resolve().then(async () => {
-		const failures: Error[] = [];
-		const unsubscribe = runner.onError((error) => {
-			if (error.event === "session_start" || error.event === "resources_discover") {
-				failures.push(new Error(`${error.extensionPath}: ${error.error}`));
+	const start = trackSessionWork(session, () =>
+		Promise.resolve().then(async () => {
+			const failures: Error[] = [];
+			const unsubscribe = runner.onError((error) => {
+				if (error.event === "session_start" || error.event === "resources_discover") {
+					failures.push(new Error(`${error.extensionPath}: ${error.error}`));
+				}
+			});
+			try {
+				await runner.emit(event);
+				await extendRunnerResources(session, runner, loader, event.reason === "reload" ? "reload" : "startup");
+				if (failures.length) throw new AggregateError(failures, "Extension startup failed");
+				await finalize?.();
+				completeStartup(runner);
+			} finally {
+				unsubscribe();
 			}
+		}),
+	).catch(async (error: unknown) => {
+		failedExtensionStarts.add(runner);
+		return rollbackStartup(runner, error instanceof Error ? error : new Error(String(error)), async (cause) => {
+			try {
+				if (!hasSessionReload(session)) await session.dispose();
+			} catch (cleanupError) {
+				throw Object.assign(new AggregateError([cause, cleanupError], "Extension startup and cleanup failed"), {
+					code: "ShutdownFailed",
+				});
+			}
+			throw cause;
 		});
-		try {
-			await runner.emit(event);
-			await extendRunnerResources(session, runner, loader, event.reason === "reload" ? "reload" : "startup");
-			if (failures.length) throw new AggregateError(failures, "Extension startup failed");
-			await finalize?.();
-			completeStartup(runner);
-		} catch (error) {
-			failedExtensionStarts.add(runner);
-			return rollbackStartup(runner, error instanceof Error ? error : new Error(String(error)));
-		} finally {
-			unsubscribe();
-		}
 	});
 	extensionStarts.set(runner, start);
 	return start;

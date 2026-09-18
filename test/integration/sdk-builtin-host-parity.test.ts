@@ -819,7 +819,7 @@ test(
 );
 
 // #3105: supported shared buses do not transfer workflow lifetime ownership.
-test.each(["bus", "loader"])(
+test.each(["bus", "loader", "facade", "subclass"])(
 	"built Node shared-%s sibling reload and disposal preserve a pending workflow and exit naturally",
 	(shared) => {
 		const result = spawnSyncCollect(
@@ -854,6 +854,56 @@ test.each(["prompt", "reload", "compact", "compact-provider"] as const)(
 			drained: true,
 			providerCalls: scenario === "compact-provider" ? 1 : 0,
 			active: 0,
+		});
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
+// #3105: initial public bind/start owns work before shutdown, with independent release.
+test.each(["none", "startup", "cleanup"])(
+	"built Node drains initial startup with %s failure",
+	(failure) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-initial-startup.mjs", import.meta.url)),
+				failure,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
+			drained: true,
+			active: false,
+			shutdowns: 1,
+			failure,
+		});
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
+test.each(
+	["new", "resume", "fork", "import"].flatMap((operation) =>
+		["none", "cleanup"].map((failure) => ({ operation, failure })),
+	),
+)(
+	"built Node finalizes failed $operation retirement with $failure failure",
+	({ operation, failure }) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-retirement-failure.mjs", import.meta.url)),
+				operation,
+				failure,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
+			operation,
+			failQuit: failure === "cleanup",
+			finalized: true,
+			creations: 0,
 		});
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,

@@ -22,7 +22,7 @@ import { formatStartupDiagnostics } from "./workflow-command-surfaces.js";
 
 interface WorkflowLifetime {
 	readonly generations: Set<() => Promise<void>>;
-	readonly release: () => Promise<void>;
+	release?: () => Promise<void>;
 	closing?: Promise<void>;
 }
 
@@ -68,8 +68,7 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 		"workflows:lifecycle:v1",
 		() => ({
 			generations: new Set(),
-			// Injected backends are borrowed: never stop caller-owned durability.
-			release: getDurableBackendProcessOwner().injectedBackend === undefined ? acquireDbosLease() : async () => {},
+			// Discovery is borrowed. Acquire durability only when a session starts.
 		}),
 	);
 	lifetime.generations.add(async () => {
@@ -141,6 +140,9 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 	});
 
 	pi.on("session_start", async (event, ctx) => {
+		// Injected backends remain borrowed; each started lifetime owns one lease.
+		lifetime.release ??=
+			getDurableBackendProcessOwner().injectedBackend === undefined ? acquireDbosLease() : async () => {};
 		const reason =
 			typeof event === "object" && event !== null && "reason" in event
 				? (event as { readonly reason?: string }).reason
@@ -201,7 +203,7 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 				() => {
 					lifetime.generations.clear();
 				},
-				lifetime.release,
+				() => lifetime.release?.(),
 			]);
 			await lifetime.closing;
 		} else {

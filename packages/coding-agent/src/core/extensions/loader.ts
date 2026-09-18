@@ -4,6 +4,7 @@
 
 export {
 	getExtensionRuntimeEventBus,
+	instantiateExtensions,
 	loadExtensionFromFactory,
 	loadExtensions,
 	loadExtensionsCached,
