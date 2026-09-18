@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { afterEach, beforeEach, describe, test } from "vitest";
+import { afterEach, beforeEach, describe, test, vi } from "vitest";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { testRunId } from "../helpers/run-id.js";
@@ -10,7 +10,6 @@ import {
 	buildMockPi,
 	installSlashDispatchTestHooks,
 	join,
-	LIFECYCLE_NOTICE_CUSTOM_TYPE,
 	makeInflightRun,
 	mkdtemp,
 	registerTestStageHandle,
@@ -238,7 +237,7 @@ describe("/workflow command in non-interactive (-p) mode (#1156 regressions)", (
 		assert.match(content, /quit.*resume|resume.*quit/i);
 	});
 
-	test.sequential("issue #1156: headless terminal workflow failure throws a command-visible error", async () => {
+	test.sequential("headless workflow failure remains visible through run status after acceptance", async () => {
 		const resource = await registerWorkflowCommandWithResource(
 			"terminal-failure.ts",
 			`import { workflow } from "@bastani/workflows";
@@ -256,16 +255,21 @@ export default workflow({
 		);
 
 		try {
-			await assertRejectsHeadlessCommand(
-				() => resource.handler("terminal-failure", headlessNoOpCtx()),
-				/Workflow "terminal-failure" failed: terminal boom/,
-			);
+			await resource.handler("terminal-failure", headlessNoOpCtx());
+			const accepted = resource.sent.find((message) => chatSurfacePayload(message)?.kind === "detail");
+			const runId = chatSurfacePayload(accepted).detail.runId;
+			await vi.waitFor(async () => {
+				await resource.handler(`status ${runId}`, headlessNoOpCtx());
+				const detail = chatSurfacePayload(resource.sent.at(-1));
+				assert.equal(detail.detail.status, "failed");
+				assert.match(JSON.stringify(detail), /terminal boom/);
+			});
 		} finally {
 			await resource.cleanup();
 		}
 	}, 15_000);
 
-	test.sequential("issue #1156: headless /workflow success emits a printable terminal detail summary", async () => {
+	test.sequential("headless workflow acceptance and eventual success emit printable run details", async () => {
 		const resource = await registerWorkflowCommandWithResource(
 			"headless-terminal-success.ts",
 			`import { workflow } from "@bastani/workflows";
@@ -289,6 +293,12 @@ export default workflow({
 
 		try {
 			await resource.handler("headless-terminal-success", headlessNoOpCtx());
+			const accepted = resource.sent.find((message) => chatSurfacePayload(message)?.kind === "detail");
+			const runId = chatSurfacePayload(accepted).detail.runId;
+			await vi.waitFor(async () => {
+				await resource.handler(`status ${runId}`, headlessNoOpCtx());
+				assert.equal(chatSurfacePayload(resource.sent.at(-1)).detail.status, "completed");
+			});
 
 			assert.equal(
 				resource.sent.some((message) => chatSurfacePayload(message)?.kind === "dispatch"),
@@ -296,7 +306,7 @@ export default workflow({
 				"headless success must not emit an interactive dispatch surface",
 			);
 
-			const detailMessage = resource.sent.find((message) => chatSurfacePayload(message)?.kind === "detail");
+			const detailMessage = resource.sent.findLast((message) => chatSurfacePayload(message)?.kind === "detail");
 			assert.ok(detailMessage, "expected a terminal run detail chat surface");
 			const detailPayload = chatSurfacePayload(detailMessage);
 			assert.ok(detailPayload?.kind === "detail", "expected terminal run detail payload");
@@ -310,11 +320,8 @@ export default workflow({
 				detailPayload.detail.stages.some((stage) => stage.status === "completed"),
 				true,
 			);
-			assert.equal(
-				resource.sent.some((message) => message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE),
-				false,
-				"headless slash completion should not emit a lifecycle steer notice before terminal detail",
-			);
+			// Background completion may publish a lifecycle notice; the accepted run
+			// and its eventual terminal detail remain independently inspectable.
 			assert.equal(detailMessage.display, true, "terminal detail must be displayable for print mode");
 			assert.equal(typeof detailMessage.content, "string");
 

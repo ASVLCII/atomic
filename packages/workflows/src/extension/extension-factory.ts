@@ -126,7 +126,7 @@ function factory(pi: ExtensionAPI): void {
 	const executeWorkflowToolWithAutoAttach: typeof executeWorkflowTool = async (args, ctx, signal, onRunAccepted) => {
 		const result = await executeWorkflowTool(args, ctx, signal, onRunAccepted);
 		if (
-			workflowPolicyFromContext(ctx).mode === "interactive" &&
+			workflowPolicyFromContext(ctx).allowInputPicker &&
 			typeof args.workflow === "string" &&
 			result.action === "run" &&
 			result.status === "running" &&

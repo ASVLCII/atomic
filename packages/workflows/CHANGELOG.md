@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Headless launches return an accepted run identity for status inspection, without input pickers. Required durable gates remain pending until an authorized host or answer arrives, including when no host was initially bound. Explicit runtime execution policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+
 ### Added
 
 - Added `workflowDependency()`, `/workflow dependency` and the workflow tool's `dependency` action for bounded database inspection and registered managed-cluster recovery, with actual port, verified identity, runtime versions, consumers, retained latest failure and safe guidance. External database endpoints receive query-only checks ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).

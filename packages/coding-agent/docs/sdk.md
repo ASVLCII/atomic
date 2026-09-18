@@ -168,6 +168,8 @@ Workflow input uses these same callbacks, including stage questionnaires and nes
 
 A durable workflow approval stays pending when input is unavailable, cancelled or invalid. Withdrawing the adapter does not approve it or discard the run. Bind a new adapter to present a live pending request again; it receives a fresh request ID, and late answers to the withdrawn request cannot authorize work. To continue a saved run in another session, keep its definition and durable storage available, bind the new host, and use the existing `/workflow resume <run-id>` command or workflow tool's `resume` action. Rebinding alone does not reopen a saved run. See [workflow operations](/workflows/operations) for inspection, graceful quit and resume.
 
+This also applies when no adapter was bound at creation: normal workflow launch preserves the required gate and returns its run identity. Inspect workflow status, then bind an authorized host or submit a validated answer. Headless CLI launches use the same execution defaults; they skip input pickers and do not wait for terminal completion. Explicit runtime execution restrictions remain enforced.
+
 Only an actual `true` confirms a primitive approval. Questionnaire readiness keeps its existing choices: staying on the stage does not advance it. Missing input never bypasses an approval or exhausted budget; obtain approval before explicitly resuming with a raised budget.
 
 `onDiagnostic` receives session-attributed operational diagnostics. Existing errors and tool results remain available without a callback. Third-party extensions can still write directly to the console; the callback does not intercept their output.

@@ -46,14 +46,14 @@ export function createWorkflowCommandReporter(
 ): WorkflowCommandReporter {
 	return {
 		info(message: string): void {
-			if (policy.mode === "non_interactive") {
+			if (ctx.hasUI === false || policy.mode === "non_interactive") {
 				if (pi) emitWorkflowCommandOutput(pi, message, { command: "message" });
 				return;
 			}
 			ctx.ui.notify(message, "info");
 		},
 		error(message: string): void {
-			if (policy.mode === "non_interactive") throw new WorkflowHeadlessCommandError(message);
+			if (ctx.hasUI === false || policy.mode === "non_interactive") throw new WorkflowHeadlessCommandError(message);
 			ctx.ui.notify(message, "error");
 		},
 	};

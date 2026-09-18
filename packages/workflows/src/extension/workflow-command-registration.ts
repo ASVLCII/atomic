@@ -121,7 +121,8 @@ async function workflowSlashHandler(
 			return;
 		}
 		const schemaText = renderInputsSchema(workflowName, inputResult.inputs, { theme: deriveGraphTheme({}) });
-		if (policy.mode === "non_interactive") emitWorkflowCommandOutput(pi, schemaText, { command, workflowName });
+		if (ctx.hasUI === false || policy.mode === "non_interactive")
+			emitWorkflowCommandOutput(pi, schemaText, { command, workflowName });
 		else print(schemaText);
 	};
 
@@ -296,7 +297,7 @@ async function workflowSlashHandler(
 		fail(`Workflow "${workflowName}" failed: ${runResult.error ?? "unknown error"}`);
 		return;
 	}
-	if (policy.mode === "non_interactive") {
+	if (ctx.hasUI === false || policy.mode === "non_interactive") {
 		emitTerminalRunDetailSurface(pi, workflowName, mergedInputs, runResult);
 		return;
 	}
