@@ -87,6 +87,31 @@ Current repair validation:
 
 No findings from this consolidated batch remain deferred. The pre-existing listener warning and later slices remain as documented above. No new live-provider, packed-install, platform or Herdr-transport claim is made.
 
+## Constructor rollback review repair
+
+The second readiness claim also missed an initialization boundary: `new AgentSession` could register providers and then throw before the factory installed startup rollback. The constructor probe failed with `providerLeaked:true`. Factory construction now restores the provider snapshot and flushes settings before rejection, aggregating cleanup failures. The constructor releases its acquired agent subscription, temporary-storage lease and execution-ended listener, invalidates its partial runner and clears the runner reference on runtime construction failure. No startup event is emitted for this failed constructor.
+
+The durable `constructor failure restores new and replaced providers without starting a session` parity regression failed before repair and passes afterward. It verifies new registrations are removed, a pre-existing borrowed registration overwritten during construction is restored verbatim, and creation rejects rather than returning a session. This extends the initialization-rollback acceptance row above; previous startup/finalization and deduplication checks remain green.
+
+Current validation supersedes the earlier counts:
+
+- `npm run build` and `npm run check` passed: `/tmp/3105-a-constructor-{build,check}.log`.
+- The expanded package command above plus `test/agent-session-dynamic-provider.test.ts test/agent-session-dynamic-tools.test.ts test/agent-session-runtime-events.test.ts test/session-cwd.test.ts` passed 259 tests in 32 files, no skips: `/tmp/3105-a-constructor-affected.log`.
+- The affected workflow command above passed 28 tests in three files: `/tmp/3105-a-constructor-workflows.log`.
+- `node /tmp/3105-a-risk-turn2-constructor.mjs` failed before repair and passed after rebuild with `providerLeaked:false`: `/tmp/3105-a-constructor-{red,green}.log`. Focused test RED/GREEN: `/tmp/3105-a-constructor-test-{red,green}.log`.
+- `node /tmp/3105-a-risk-finalization.mjs`, `node /tmp/3105-a-completion-probe.mjs` and `node packages/coding-agent/test/fixtures/sdk-builtin-composition.mjs` passed and exited normally: `/tmp/3105-a-constructor-{finalization,dedup,smoke}.log`.
+- `qlty metrics --functions packages/coding-agent/src/core/sdk.ts packages/coding-agent/src/core/agent-session.ts` executed with existing configuration: `/tmp/3105-a-constructor-qlty.log`.
+
+No constructor finding is deferred. The existing listener warning and B–H remain separate work.
+
 ## Contract amendments received
 
-The current instruction authorizes runtime implementation despite historical design-only wording, limits this checkout to A, and forbids push, PR, merge and release. No new user amendments were received during implementation.
+The current instruction authorizes runtime implementation despite historical design-only wording and limits this checkout to A. Child stages still may not push, create PRs, merge, release or deploy.
+
+Inherited user amendments:
+
+> "make sure that you create PRs and loop until CI is green, then you can merge if so"
+
+> "and there is no addressable greptile feedback"
+
+The parent owns one cumulative PR after sequential slices, then exact-current-head CI/repair convergence and inspection of Greptile summaries, inline threads and comments. Merge requires green required CI, no remaining actionable Greptile feedback and applicable review/protection gates. Non-actionable feedback needs evidence-backed disposition; stale reviews or aggregate scores are insufficient. This child does not start a duplicate post-PR workflow or merge partial slices. These parent-owned gates are not yet verified here.

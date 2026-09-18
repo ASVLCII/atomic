@@ -217,6 +217,7 @@ class AgentSessionBase {
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._orchestrationContext = config.orchestrationContext;
 		this._subagentPolicy = config.subagentPolicy;
+		let removeExecutionEndedListener: (() => void) | undefined;
 		if (config.subagentPolicy?.executionEnded !== undefined) {
 			// Reuse the stable-key admission/drain primitive, not workflow identity or task ownership.
 			const admission = WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch());
@@ -233,7 +234,11 @@ class AgentSessionBase {
 			};
 			const ended = config.subagentPolicy.executionEnded;
 			if (ended.aborted) admission.seal();
-			else ended.addEventListener("abort", () => admission.seal(), { once: true });
+			else {
+				const seal = () => admission.seal();
+				ended.addEventListener("abort", seal, { once: true });
+				removeExecutionEndedListener = () => ended.removeEventListener("abort", seal);
+			}
 		}
 		this._systemPromptTransform = config.systemPromptTransform;
 		const stageContext =
@@ -288,13 +293,23 @@ class AgentSessionBase {
 		const internals = this as unknown as AgentSessionInternalSurface;
 		internals._handleAgentEvent = internals._handleAgentEvent.bind(this);
 		this._unsubscribeAgent = this.agent.subscribe(internals._handleAgentEvent);
-		internals._installAgentToolHooks();
-		internals._installAgentNextTurnRefresh();
-		internals._buildRuntime({
-			activeToolNames: this._initialActiveToolNames,
-			includeAllExtensionTools: true,
-		});
-		if (this._workflowStageAdmission?.hasAgentTaskHost()) internals.getAgentTaskHost();
+		try {
+			internals._installAgentToolHooks();
+			internals._installAgentNextTurnRefresh();
+			internals._buildRuntime({
+				activeToolNames: this._initialActiveToolNames,
+				includeAllExtensionTools: true,
+			});
+			if (this._workflowStageAdmission?.hasAgentTaskHost()) internals.getAgentTaskHost();
+		} catch (error) {
+			// No session escapes a failed constructor to release these acquisitions later.
+			removeExecutionEndedListener?.();
+			this._unsubscribeAgent?.();
+			this._tempStorageLease?.release();
+			this._extensionRunner?.invalidate("Session construction failed");
+			if (this._extensionRunnerRef) this._extensionRunnerRef.current = undefined;
+			throw error;
+		}
 	}
 }
 

@@ -433,26 +433,36 @@ async function constructAgentSession(
 	}
 
 	const providerRollback = modelRuntime.createExtensionProviderTransaction();
-	const session = new AgentSession({
-		agent,
-		sessionManager,
-		settingsManager,
-		cwd,
-		scopedModels: options.scopedModels,
-		fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
-		isFallbackModelAllowed: options.isFallbackModelAllowed,
-		resourceLoader,
-		customTools: options.customTools,
-		modelRuntime,
-		initialActiveToolNames,
-		allowedToolNames,
-		excludedToolNames: options.excludedTools,
-		extensionRunnerRef,
-		sessionStartEvent: options.sessionStartEvent,
-		orchestrationContext: options.orchestrationContext,
-		subagentPolicy: options.subagentPolicy,
-		systemPromptTransform: options.systemPromptTransform,
-	});
+	let session: AgentSession;
+	try {
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settingsManager,
+			cwd,
+			scopedModels: options.scopedModels,
+			fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
+			isFallbackModelAllowed: options.isFallbackModelAllowed,
+			resourceLoader,
+			customTools: options.customTools,
+			modelRuntime,
+			initialActiveToolNames,
+			allowedToolNames,
+			excludedToolNames: options.excludedTools,
+			extensionRunnerRef,
+			sessionStartEvent: options.sessionStartEvent,
+			orchestrationContext: options.orchestrationContext,
+			subagentPolicy: options.subagentPolicy,
+			systemPromptTransform: options.systemPromptTransform,
+		});
+	} catch (error) {
+		// The constructor releases its own leases/subscriptions; restore borrowed provider state here.
+		const cleanup = await Promise.allSettled([providerRollback.commit(), settingsManager.flush()]);
+		const failures = cleanup.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+		if (failures.length)
+			throw new AggregateError([error, ...failures], "Session construction failed and rollback reported errors");
+		throw error;
+	}
 	registerStartupRollback(session.extensionRunner, async (error) => {
 		const cleanupErrors: Error[] = [];
 		const unsubscribe = session.extensionRunner.onError((failure) => {

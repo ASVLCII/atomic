@@ -387,3 +387,56 @@ test.each([false, true])("prompt finalization failure rolls back once (deferred=
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: constructor failures restore borrowed provider state before rejecting.
+test("constructor failure restores new and replaced providers without starting a session", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-constructor-"));
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: null });
+	const original = {
+		apiKey: "original",
+		baseUrl: "https://original.invalid",
+		api: "openai-completions" as const,
+		models: [],
+	};
+	modelRuntime.registerProvider("existing-provider", original);
+	const events: string[] = [];
+	const settingsManager = SettingsManager.inMemory();
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		noContextFiles: true,
+		extensionFactories: [
+			(pi) => {
+				pi.registerProvider("existing-provider", { ...original, apiKey: "replacement" });
+				pi.registerProvider("constructor-provider", original);
+				pi.on("session_start", () => {
+					events.push("start");
+				});
+			},
+		],
+	});
+	await loader.reload();
+	try {
+		await assert.rejects(
+			createAgentSession({
+				cwd,
+				agentDir: join(cwd, "agent"),
+				resourceLoader: loader,
+				modelRuntime,
+				settingsManager,
+				sessionManager: SessionManager.inMemory(cwd),
+				systemPromptTransform: () => {
+					throw new Error("constructor transform failed");
+				},
+			}),
+			/constructor transform failed/,
+		);
+		assert.equal(modelRuntime.getRegisteredProviderConfig("constructor-provider"), undefined);
+		assert.deepEqual(modelRuntime.getRegisteredProviderConfig("existing-provider"), original);
+		assert.deepEqual(events, []);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
