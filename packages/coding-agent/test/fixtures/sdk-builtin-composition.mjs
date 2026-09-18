@@ -28,6 +28,28 @@ try {
 		await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 		session.dispose();
 	}
+	const { session: suppressed } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { intercom: false, "web-access": false },
+		tools: ["read", "intercom"],
+		noTools: "all",
+	});
+	try {
+		for (let generation = 0; generation < 2; generation++) {
+			assert.deepEqual(suppressed.getActiveToolNames(), []);
+			assert.deepEqual(suppressed.getAllTools(), []);
+			assert.equal(suppressed.resourceLoader.getExtensions().extensions.length, 3);
+			assert.ok(suppressed.resourceLoader.getSkills().skills.length > 0);
+			if (generation === 0) await suppressed.reload();
+		}
+		console.log("SDK builtin suppression: PASS");
+	} finally {
+		await suppressed.closeSessionTasks();
+		await suppressed.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+		suppressed.dispose();
+	}
 } finally {
 	await rm(cwd, { recursive: true, force: true });
 }

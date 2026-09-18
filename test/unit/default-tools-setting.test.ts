@@ -61,7 +61,17 @@ function sessionRoots(prefix: string): { cwd: string; agentDir: string } {
 const BUILTIN_PACKAGE_SESSION_TIMEOUT_MS = 120_000;
 
 /** Every tool contributed by Atomic's builtin extension packages. */
-const BUILTIN_EXTENSION_TOOLS = ["workflow", "subagent", "intercom", "mcp", "web_search"] as const;
+// #3105: the normal factory composes all shipped extensions, even with a custom loader.
+const BUILTIN_EXTENSION_TOOLS = [
+	"workflow",
+	"subagent",
+	"intercom",
+	"mcp",
+	"web_search",
+	"code_search",
+	"fetch_content",
+	"get_search_content",
+] as const;
 
 type ToolOptions = Pick<CreateAgentSessionOptions, "tools" | "excludedTools" | "noTools" | "customTools">;
 
@@ -207,34 +217,18 @@ describe("defaultTools setting", () => {
 		try {
 			await session.bindExtensions({});
 
-			assert.deepEqual([...session.getActiveToolNames()].sort(), [
-				"dynamic_tool",
-				"intercom",
-				"read",
-				"sdk_tool",
-				"static_tool",
-			]);
+			assert.deepEqual(
+				[...session.getActiveToolNames()].sort(),
+				["dynamic_tool", "read", "sdk_tool", "static_tool", ...BUILTIN_EXTENSION_TOOLS].sort(),
+			);
 			const registered = session
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort();
-			assert.deepEqual(registered, [
-				"ask_user_question",
-				"bash",
-				"dynamic_tool",
-				"edit",
-				"find",
-				"intercom",
-				"kill",
-				"ls",
-				...(getDefaultToolNames().includes("powershell") ? (["powershell"] as const) : []),
-				"read",
-				"sdk_tool",
-				"search",
-				"static_tool",
-				"todo",
-				"write",
-			]);
+			assert.deepEqual(
+				registered,
+				[...registrableToolNames, ...BUILTIN_EXTENSION_TOOLS, "dynamic_tool", "sdk_tool", "static_tool"].sort(),
+			);
 		} finally {
 			session.dispose();
 		}
@@ -243,14 +237,17 @@ describe("defaultTools setting", () => {
 	test("preserves explicit tool option precedence over the setting", async () => {
 		const allowlistedSession = await createSession(["read", "find"], { tools: ["read"] });
 		try {
-			assert.deepEqual(allowlistedSession.getActiveToolNames(), ["read", "intercom"]);
+			assert.deepEqual(allowlistedSession.getActiveToolNames(), ["read"]);
 		} finally {
 			allowlistedSession.dispose();
 		}
 
 		const excludedSession = await createSession(["read", "find"], { excludedTools: ["read"] });
 		try {
-			assert.deepEqual(excludedSession.getActiveToolNames(), ["find", "intercom"]);
+			assert.deepEqual(
+				[...excludedSession.getActiveToolNames()].sort(),
+				["find", ...BUILTIN_EXTENSION_TOOLS].sort(),
+			);
 		} finally {
 			excludedSession.dispose();
 		}
@@ -259,9 +256,9 @@ describe("defaultTools setting", () => {
 		try {
 			assert.deepEqual(
 				toolLessSession.getAllTools().map((tool) => tool.name),
-				["intercom"],
+				[],
 			);
-			assert.deepEqual(toolLessSession.getActiveToolNames(), ["intercom"]);
+			assert.deepEqual(toolLessSession.getActiveToolNames(), []);
 		} finally {
 			toolLessSession.dispose();
 		}
@@ -270,7 +267,7 @@ describe("defaultTools setting", () => {
 	test('noTools: "builtin" ignores the configured defaults but keeps extension tools', async () => {
 		const session = await createSession(["read"], { noTools: "builtin" }, [staticExtensionTool("static_tool")]);
 		try {
-			assert.deepEqual(session.getActiveToolNames(), ["static_tool", "intercom"]);
+			assert.deepEqual([...session.getActiveToolNames()].sort(), ["static_tool", ...BUILTIN_EXTENSION_TOOLS].sort());
 			assert.ok(
 				session
 					.getAllTools()
@@ -286,14 +283,20 @@ describe("defaultTools setting", () => {
 	test("an unset setting keeps the standard built-in defaults; an empty list keeps none", async () => {
 		const unsetSession = await createSession(undefined);
 		try {
-			assert.deepEqual(unsetSession.getActiveToolNames(), [...getDefaultToolNames(), "intercom"]);
+			assert.deepEqual(
+				[...unsetSession.getActiveToolNames()].sort(),
+				[...getDefaultToolNames(), ...BUILTIN_EXTENSION_TOOLS].sort(),
+			);
 		} finally {
 			unsetSession.dispose();
 		}
 
 		const emptySession = await createSession([], {}, [staticExtensionTool("static_tool")]);
 		try {
-			assert.deepEqual(emptySession.getActiveToolNames(), ["static_tool", "intercom"]);
+			assert.deepEqual(
+				[...emptySession.getActiveToolNames()].sort(),
+				["static_tool", ...BUILTIN_EXTENSION_TOOLS].sort(),
+			);
 			for (const builtin of registrableToolNames) {
 				assert.ok(
 					emptySession
@@ -322,8 +325,8 @@ describe("defaultTools setting", () => {
 			const session = await createSessionFromManager(settingsManager, cwd, agentDir);
 			try {
 				assert.deepEqual(
-					session.getActiveToolNames(),
-					[...getDefaultToolNames(), "intercom"],
+					[...session.getActiveToolNames()].sort(),
+					[...getDefaultToolNames(), ...BUILTIN_EXTENSION_TOOLS].sort(),
 					`expected malformed defaultTools ${raw} to fall back to the standard defaults`,
 				);
 			} finally {

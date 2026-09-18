@@ -92,7 +92,8 @@ function asCustomLoader(
 	};
 }
 
-describe("mandatory ordinary Intercom sessions", () => {
+// #3105: collision and broker checks explicitly select Intercom; suppression is covered by SDK parity.
+describe("trusted ordinary Intercom sessions", () => {
 	afterEach(() => {
 		for (const dir of tempDirs.splice(0)) {
 			stopBrokerAt(join(dir, "agent"));
@@ -115,7 +116,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 		}
 	});
 
-	it("loads ordinary Intercom but no optional bundled extensions in a fresh SDK session", async () => {
+	it("allows selecting ordinary Intercom without other builtin tools", async () => {
 		const cwd = createTempDir("ic-sdk-");
 		const agentDir = join(cwd, "agent");
 		mkdirSync(agentDir, { recursive: true });
@@ -124,7 +125,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 			agentDir,
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			sessionManager: SessionManager.inMemory(cwd),
-			noTools: "all",
+			tools: ["intercom"],
 		});
 		try {
 			const tools = session.getAllTools();
@@ -164,7 +165,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 			services,
 			sessionManager: SessionManager.inMemory(cwd),
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
-			noTools: "all",
+			tools: ["intercom"],
 		});
 		try {
 			expect(session.getActiveToolNames()).toEqual(["intercom"]);
@@ -191,7 +192,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 			services,
 			sessionManager: SessionManager.inMemory(cwd),
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
-			tools: [],
+			tools: ["intercom"],
 		});
 		try {
 			expect(session.getAllTools().map((tool) => tool.name)).toEqual(["intercom"]);
@@ -223,7 +224,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 			services,
 			sessionManager: SessionManager.inMemory(cwd),
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
-			noTools: "all",
+			tools: ["intercom"],
 		});
 		try {
 			expect(session.getAllTools().map((tool) => tool.name)).toEqual(["intercom"]);
@@ -277,8 +278,8 @@ describe("mandatory ordinary Intercom sessions", () => {
 				settingsManager,
 				sessionManager: SessionManager.inMemory(cwd),
 				resourceLoader: suppliedLoader,
-				tools: ["project_tool"],
-				excludedTools: ["intercom", "bash"],
+				tools: ["project_tool", "intercom"],
+				excludedTools: ["bash"],
 				customTools: [fakeIntercomTool()],
 			});
 			try {
@@ -341,7 +342,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			sessionManager: SessionManager.inMemory(cwd),
 			resourceLoader: suppliedLoader,
-			tools: ["read", "bash"],
+			tools: ["read", "bash", "intercom"],
 		});
 		try {
 			expect(session.getActiveToolNames()).toEqual(["read", "bash", "intercom"]);
@@ -397,7 +398,7 @@ describe("mandatory ordinary Intercom sessions", () => {
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			sessionManager: SessionManager.inMemory(cwd),
 			resourceLoader: suppliedLoader,
-			noTools: "all",
+			tools: ["intercom"],
 		});
 		try {
 			const intercom = session.getAllTools().find((tool) => tool.name === "intercom");

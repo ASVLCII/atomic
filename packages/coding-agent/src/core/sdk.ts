@@ -31,7 +31,7 @@ import { getDefaultToolNames } from "./tools/index.ts";
 
 export type { ModelFallbackReason } from "./model-resolver-types.ts";
 export * from "./sdk-exports.ts";
-export type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
+export type { AtomicBuiltin, CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
 
 // Preserve the pre-0.81 fallback for extensions that construct Agent instances
 // or invoke low-level agent loops without supplying streamFn.
@@ -140,15 +140,20 @@ async function constructAgentSession(
 			cwd,
 			agentDir,
 			settingsManager,
-			builtinPackagePaths: getBuiltinPackagePaths(),
+			builtinPackagePaths: getBuiltinPackagePaths(options.builtins),
 		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
 	}
-	if (options.resourceLoader && !isMandatoryResourceLoader(resourceLoader)) {
-		resourceLoader = await withBuiltinResourceLoader(resourceLoader, cwd, agentDir);
+	if (
+		(options.resourceLoader || options.builtins) &&
+		(!isMandatoryResourceLoader(resourceLoader) || options.builtins)
+	) {
+		resourceLoader = await withBuiltinResourceLoader(resourceLoader, cwd, agentDir, options.builtins);
 	}
-	resourceLoader = await withMandatoryResourceLoader(resourceLoader, cwd);
+	if (options.builtins?.intercom !== false) {
+		resourceLoader = await withMandatoryResourceLoader(resourceLoader, cwd);
+	}
 
 	// Check if session has existing data to restore
 	const existingSession = sessionManager.buildSessionContext();
@@ -228,9 +233,9 @@ async function constructAgentSession(
 	// and SDK custom tool (workflow, subagent, intercom, mcp, web_search, ...)
 	// for any user who configures it (upstream 4d9aa837 + companion fix 541045ae).
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
-	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
-	const initialActiveToolNames: string[] = options.tools
-		? [...options.tools]
+	const allowedToolNames = options.noTools === "all" ? [] : options.tools;
+	const initialActiveToolNames: string[] = allowedToolNames
+		? [...allowedToolNames]
 		: options.noTools
 			? []
 			: [...(configuredDefaultToolNames ?? getDefaultToolNames())];

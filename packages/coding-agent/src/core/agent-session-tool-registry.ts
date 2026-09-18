@@ -21,7 +21,6 @@ export function _refreshToolRegistry(
 	const allowedToolNames = this._allowedToolNames;
 	const excludedToolNames = this._excludedToolNames;
 	const isExposedTool = (name: string): boolean => {
-		if (isMandatoryRuntimeTool(name)) return true;
 		if (allowedToolNames && !allowedToolNames.has(name)) {
 			return false;
 		}

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Intercom now respects tool allowlists and exclusions. `tools: []` and `noTools: "all"` expose no tools; `noTools: "all"` also overrides nonempty allowlists. Select `"intercom"` explicitly when using an allowlist. SDK `builtins` flags can disable individual shipped packages and resources without reload restoring them ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+
 ### Added
 
 - Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers, retained latest failure and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).

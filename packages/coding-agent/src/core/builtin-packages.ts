@@ -4,6 +4,7 @@ import { getPackageDir } from "../config.js";
 import { moduleDirFromMetaUrl } from "../utils/split-launcher.ts";
 import { stripBom } from "../utils/text.ts";
 import { type BuiltinPackageDirName, requiredEntriesForBuiltin } from "./builtin-install-layout.ts";
+import type { AtomicBuiltin } from "./sdk-types.ts";
 
 interface BuiltinPackageDescriptor {
 	readonly packageName: string;
@@ -110,9 +111,13 @@ function getBuiltinPackageCandidateContext(): BuiltinPackageCandidateContext {
 }
 
 /** Atomic-owned builtin package roots paired with their verified descriptors. */
-export function getBuiltinPackageLocations(required = false): BuiltinPackageLocation[] {
+export function getBuiltinPackageLocations(
+	required = false,
+	builtins?: Partial<Record<AtomicBuiltin, boolean>>,
+): BuiltinPackageLocation[] {
 	const context = getBuiltinPackageCandidateContext();
 	return BUILTIN_PACKAGES.flatMap((descriptor) => {
+		if (builtins?.[descriptor.distDirName] === false) return [];
 		const packageDir = firstExistingPackageDir(
 			[...descriptor.sourceCandidates(context), ...distCandidates(context, descriptor)],
 			descriptor,
@@ -140,8 +145,8 @@ export function getBuiltinPackageLocations(required = false): BuiltinPackageLoca
  * Bun binary layout:
  *   process executable dir -> builtin/<package>
  */
-export function getBuiltinPackagePaths(): string[] {
-	return getBuiltinPackageLocations(true).map(({ packageDir }) => packageDir);
+export function getBuiltinPackagePaths(builtins?: Partial<Record<AtomicBuiltin, boolean>>): string[] {
+	return getBuiltinPackageLocations(true, builtins).map(({ packageDir }) => packageDir);
 }
 
 /** Built-in package roots whose extensions Atomic must load in every model session. */

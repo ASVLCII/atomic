@@ -221,6 +221,7 @@ export {
 	AgentSessionRuntime,
 	type AgentSessionRuntimeDiagnostic,
 	type AgentSessionServices,
+	type AtomicBuiltin,
 	type CreateAgentSessionFromServicesOptions,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,

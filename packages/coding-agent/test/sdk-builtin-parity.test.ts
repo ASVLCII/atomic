@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@bastani/pi-ai/compat";
+import { Type } from "typebox";
 import { test, vi } from "vitest";
 import * as config from "../src/config.js";
 import { AgentSession } from "../src/core/agent-session.js";
@@ -16,8 +17,10 @@ import { noOpUIContext } from "../src/core/extensions/runner-ui.ts";
 import { ModelRuntime } from "../src/core/model-runtime.js";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession, createUnstartedAgentSession } from "../src/core/sdk.ts";
+import type { AtomicBuiltin, CreateAgentSessionOptions } from "../src/core/sdk-types.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { getDefaultToolNames } from "../src/core/tools/index.ts";
 
 // #3105: the ordinary SDK factory, not CLI setup, supplies Atomic's shipped capabilities.
 test("default SDK creation returns an Atomic AgentSession with builtin tools and resources", async () => {
@@ -144,6 +147,18 @@ test("missing shipped builtin assets reject with the package identity", async ()
 			(error: Error & { code?: string }) =>
 				error.code === "BuiltinUnavailable" && error.message.includes("@bastani/workflows"),
 		);
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			sessionManager: SessionManager.inMemory(cwd),
+			builtins: { workflows: false, subagents: false, mcp: false, "web-access": false, intercom: false },
+		});
+		try {
+			assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
+			assert.ok(session.getActiveToolNames().includes("read"));
+		} finally {
+			session.dispose();
+		}
 	} finally {
 		packageDir.mockRestore();
 		rmSync(cwd, { recursive: true, force: true });
@@ -436,6 +451,213 @@ test("constructor failure restores new and replaced providers without starting a
 		assert.equal(modelRuntime.getRegisteredProviderConfig("constructor-provider"), undefined);
 		assert.deepEqual(modelRuntime.getRegisteredProviderConfig("existing-provider"), original);
 		assert.deepEqual(events, []);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: explicit suppression applies equally to coding and extension tools after reload.
+test("noTools all suppresses Intercom and remains empty after reload", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-selection-"));
+	try {
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager: SettingsManager.inMemory(),
+			sessionManager: SessionManager.inMemory(cwd),
+			noTools: "all",
+			tools: ["read", "intercom"],
+		});
+		try {
+			assert.deepEqual(session.getActiveToolNames(), []);
+			await session.reload();
+			assert.deepEqual(session.getActiveToolNames(), []);
+		} finally {
+			session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: package suppression removes resources as well as tools across generations.
+test("disabled builtins stay absent with custom discovery and reload", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-disabled-"));
+	const settingsManager = SettingsManager.inMemory();
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		builtinPackagePaths: getBuiltinPackagePaths(),
+		noContextFiles: true,
+	});
+	await loader.reload();
+	const original = [...loader.getExtensions().extensions];
+	const builtins = Object.freeze({
+		workflows: false,
+		subagents: false,
+		mcp: false,
+		"web-access": false,
+		intercom: false,
+	});
+	try {
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager,
+			sessionManager: SessionManager.inMemory(cwd),
+			resourceLoader: loader,
+			builtins,
+		});
+		try {
+			for (let generation = 0; generation < 2; generation++) {
+				assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
+				assert.equal(session.resourceLoader.getSkills().skills.length, 0);
+				assert.equal(session.resourceLoader.getPrompts().prompts.length, 0);
+				assert.ok(session.getActiveToolNames().includes("read"));
+				assert.ok(!session.getActiveToolNames().includes("intercom"));
+				if (generation === 0) {
+					assert.deepEqual(loader.getExtensions().extensions, original);
+					await session.reload();
+				}
+			}
+		} finally {
+			session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+const extensionToolNames = [
+	"workflow",
+	"subagent",
+	"mcp",
+	"web_search",
+	"code_search",
+	"fetch_content",
+	"get_search_content",
+	"intercom",
+];
+// #3105: active selection is independent from composition and must survive reload unchanged.
+test.each<{
+	name: string;
+	options: Pick<CreateAgentSessionOptions, "tools" | "noTools" | "excludedTools">;
+	defaults?: string[];
+	expected: string[];
+}>([
+	{
+		name: "omitted selection",
+		options: {},
+		expected: [...getDefaultToolNames(), ...extensionToolNames, "custom_probe"],
+	},
+	{ name: "empty allowlist", options: { tools: [] }, expected: [] },
+	{ name: "all without allowlist", options: { noTools: "all" }, expected: [] },
+	{ name: "builtin suppression", options: { noTools: "builtin" }, expected: [...extensionToolNames, "custom_probe"] },
+	{
+		name: "builtin with explicit allowlist",
+		options: { noTools: "builtin", tools: ["read", "intercom"] },
+		expected: ["read", "intercom"],
+	},
+	{ name: "empty configured defaults", options: {}, defaults: [], expected: [...extensionToolNames, "custom_probe"] },
+	{
+		name: "configured coding defaults",
+		options: {},
+		defaults: ["read"],
+		expected: ["read", ...extensionToolNames, "custom_probe"],
+	},
+	{
+		name: "explicit beats configured defaults",
+		options: { tools: ["custom_probe", "intercom"] },
+		defaults: ["read"],
+		expected: ["custom_probe", "intercom"],
+	},
+	{
+		name: "exclusions win",
+		options: { tools: ["read", "intercom", "custom_probe"], excludedTools: ["intercom", "custom_probe", "unknown"] },
+		expected: ["read"],
+	},
+	{
+		name: "unknown exclusions ignored",
+		options: { tools: ["intercom", "read"], excludedTools: ["unknown"] },
+		expected: ["intercom", "read"],
+	},
+])("tool selection: $name", async ({ options, defaults, expected }) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-matrix-"));
+	const snapshot = structuredClone(options);
+	if (options.tools) Object.freeze(options.tools);
+	if (options.excludedTools) Object.freeze(options.excludedTools);
+	Object.freeze(options);
+	try {
+		const { session } = await createAgentSession({
+			...options,
+			cwd,
+			agentDir: join(cwd, "agent"),
+			settingsManager: SettingsManager.inMemory(defaults === undefined ? {} : { defaultTools: defaults }),
+			sessionManager: SessionManager.inMemory(cwd),
+			customTools: [
+				{
+					name: "custom_probe",
+					label: "Probe",
+					description: "Custom selection probe",
+					parameters: Type.Object({}),
+					execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+				},
+			],
+		});
+		try {
+			assert.deepEqual([...session.getActiveToolNames()].sort(), [...expected].sort());
+			if (options.tools && options.noTools !== "all") assert.deepEqual(session.getActiveToolNames(), expected);
+			assert.ok(session.resourceLoader.getExtensions().extensions.length >= 5);
+			await session.reload();
+			assert.deepEqual([...session.getActiveToolNames()].sort(), [...expected].sort());
+			for (const excluded of options.excludedTools ?? [])
+				assert.equal(session.getToolDefinition(excluded), undefined);
+			assert.deepEqual(options, snapshot);
+		} finally {
+			session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: omitted keys, empty selection and explicit true all retain shipped descriptor order.
+test.each<Partial<Record<AtomicBuiltin, boolean>>>([
+	{},
+	{ workflows: true, subagents: true, mcp: true, "web-access": true, intercom: true },
+	{ workflows: false },
+	{ subagents: false },
+	{ mcp: false },
+	{ "web-access": false },
+	{ intercom: false },
+])("builtin selection %j preserves enabled families after reload", async (builtins) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-builtins-"));
+	Object.freeze(builtins);
+	try {
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			builtins,
+			settingsManager: SettingsManager.inMemory(),
+			sessionManager: SessionManager.inMemory(cwd),
+		});
+		try {
+			for (let generation = 0; generation < 2; generation++) {
+				for (const [family, tool] of [
+					["workflows", "workflow"],
+					["subagents", "subagent"],
+					["mcp", "mcp"],
+					["web-access", "web_search"],
+					["intercom", "intercom"],
+				] as const) {
+					assert.equal(session.getActiveToolNames().includes(tool), builtins[family] !== false, family);
+				}
+				if (generation === 0) await session.reload();
+			}
+		} finally {
+			session.dispose();
+		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

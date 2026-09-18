@@ -15,7 +15,11 @@ import type { ResourceLoader } from "./resource-loader.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 
+export type AtomicBuiltin = "workflows" | "subagents" | "mcp" | "web-access" | "intercom";
+
 export interface CreateAgentSessionOptions {
+	/** Shipped packages are enabled unless explicitly false. Independent of tool selection. */
+	builtins?: Partial<Record<AtomicBuiltin, boolean>>;
 	/** Working directory for project-local discovery. Default: process.cwd() */
 	cwd?: string;
 	/** Global config directory. Default: ~/.atomic/agent */
@@ -42,11 +46,11 @@ export interface CreateAgentSessionOptions {
 	scopedModels?: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 
 	/**
-	 * Optional default tool suppression mode when no explicit allowlist is provided.
+	 * Tool suppression mode.
 	 *
-	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, bash, edit, write,
-	 *   find, search, ask_user_question, todo) but keep extension/custom tools enabled
+	 * - "all": no active tools, even with an explicit allowlist
+	 * - "builtin": suppress coding-tool defaults only when tools is omitted;
+	 *   extension/custom tools remain enabled
 	 */
 	noTools?: "all" | "builtin";
 	/**
@@ -57,7 +61,7 @@ export interface CreateAgentSessionOptions {
 	 * built-in tools (read, bash, edit, write, find, search, ask_user_question,
 	 * todo). Extension/custom tools remain enabled unless `noTools` changes
 	 * that default. When provided, only the listed tool names are enabled,
-	 * minus any names in `excludedTools`.
+	 * minus any names in `excludedTools`. `noTools: "all"` overrides this selection.
 	 */
 	tools?: string[];
 	/**

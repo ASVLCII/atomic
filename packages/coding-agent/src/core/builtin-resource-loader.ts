@@ -12,6 +12,7 @@ import type {
 	ResourceLoaderReloadOptions,
 	ResourceLoaderReloadTransaction,
 } from "./resource-loader-types.ts";
+import type { AtomicBuiltin } from "./sdk-types.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { buildSkillCatalog } from "./skill-catalog.ts";
 
@@ -30,10 +31,27 @@ class BuiltinResourceLoader implements ResourceLoader {
 	private readonly delegate: ResourceLoader;
 	private readonly cwd: string;
 	private readonly agentDir: string;
-	constructor(delegate: ResourceLoader, cwd: string, agentDir: string) {
+	private readonly builtins: Partial<Record<AtomicBuiltin, boolean>>;
+	private readonly disabledRoots: string[];
+	private isDisabledPath(path: string): boolean {
+		return this.disabledRoots.some((root) => {
+			const child = relative(root, canonical(path));
+			return child !== ".." && !child.startsWith(`..${sep}`) && !child.startsWith(sep);
+		});
+	}
+	constructor(
+		delegate: ResourceLoader,
+		cwd: string,
+		agentDir: string,
+		builtins?: Partial<Record<AtomicBuiltin, boolean>>,
+	) {
 		this.delegate = delegate;
 		this.cwd = cwd;
 		this.agentDir = agentDir;
+		this.builtins = { ...builtins };
+		this.disabledRoots = getBuiltinPackageLocations()
+			.filter((location) => this.builtins[location.distDirName] === false)
+			.map((location) => canonical(location.packageDir));
 		this.assets = new DefaultResourceLoader({
 			cwd,
 			agentDir,
@@ -46,10 +64,11 @@ class BuiltinResourceLoader implements ResourceLoader {
 		});
 	}
 	async initialize(): Promise<void> {
-		const locations = getBuiltinPackageLocations(true);
+		const locations = getBuiltinPackageLocations(true, this.builtins);
 		const target = this.delegate.getExtensions();
 		const identities = new Set<string>();
 		const extensions = target.extensions.filter((extension) => {
+			if (this.isDisabledPath(extension.resolvedPath)) return false;
 			const path = canonical(extension.resolvedPath);
 			const builtin = locations.find((location) => {
 				const child = relative(canonical(location.packageDir), path);
@@ -110,9 +129,10 @@ class BuiltinResourceLoader implements ResourceLoader {
 	getSkills(): ReturnType<ResourceLoader["getSkills"]> {
 		const caller = this.delegate.getSkills();
 		const builtin = this.assets.getSkills();
-		const paths = new Set(caller.skills.map((skill) => canonical(skill.filePath)));
+		const skills = caller.skills.filter((skill) => !this.isDisabledPath(skill.filePath));
+		const paths = new Set(skills.map((skill) => canonical(skill.filePath)));
 		return {
-			skills: [...caller.skills, ...builtin.skills.filter((skill) => !paths.has(canonical(skill.filePath)))],
+			skills: [...skills, ...builtin.skills.filter((skill) => !paths.has(canonical(skill.filePath)))],
 			diagnostics: [...caller.diagnostics, ...builtin.diagnostics],
 		};
 	}
@@ -122,9 +142,10 @@ class BuiltinResourceLoader implements ResourceLoader {
 	getPrompts(): ReturnType<ResourceLoader["getPrompts"]> {
 		const caller = this.delegate.getPrompts();
 		const builtin = this.assets.getPrompts();
-		const paths = new Set(caller.prompts.map((prompt) => canonical(prompt.filePath)));
+		const prompts = caller.prompts.filter((prompt) => !this.isDisabledPath(prompt.filePath));
+		const paths = new Set(prompts.map((prompt) => canonical(prompt.filePath)));
 		return {
-			prompts: [...caller.prompts, ...builtin.prompts.filter((prompt) => !paths.has(canonical(prompt.filePath)))],
+			prompts: [...prompts, ...builtin.prompts.filter((prompt) => !paths.has(canonical(prompt.filePath)))],
 			diagnostics: [...caller.diagnostics, ...builtin.diagnostics],
 		};
 	}
@@ -132,7 +153,10 @@ class BuiltinResourceLoader implements ResourceLoader {
 		const caller = this.delegate.getThemes();
 		const builtin = this.assets.getThemes();
 		return {
-			themes: [...caller.themes, ...builtin.themes],
+			themes: [
+				...caller.themes.filter((theme) => !theme.sourcePath || !this.isDisabledPath(theme.sourcePath)),
+				...builtin.themes,
+			],
 			diagnostics: [...caller.diagnostics, ...builtin.diagnostics],
 		};
 	}
@@ -155,8 +179,12 @@ class BuiltinResourceLoader implements ResourceLoader {
 		const bundled: ResourceExtensionPaths = {};
 		const caller: ResourceExtensionPaths = {};
 		for (const kind of ["skillPaths", "promptPaths", "themePaths"] as const) {
-			bundled[kind] = paths[kind]?.filter((entry) => entry.metadata.configurationOrigin === "bundled");
-			caller[kind] = paths[kind]?.filter((entry) => entry.metadata.configurationOrigin !== "bundled");
+			bundled[kind] = paths[kind]?.filter(
+				(entry) => !this.isDisabledPath(entry.path) && entry.metadata.configurationOrigin === "bundled",
+			);
+			caller[kind] = paths[kind]?.filter(
+				(entry) => !this.isDisabledPath(entry.path) && entry.metadata.configurationOrigin !== "bundled",
+			);
 		}
 		await this.delegate.extendResources(caller);
 		await this.assets.extendResources(bundled);
@@ -180,7 +208,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 	): Promise<ResourceLoaderReloadTransaction> {
 		if (!this.delegate.prepareReload) throw new Error("Resource loader does not support transactional reload");
 		const transaction = await this.delegate.prepareReload(settings, options);
-		const candidate = new BuiltinResourceLoader(transaction.loader, this.cwd, this.agentDir);
+		const candidate = new BuiltinResourceLoader(transaction.loader, this.cwd, this.agentDir, this.builtins);
 		await candidate.initialize();
 		const publish = () => {
 			this.extensions = candidate.extensions;
@@ -215,9 +243,10 @@ export async function withBuiltinResourceLoader(
 	loader: ResourceLoader,
 	cwd: string,
 	agentDir: string,
+	builtins?: Partial<Record<AtomicBuiltin, boolean>>,
 ): Promise<ResourceLoader> {
-	if (loader instanceof BuiltinResourceLoader) return loader;
-	const composed = new BuiltinResourceLoader(loader, cwd, agentDir);
+	if (loader instanceof BuiltinResourceLoader && builtins === undefined) return loader;
+	const composed = new BuiltinResourceLoader(loader, cwd, agentDir, builtins);
 	await composed.initialize();
 	return composed;
 }

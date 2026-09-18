@@ -134,12 +134,12 @@ When a print-mode turn correctly finishes by calling an opt-in terminating struc
 
 | Option | Description |
 |--------|-------------|
-| `--tools <list>`, `-t <list>` | Allowlist specific built-in, extension, and custom tools; mandatory `intercom` remains available |
-| `--exclude-tools <list>`, `-xt <list>` | Denylist specific built-in, extension, and custom tools; mandatory `intercom` cannot be excluded |
+| `--tools <list>`, `-t <list>` | Allowlist specific coding, extension, and custom tools, including Intercom |
+| `--exclude-tools <list>`, `-xt <list>` | Exclude specific coding, extension, and custom tools, including Intercom |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
-| `--no-tools`, `-nt` | Disable every tool except mandatory `intercom` |
+| `--no-tools`, `-nt` | Disable every tool, including Intercom, even with `--tools` |
 
-Default built-in tools: `read`, `bash`, `kill`, `edit`, `write`, `find`, `search`, `ask_user_question`, `todo`, plus `powershell` on native Windows when a PowerShell executable is available. `find.paths` accepts directories, files, or glob paths such as `*.ts` and honors `timeout`; `search` accepts `pattern`, optional `paths`, `i`, `gitignore`, and `skip` for regex content-search pagination. Use `--exclude-tools` to disable one or more non-mandatory tools while leaving the rest available, for example `atomic --exclude-tools ask_user_question`. The `defaultTools` setting selects which built-in tools a session starts with; `--tools` replaces that default with a strict allowlist over non-mandatory built-in, custom, and extension tools; `--no-builtin-tools` removes only built-ins; `--no-tools` removes every tool except ordinary bundled `intercom`. `ls` remains available as an SDK compatibility tool but is not enabled by default.
+Default built-in tools: `read`, `bash`, `kill`, `edit`, `write`, `find`, `search`, `ask_user_question`, `todo`, plus `powershell` on native Windows when available. `ls` remains available but is not a default. `defaultTools` selects initial coding tools without narrowing extension/custom tools. `--tools` selects an explicit allowlist; `--exclude-tools` subtracts from it. `--no-builtin-tools` suppresses coding defaults when no allowlist is given. `--no-tools` overrides all selection. To retain Intercom with an allowlist, include `intercom` explicitly.
 
 ## Project Trust Options
 

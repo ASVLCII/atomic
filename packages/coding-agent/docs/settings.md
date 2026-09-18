@@ -419,7 +419,7 @@ On Windows, select `powershell` instead of `bash`, or include both:
 }
 ```
 
-An empty array starts with no built-in tools while preserving extension and custom tools. `--tools` replaces this behavior with a strict allowlist covering every non-mandatory tool, `--no-tools` disables every tool except mandatory ordinary `intercom`, and `--no-builtin-tools` disables only the built-in defaults. `--exclude-tools` filters the resulting list but cannot remove Intercom. A project `defaultTools` array replaces the global array.
+An empty array starts with no coding tools while preserving extension/custom tools. `--tools` replaces this behavior with an allowlist including Intercom; `--no-tools` disables every tool even with an allowlist. `--no-builtin-tools` suppresses coding defaults when no allowlist is given. `--exclude-tools` filters the result, including Intercom. A project `defaultTools` array replaces the global array.
 
 ### Sessions
 

@@ -111,6 +111,8 @@ The main factory function for a single `AgentSession`.
 
 `createAgentSession()` includes Atomic's shipped workflows, subagents, MCP, web access and Intercom, plus their bundled resources. It uses normal user, project and configured-package discovery when no `resourceLoader` is supplied. A custom loader supplies your resources; the factory adds shipped builtins without changing the loader's options. Services still need their existing configuration and credentials.
 
+Use `builtins: { "web-access": false, intercom: false }` to disable specific shipped packages and their resources. Omitted keys remain enabled, including with `builtins: {}`. Tool selection is separate: `tools: []` and `noTools: "all"` expose no tools, including Intercom; `noTools: "all"` also overrides a nonempty allowlist. `excludedTools` wins over selection. Suppression survives reload. See [tool precedence](/sdk/reference#tools) for `defaultTools` and `noTools: "builtin"`.
+
 Creation finishes extension startup before returning. Pass `extensionBindings` when startup hooks need your host bindings. Later `session.bindExtensions(...)` updates those bindings without replaying `session_start`; reload starts a new extension generation. Missing shipped assets reject with an error whose `code` is `BuiltinUnavailable` and whose message names the package. Reinstall the package rather than continuing with a partially available session.
 
 ```typescript

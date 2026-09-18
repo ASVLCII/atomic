@@ -179,20 +179,24 @@ Specify which tools to expose by name:
 
 - Built-in tool names enabled by default: `read`, `bash`, `kill`, `edit`, `write`, `find`, `search`, `ask_user_question`, `todo`
 - `find` discovers filesystem paths by glob; `search` searches file contents with regex patterns across files, directories, globs, and internal URLs.
-- `tools` is an allowlist: when provided, only the listed built-in, extension, and custom tool names are exposed, plus mandatory ordinary `intercom`.
-- `excludedTools` is a blocklist: matching built-in, extension, and custom tool names are omitted from the final registry and active tool set, except mandatory ordinary `intercom`. If both are provided, `tools` is applied first and `excludedTools` subtracts from it.
-- `noTools: "all"` disables every tool except mandatory ordinary `intercom`
-- `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled, except names listed in `excludedTools`
+- `builtins` selects shipped packages independently of tools: keys are `workflows`, `subagents`, `mcp`, `web-access`, and `intercom`. Omitted, `{}`, and omitted keys enable packages. A `false` value removes that package's extensions and resources, including on reload; `true` enables it.
+- `tools` is an allowlist of coding, extension, and custom tool names. `tools: []` exposes none, including Intercom.
+- `excludedTools` removes matching names from the registry and active selection. Exclusions win over `tools`; unknown names are ignored.
+- `noTools: "all"` exposes no tools, even with a nonempty `tools` allowlist. It does not remove package resources or authorize services.
+- `noTools: "builtin"` suppresses coding-tool defaults when `tools` is omitted, keeping extension/custom tools except exclusions. An explicit `tools` list still wins over this mode.
+- Configured `defaultTools` selects only initial coding tools when `tools` and `noTools` are omitted. It does not disable extension/custom tools.
+
+Migration: Intercom no longer bypasses tool selection. Add `"intercom"` to an explicit allowlist if needed, and remove `noTools: "all"` when you want any active tools. Use `builtins: { intercom: false }` to remove its package entirely rather than only suppress its tool. These options do not change caller-owned arrays or loader configuration.
 
 ```typescript
 import { createAgentSession } from "@bastani/atomic";
 
-// Read-only mode. `tools` selects optional tools; ordinary Intercom remains active.
+// Read-only tools; Intercom is not selected.
 const { session } = await createAgentSession({
   tools: ["read", "search", "find", "ls"],
 });
 
-// Pick specific optional tools. Ordinary Intercom remains active even when omitted.
+// Pick specific tools.
 const { session } = await createAgentSession({
   tools: ["read", "bash", "search"],
 });
@@ -205,7 +209,7 @@ const { session } = await createAgentSession({
 // Allowlist first, then subtract exclusions
 const { session } = await createAgentSession({
   tools: ["read", "bash", "ask_user_question"],
-  excludedTools: ["ask_user_question"], // optional tools: read, bash; ordinary Intercom remains active
+  excludedTools: ["ask_user_question"], // active tools: read, bash
 });
 ```
 
