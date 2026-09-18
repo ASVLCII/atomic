@@ -111,7 +111,6 @@ export interface WorkflowModelCatalogPort {
 	routeModel?(input: {
 		task: string;
 		stageName: string;
-		instructions?: string;
 		constraints: readonly ModelConstraints[];
 		signal?: AbortSignal;
 		selection?: ModelRouterOutput;

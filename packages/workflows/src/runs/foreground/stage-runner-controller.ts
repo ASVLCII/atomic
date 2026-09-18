@@ -446,12 +446,6 @@ export class StageSessionController {
 				this.modelRoute = await route({
 					task: text,
 					stageName: this.opts.stageName,
-					instructions: [
-						options?.resourceLoader?.getSystemPrompt(),
-						...(options?.resourceLoader?.getAppendSystemPrompt() ?? []),
-					]
-						.filter((text) => text !== undefined)
-						.join("\n\n"),
 					constraints,
 					signal: this.startupWait.signal,
 					selection: options?.routerSelection,

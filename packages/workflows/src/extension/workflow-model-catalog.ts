@@ -33,7 +33,7 @@ export function workflowModelCatalogFromContext(
 					},
 				},
 				task: input.task,
-				agent: { name: input.stageName, description: "Workflow stage", instructions: input.instructions ?? "" },
+				agent: { name: input.stageName, description: "Workflow stage" },
 				constraints: input.constraints,
 				signal: input.signal,
 				selection: input.selection,

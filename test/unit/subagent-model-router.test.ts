@@ -65,10 +65,17 @@ test("task and actual shipped docs reach one inference; nonreasoning selection u
 	const [, context, options] = f.infer.mock.calls[0]!;
 	const state = JSON.parse(context.messages[0]!.content as string).state;
 	assert.equal(state.task, "Fix the approved defect");
-	assert.equal(state.agent.instructions, agent.systemPrompt);
+	assert.deepEqual(state.agent, { name: agent.name, description: agent.description });
 	assert.equal(state.documents.length, 2);
 	assert.ok(state.documents.every((doc: { content: string }) => doc.content.length > 1000));
 	assert.equal(options?.maxRetries, 0);
+});
+test("self-contained agents retain their task fallback without duplicate instructions metadata", async () => {
+	const f = await fixture();
+	await routeSubagentModel({ ctx: f.ctx, agent });
+	const state = JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state;
+	assert.equal(state.task, agent.systemPrompt);
+	assert.deepEqual(state.agent, { name: agent.name, description: agent.description });
 });
 test("hard constraints preserve exact input and nullable effort choices", () => {
 	const constraints = {
@@ -304,6 +311,8 @@ test("Jev uses one Choice over complete pairs and deterministically maps the sel
 	const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 		const body = JSON.parse(init?.body as string);
 		assert.equal(body.model, "jev-latest");
+		assert.equal(body.state.task, "Fix the approved defect");
+		assert.deepEqual(body.state.agent, { name: agent.name, description: agent.description });
 		return Response.json({
 			model: "jev-latest",
 			answers: { pair: { type: "choice", choice: "pair_0", probabilities: { pair_0: 1 }, confidence: 1 } },
