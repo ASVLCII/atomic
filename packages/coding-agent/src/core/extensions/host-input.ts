@@ -59,6 +59,7 @@ type WorkflowIdentity = Pick<HostInputOptions, "workflowRunId" | "workflowStageI
 export class HostInputBridge {
 	private adapter: HostInput | undefined;
 	private configuredInput: HostInput | null | undefined;
+	private bindingRevision = 0;
 	private closed = false;
 	private readonly pending = new Set<AbortController>();
 	private readonly bindingListeners = new Set<() => void>();
@@ -70,7 +71,7 @@ export class HostInputBridge {
 		this.signal = signal;
 	}
 
-	bind(adapter: HostInput | undefined, configuredInput?: HostInput | null): void {
+	bind(adapter: HostInput | undefined, configuredInput?: HostInput | null, bindingRevision = 0): void {
 		if (
 			adapter !== undefined &&
 			["confirm", "select", "input", "editor", "questionnaire"].some(
@@ -79,7 +80,8 @@ export class HostInputBridge {
 		) {
 			throw hostInputError("InvalidHostInput");
 		}
-		const bindingChanged = this.configuredInput !== configuredInput;
+		const bindingChanged = this.configuredInput !== configuredInput || this.bindingRevision !== bindingRevision;
+		this.bindingRevision = bindingRevision;
 		this.configuredInput = configuredInput;
 		if (adapter === this.adapter && !bindingChanged) return;
 		this.cancel();
@@ -141,7 +143,7 @@ export class HostInputBridge {
 			[WORKFLOW_INPUT]: {
 				active: () => !this.closed,
 				available: () => this.available,
-				matchesBinding: (input: HostInput | null | undefined) => this.configuredInput === input,
+				bindingRevision: () => this.bindingRevision,
 				subscribe: (listener: () => void) => {
 					this.bindingListeners.add(listener);
 					return () => this.bindingListeners.delete(listener);

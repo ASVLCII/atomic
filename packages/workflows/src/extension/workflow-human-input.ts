@@ -1,4 +1,4 @@
-import type { HostInput, QuestionnaireResult, QuestionParams } from "@bastani/atomic";
+import type { QuestionnaireResult, QuestionParams } from "@bastani/atomic";
 import { stageUiBroker } from "../shared/stage-ui-broker.js";
 import type { Store } from "../shared/store.js";
 import type { PendingPrompt } from "../shared/store-types.js";
@@ -16,7 +16,7 @@ const WORKFLOW_INPUT = Symbol.for("atomic-coding-agent/workflow-input@1");
 interface WorkflowInputBridge {
 	active(): boolean;
 	available(): boolean;
-	matchesBinding(input: HostInput | null | undefined): boolean;
+	bindingRevision(): number;
 	subscribe(listener: () => void): () => void;
 	scope(
 		runId: string,

@@ -987,7 +987,18 @@ test.each([false, true])(
 );
 
 // #3105: exercise the real child session, broker waiter and workflow host consumer.
-test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as const)(
+const childHostBindingModes = [
+	"override",
+	"null",
+	"withdrawn",
+	"parent-rebind",
+	"parent-change",
+	"reuse-null",
+	"reuse-direct",
+	"reuse-reload",
+	"inherit-reload",
+] as const;
+test.each(childHostBindingModes)(
 	"stage questionnaire respects child host precedence and durable rebind: %s",
 	async (mode) => {
 		const { buildRuntimeAdapters } = await import("../../packages/workflows/src/extension/wiring.js");
@@ -1021,6 +1032,8 @@ test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as
 				};
 			},
 		});
+		const original = host("child");
+		const reuse = mode.startsWith("reuse-");
 		const { session: parent } = await createAgentSession({
 			cwd,
 			agentDir: join(cwd, "agent"),
@@ -1028,7 +1041,7 @@ test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as
 			settingsManager: SettingsManager.inMemory(),
 			builtins: { workflows: false, subagents: false, intercom: false, mcp: false, "web-access": false },
 			tools: ["ask_user_question"],
-			extensionBindings: { humanInput: host("parent") },
+			extensionBindings: { humanInput: reuse ? original : host("parent") },
 		});
 		const unbind = bindWorkflowHumanInput(
 			store,
@@ -1066,7 +1079,7 @@ test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as
 		const child = "session" in result ? result.session : result;
 		let presentations = 0;
 		const detachPresentation =
-			mode === "parent-rebind"
+			mode === "parent-rebind" || mode === "inherit-reload" || reuse
 				? () => {}
 				: stageUiBroker.registerHost(runId, stageId, {
 						showCustomUi: () => {
@@ -1082,6 +1095,18 @@ test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as
 			const session = child as import("../../packages/coding-agent/src/index.js").AgentSession;
 			if (mode === "withdrawn") await session.bindExtensions({ humanInput: null });
 			if (mode === "parent-rebind") await parent.bindExtensions({ humanInput: null });
+			if (reuse) {
+				await parent.bindExtensions({ humanInput: host("parent") });
+				if (mode === "reuse-null") await session.bindExtensions({ humanInput: null });
+				await session.bindExtensions({ humanInput: original });
+				await session.bindExtensions({});
+				if (mode === "reuse-reload") await session.reload();
+			}
+			if (mode === "inherit-reload") {
+				await session.bindExtensions({});
+				await session.reload();
+				await parent.bindExtensions({ humanInput: host("child") });
+			}
 			const tool = session.agent.state.tools.find((entry) => entry.name === "ask_user_question")!;
 			let settled = false;
 			const pending = tool.execute("private-question", params, AbortSignal.timeout(5000)).then((reply) => {
@@ -1098,7 +1123,7 @@ test.each(["override", "null", "withdrawn", "parent-rebind", "parent-change"] as
 					"parent rebinding must not retire an explicit child host request",
 				);
 				answerReady.resolve();
-			} else if (mode !== "override") {
+			} else if (mode !== "override" && !reuse && mode !== "inherit-reload") {
 				await new Promise<void>((resolve) => setImmediate(resolve));
 				assert.equal(settled, false, "withdrawal must leave the broker waiter pending");
 				assert.deepEqual(calls, [], "the parent must not answer a withdrawn child request");

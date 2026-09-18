@@ -407,7 +407,7 @@ function makeStageExtensionUiContext(
 	ui: PiUISurface,
 	meta: StageExecutionMeta | undefined,
 	broker: StageUiBroker,
-	inheritedInput: NonNullable<CreateAgentSessionOptions["extensionBindings"]>["humanInput"],
+	inheritedBindingRevision: number,
 	explicitInput: boolean,
 ) {
 	let questionnaireSessionId: string | undefined;
@@ -421,7 +421,7 @@ function makeStageExtensionUiContext(
 						questionnaireInput = {
 							ui: childUi,
 							usesOwnBinding: () =>
-								explicitInput || workflowInputBridge(childUi)?.matchesBinding(inheritedInput) === false,
+								explicitInput || workflowInputBridge(childUi)?.bindingRevision() !== inheritedBindingRevision,
 						};
 					},
 		select: ui.select ?? (async () => undefined),
@@ -541,7 +541,8 @@ export function buildRuntimeAdapters(
 							pi.ui ?? {},
 							meta,
 							broker,
-							inheritedOptions.extensionBindings?.humanInput,
+							// Creation binds a supplied adapter once; only later explicit binds change ownership.
+							inheritedOptions.extensionBindings?.humanInput === undefined ? 0 : 1,
 							stageOptions.extensionBindings?.humanInput !== undefined,
 						)
 					: undefined;

@@ -184,6 +184,8 @@ Callbacks may be shared, but request and diagnostic `sessionId` values identify 
 
 An explicit child `extensionBindings.humanInput` overrides the inherited host, including for durable stage questionnaires. Setting it to `null` leaves those questions pending; rebinding the parent cannot answer on that child's behalf. Rebind the child to an authorized adapter to continue. Without a child override, pending stage questions follow parent host withdrawal and reattachment.
 
+You may reuse the same adapter object when explicitly rebinding a child, even after the parent switches hosts. That child selection survives reload. An empty binding object does not select a new host or restore inheritance.
+
 The inherited `isFallbackModelAllowed` predicate also applies when a workflow replaces its stage session to try a fallback. A rejected candidate is not executed. This predicate restricts fallback choices, not an explicitly selected primary model.
 
 ### AgentSession

@@ -80,6 +80,31 @@ With supervisor approval, final `npm run build` and `npm run check` both exited 
 
 Fixture provenance: copied preexisting `packages/ai/dist/providers/data/kimi-coding.json` before rebuilding to `kimi-coding-built-source.json`; SHA-256 `202d4b9a3e3327cebb01626fb1818f92627e59800f27858902c4ce69105f0bd7`. Evidence-only `construct-catalog-fixture.mjs` flattens its API groups, preserves ID/name/reasoning/input/cost/limits, translates cache cost and limit names to models.dev shape, and sets `tool_call: true` for the four known coding models. The resulting `kimi-models-dev-fixture.json` hash is `a68861a52b2f3a78ace276cd07a48f00841627a080a7add5f623f4d20bcf9b2d`; constructor hash `bb2d646b70a2743d0a910cc09924065f8ec86402f9c7f6706627a7596d4ae9e9`; preload hash `d9567fdd85148f966d04f9529fee1f998e61478de5b6642a6dd31b51b4831677`. All are retained in the evidence directory and `catalog-hashes.log`. This reconstructs generator input from local built values, not a historical raw API snapshot. Ordinary commit hooks use the same disclosed preload, without skips. Final tracked AI diff is empty. Live-catalog stability and exact-head parent CI remain outstanding external gates.
 
+## Adapter-reference reuse review repair (baseline `1801e068d`)
+
+Frozen goal: preserve explicit child host intent independently of adapter identity, with omission/empty inheritance, null withdrawal, reload, durable broker ownership and child identity unchanged. All three latest P1 findings describe this same cause.
+
+The session now records explicit human-input binding revisions, carries them into reloaded runners, and notifies the existing host bridge even for same-reference binding. Workflow routing compares this intent against creation's inherited binding, not against the original adapter object. No public host contract, provider fallback policy or lifecycle boundary changed.
+
+Durable #3105 regressions extend the production factory/Store/Broker matrix with parent A → B then child null → A, direct child A, explicit A followed by reload, and omitted/empty child bindings followed by reload. They assert the selected answer, exactly one callback, no parent presentation, and child/run/stage identity. Existing withdrawal, pending/rebind and explicit-child independence cases remain intact.
+
+Evidence in `/tmp/atomic-sdk-e-evidence/`:
+
+- `node /tmp/sdk-e-r2-rebind.mjs`: failed before repair (`r3-review-red.log`); passes against rebuilt production code (`r3-review-green.log`), calling only the original child-selected adapter. Independent source reviewer config passes all four tests (`r3-source-review-green.log`).
+- Targeted matrix: three new cases failed with the parent's answer (`r3-durable-red.log`); all nine pass (`r3-durable-green2.log`). An intermediate revision-baseline hypothesis failed and was corrected; retained in `r3-durable-green.log`.
+- Full host parity: 39 tests pass (`r3-host-full.log`). Full SDK parity and five affected coding-agent files: 71 tests pass (`r3-agent-full.log`). Explicit excluded-runner config: 32 pass (`r3-runner-full.log`). Affected unit files: 225 tests in 25 files pass (`r3-unit-full.log`, exact command in `r3-unit-command.log`). Existing listener warnings remain unsuppressed.
+- Supplemental qlty 0.642.0 metrics/smells completed for host input, session binding and workflow wiring (`r3-qlty-{metrics,smells}.log`); complexity/return-count advisories remain, not a full lint/security claim. No qlty configuration changed.
+
+### Authorized prerequisite: live catalog rename
+
+The parent explicitly amended the earlier no-generator-edit boundary to authorize a minimal, separately signed prerequisite repair. Fresh **unmodified** build/check first failed TS2307 (`r3-{build,check}-unmodified.log`). Live Node `fetch` returned HTTP 200: the old `kimi-for-coding` key is absent; `kimi-code-plan-cn` serves the existing `.com` coding endpoint and `kimi-code-plan-global` is distinct (`r3-live-kimi.json`). Recent generator history is retained in `r3-generator-history.log`.
+
+Prerequisite commit `38cc339fe` selects the renamed `.com` catalog, falling back to the legacy key, while retaining provider ID, authentication, Anthropic transport and existing metadata conversion. No models are invented, no provider is removed, and no unrelated bulk refresh is committed. Deterministic generation reproduces the missing imported shard with the new key while legacy generation passes (`r3-kimi-red.log`); both then pass (`r3-kimi-final.log`). Seven relevant generation/provider/auth/compatibility files pass all 60 tests (`r3-ai-tests.log`).
+
+After the prerequisite, **unmodified** `npm run build` and `npm run check` both exit 0 (`r3-build-fixed.log`, `r3-check-fixed.log`), with `NODE_OPTIONS` removed, no preload, and no generated tracked AI drift. This supersedes the earlier external-catalog gate failure for this candidate. Prerequisite commit normal hooks also pass unmodified (`r3-prerequisite-commit.log`). F public disposal, G services and H packed strict declarations/normal exit remain deferred; cumulative exact-head CI and Greptile/conditional merge remain parent-owned.
+
+Final candidate unmodified build/check reran successfully after all repair edits (`r3-build-final.log`, `r3-check-final.log`). Both signed commits use normal hooks with no catalog preload or skipped check; final signature/status evidence belongs to the repair receipt.
+
 ## Deferred work
 
 F must fix public `await session.dispose()` leaving DBOS ready and keeping Node alive. H must demonstrate normal packed-consumer exit without manual DBOS cleanup or forced exit. No lifecycle success is claimed here.

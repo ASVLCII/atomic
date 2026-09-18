@@ -134,6 +134,7 @@ export class ExtensionRunner {
 	private presentationUI?: ExtensionUIContext;
 	private presentationInput?: HostInput;
 	private humanInput?: HostInput | null;
+	private humanInputBindingRevision = 0;
 	private readonly inputBridge = new HostInputBridge(
 		() => this.sessionManager.getSessionId(),
 		() => this.getSignalFn(),
@@ -317,8 +318,10 @@ export class ExtensionRunner {
 	setHostBindings(
 		humanInput: HostInput | null | undefined,
 		onDiagnostic?: (diagnostic: HostDiagnostic) => void,
+		bindingRevision = 0,
 	): void {
 		this.humanInput = humanInput;
+		this.humanInputBindingRevision = bindingRevision;
 		this.onDiagnostic = onDiagnostic;
 		this.refreshHostInput();
 	}
@@ -332,6 +335,7 @@ export class ExtensionRunner {
 		this.inputBridge.bind(
 			this.humanInput === undefined ? this.presentationInput : (this.humanInput ?? undefined),
 			this.humanInput,
+			this.humanInputBindingRevision,
 		);
 		const bridged = this.inputBridge.wrap(
 			ui ?? {

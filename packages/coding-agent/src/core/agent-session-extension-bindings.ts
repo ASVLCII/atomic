@@ -128,6 +128,8 @@ async function extendRunnerResources(
 
 const extensionStarts = new WeakMap<ExtensionRunner, Promise<void>>();
 const failedExtensionStarts = new WeakSet<ExtensionRunner>();
+// Binding intent is session-local and survives runner reloads, even when a host object is reused.
+const humanInputBindingRevisions = new WeakMap<AgentSession, number>();
 
 function startExtensions(
 	session: AgentSession,
@@ -168,7 +170,10 @@ export async function bindExtensions(this: AgentSession, bindings: ExtensionBind
 		if (failedExtensionStarts.has(this._extensionRunner)) return extensionStarts.get(this._extensionRunner)!;
 		throw hostInputError("SessionClosed");
 	}
-	if (bindings.humanInput !== undefined) this._extensionHumanInput = bindings.humanInput;
+	if (bindings.humanInput !== undefined) {
+		this._extensionHumanInput = bindings.humanInput;
+		humanInputBindingRevisions.set(this, (humanInputBindingRevisions.get(this) ?? 0) + 1);
+	}
 	if (bindings.onDiagnostic !== undefined) this._extensionDiagnosticListener = bindings.onDiagnostic;
 	if (bindings.uiContext !== undefined) {
 		this._extensionUIContext = bindings.uiContext;
@@ -222,7 +227,11 @@ export function getExtensionSourceLabel(this: AgentSession, extensionPath: strin
 }
 
 export function _applyExtensionBindings(this: AgentSession, runner: ExtensionRunner): void {
-	runner.setHostBindings(this._extensionHumanInput, this._extensionDiagnosticListener);
+	runner.setHostBindings(
+		this._extensionHumanInput,
+		this._extensionDiagnosticListener,
+		humanInputBindingRevisions.get(this),
+	);
 	runner.setUIContext(this._extensionUIContext, this._extensionMode);
 	runner.bindCommandContext(this._extensionCommandContextActions);
 	runner.bindChildSessionOptions(this._childSessionOptions);
@@ -513,7 +522,11 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 	let rollbackPreparedResources: (() => void) | undefined;
 	try {
 		this._bindExtensionCore(candidateRunner, publication);
-		candidateRunner.setHostBindings(this._extensionHumanInput, this._extensionDiagnosticListener);
+		candidateRunner.setHostBindings(
+			this._extensionHumanInput,
+			this._extensionDiagnosticListener,
+			humanInputBindingRevisions.get(this),
+		);
 		candidateRunner.setUIContext(this._extensionUIContext, this._extensionMode);
 		candidateRunner.bindCommandContext(this._extensionCommandContextActions);
 		candidateRunner.bindChildSessionOptions(this._childSessionOptions);
