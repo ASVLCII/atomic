@@ -133,6 +133,23 @@ export function getBuiltinPackageLocations(
 	});
 }
 
+/** Every verified shipped root, including alternate source/dist locations in a built checkout. */
+export function getAllBuiltinPackageLocations(): BuiltinPackageLocation[] {
+	const context = getBuiltinPackageCandidateContext();
+	return BUILTIN_PACKAGES.flatMap((descriptor) => {
+		const candidates = new Set(
+			[...descriptor.sourceCandidates(context), ...distCandidates(context, descriptor)].map((path) => resolve(path)),
+		);
+		return [...candidates]
+			.filter((path) => isPackageDir(path, descriptor))
+			.map((packageDir) => ({
+				packageName: descriptor.packageName,
+				distDirName: descriptor.distDirName,
+				packageDir,
+			}));
+	});
+}
+
 /**
  * Built-in pi package roots shipped with this Atomic distribution.
  *

@@ -481,53 +481,64 @@ test("noTools all suppresses Intercom and remains empty after reload", async () 
 });
 
 // #3105: package suppression removes resources as well as tools across generations.
-test("disabled builtins stay absent with custom discovery and reload", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-disabled-"));
-	const settingsManager = SettingsManager.inMemory();
-	const loader = new DefaultResourceLoader({
-		cwd,
-		agentDir: join(cwd, "agent"),
-		settingsManager,
-		builtinPackagePaths: getBuiltinPackagePaths(),
-		noContextFiles: true,
-	});
-	await loader.reload();
-	const original = [...loader.getExtensions().extensions];
-	const builtins = Object.freeze({
-		workflows: false,
-		subagents: false,
-		mcp: false,
-		"web-access": false,
-		intercom: false,
-	});
-	try {
-		const { session } = await createAgentSession({
+test.each(["preferred", "dist"])(
+	"disabled builtins stay absent with %s custom discovery and reload",
+	async (layout) => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-disabled-"));
+		const settingsManager = SettingsManager.inMemory();
+		const loader = new DefaultResourceLoader({
 			cwd,
 			agentDir: join(cwd, "agent"),
 			settingsManager,
-			sessionManager: SessionManager.inMemory(cwd),
-			resourceLoader: loader,
-			builtins,
+			builtinPackagePaths:
+				layout === "preferred"
+					? getBuiltinPackagePaths()
+					: [join(config.getPackageDir(), "dist", "builtin", "subagents")],
+			noContextFiles: true,
+		});
+		await loader.reload();
+		const original = [...loader.getExtensions().extensions];
+		assert.ok(original.length > 0, "the supplied shipped extension must actually be loaded");
+		const originalArray = loader.getExtensions().extensions;
+		const originalSkills = loader.getSkills().skills;
+		const builtins = Object.freeze({
+			workflows: false,
+			subagents: false,
+			mcp: false,
+			"web-access": false,
+			intercom: false,
 		});
 		try {
-			for (let generation = 0; generation < 2; generation++) {
-				assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
-				assert.equal(session.resourceLoader.getSkills().skills.length, 0);
-				assert.equal(session.resourceLoader.getPrompts().prompts.length, 0);
-				assert.ok(session.getActiveToolNames().includes("read"));
-				assert.ok(!session.getActiveToolNames().includes("intercom"));
-				if (generation === 0) {
-					assert.deepEqual(loader.getExtensions().extensions, original);
-					await session.reload();
+			const { session } = await createAgentSession({
+				cwd,
+				agentDir: join(cwd, "agent"),
+				settingsManager,
+				sessionManager: SessionManager.inMemory(cwd),
+				resourceLoader: loader,
+				builtins,
+			});
+			try {
+				for (let generation = 0; generation < 2; generation++) {
+					assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
+					assert.equal(session.resourceLoader.getSkills().skills.length, 0);
+					assert.equal(session.resourceLoader.getPrompts().prompts.length, 0);
+					assert.ok(session.getActiveToolNames().includes("read"));
+					assert.ok(!session.getActiveToolNames().includes("intercom"));
+					if (generation === 0) {
+						assert.deepEqual(loader.getExtensions().extensions, original);
+						assert.equal(loader.getExtensions().extensions, originalArray);
+						assert.equal(loader.getSkills().skills, originalSkills);
+						await session.reload();
+					}
 				}
+			} finally {
+				session.dispose();
 			}
 		} finally {
-			session.dispose();
+			rmSync(cwd, { recursive: true, force: true });
 		}
-	} finally {
-		rmSync(cwd, { recursive: true, force: true });
-	}
-});
+	},
+);
 
 const extensionToolNames = [
 	"workflow",

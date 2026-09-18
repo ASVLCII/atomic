@@ -64,3 +64,27 @@ Deferred: later slices C–H, existing unrelated issues, packed consumer and rem
 - "and there is no addressable greptile feedback"
 
 These are parent-owned requirements for the eventual cumulative PR. This child may not push, create a PR or merge. Merge requires exact-head green CI, applicable protection/review gates and no remaining actionable Greptile feedback; a stale review or aggregate score is insufficient.
+
+## Consolidated review repair (five blocking findings)
+
+| Batch findings (in consolidated order) | Root cause and disposition | Durable evidence |
+| --- | --- | --- |
+| 1, 3, 5: caller resources on another Windows drive | Resolved: `win32.relative()` can return a drive-qualified absolute path; both containment predicates now reject `isAbsolute(child)` | `sdk-builtin-windows-paths.test.ts` injects real `node:path.win32` semantics into composition; extensions, skills, prompts and themes on another drive, same-drive unrelated paths and prefix siblings survive creation/reload, with caller arrays unchanged |
+| 2, 4: disabled alternate shipped root | Resolved: suppression previously considered only the preferred discovery winner; it now enumerates all verified Atomic candidate roots using the existing manifest-name/required-entry checks | `sdk-builtin-parity.test.ts` exercises preferred roots and explicit `dist/builtin/subagents` through the public factory; extensions/resources stay absent after reload and caller arrays retain identity |
+
+Preferred enabled discovery and descriptor order remain unchanged. No basename-based recognition or arbitrary caller-package discovery was added. Existing missing-assets, deduplication, startup/rollback, tool-selection and trusted Intercom tests remain passing. Baseline `ISSUES.md` is unchanged; the resolved B defects are tracked here rather than left as open issues. Existing guides/changelog already describe suppression and caller preservation, so these corrections require no additional migration guidance.
+
+Both reviewer reproductions ran before repair: `/tmp/b-review-win-red.log` records the cross-drive false positive, and `/tmp/b-review-runtime-red.log` records `1 !== 0` for the alternate dist extension. Durable failing regressions are captured in `/tmp/b-review-windows-test-red.log` and `/tmp/b-review-dist-test-red.log`. The latter focused RED selected two cases (other cases were not selected); final runs below select whole suites and have no skips. A first 120-second parity run exceeded the command budget; the complete rerun passed 33 tests in 145.90 seconds (`/tmp/b-review-parity-green.log`). A theme fixture initially lacked required color values; corrected fixture validation is included in the final affected run.
+
+Repair validation (all successful):
+
+- `npm run build`: `/tmp/b-review-build.log`.
+- `npm run check`: `/tmp/b-review-check.log` (repeated after final edits).
+- The affected package command above, plus `test/builtin-packages test/builtin-extension-entry-labels test/native-builtin`: **431 passed in 38 files**, no skips, `/tmp/b-review-affected.log`; the `test/sdk-` filter includes both SDK parity and injected Windows regression files. Existing filenames matched by added filters, rather than nonexistent suites, determine coverage.
+- The root affected command above: **34 passed in four files**, no skips, `/tmp/b-review-unit.log`.
+- `node packages/coding-agent/test/fixtures/sdk-builtin-composition.mjs`: both composition and suppression PASS, `/tmp/b-review-node.log`.
+- `node /tmp/sdk-b-evidence-probe.mjs`: unchanged reviewer runtime probe, **five scenarios PASS**, `/tmp/b-review-runtime-green.log`.
+- `node /tmp/3105-b-risk-windows-green.mjs`: reviewer source-extracted probe adapted to supply the new `isAbsolute` import and require correct results instead of expecting a defect; **four cases PASS**, `/tmp/b-review-win-green.log`. The original defect-expecting probe remains unchanged. This and the durable injected scenario run locally on macOS, not native Windows.
+- `qlty metrics --functions packages/coding-agent/src/core/builtin-resource-loader.ts packages/coding-agent/src/core/builtin-packages.ts` and `qlty smells` on those same paths: `/tmp/b-review-qlty-metrics.log`, `/tmp/b-review-qlty-smells.log`; no smells reported. Existing Qlty configuration unchanged; authoritative lint/typecheck remains `npm run check`.
+
+Signed conventional repair commit uses normal hooks; raw hook/commit output is retained at `/tmp/b-review-commit.log`, with SHA/signature/clean-tree verification in `/tmp/b-review-commit-receipt.log`. Exact commit SHA is returned in the handoff rather than self-embedded in the commit. Existing `beforeExit` MaxListeners warnings remain visible and unsuppressed. No forced process exit was added. Built workspace Node proof is not packed-install proof; C–H, native Windows/remote CI and cumulative PR/Greptile/merge gates remain explicitly deferred to the parent.

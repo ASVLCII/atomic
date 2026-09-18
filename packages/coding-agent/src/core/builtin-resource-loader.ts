@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
-import { relative, sep } from "node:path";
-import { getBuiltinPackageLocations } from "./builtin-packages.ts";
+import { isAbsolute, relative, sep } from "node:path";
+import { getAllBuiltinPackageLocations, getBuiltinPackageLocations } from "./builtin-packages.ts";
 import { getExtensionRuntimeEventBus, loadExtensions } from "./extensions/loader.ts";
 import type { LoadExtensionsResult } from "./extensions/types.ts";
 import { markTrustedMandatoryRuntimeExtension } from "./mandatory-runtime-tools.ts";
@@ -36,7 +36,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 	private isDisabledPath(path: string): boolean {
 		return this.disabledRoots.some((root) => {
 			const child = relative(root, canonical(path));
-			return child !== ".." && !child.startsWith(`..${sep}`) && !child.startsWith(sep);
+			return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
 		});
 	}
 	constructor(
@@ -49,7 +49,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 		this.cwd = cwd;
 		this.agentDir = agentDir;
 		this.builtins = { ...builtins };
-		this.disabledRoots = getBuiltinPackageLocations()
+		this.disabledRoots = getAllBuiltinPackageLocations()
 			.filter((location) => this.builtins[location.distDirName] === false)
 			.map((location) => canonical(location.packageDir));
 		this.assets = new DefaultResourceLoader({
@@ -72,7 +72,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 			const path = canonical(extension.resolvedPath);
 			const builtin = locations.find((location) => {
 				const child = relative(canonical(location.packageDir), path);
-				return child !== ".." && !child.startsWith(`..${sep}`) && !child.startsWith(sep);
+				return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
 			});
 			if (!builtin) return true;
 			if (identities.has(builtin.packageName)) return false;
