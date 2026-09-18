@@ -93,6 +93,7 @@ export type SetLabelHandler = (entryId: string, label: string | undefined) => vo
  * Contains flag values (defaults set during registration, CLI values set after).
  */
 export interface ExtensionRuntimeState {
+	getChildSessionOptions?: import("../child-session-options.ts").ChildSessionOptionsResolver;
 	/** Shared by extension loading and its runner generation. */
 	workflowActivityHub: WorkflowActivityHub;
 	flagValues: Map<string, boolean | string>;

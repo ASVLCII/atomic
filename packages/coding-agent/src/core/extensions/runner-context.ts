@@ -26,6 +26,7 @@ import type {
 } from "./types.ts";
 export interface ExtensionContextSource {
 	observeWorkflowActivity: ExtensionContext["observeWorkflowActivity"];
+	getChildSessionOptions?: ExtensionContext["getChildSessionOptions"];
 	getExtensionPaths?(): string[];
 	assertActive(): void;
 	getUIContext(): ExtensionUIContext;
@@ -147,6 +148,10 @@ export async function publishExtensionContextEffect(context: ExtensionContext, e
  */
 export function createExtensionContext(source: ExtensionContextSource, owner: object = source): ExtensionContext {
 	const context: ExtensionContext = {
+		getChildSessionOptions: (options) => {
+			source.assertActive();
+			return source.getChildSessionOptions?.(options) ?? options;
+		},
 		getExtensionPaths: () => {
 			source.assertActive();
 			return source.getExtensionPaths?.() ?? [];

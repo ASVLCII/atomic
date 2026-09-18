@@ -149,6 +149,17 @@ export class ExtensionRunner {
 	bindTaskHost(binding: () => import("../tasks/agent-adapter.js").AgentTaskHost): void {
 		this.taskHostBinding = binding;
 	}
+	bindChildSessionOptions(
+		resolver: import("../child-session-options.ts").ChildSessionOptionsResolver | undefined,
+	): void {
+		this.runtime.getChildSessionOptions = resolver;
+	}
+	getChildHostBindings(): import("../agent-session-types.ts").ExtensionBindings {
+		return {
+			humanInput: this.humanInput === undefined ? this.presentationInput : this.humanInput,
+			onDiagnostic: this.onDiagnostic,
+		};
+	}
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<Api> | undefined = () => undefined;
 	private getScopedModels: () => readonly ScopedModel[] = () => [];
@@ -327,6 +338,12 @@ export class ExtensionRunner {
 				},
 			},
 			this.presentationInput,
+			this.orchestrationContext?.kind === "workflow-stage"
+				? {
+						workflowRunId: this.orchestrationContext.workflowRunId,
+						workflowStageId: this.orchestrationContext.workflowStageId,
+					}
+				: {},
 		);
 		this.uiContext = this.wrapUIPromptContext(bridged, this.uiPromptBinding);
 		copyHostQuestionnaire(bridged, this.uiContext);
@@ -595,6 +612,7 @@ export class ExtensionRunner {
 	private createContextSource(): ExtensionCommandContextSource {
 		return {
 			assertActive: () => this.assertActive(),
+			getChildSessionOptions: (options) => this.runtime.getChildSessionOptions?.(options) ?? options,
 			getExtensionPaths: () => this.getExtensionPaths(),
 			observeWorkflowActivity: (observer) => this.runtime.workflowActivityHub.observeWorkflowActivity(observer),
 			...(this.taskHostBinding ? { getAgentTaskHost: this.taskHostBinding } : {}),

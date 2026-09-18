@@ -170,6 +170,7 @@ class AgentSessionBase {
 	protected _subagentPolicy?: SubagentChildPolicy;
 	protected _allowedToolNames?: Set<string>;
 	protected _excludedToolNames?: Set<string>;
+	protected _childSessionOptions?: import("./child-session-options.ts").ChildSessionOptionsResolver;
 	protected _baseToolsOverride?: Record<string, AgentTool>;
 	protected _sessionStartEvent: SessionStartEvent;
 	protected _orchestrationContext?: OrchestrationContext;
@@ -215,6 +216,7 @@ class AgentSessionBase {
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
+		this._childSessionOptions = config.childSessionOptions;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._orchestrationContext = config.orchestrationContext;

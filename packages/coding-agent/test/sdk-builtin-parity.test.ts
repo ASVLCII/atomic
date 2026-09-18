@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@bastani/pi-ai/compat";
@@ -831,6 +831,7 @@ async function hostSession(bindings: ExtensionBindings = {}) {
 		return {
 			session,
 			contexts,
+			loader,
 			close: () => {
 				session.dispose();
 				rmSync(cwd, { recursive: true, force: true });
@@ -1326,3 +1327,124 @@ test("SDK questionnaire settles throwing reply validation and releases the reque
 		fixture.close();
 	}
 }, 1000);
+
+// #3105: child creation cannot discard the invoking SDK session's host or ceiling.
+test("child session inherits callback and config without resurrecting disabled builtins", async () => {
+	const requests: HostInputOptions[] = [];
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			input: async (_title, _placeholder, options) => {
+				requests.push(options);
+				return "  child text  ";
+			},
+		}),
+	});
+	try {
+		const options = fixture.contexts[0]!.getChildSessionOptions!({
+			builtins: { intercom: true, workflows: true },
+			sessionManager: SessionManager.inMemory(fixture.session.sessionManager.getCwd()),
+		});
+		const { session: child } = await createAgentSession(options);
+		try {
+			assert.equal(child.settingsManager, fixture.session.settingsManager);
+			assert.equal(child.getActiveToolNames().includes("intercom"), false);
+			assert.equal(child.getActiveToolNames().includes("workflow"), false);
+			assert.equal(await child.extensionRunner.createContext().ui.input("raw"), "  child text  ");
+			assert.equal(requests[0]!.sessionId, child.sessionManager.getSessionId());
+			assert.notEqual(requests[0]!.sessionId, fixture.session.sessionManager.getSessionId());
+		} finally {
+			child.dispose();
+		}
+	} finally {
+		fixture.close();
+	}
+});
+
+// #3105: omitted selection, empty selection, and excluded tools are distinct child ceilings.
+test.each([
+	{ tools: [] },
+	{ noTools: "all" as const },
+	{ tools: ["read"], excludedTools: ["read"] },
+	{ noTools: "builtin" as const },
+])("child selections cannot widen parent %j", async (selection) => {
+	const fixture = await hostSession();
+	const base = fixture.contexts[0]!.getChildSessionOptions!({});
+	const { session: parent } = await createAgentSession({
+		...base,
+		...selection,
+		sessionManager: SessionManager.inMemory(base.cwd),
+	});
+	let child: AgentSession | undefined;
+	try {
+		const input = Object.freeze({ tools: Object.freeze(["read", "bash", "intercom"]) });
+		const options = parent.extensionRunner.createContext().getChildSessionOptions!({
+			tools: [...input.tools],
+			sessionManager: SessionManager.inMemory(base.cwd),
+		});
+		child = (await createAgentSession(options)).session;
+		assert.deepEqual(child.getActiveToolNames(), []);
+		assert.deepEqual(input.tools, ["read", "bash", "intercom"]);
+	} finally {
+		child?.dispose();
+		parent.dispose();
+		fixture.close();
+	}
+});
+
+// #3105: siblings and replacement children retain their invoking owner's configuration.
+test("child callbacks, diagnostics and relative cwd stay owner-local across rebinding and reload", async () => {
+	const diagnostics: HostDiagnostic[][] = [[], []];
+	const fixtures = await Promise.all(
+		["left", "right"].map((label, index) =>
+			hostSession({
+				humanInput: callbackHost({ input: async () => label }),
+				onDiagnostic: (diagnostic) => diagnostics[index]!.push(diagnostic),
+			}),
+		),
+	);
+	const children: AgentSession[] = [];
+	try {
+		for (let index = 0; index < fixtures.length; index++) {
+			const fixture = fixtures[index]!;
+			const cwd = join(fixture.session.sessionManager.getCwd(), "child");
+			mkdirSync(cwd);
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir: join(fixture.session.sessionManager.getCwd(), "agent"),
+				settingsManager: fixture.session.settingsManager,
+				resourceLoaderInheritanceSnapshot: fixture.loader.getInheritanceSnapshot(),
+			});
+			await loader.reload();
+			const { session } = await createAgentSession(
+				fixture.contexts[0]!.getChildSessionOptions!({
+					cwd: "child",
+					resourceLoader: loader,
+					sessionManager: SessionManager.inMemory(cwd),
+				}),
+			);
+			children.push(session);
+			assert.equal(session.extensionRunner.createContext().cwd, cwd);
+			assert.equal(session.settingsManager, fixture.session.settingsManager);
+			assert.equal(await session.extensionRunner.createContext().ui.input("raw"), index === 0 ? "left" : "right");
+			await session.prompt("/diagnostic-test");
+			assert.equal(diagnostics[index]!.length, 1);
+			assert.equal(diagnostics[index]![0]!.sessionId, session.sessionId);
+		}
+		await fixtures[0]!.session.bindExtensions({ humanInput: callbackHost({ input: async () => "replacement" }) });
+		await fixtures[0]!.session.reload();
+		const source = fixtures[0]!.session.extensionRunner.createContext();
+		const { session: replacement } = await createAgentSession(
+			source.getChildSessionOptions!({
+				sessionManager: SessionManager.inMemory(fixtures[0]!.session.sessionManager.getCwd()),
+			}),
+		);
+		children.push(replacement);
+		assert.equal(await replacement.extensionRunner.createContext().ui.input("raw"), "replacement");
+		assert.equal(replacement.getActiveToolNames().includes("intercom"), false);
+		assert.equal(await children[1]!.extensionRunner.createContext().ui.input("raw"), "right");
+		assert.equal(diagnostics[1]!.length, 1);
+	} finally {
+		for (const child of children) child.dispose();
+		for (const fixture of fixtures) fixture.close();
+	}
+});

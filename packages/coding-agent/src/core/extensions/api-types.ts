@@ -196,6 +196,8 @@ export interface ExtensionAPI {
 	 * Return the resource-loader options that child Atomic sessions should inherit without sharing this loader instance.
 	 */
 	getResourceLoaderInheritanceSnapshot?: () => DefaultResourceLoaderInheritanceSnapshot;
+	/** Internal owner-bound defaults and capability ceiling for builtin child adapters. */
+	getChildSessionOptions?: import("../child-session-options.ts").ChildSessionOptionsResolver;
 
 	// =========================================================================
 	// Message Rendering

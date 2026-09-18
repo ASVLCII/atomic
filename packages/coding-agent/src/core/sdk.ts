@@ -1,4 +1,4 @@
-import { join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { clampThinkingLevel, type Message, type ProviderHeaders, streamSimple } from "@bastani/pi-ai/compat";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "../config.js";
@@ -8,6 +8,7 @@ import { restoreAnthropicReplayThinkingBlocks } from "./anthropic-thinking-guard
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
 import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
+import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
@@ -27,7 +28,7 @@ import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { registerStartupRollback, rollbackStartup } from "./session-startup-rollback.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
-import { getDefaultToolNames } from "./tools/index.ts";
+import { allToolNames, getDefaultToolNames } from "./tools/index.ts";
 
 export type { ModelFallbackReason } from "./model-resolver-types.ts";
 export * from "./sdk-exports.ts";
@@ -135,21 +136,31 @@ async function constructAgentSession(
 		});
 	}
 
+	const disableWorkflowExtension =
+		options.orchestrationContext?.kind === "workflow-stage" || options.subagentPolicy !== undefined;
 	if (!resourceLoader) {
 		resourceLoader = new DefaultResourceLoader({
 			cwd,
 			agentDir,
 			settingsManager,
-			builtinPackagePaths: getBuiltinPackagePaths(options.builtins),
+			builtinPackagePaths: getBuiltinPackagePaths(options.builtins).map((source) =>
+				disableWorkflowExtension && basename(source) === "workflows" ? { source, extensions: [] } : source,
+			),
 		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
 	}
 	if (
-		(options.resourceLoader || options.builtins) &&
-		(!isMandatoryResourceLoader(resourceLoader) || options.builtins)
+		(options.resourceLoader || options.builtins || disableWorkflowExtension) &&
+		(!isMandatoryResourceLoader(resourceLoader) || options.builtins || disableWorkflowExtension)
 	) {
-		resourceLoader = await withBuiltinResourceLoader(resourceLoader, cwd, agentDir, options.builtins);
+		resourceLoader = await withBuiltinResourceLoader(
+			resourceLoader,
+			cwd,
+			agentDir,
+			options.builtins,
+			disableWorkflowExtension,
+		);
 	}
 	if (options.builtins?.intercom !== false) {
 		resourceLoader = await withMandatoryResourceLoader(resourceLoader, cwd);
@@ -233,12 +244,20 @@ async function constructAgentSession(
 	// and SDK custom tool (workflow, subagent, intercom, mcp, web_search, ...)
 	// for any user who configures it (upstream 4d9aa837 + companion fix 541045ae).
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
-	const allowedToolNames = options.noTools === "all" ? [] : options.tools;
+	const allowedToolNames =
+		options.noTools === "all" ? [] : options.tools === undefined ? undefined : [...options.tools];
 	const initialActiveToolNames: string[] = allowedToolNames
 		? [...allowedToolNames]
 		: options.noTools
 			? []
 			: [...(configuredDefaultToolNames ?? getDefaultToolNames())];
+	const childBuiltins = { ...options.builtins };
+	const childExcludedTools = [
+		...(options.excludedTools ?? []),
+		...(allowedToolNames === undefined
+			? [...allToolNames].filter((name) => !initialActiveToolNames.includes(name))
+			: []),
+	];
 
 	let agent: Agent;
 
@@ -445,6 +464,26 @@ async function constructAgentSession(
 			sessionManager,
 			settingsManager,
 			cwd,
+			childSessionOptions: (child) =>
+				inheritChildSessionOptions(
+					{
+						cwd,
+						agentDir,
+						modelRuntime,
+						settingsManager,
+						model: session.model,
+						thinkingLevel: session.thinkingLevel,
+						fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
+						isFallbackModelAllowed: options.isFallbackModelAllowed,
+						builtins: childBuiltins,
+						tools: allowedToolNames,
+						noTools: options.noTools,
+						excludedTools: childExcludedTools,
+						customTools: options.customTools,
+						extensionBindings: session.extensionRunner.getChildHostBindings(),
+					},
+					child,
+				),
 			scopedModels: options.scopedModels,
 			fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
 			isFallbackModelAllowed: options.isFallbackModelAllowed,

@@ -200,6 +200,10 @@ export function createExtensionAPI(
 			assertActive();
 			return resourceLoaderInheritanceSnapshotProvider?.() ?? {};
 		},
+		getChildSessionOptions(options) {
+			assertActive();
+			return runtime.getChildSessionOptions?.(options) ?? options;
+		},
 
 		sendMessage(message, options): void | Promise<void> {
 			assertActive();

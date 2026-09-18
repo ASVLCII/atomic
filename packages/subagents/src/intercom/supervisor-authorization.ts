@@ -9,11 +9,21 @@ export interface SupervisorAuthorization {
 	childName: string;
 }
 
+/** Tool availability is required before requesting or attaching supervisor authority. */
+export function childAllowsIntercom(options: import("@bastani/atomic").CreateAgentSessionOptions): boolean {
+	if (options.builtins?.intercom === false || options.noTools === "all" || options.excludedTools?.includes("intercom"))
+		return false;
+	return ["intercom", "contact_supervisor"].some(
+		(name) => !options.excludedTools?.includes(name) && (options.tools === undefined || options.tools.includes(name)),
+	);
+}
 /** Ask the parent Intercom extension to mint a broker-issued child capability. */
 export async function requestSupervisorAuthorization(
 	events: IntercomEventBus | undefined,
 	childName: string | undefined,
+	childOptions?: import("@bastani/atomic").CreateAgentSessionOptions,
 ): Promise<SupervisorAuthorization | undefined> {
+	if (childOptions && !childAllowsIntercom(childOptions)) return undefined;
 	const normalizedChildName = childName?.trim();
 	if (!events || !normalizedChildName) return undefined;
 	const request: { childName: string; completion?: Promise<SupervisorAuthorization> } = {

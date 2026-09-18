@@ -115,6 +115,7 @@ export interface RuntimeWiringSurface {
 	ui?: PiUISurface;
 	/** Resource-loader inheritance snapshot supplied by Atomic's ExtensionAPI. */
 	getResourceLoaderInheritanceSnapshot?: () => DefaultResourceLoaderInheritanceSnapshot | undefined;
+	getChildSessionOptions?: (options: CreateAgentSessionOptions) => CreateAgentSessionOptions;
 	/** Test seam: inject a stub session factory instead of importing the SDK. */
 	createAgentSession?: (options?: CreateAgentSessionOptions) => Promise<StageSessionCreateResult>;
 	sendMessage?: StageLateMessageRouter["routeMessage"];
@@ -377,7 +378,7 @@ function withWorkflowStageSessionOptions(
 		meta && existingContext?.lateMessageRouter === undefined
 			? makeWorkflowStageOrchestrationContext(meta, pi)
 			: undefined;
-	return {
+	const resolved: CreateAgentSessionOptions = {
 		...options,
 		excludedTools,
 		...(meta
@@ -389,6 +390,11 @@ function withWorkflowStageSessionOptions(
 				}
 			: {}),
 	};
+	if (resolved.orchestrationContext && !stageHasIntercomAccess(options as StageOptions)) {
+		const { intercomGroup: _group, pendingStageDelivery: _delivery, ...context } = resolved.orchestrationContext;
+		resolved.orchestrationContext = context;
+	}
+	return resolved;
 }
 
 function shouldBindStageUiContext(pi: RuntimeWiringSurface, meta: StageExecutionMeta | undefined): boolean {
@@ -397,7 +403,14 @@ function shouldBindStageUiContext(pi: RuntimeWiringSurface, meta: StageExecution
 }
 
 function makeStageExtensionUiContext(ui: PiUISurface, meta: StageExecutionMeta | undefined, broker: StageUiBroker) {
+	let questionnaireSessionId: string | undefined;
 	return {
+		[Symbol.for("atomic-coding-agent/stage-questionnaire@1")]:
+			meta === undefined
+				? undefined
+				: (sessionId: string) => {
+						questionnaireSessionId = sessionId;
+					},
 		select: ui.select ?? (async () => undefined),
 		confirm: ui.confirm ?? (async () => false),
 		input: ui.input ?? (async () => undefined),
@@ -417,7 +430,14 @@ function makeStageExtensionUiContext(ui: PiUISurface, meta: StageExecutionMeta |
 			options?: PiCustomOverlayOptions,
 		): Promise<T> => {
 			if (meta !== undefined) {
-				return broker.requestCustomUi(meta.runId, meta.stageId, factory, options, meta.signal);
+				return broker.requestCustomUi(
+					meta.runId,
+					meta.stageId,
+					factory,
+					options,
+					meta.signal,
+					questionnaireSessionId,
+				);
 			}
 			if (ui.custom) {
 				const result = await ui.custom(factory as PiCustomOverlayFactory, options ?? { overlay: true });
@@ -490,11 +510,21 @@ export function buildRuntimeAdapters(
 				// extensions, tools, prompts, and skills as the parent chat. Callers
 				// can still opt into a custom resource set by passing `resourceLoader`
 				// through `stage(name, options)`.
-				const sessionOptions = withWorkflowStageSessionOptions(
-					stripWorkflowOnlyOptions(stageOptions) ?? {},
-					meta,
-					pi,
-				);
+				const inheritedOptions =
+					pi.getChildSessionOptions?.(stripWorkflowOnlyOptions(stageOptions) ?? {}) ??
+					stripWorkflowOnlyOptions(stageOptions) ??
+					{};
+				const sessionOptions = withWorkflowStageSessionOptions(inheritedOptions, meta, pi);
+				const stageUi = shouldBindStageUiContext(pi, meta)
+					? makeStageExtensionUiContext(pi.ui ?? {}, meta, broker)
+					: undefined;
+				if (stageUi)
+					sessionOptions.extensionBindings = {
+						...sessionOptions.extensionBindings,
+						uiContext: stageUi as unknown as NonNullable<
+							CreateAgentSessionOptions["extensionBindings"]
+						>["uiContext"],
+					};
 				const signal = meta?.startupSignal ?? meta?.signal;
 				const result = await createSession(sessionOptions, { signal, onStartupPhase: meta?.onStartupPhase });
 				const bindable = result.session as BindableStageSession;
@@ -502,11 +532,7 @@ export function buildRuntimeAdapters(
 					signal?.throwIfAborted();
 					meta?.onStartupPhase?.("extension-binding");
 					if (typeof bindable.bindExtensions === "function") {
-						await bindable.bindExtensions(
-							shouldBindStageUiContext(pi, meta)
-								? { uiContext: makeStageExtensionUiContext(pi.ui ?? {}, meta, broker) }
-								: {},
-						);
+						await bindable.bindExtensions(stageUi ? { uiContext: stageUi } : {});
 					}
 					signal?.throwIfAborted();
 				} catch (error) {

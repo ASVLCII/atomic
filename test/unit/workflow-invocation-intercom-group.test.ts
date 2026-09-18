@@ -120,7 +120,8 @@ test("explicit named groups become invocation-owned while default remains an esc
 	assert.deepEqual(groups.slice(1), [`${groups[0]}/reviewers`, "default"]);
 });
 
-test("restricted stages remain in the workflow invocation Intercom group", async () => {
+// #3105: only stages with Intercom access receive its invocation identity.
+test("restricted stages do not acquire workflow Intercom groups", async () => {
 	const groups: Array<string | undefined> = [];
 	const definition = workflow({
 		name: "intercom-capability-gate",
@@ -154,11 +155,9 @@ test("restricted stages remain in the workflow invocation Intercom group", async
 
 	assert.equal(result.status, "completed");
 	assert.equal(groups.length, 4);
-	for (const group of groups) {
-		assert.ok(group);
-		assert.notEqual(group, "default");
-	}
-	assert.equal(new Set(groups).size, 1);
+	assert.deepEqual(groups.slice(0, 3), [undefined, undefined, undefined]);
+	assert.ok(groups[3]);
+	assert.notEqual(groups[3], "default");
 });
 
 test("nested workflow stages stay in the top-level invocation group", async () => {

@@ -174,6 +174,14 @@ Only an actual `true` confirms a primitive approval. Questionnaire readiness kee
 
 `onDiagnostic` receives session-attributed operational diagnostics. Existing errors and tool results remain available without a callback. Third-party extensions can still write directly to the console; the callback does not intercept their output.
 
+### Workflow and subagent children
+
+Children use the invoking session's model/auth runtime, settings, agent directory, human-input callbacks and diagnostic sink. A child model or fallback choice does not switch to global credentials. Relative child working directories resolve from the invoking session, without changing the process working directory.
+
+Child tool selections can narrow the parent's selection, not expand it. Disabled builtin packages, excluded tools, empty allowlists and `noTools: "all"` remain suppressed in children and fallback attempts. Enable a needed capability on the parent before launching a child. Workflow stages and subagents still exclude recursive workflow tooling; subagents retain the single-level delegation limit.
+
+Callbacks may be shared, but request and diagnostic `sessionId` values identify the originating child. Workflow questions also carry their run/stage identity. Group overrides retain the normal Intercom authorization rules. Disabling or excluding Intercom does not create a substitute supervisor grant. Reopening conversation history does not restore child authority.
+
 ### AgentSession
 
 The session manages agent lifecycle, message history, model state, compaction, and event streaming.

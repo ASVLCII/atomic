@@ -38,3 +38,22 @@ test("subagent bridge returns no authority when no Intercom listener owns author
 	};
 	assert.equal(await requestSupervisorAuthorization(events, "child-1"), undefined);
 });
+
+// #3105: disallowed child Intercom cannot mint a replacement supervisor grant.
+test.each([
+	{ builtins: { intercom: false } },
+	{ tools: [] },
+	{ tools: ["read"] },
+	{ noTools: "all" as const },
+	{ excludedTools: ["intercom"] },
+])("suppressed child Intercom %j never contacts the authorization provider", async (options) => {
+	let requests = 0;
+	const events = {
+		on: () => () => {},
+		emit: () => {
+			requests++;
+		},
+	};
+	assert.equal(await requestSupervisorAuthorization(events, "child", options), undefined);
+	assert.equal(requests, 0);
+});

@@ -33,6 +33,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 	private readonly agentDir: string;
 	private readonly builtins: Partial<Record<AtomicBuiltin, boolean>>;
 	private readonly disabledRoots: string[];
+	private readonly disableWorkflowExtension: boolean;
 	private isDisabledPath(path: string): boolean {
 		return this.disabledRoots.some((root) => {
 			const child = relative(root, canonical(path));
@@ -44,7 +45,9 @@ class BuiltinResourceLoader implements ResourceLoader {
 		cwd: string,
 		agentDir: string,
 		builtins?: Partial<Record<AtomicBuiltin, boolean>>,
+		disableWorkflowExtension = false,
 	) {
+		this.disableWorkflowExtension = disableWorkflowExtension;
 		this.delegate = delegate;
 		this.cwd = cwd;
 		this.agentDir = agentDir;
@@ -78,6 +81,7 @@ class BuiltinResourceLoader implements ResourceLoader {
 				return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
 			});
 			if (!builtin) return true;
+			if (this.disableWorkflowExtension && builtin.distDirName === "workflows") return false;
 			if (identities.has(builtin.packageName)) return false;
 			identities.add(builtin.packageName);
 			return true;
@@ -96,7 +100,8 @@ class BuiltinResourceLoader implements ResourceLoader {
 				resource.enabled &&
 				!locations.some(
 					(location) =>
-						identities.has(location.packageName) &&
+						(identities.has(location.packageName) ||
+							(this.disableWorkflowExtension && location.distDirName === "workflows")) &&
 						canonical(resource.path).startsWith(`${canonical(location.packageDir)}${sep}`),
 				),
 		);
@@ -211,7 +216,13 @@ class BuiltinResourceLoader implements ResourceLoader {
 	): Promise<ResourceLoaderReloadTransaction> {
 		if (!this.delegate.prepareReload) throw new Error("Resource loader does not support transactional reload");
 		const transaction = await this.delegate.prepareReload(settings, options);
-		const candidate = new BuiltinResourceLoader(transaction.loader, this.cwd, this.agentDir, this.builtins);
+		const candidate = new BuiltinResourceLoader(
+			transaction.loader,
+			this.cwd,
+			this.agentDir,
+			this.builtins,
+			this.disableWorkflowExtension,
+		);
 		await candidate.initialize();
 		const publish = () => {
 			this.extensions = candidate.extensions;
@@ -247,9 +258,10 @@ export async function withBuiltinResourceLoader(
 	cwd: string,
 	agentDir: string,
 	builtins?: Partial<Record<AtomicBuiltin, boolean>>,
+	disableWorkflowExtension = false,
 ): Promise<ResourceLoader> {
-	if (loader instanceof BuiltinResourceLoader && builtins === undefined) return loader;
-	const composed = new BuiltinResourceLoader(loader, cwd, agentDir, builtins);
+	if (loader instanceof BuiltinResourceLoader && builtins === undefined && !disableWorkflowExtension) return loader;
+	const composed = new BuiltinResourceLoader(loader, cwd, agentDir, builtins, disableWorkflowExtension);
 	await composed.initialize();
 	return composed;
 }

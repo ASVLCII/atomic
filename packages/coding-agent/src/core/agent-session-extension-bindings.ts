@@ -225,6 +225,7 @@ export function _applyExtensionBindings(this: AgentSession, runner: ExtensionRun
 	runner.setHostBindings(this._extensionHumanInput, this._extensionDiagnosticListener);
 	runner.setUIContext(this._extensionUIContext, this._extensionMode);
 	runner.bindCommandContext(this._extensionCommandContextActions);
+	runner.bindChildSessionOptions(this._childSessionOptions);
 
 	this._extensionErrorUnsubscriber?.();
 	this._extensionErrorUnsubscriber = this._extensionErrorListener
@@ -515,6 +516,7 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 		candidateRunner.setHostBindings(this._extensionHumanInput, this._extensionDiagnosticListener);
 		candidateRunner.setUIContext(this._extensionUIContext, this._extensionMode);
 		candidateRunner.bindCommandContext(this._extensionCommandContextActions);
+		candidateRunner.bindChildSessionOptions(this._childSessionOptions);
 		await options?.beforeSessionStart?.();
 		await startExtensions(this, candidateRunner, resourceTransaction.loader, { type: "session_start", reason });
 		const preparedResources = resourceTransaction.prepareCommit?.();

@@ -178,6 +178,8 @@ export interface ExtensionContext {
 	getExtensionPaths?(): string[];
 	/** Internal actual-session binding; never populated from model arguments. */
 	getAgentTaskHost?(): import("../tasks/agent-adapter.js").AgentTaskHost;
+	/** Internal owner-bound defaults and capability ceiling for builtin child adapters. */
+	getChildSessionOptions?: import("../child-session-options.ts").ChildSessionOptionsResolver;
 	/** Session-scoped orchestration policy for child runtimes such as workflow stages. */
 	readonly orchestrationContext?: OrchestrationContext;
 	/** Typed capability policy for an in-process subagent child, when this session is one. */

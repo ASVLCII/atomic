@@ -54,7 +54,7 @@ export function copyHostQuestionnaire(source: ExtensionUIContext, target: Extens
 // Private runner/builtin seam. Symbol identity survives the separately bundled
 // workflow extension; no request minting or host adapter is exposed publicly.
 const WORKFLOW_INPUT = Symbol.for("atomic-coding-agent/workflow-input@1");
-type WorkflowIdentity = Pick<HostInputOptions, "workflowRunId" | "workflowStageId">;
+type WorkflowIdentity = Pick<HostInputOptions, "workflowRunId" | "workflowStageId"> & { sessionId?: string };
 /** One runner owns request settlement; host promises cannot revive a retired request. */
 export class HostInputBridge {
 	private adapter: HostInput | undefined;
@@ -104,23 +104,25 @@ export class HostInputBridge {
 				this.request(
 					(host, identity) => host.confirm(title, message, identity),
 					(value) => typeof value === "boolean",
-					{ ...options, ...scope },
+					{ ...options, ...scope, sessionId: scope.sessionId },
 				),
 			select: (title, choices, options) =>
 				this.request(
 					(host, identity) => host.select(title, choices, identity),
 					(value) => value === undefined || (typeof value === "string" && choices.includes(value)),
-					{ ...options, ...scope },
+					{ ...options, ...scope, sessionId: scope.sessionId },
 				),
 			input: (title, placeholder, options) =>
 				this.request((host, identity) => host.input(title, placeholder, identity), validText, {
 					...options,
 					...scope,
+					sessionId: scope.sessionId,
 				}),
 			editor: (title, initial, options) =>
 				this.request((host, identity) => host.editor(title, initial, identity), validText, {
 					...options,
 					...scope,
+					sessionId: scope.sessionId,
 				}),
 		};
 		questionnaires.set(wrapped, (params, signal, present) =>
@@ -137,8 +139,12 @@ export class HostInputBridge {
 					this.bindingListeners.add(listener);
 					return () => this.bindingListeners.delete(listener);
 				},
-				scope: (workflowRunId: string, workflowStageId: string) => {
-					const scoped = this.wrap(ui, presentationHost, { workflowRunId, workflowStageId });
+				scope: (workflowRunId: string, workflowStageId: string, sessionId?: string) => {
+					const scoped = this.wrap(ui, presentationHost, {
+						workflowRunId,
+						workflowStageId,
+						...(sessionId === undefined ? {} : { sessionId }),
+					});
 					return { ui: scoped, questionnaire: getHostQuestionnaire(scoped)! };
 				},
 			},
@@ -179,7 +185,7 @@ export class HostInputBridge {
 				invoke(host, {
 					signal: controller.signal,
 					requestId: randomUUID(),
-					sessionId: this.sessionId(),
+					sessionId: options?.sessionId ?? this.sessionId(),
 					...(options?.workflowRunId !== undefined ? { workflowRunId: options.workflowRunId } : {}),
 					...(options?.workflowStageId !== undefined ? { workflowStageId: options.workflowStageId } : {}),
 				}),

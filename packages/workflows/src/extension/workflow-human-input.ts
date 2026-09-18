@@ -18,6 +18,7 @@ interface WorkflowInputBridge {
 	scope(
 		runId: string,
 		stageId: string,
+		sessionId?: string,
 	): {
 		ui: PiUISurface;
 		questionnaire(params: QuestionParams, signal?: AbortSignal): Promise<QuestionnaireResult>;
@@ -54,7 +55,7 @@ export function bindWorkflowHumanInput(store: Store, ctx: WorkflowHumanInputCont
 				void Promise.resolve().then(async () => {
 					if (controller.signal.aborted) return;
 					try {
-						const scoped = bridge(ctx.ui)?.scope(run.id, stage.id);
+						const scoped = bridge(ctx.ui)?.scope(run.id, stage.id, questionnaire?.sessionId);
 						if (questionnaire) {
 							const answer = await scoped?.questionnaire(questionnaire.params, controller.signal);
 							if (controller.signal.aborted || !answer || answer.cancelled || answer.error) return;

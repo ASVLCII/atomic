@@ -188,6 +188,8 @@ Specify which tools to expose by name:
 
 Migration: Intercom no longer bypasses tool selection. Add `"intercom"` to an explicit allowlist if needed, and remove `noTools: "all"` when you want any active tools. Use `builtins: { intercom: false }` to remove its package entirely rather than only suppress its tool. These options do not change caller-owned arrays or loader configuration.
 
+Workflow and subagent children inherit these restrictions. Child allowlists intersect with the parent selection, including during model fallback. A child cannot restore a parent-disabled package or excluded tool. See [child configuration](/sdk#workflow-and-subagent-children) for model/auth, host callback and working-directory inheritance.
+
 ```typescript
 import { createAgentSession } from "@bastani/atomic";
 

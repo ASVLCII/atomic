@@ -34,6 +34,7 @@ import {
 	isSubagentOrchestrationSkillSelector,
 	resolveSkillsFromCatalog,
 } from "../../agents/skills.js";
+import { childAllowsIntercom } from "../../intercom/supervisor-authorization.js";
 import { ensureArtifactsDir, writeArtifact, writeMetadata } from "../../shared/artifacts.js";
 import { DEFAULT_MAX_JSONL_BYTES } from "../../shared/jsonl-writer.js";
 import { resolveEffectiveThinking } from "../../shared/model-info.js";
@@ -65,6 +66,8 @@ export interface ParentContext {
 	readonly intercomGroup?: string;
 	readonly workflowStageSubagentGuard?: boolean;
 	readonly orchestrationContext?: CreateAgentSessionOptions["orchestrationContext"];
+	readonly getChildSessionOptions?: (options: CreateAgentSessionOptions) => CreateAgentSessionOptions;
+	readonly resourceLoaderInheritanceSnapshot?: import("@bastani/atomic").DefaultResourceLoaderInheritanceSnapshot;
 }
 
 export interface TestSessionOptions {
@@ -339,8 +342,9 @@ function workflowMetadataFromContext(
  */
 export function inProcessChildBuiltinPackagePaths(
 	_context: CreateAgentSessionOptions["orchestrationContext"] | undefined,
+	builtins?: CreateAgentSessionOptions["builtins"],
 ): PackageSource[] {
-	return getBuiltinPackagePaths().map((source) =>
+	return getBuiltinPackagePaths(builtins).map((source) =>
 		basename(source) === "workflows" ? { source, extensions: [] } : source,
 	);
 }
@@ -357,13 +361,16 @@ export function inProcessChildResourceLoaderOptions(input: {
 	readonly settingsManager: SettingsManager;
 	readonly agent: Pick<AgentConfig, "systemPrompt" | "systemPromptMode">;
 	readonly orchestrationContext: CreateAgentSessionOptions["orchestrationContext"] | undefined;
+	readonly builtins?: CreateAgentSessionOptions["builtins"];
+	readonly resourceLoaderInheritanceSnapshot?: import("@bastani/atomic").DefaultResourceLoaderInheritanceSnapshot;
 }): ConstructorParameters<typeof DefaultResourceLoader>[0] {
 	const agentPrompt = input.agent.systemPrompt?.trim();
 	return {
 		cwd: input.cwd,
 		agentDir: input.agentDir,
 		settingsManager: input.settingsManager,
-		builtinPackagePaths: inProcessChildBuiltinPackagePaths(input.orchestrationContext),
+		resourceLoaderInheritanceSnapshot: input.resourceLoaderInheritanceSnapshot,
+		builtinPackagePaths: inProcessChildBuiltinPackagePaths(input.orchestrationContext, input.builtins),
 		...(agentPrompt && input.agent.systemPromptMode === "append"
 			? { appendSystemPrompt: [agentPrompt] }
 			: agentPrompt
@@ -956,13 +963,32 @@ export class SubagentControlRuntime {
 			if (admitted.spec.testSession) {
 				created = { session: createTestSession(sessionManager, admitted.spec) };
 			} else {
-				const settingsManager = SettingsManager.create(admitted.policy.cwd, getAgentDir());
+				const childOptions: CreateAgentSessionOptions = {
+					cwd: admitted.policy.cwd,
+					...((candidate.model ?? admitted.policy.model)
+						? { model: candidate.model ?? admitted.policy.model }
+						: {}),
+					...((candidate.thinkingLevel ?? admitted.policy.thinkingLevel)
+						? { thinkingLevel: candidate.thinkingLevel ?? admitted.policy.thinkingLevel }
+						: {}),
+					...(admitted.spec.fallbackModels !== undefined
+						? { fallbackModels: [...admitted.spec.fallbackModels] }
+						: {}),
+					isFallbackModelAllowed: admitted.spec.isFallbackModelAllowed,
+					tools: admitted.policy.tools ? [...admitted.policy.tools] : undefined,
+					excludedTools: admitted.policy.excludedTools ? [...admitted.policy.excludedTools] : undefined,
+				};
+				const inherited = admitted.spec.parent?.getChildSessionOptions?.(childOptions) ?? childOptions;
+				const agentDir = inherited.agentDir ?? getAgentDir();
+				const settingsManager = inherited.settingsManager ?? SettingsManager.create(admitted.policy.cwd, agentDir);
 				const resourceLoader = new DefaultResourceLoader(
 					inProcessChildResourceLoaderOptions({
 						cwd: admitted.policy.cwd,
-						agentDir: getAgentDir(),
+						agentDir,
 						settingsManager,
 						agent: admitted.spec.agent,
+						builtins: inherited.builtins,
+						resourceLoaderInheritanceSnapshot: admitted.spec.parent?.resourceLoaderInheritanceSnapshot,
 						orchestrationContext: admitted.spec.parent?.orchestrationContext,
 					}),
 				);
@@ -989,27 +1015,22 @@ export class SubagentControlRuntime {
 				created = {
 					session: (
 						await createAgentSession({
-							cwd: admitted.policy.cwd,
-							model: candidate.model ?? admitted.policy.model,
-							thinkingLevel: candidate.thinkingLevel ?? admitted.policy.thinkingLevel,
-							...(admitted.spec.fallbackModels !== undefined
-								? { fallbackModels: [...admitted.spec.fallbackModels] }
-								: {}),
-							isFallbackModelAllowed: admitted.spec.isFallbackModelAllowed,
-							tools: admitted.policy.tools ? [...admitted.policy.tools] : undefined,
-							excludedTools: admitted.policy.excludedTools ? [...admitted.policy.excludedTools] : undefined,
-							customTools: admitted.policy.customTools,
+							...inherited,
+							customTools: admitted.policy.customTools ?? inherited.customTools,
 							resourceLoader,
-							sessionManager,
+							subagentPolicy: {
+								...admitted.policy,
+								executionEnded: executionEnded.signal,
+								...(!childAllowsIntercom(inherited) ? { intercom: undefined, intercomGroup: undefined } : {}),
+							},
 							settingsManager,
 							orchestrationContext: admitted.spec.parent?.orchestrationContext,
-							subagentPolicy: { ...admitted.policy, executionEnded: executionEnded.signal },
+							sessionManager,
 							systemPromptTransform,
 							initialContextTransform: promptBehavior.initialContextTransform,
 						})
 					).session,
 				};
-				await created.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
 			}
 			session = created.session;
 			const transcriptSession = session;

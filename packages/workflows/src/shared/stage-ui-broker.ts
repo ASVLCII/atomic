@@ -20,6 +20,7 @@ export interface StageCustomUiRequest<T = unknown> {
 	readonly factory: PiCustomOverlayFactory<T>;
 	readonly options?: PiCustomOverlayOptions;
 	readonly createdAt: number;
+	readonly sessionId?: string;
 	resolve(value: T): void;
 	reject(reason: unknown): void;
 }
@@ -129,7 +130,12 @@ export class StageUiBroker {
 		const adapter = this.adapters.get(hostKey);
 		const request = this.pending.get(hostKey);
 		if (!adapter?.questionnaireParams || !request) return undefined;
-		return { requestId: request.id, params: adapter.questionnaireParams, prompt: adapter.prompt };
+		return {
+			requestId: request.id,
+			params: adapter.questionnaireParams,
+			prompt: adapter.prompt,
+			sessionId: request.sessionId,
+		};
 	}
 
 	/**
@@ -216,6 +222,7 @@ export class StageUiBroker {
 		factory: PiCustomOverlayFactory<T>,
 		options?: PiCustomOverlayOptions,
 		signal?: AbortSignal,
+		sessionId?: string,
 	): Promise<T> {
 		// Session pause aborts the tool, not the stage (which remains resumable).
 		// Either owner must be able to dismiss its outstanding custom UI request.
@@ -237,6 +244,7 @@ export class StageUiBroker {
 				stageId,
 				factory,
 				...(options !== undefined ? { options } : {}),
+				...(sessionId === undefined ? {} : { sessionId }),
 				createdAt: Date.now(),
 				resolve,
 				reject,

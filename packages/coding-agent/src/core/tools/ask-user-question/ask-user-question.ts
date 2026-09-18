@@ -20,6 +20,8 @@ import { validateQuestionnaire } from "./tool/validate-questionnaire.ts";
 import type { WrappingSelectItem } from "./view/components/wrapping-select.ts";
 
 const ERROR_NO_UI = "Error: UI not available (running in non-interactive mode)";
+// Private first-party route: a workflow owns this waiter even without a human host.
+const STAGE_QUESTIONNAIRE = Symbol.for("atomic-coding-agent/stage-questionnaire@1");
 
 /**
  * Mount options for the blocking questionnaire (#2378).
@@ -105,7 +107,10 @@ Preview content is rendered as markdown in a monospace box. Multi-line text with
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const typed = params as unknown as QuestionParams;
-			if (!(ctx.hasHumanInput ?? ctx.hasUI))
+			const stageOwned = (ctx.ui as ExtensionUIContext & { [STAGE_QUESTIONNAIRE]?: (sessionId: string) => void })[
+				STAGE_QUESTIONNAIRE
+			];
+			if (typeof stageOwned !== "function" && !(ctx.hasHumanInput ?? ctx.hasUI))
 				return buildToolResult(ERROR_NO_UI, { answers: [], cancelled: true, error: "no_ui" });
 
 			const validation = validateQuestionnaire(typed);
@@ -117,6 +122,13 @@ Preview content is rendered as markdown in a monospace box. Multi-line text with
 				});
 			}
 
+			if (typeof stageOwned === "function") {
+				stageOwned(ctx.sessionManager.getSessionId());
+				return buildQuestionnaireResponse(
+					await presentQuestionnaire(ctx.ui, typed, signal, options?.chatAsOption),
+					typed,
+				);
+			}
 			const questionnaire = getHostQuestionnaire(ctx.ui);
 			const result = questionnaire
 				? await questionnaire(typed, signal, (requestSignal) =>

@@ -17,6 +17,7 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 - Canonicalized Intercom UUID-prefix sends revalidate the original selector against the broker's current authorized sessions, so a newly visible same-prefix UUID, exact name, or custom ID refuses instead of delivering to the previously unique identity ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
 - Prefix ambiguity refusals no longer include unauthorized or hidden session names when a canonicalized UUID-prefix send is rejected ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
+- Workflow children keep separate pending-ask lists from their parent stage and siblings. Stage replacement still preserves the stage's own pending asks ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

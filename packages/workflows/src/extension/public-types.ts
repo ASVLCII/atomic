@@ -166,6 +166,7 @@ export interface ExtensionAPI {
 	getWorkflowResources?: () => readonly WorkflowResourceInfo[];
 	refreshWorkflowResources?: () => Promise<readonly WorkflowResourceInfo[]>;
 	getResourceLoaderInheritanceSnapshot?: () => DefaultResourceLoaderInheritanceSnapshot | undefined;
+	getChildSessionOptions?: (options: CreateAgentSessionOptions) => CreateAgentSessionOptions;
 	registerShortcut?: (
 		key: string,
 		opts: {

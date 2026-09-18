@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Workflow selection and automatic stage-model selection allow an initial attempt plus up to three repairs for malformed or schema-invalid answers, within the original decision deadline. Authentication/provider errors, cancellation and stale catalogs remain terminal; repairs never duplicate admission.
 - Workflow startup no longer removes the default `ask_user_question` tool in headless sessions. Without a UI, execution still returns the existing `no_ui` refusal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - SDK workflow discovery and project configuration now follow the session's working directory rather than the process working directory ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Stage sessions inherit SDK configuration, callbacks and capability restrictions before startup. Questionnaires retain the originating child identity and stay pending through host withdrawal; tool suppression also removes Intercom group access without restoring recursive workflow tooling ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

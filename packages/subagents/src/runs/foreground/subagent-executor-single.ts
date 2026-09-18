@@ -200,8 +200,14 @@ export async function runSinglePath(
 
 	let r: SingleResult;
 	try {
-		const supervisorAuthorization = await requestSupervisorAuthorization(deps.pi.events, childIntercomTarget);
+		const supervisorAuthorization = await requestSupervisorAuthorization(
+			deps.pi.events,
+			childIntercomTarget,
+			ctx.getChildSessionOptions?.({ tools: agentConfig.tools }),
+		);
 		const runOptions: RunSyncOptions = {
+			getChildSessionOptions: ctx.getChildSessionOptions,
+			resourceLoaderInheritanceSnapshot: deps.pi.getResourceLoaderInheritanceSnapshot?.(),
 			cwd: effectiveCwd,
 			signal,
 			interruptSignal: interruptController.signal,

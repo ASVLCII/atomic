@@ -65,6 +65,7 @@
 - The Router model picker updates an existing project override instead of silently changing a global default that the project ignores, and displays the save scope ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
 - Saved Jev credentials become available to automatic routing immediately after login, even during catalog refresh; stale refreshes no longer restore credentials after logout.
 - Workflow and automatic model routing now repair malformed or schema-invalid answers up to three times after the initial attempt, including Jev, within one shared deadline. Authentication/provider failures, cancellation and stale decisions still stop without retries or launch.
+- Workflow and subagent children retain the invoking SDK session's model/auth configuration, host callbacks and tool restrictions through fallback. Child requests and diagnostics keep their own session identity; disabled Intercom cannot grant supervisor access, and workflow children no longer share their parent stage's pending asks ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

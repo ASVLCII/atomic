@@ -34,6 +34,7 @@ interface ForegroundParallelRunInput {
 	agents: AgentConfig[];
 	agentConfigs?: AgentConfig[];
 	ctx: ExtensionContext;
+	resourceLoaderInheritanceSnapshot?: import("@bastani/atomic").DefaultResourceLoaderInheritanceSnapshot;
 	intercomEvents: IntercomEventBus;
 	signal: AbortSignal;
 	runId: string;
@@ -166,7 +167,13 @@ export async function runForegroundParallelTasks(input: ForegroundParallelRunInp
 			outputPath,
 		);
 		const childIntercomTarget = input.childIntercomTarget?.(task.agent, index);
-		const supervisorAuthorization = await requestSupervisorAuthorization(input.intercomEvents, childIntercomTarget);
+		const supervisorAuthorization = await requestSupervisorAuthorization(
+			input.intercomEvents,
+			childIntercomTarget,
+			input.ctx.getChildSessionOptions?.({
+				tools: (input.agentConfigs?.[index] ?? input.agents.find((agent) => agent.name === task.agent))?.tools,
+			}),
+		);
 		const interruptController = new AbortController();
 		if (input.foregroundControl) {
 			input.foregroundControl.currentAgent = task.agent;
@@ -188,6 +195,8 @@ export async function runForegroundParallelTasks(input: ForegroundParallelRunInp
 				? join(input.paramsCwd, "progress.md")
 				: undefined;
 		const runOptions: RunSyncOptions = {
+			getChildSessionOptions: input.ctx.getChildSessionOptions,
+			resourceLoaderInheritanceSnapshot: input.resourceLoaderInheritanceSnapshot,
 			cwd: taskCwd,
 			signal: input.signal,
 			interruptSignal: interruptController.signal,

@@ -12,6 +12,7 @@
 - Automatic routing keeps eligible unsuffixed fallback models using the routed thinking level, while preserving explicit fallback efforts. Failed parallel routing cancels sibling routing requests before child admission ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
 - Automatic model selection now works with strict Responses-schema providers while retaining exact model/effort pair validation.
 - Automatic model routing allows up to three repairs after a malformed or schema-invalid answer, sharing the original decision deadline and never starting a child before a valid decision. Authentication/provider failures, cancellation and stale catalogs are not retried.
+- In-process children inherit SDK model/auth configuration, settings, resource discovery and human-input callbacks without restoring parent-disabled packages or tools. Fallback keeps the same restrictions, startup runs once, and suppressed Intercom cannot mint supervisor grants ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Removed
 
