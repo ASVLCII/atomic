@@ -1586,3 +1586,33 @@ test.each(["overlap", "nested"])(
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: use built public exports and natural Node exit for all three final lifecycle roots.
+test.each([
+	"path",
+	"path-reject",
+	"path-cleanup",
+	"reload",
+	"reload-reject",
+	"thinking",
+	"name",
+	"bus",
+	"observer",
+	"context",
+	"shortcut",
+])(
+	"built Node factory, input and dispatch ownership (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-dispatch-lifecycle.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

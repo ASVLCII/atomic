@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@bastani/pi-ai/compat";
@@ -2403,3 +2403,203 @@ test.each([false, true])(
 		rmSync(cwd, { recursive: true, force: true });
 	},
 );
+
+// #3105: failed discovered factories own their acquisitions before returning.
+test("failed path factory runs registered cleanup before returning discovery diagnostics", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-path-rollback-"));
+	const agentDir = join(cwd, "agent");
+	const marker = join(cwd, "released");
+	mkdirSync(join(agentDir, "extensions"), { recursive: true });
+	writeFileSync(
+		join(agentDir, "extensions", "broken.ts"),
+		`import { writeFileSync } from "node:fs";
+export default function(pi) {
+ pi.on("session_shutdown", () => writeFileSync(${JSON.stringify(marker)}, "released"));
+ throw new Error("path factory failed");
+}`,
+	);
+	try {
+		const { session, extensionsResult } = await createAgentSession({
+			cwd,
+			agentDir,
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory(),
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			tools: [],
+		});
+		try {
+			assert.equal(existsSync(marker), true);
+			assert.match(extensionsResult.errors[0]!.error, /path factory failed/);
+		} finally {
+			await session.dispose();
+		}
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: a captured dialog cannot open new requests while its generation retires.
+test("reload seals captured input before candidate preparation and keeps successor bindings", async () => {
+	const calls: string[] = [];
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			confirm: async (title) => {
+				calls.push(title);
+				return true;
+			},
+		}),
+	});
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const oldConfirm = fixture.contexts[0]!.ui.confirm;
+	const reloading = fixture.session.reload({
+		beforeSessionStart: async () => {
+			entered.resolve();
+			await release.promise;
+		},
+	});
+	try {
+		await entered.promise;
+		await assert.rejects(oldConfirm("old generation", "  raw\n"), { code: "SessionClosed" });
+		assert.deepEqual(calls, []);
+	} finally {
+		release.resolve();
+		await reloading;
+	}
+	try {
+		assert.equal(await fixture.contexts.at(-1)!.ui.confirm("new generation", "  raw\n"), true);
+		assert.deepEqual(calls, ["new generation"]);
+	} finally {
+		await fixture.close();
+	}
+});
+
+// #3105: synchronous setters must retain their asynchronous extension execution.
+test.each(["thinking", "name", "bus", "observer", "context", "shortcut"] as const)(
+	"disposal drains detached %s handlers before registered cleanup",
+	async (kind) => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-thinking-drain-"));
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		let active = 0;
+		let shutdowns = 0;
+		let emitBus = () => {};
+		const suspend = async () => {
+			entered.resolve();
+			await release.promise;
+			active++;
+		};
+		const settingsManager = SettingsManager.inMemory();
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					pi.on("thinking_level_select", kind === "thinking" ? suspend : () => {});
+					pi.on("session_info_changed", kind === "name" ? suspend : () => {});
+					if (kind === "context") pi.on("context", suspend);
+					pi.registerShortcut("ctrl+shift+j", { handler: suspend });
+					pi.events.on("drain", suspend);
+					emitBus = () => pi.events.emit("drain", {});
+					pi.on("session_shutdown", () => {
+						shutdowns++;
+						active = 0;
+					});
+				},
+			],
+		});
+		await resourceLoader.reload();
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			resourceLoader,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			sessionManager: SessionManager.inMemory(cwd),
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			tools: [],
+		});
+		if (kind === "thinking") assert.equal(session.setThinkingLevel("high"), undefined);
+		else if (kind === "name") session.setSessionName("raw name  ");
+		else if (kind === "bus") emitBus();
+		else if (kind === "observer") session.extensionRunner.createContext().observeWorkflowActivity(suspend);
+		else if (kind === "shortcut")
+			void session.extensionRunner
+				.getShortcuts({})
+				.get("ctrl+shift+j")!
+				.handler(session.extensionRunner.createContext());
+		else void session.extensionRunner.emitContext([]);
+		await entered.promise;
+		let closed = false;
+		const closing = session.dispose().then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		const closedBeforeRelease = closed;
+		const shutdownsBeforeRelease = shutdowns;
+		release.resolve();
+		await closing;
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(closedBeforeRelease, false);
+		assert.equal(shutdownsBeforeRelease, 0);
+		assert.equal(active, 0);
+		assert.equal(shutdowns, 1);
+		if (kind === "context") await assert.rejects(session.extensionRunner.emitContext([]), { code: "SessionClosed" });
+		rmSync(cwd, { recursive: true, force: true });
+	},
+);
+
+// #3105: rollback failure is not an ordinary extension discovery diagnostic.
+test.each(["path", "inline"] as const)("failed %s factory rejects with original and cleanup causes", async (kind) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-factory-causes-"));
+	const agentDir = join(cwd, "agent");
+	const settingsManager = SettingsManager.inMemory();
+	mkdirSync(join(agentDir, "extensions"), { recursive: true });
+	const source = `export default function(pi) {
+		pi.on("session_shutdown", () => { throw new Error("cleanup rejected"); });
+		throw new Error("factory rejected");
+	}`;
+	if (kind === "path") writeFileSync(join(agentDir, "extensions", "broken.ts"), source);
+	const resourceLoader =
+		kind === "inline"
+			? new DefaultResourceLoader({
+					cwd,
+					agentDir,
+					settingsManager,
+					extensionFactories: [
+						(pi) => {
+							pi.on("session_shutdown", () => {
+								throw new Error("cleanup rejected");
+							});
+							throw new Error("factory rejected");
+						},
+					],
+				})
+			: undefined;
+	try {
+		const creation =
+			kind === "inline"
+				? resourceLoader!.reload()
+				: createAgentSession({
+						cwd,
+						agentDir,
+						settingsManager,
+						sessionManager: SessionManager.inMemory(cwd),
+						builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+						tools: [],
+					});
+		await assert.rejects(creation, (error: Error & { code?: string }) => {
+			assert.equal(error.code, "ShutdownFailed");
+			assert.ok(error instanceof AggregateError);
+			assert.deepEqual(
+				error.errors.map((cause: Error) => cause.message),
+				["factory rejected", "cleanup rejected"],
+			);
+			return true;
+		});
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

@@ -1,3 +1,5 @@
+import { extensionWorkOpen, trackExtensionWork } from "./extension-work.ts";
+import { hostInputError } from "./host-input.js";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
 import type {
 	Extension,
@@ -12,14 +14,21 @@ import { WorkflowActivityHub } from "./workflow-activity-hub.js";
 /** Prepared generations do not own session event delivery until bound by a runner. */
 export const boundExtensionRuntimes = new WeakSet<ExtensionRuntime>();
 
-export async function runResourceRegistrationBatch<T>(runtime: ExtensionRuntime, run: () => Promise<T>): Promise<T> {
-	if (!runtime.beginResourceRegistrationBatch || !runtime.endResourceRegistrationBatch) return run();
-	runtime.beginResourceRegistrationBatch();
-	try {
-		return await run();
-	} finally {
-		runtime.endResourceRegistrationBatch();
-	}
+export async function runResourceRegistrationBatch<T>(
+	runtime: ExtensionRuntime,
+	run: () => Promise<T>,
+	shutdown = false,
+): Promise<T> {
+	if (!shutdown && !extensionWorkOpen(runtime)) throw hostInputError("SessionClosed");
+	return trackExtensionWork(runtime, async () => {
+		if (!runtime.beginResourceRegistrationBatch || !runtime.endResourceRegistrationBatch) return run();
+		runtime.beginResourceRegistrationBatch();
+		try {
+			return await run();
+		} finally {
+			runtime.endResourceRegistrationBatch();
+		}
+	});
 }
 
 function registrationKey(extension: Extension, name: string): string {
@@ -49,8 +58,10 @@ export function createExtensionRuntime(): ExtensionRuntime {
 	};
 
 	const runtime: ExtensionRuntime = {
-		workflowActivityHub: new WorkflowActivityHub(),
 		sendMessage: notInitialized,
+		workflowActivityHub: new WorkflowActivityHub((operation) =>
+			extensionWorkOpen(runtime) ? trackExtensionWork(runtime, operation) : Promise.resolve(),
+		),
 		sendMessages: notInitialized,
 		sendUserMessage: notInitialized,
 		appendEntry: notInitialized,

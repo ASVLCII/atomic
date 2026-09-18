@@ -19,6 +19,10 @@ interface ObserverLease {
 }
 
 export class WorkflowActivityHub {
+	private readonly runDelivery: (operation: () => Promise<void>) => Promise<void>;
+	constructor(runDelivery: (operation: () => Promise<void>) => Promise<void> = (run) => run()) {
+		this.runDelivery = runDelivery;
+	}
 	private cursor: WorkflowObservationCursor = { epoch: randomUUID(), revision: 0 };
 	private availability: "ready" | "recovering" | "unavailable" = "unavailable";
 	private roots = new Map<string, WorkflowRootActivity>();
@@ -80,8 +84,9 @@ export class WorkflowActivityHub {
 		} else lease.queue.push(frame);
 		if (lease.delivering) return;
 		lease.delivering = true;
-		queueMicrotask(() => {
-			void this.deliver(lease);
+		void this.runDelivery(async () => {
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			await this.deliver(lease);
 		});
 	}
 	private async deliver(lease: ObserverLease): Promise<void> {

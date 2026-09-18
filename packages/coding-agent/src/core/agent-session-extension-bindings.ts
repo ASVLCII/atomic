@@ -303,6 +303,7 @@ export function _bindExtensionCore(
 	runner: ExtensionRunner,
 	publication?: ExtensionPublicationGate,
 ): void {
+	runner.bindWorkOwner(this);
 	bindExtensionContextPublication(runner.createContext(), publication && ((effect) => publication.stageStart(effect)));
 	runner.bindTaskHost(() => this.getAgentTaskHost());
 	const getCommands = (): SlashCommandInfo[] => {
@@ -508,10 +509,11 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 }
 
 async function reloadAdmitted(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
+	const retiringRunner = this._extensionRunner;
 	try {
 		abortSessionWork(this);
 		this.abortBash();
-		this._extensionRunner.cancelHostInput();
+		this._extensionRunner.sealHostInput();
 		if (this.isStreaming || this._activePromptCount > 0) await this.abort();
 		await this.closeSessionTasks();
 		await drainSessionWork(this, true);
@@ -519,6 +521,9 @@ async function reloadAdmitted(this: AgentSession, options?: AgentSessionReloadOp
 		replaceSessionTaskOwner(this);
 		if (this._disposed) throw hostInputError("SessionClosed");
 		await reloadGeneration.call(this, options);
+	} catch (error) {
+		if (!this._disposed && this._extensionRunner === retiringRunner) retiringRunner.resumeAfterRejectedReload();
+		throw error;
 	} finally {
 		sessionGenerationClosing.delete(this);
 	}

@@ -3,6 +3,7 @@ import type { AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildSystemPromptOptions, ExtensionAPI } from "../../src/index.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getAssistantTexts, type Harness } from "./harness.ts";
 
 describe("AgentSession model and extension characterization", () => {
@@ -406,18 +407,24 @@ describe("AgentSession model and extension characterization", () => {
 
 	it("bindExtensions emits session_start and reload emits session_shutdown then session_start", async () => {
 		const lifecycleEvents: string[] = [];
-		const harness = await createHarness({
-			extensionFactories: [
-				(pi) => {
-					pi.on("session_start", async (event) => {
-						lifecycleEvents.push(`start:${event.reason}`);
-					});
-					pi.on("session_shutdown", async (event) => {
-						lifecycleEvents.push(`shutdown:${event.reason}`);
-					});
-				},
-			],
-		});
+		const factories = [
+			(pi: ExtensionAPI) => {
+				pi.on("session_start", async (event) => {
+					lifecycleEvents.push(`start:${event.reason}`);
+				});
+				pi.on("session_shutdown", async (event) => {
+					lifecycleEvents.push(`shutdown:${event.reason}`);
+				});
+			},
+		];
+		// #3105: reload supplies a fresh runtime, not the invalidated test stub.
+		let loaded = await createTestExtensionsResult(factories);
+		const resourceLoader = createTestResourceLoader({ extensionsResult: loaded });
+		resourceLoader.getExtensions = () => loaded;
+		resourceLoader.reload = async () => {
+			loaded = await createTestExtensionsResult(factories);
+		};
+		const harness = await createHarness({ resourceLoader });
 		harnesses.push(harness);
 
 		await harness.session.bindExtensions({ shutdownHandler: () => {} });

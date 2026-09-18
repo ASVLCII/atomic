@@ -4,6 +4,7 @@ import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import { lifecycleScopeForOwner } from "../session-lifecycle-scope.ts";
+import { extensionWorkOpen, trackExtensionWork } from "./extension-work.ts";
 import {
 	captureRegistrationInvocation as captureInvocation,
 	invocationExtension,
@@ -80,7 +81,9 @@ export function createExtensionAPI(
 			assertActive();
 			const unsubscribe = runtime.trackEventBusSubscription(
 				eventBus.on(channel, (data) => {
-					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime)) deliver(data);
+					if (!extensionWorkOpen(ownerRuntime)) return;
+					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime))
+						return trackExtensionWork(ownerRuntime, async () => deliver(data));
 				}),
 			);
 			if (state === "loading") loadingUnsubscribers.push(unsubscribe);

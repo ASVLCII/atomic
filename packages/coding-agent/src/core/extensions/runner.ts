@@ -13,6 +13,7 @@ import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
+import { bindExtensionWork, extensionWorkOpen, resumeExtensionWork, sealExtensionWork } from "./extension-work.ts";
 import {
 	copyHostQuestionnaire,
 	type HostDiagnostic,
@@ -149,7 +150,7 @@ export class ExtensionRunner {
 	private presentationInput?: HostInput;
 	private humanInput?: HostInput | null;
 	private humanInputBindingRevision = 0;
-	private readonly inputBridge = new HostInputBridge(
+	private inputBridge = new HostInputBridge(
 		() => this.sessionManager.getSessionId(),
 		() => this.getSignalFn(),
 	);
@@ -161,6 +162,10 @@ export class ExtensionRunner {
 	private orchestrationContext: OrchestrationContext | undefined;
 	private subagentPolicy: SubagentChildPolicy | undefined;
 	private taskHostBinding: (() => import("../tasks/agent-adapter.js").AgentTaskHost) | undefined;
+	/** @internal Attach dispatch receipts to the owning session before startup. */
+	bindWorkOwner(owner: object): void {
+		bindExtensionWork(this.runtime, owner);
+	}
 	bindTaskHost(binding: () => import("../tasks/agent-adapter.js").AgentTaskHost): void {
 		this.taskHostBinding = binding;
 	}
@@ -347,6 +352,18 @@ export class ExtensionRunner {
 	/** @internal Seal input admission without invalidating shutdown handlers. */
 	sealHostInput(): void {
 		this.inputBridge.close();
+		sealExtensionWork(this.runtime);
+	}
+
+	/** @internal A rejected transaction retains the live runner, but never revives captured dialogs. */
+	resumeAfterRejectedReload(): void {
+		if (this.staleMessage) return;
+		resumeExtensionWork(this.runtime);
+		this.inputBridge = new HostInputBridge(
+			() => this.sessionManager.getSessionId(),
+			() => this.getSignalFn(),
+		);
+		this.refreshHostInput();
 	}
 
 	private refreshHostInput(): void {
@@ -552,6 +569,15 @@ export class ExtensionRunner {
 	getShortcuts(resolvedKeybindings: KeybindingsConfig): Map<KeyId, ExtensionShortcut> {
 		const resolution = resolveExtensionShortcuts(this.extensions, resolvedKeybindings, this.hasUI());
 		this.shortcutDiagnostics = resolution.diagnostics;
+		for (const [key, shortcut] of resolution.shortcuts) {
+			resolution.shortcuts.set(key, {
+				...shortcut,
+				handler: (context) => {
+					if (!extensionWorkOpen(this.runtime)) return Promise.reject(hostInputError("SessionClosed"));
+					return runResourceRegistrationBatch(this.runtime, async () => shortcut.handler(context));
+				},
+			});
+		}
 		return resolution.shortcuts;
 	}
 
@@ -560,7 +586,7 @@ export class ExtensionRunner {
 	}
 
 	invalidate(message = STALE_EXTENSION_CONTEXT_MESSAGE): void {
-		this.inputBridge.close();
+		this.sealHostInput();
 		if (!this.staleMessage) {
 			this.staleMessage = message;
 			this.runtime.invalidate(message);
@@ -695,25 +721,30 @@ export class ExtensionRunner {
 		event: TEvent,
 		isCurrent?: () => boolean,
 	): Promise<RunnerEmitResult<TEvent>> {
+		if (event.type !== "session_shutdown" && !extensionWorkOpen(this.runtime))
+			return undefined as RunnerEmitResult<TEvent>;
 		const observerFailures: Error[] = [];
-		const result = await runResourceRegistrationBatch(this.runtime, () =>
-			runGenericHandlers(
-				this.extensions,
-				this.createContext(),
-				event,
-				(error) => {
-					try {
-						this.emitError(error);
-					} catch (cause) {
-						if (event.type !== "session_shutdown") throw cause;
-						observerFailures.push(
-							new Error(`${error.extensionPath}: ${error.error}`),
-							new Error("Shutdown observer failed", { cause }),
-						);
-					}
-				},
-				isCurrent,
-			),
+		const result = await runResourceRegistrationBatch(
+			this.runtime,
+			() =>
+				runGenericHandlers(
+					this.extensions,
+					this.createContext(),
+					event,
+					(error) => {
+						try {
+							this.emitError(error);
+						} catch (cause) {
+							if (event.type !== "session_shutdown") throw cause;
+							observerFailures.push(
+								new Error(`${error.extensionPath}: ${error.error}`),
+								new Error("Shutdown observer failed", { cause }),
+							);
+						}
+					},
+					isCurrent,
+				),
+			event.type === "session_shutdown",
 		);
 		if (observerFailures.length)
 			throw Object.assign(new AggregateError(observerFailures, "Shutdown observers failed"), {

@@ -72,6 +72,7 @@
 - Workflow stage questionnaires respect explicit child human-input adapters and withdrawal without losing durable pending/rebind behavior. Stage fallback replacements enforce inherited model restrictions instead of treating fallback candidates as unrestricted primaries ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Explicitly rebinding a workflow child to its originally inherited adapter now keeps questions with that selected host after parent rebinding, including across child reload ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Child sessions honor a supplied session manager's working directory when `cwd` is omitted, and optional `undefined` child configuration no longer discards inherited models, settings or host callbacks ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Failed file-loaded extension factories now run registered rollback cleanup; cleanup failures reject instead of becoming discovery-only diagnostics. Reload seals retiring input before successor startup. Disposal drains asynchronous extension notifications, bus handlers, shortcuts and workflow observers before shutdown, including notifications from synchronous thinking/session-name setters ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

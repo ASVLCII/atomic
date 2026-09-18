@@ -52,6 +52,8 @@ export function _emitQueueUpdate(this: AgentSession): void {
 	});
 }
 
+const consumedQueuedMessageEvents = new WeakSet<object>();
+
 /** Internal handler for agent events - shared by subscribe and reconnect */
 
 export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promise<void> | void {
@@ -61,6 +63,19 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	// _processAgentEvent, slow earlier queued events can delay agent_end processing
 	// and waitForRetry() can miss the in-flight retry.
 	this._createRetryPromiseForAgentEnd(event);
+	// Agent-core has already consumed this message. Reflect admission before an
+	// Escape/abort can restore it from a stale queue while earlier hooks settle.
+	if (event.type === "message_start" && event.message.role === "user") {
+		const text = this._getUserMessageText(event.message);
+		if (text) {
+			const queue = [this._steeringMessages, this._followUpMessages].find((messages) => messages.includes(text));
+			if (queue) {
+				queue.splice(queue.indexOf(text), 1);
+				this._admittedQueuedMessageAwaitingReply = text;
+				consumedQueuedMessageEvents.add(event);
+			}
+		}
+	}
 	const awaitProtectedPersistence =
 		event.type === "message_end" && event.message.role === "custom"
 			? markProtectedStreamingCustomMessageConsumed(this, event.message)
@@ -134,35 +149,13 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 		isProtectedStreamingCustomMessage(this, event.message)
 			? event.message
 			: undefined;
-	// When a user message starts, check if it's from either queue and remove it BEFORE emitting
-	// This ensures the UI sees the updated queue state
+	// Public notifications remain serialized behind extension events.
 	if (event.type === "message_start" && event.message.role === "user") {
 		this._overflowRecoveryAttempted = false;
 		this._recoverableLengthRecoveryAttempted = false;
 		this._fallbackAttemptedKeys.clear();
 		this._fallbackBlockedModels.length = 0;
-		const messageText = this._getUserMessageText(event.message);
-		if (messageText) {
-			// Check steering queue first
-			const steeringIndex = this._steeringMessages.indexOf(messageText);
-			if (steeringIndex !== -1) {
-				this._steeringMessages.splice(steeringIndex, 1);
-				// The loop already polled this message out of the agent queue, so the
-				// pause hold can no longer reach it and Escape can no longer restore it
-				// to the editor. Record it so an interrupt that kills its reply before
-				// any output can still schedule that reply (issue #2362).
-				this._admittedQueuedMessageAwaitingReply = messageText;
-				this._emitQueueUpdate();
-			} else {
-				// Check follow-up queue
-				const followUpIndex = this._followUpMessages.indexOf(messageText);
-				if (followUpIndex !== -1) {
-					this._followUpMessages.splice(followUpIndex, 1);
-					this._admittedQueuedMessageAwaitingReply = messageText;
-					this._emitQueueUpdate();
-				}
-			}
-		}
+		if (consumedQueuedMessageEvents.delete(event)) this._emitQueueUpdate();
 	}
 
 	this._applyInterruptAbortMessage(event);

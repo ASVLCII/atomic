@@ -44,8 +44,11 @@ if (!nested) await preflight.promise;
 const b = nested ? Promise.resolve({ cancelled: false }) : runtime.newSession().catch(error => error);
 try {
  if (!nested) {
- const bindingSession = await binding.promise;
- releasePreflight.resolve();
+	await tick(); await tick();
+	assert.deepEqual([...active], [1], "retirement waits for admitted preflight before shutdown");
+	assert.equal(bound, 0, "successor cannot bind before independent preflight release");
+	releasePreflight.resolve();
+	const bindingSession = await binding.promise;
  await tick(); await tick();
  await bindingSession.bindExtensions({});
  releaseBinding.resolve();

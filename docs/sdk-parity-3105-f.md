@@ -199,3 +199,54 @@ Exact command receipt: `/tmp/3105-f-r6-commands.txt`. All four supplied probes e
 - Supplemental qlty smells/metrics: exit 0, `/tmp/3105-f-r6-receipt-{qlty,metrics}.log`. Complexity warnings remain visible, including publication `apply` 25 and existing `fork` 28; this is not a clean-smells claim. Normal build/check are authoritative.
 
 No source/test edits followed these final suite receipts. SDK guide/reference and Unreleased explain the repaired behavior. No assertions were removed or softened and no skips added. `ISSUES.md` is unchanged. The earlier native `Output spool unavailable` observation remains unattributed: it did not recur in these full runs, but no native cause or repair is claimed. Evidence remains local macOS arm64 Node 26.8.2, deterministic providers and built workspace exports, not packed-consumer H, other-platform/live-provider or remote CI evidence. Parent-owned exact-head CI/Greptile conditional cumulative merge remains pending; no push, PR, merge or release was performed.
+
+## F continuation from `9ab865cd4`
+
+This repair supersedes earlier completeness claims. Scope remains contract F and issue §8.1 F, preserving A–E. The source-grounded lifecycle map guided the repair of all three consolidated P1 roots. No required root is deferred.
+
+| Applicable requirement / decision | Current evidence |
+| --- | --- |
+| Failed file factory acquisitions roll back before successful creation | Shared inline/file factory execution now invokes registered rollback. Exact ordinary and later-rejected creation probes change acquired=1/released=0 to acquired=1/released=1. Public source and built Node tests cover ordinary diagnostics, later setup rejection and failing cleanup |
+| Retiring input closes before successor startup; captured functions cannot approve | Reload seals the retiring bridge synchronously. Both exact input probes now report SessionClosed, with no old host call. Built overlap fixture permits successor approval while old captured input refuses |
+| All admitted asynchronous extension execution drains before cleanup | Generic/specialized runner dispatch, bus callbacks, shortcuts and workflow observers attach to existing session work receipts before execution. Six public source and built Node cases independently release handlers after observing disposal pending, then require zero resources and one shutdown |
+| Creating → ready or rollback → closed; original and cleanup causes retained | Complete SDK startup tests plus file/inline failure tests. Cleanup failures remain aggregate ShutdownFailed rather than discovery diagnostics |
+| Live → closing → closed; synchronous seal, one shared Promise/outcome | Complete SDK and runtime suites preserve repeated Promise/outcome identity and reject closed work; detached callbacks cannot acquire resources after successful close |
+| Reload/replacement drains old work, preserves durable pending state and bindings | All 127 host parity cases pass, including pending gates, sibling workflows and reentrant replacement. Failed transactional reload restores the surviving runner with a fresh input bridge; old captured functions stay closed |
+| Cancellation, tasks, persistence, subscriptions, aggregate errors and borrowed ownership | Current lifecycle/queue/task selections pass. Shared managers, loaders, stage owners and siblings retain their existing tests |
+| Exact actual AgentSession, dispose Promise<void>, synchronous setters and optional fields | Session result, setter and host-input signatures unchanged; source regression asserts setThinkingLevel returns undefined. Normal build/check pass; internal runner ownership methods add no new public manager/result shape |
+| Raw input, duplicate values and order preserved | Existing A–E parity passes. Overlap fixture checks exact `  raw\n` payload; no normalization, deduplication or uniqueness rule added |
+| Natural Node exit without forced exit/private DBOS cleanup | New 11-case built fixture and all prior host fixtures exit normally using public disposal. Authored workflow source hash remains `aee794cfa82fe248928ab07ec0964752c59a0bfc8ff685f814f710f9c4c61db2` |
+| Independent checkout initialization; no workflows compile pipeline | npm ci --ignore-scripts and initial npm run build passed, `/tmp/3105-f-cont-{install,initial-build}.log`; normal final build passed |
+| Vertical red-green and durable coverage in both named files | `/tmp/3105-f-cont-{path,input,thinking,dispatch,shortcut,specialized,causes}-red.log` retain public failures; corresponding regressions pass in complete SDK/host runs. New built fixture is `test/fixtures/sdk-host-dispatch-lifecycle.mjs` |
+| Required build/check and all affected tests | Final commands/counts below; no new skips or weakened acceptance |
+| Supplemental qlty preserving repository gates | Existing config unchanged; smells/metrics exit 0, warnings retained. New extension-work helper has no reported smells; existing publisher complexity 27 remains visible |
+| Actionable SDK guide and Unreleased notes | Guide explains callback settlement and reacquiring dialogs after failed reload; one Fixed entry covers shipped behavior. Released sections unchanged |
+| Signed conventional commit, normal hooks and model attribution | Delivery uses normal signed commit with Refs #3105 and Assistant-model: GPT-6-Astra; exact SHA/signature/clean status are in the handoff receipt |
+| Designated checkout/branch, prior commits, no publication/G/H work | Only feat/3105-sdk-f changed. No push, PR, merge, release or other worktree writes |
+
+### Current commands and results
+
+Full exact selectors and log names are recorded in `/tmp/3105-f-cont-commands.txt`.
+
+- `npm run build` and `npm run check`: exit 0, `/tmp/3105-f-cont-final-{build,check}.log`.
+- Complete SDK parity and affected coding-agent lifecycle/resource/CLI/settings selection: **72 files, 613 passed**, 14 unchanged credential/PowerShell skips in two wholly skipped files; `/tmp/3105-f-cont-final-core.log`.
+- `npx vitest --run --project integration test/integration/sdk-builtin-host-parity.test.ts`: **127/127 passed**, `/tmp/3105-f-cont-final-host.log`.
+- Affected root lifecycle and workflow-observation selection: **48 files, 477 passed**, `/tmp/3105-f-cont-final-unit.log`.
+- Queue/shell/kill plus workflow activity/UI/input event selection: **15 files, 121 passed**, one existing platform skip; `/tmp/3105-f-cont-observers-queues.log`.
+- Task adapter/command/kill/stage/contract/subscription selection: **8 files, 49 passed**, `/tmp/3105-f-cont-tasks.log`.
+- Five exact review invocations: all exit 0, `/tmp/3105-f-cont-exact-green.log`. Thinking result is closedBeforeRelease=false, active=0, shutdowns=1.
+- Supplemental `qlty smells --no-upgrade-check --no-duplication` and `qlty metrics --no-upgrade-check --functions`: exit 0, `/tmp/3105-f-cont-{qlty,metrics}.log`. They supplement, not replace, normal Biome/typechecks.
+
+### Regression decisions and limits
+
+The new dispatch accounting exposed two queue timing failures in the unchanged Escape/recovery suites. Agent-core had consumed steering text before serialized extension-event handling removed it from the session queue. Admission bookkeeping now runs synchronously when the event arrives; public notifications remain serialized. Both original failures pass without changed assertions, `/tmp/3105-f-cont-queues{,-green}.log`.
+
+Two old fixtures assumed behavior the required drain forbids. The model lifecycle fixture now supplies fresh reload registrations instead of reusing an invalidated stub runtime; its startup/shutdown assertion is unchanged. The binding-overlap fixture independently releases old preflight before waiting for successor binding, explicitly checks no shutdown or binding occurred while preflight was suspended, and retains its concurrent/nested binding assertions. Initial failures remain in `/tmp/3105-f-cont-{core,host}.log`; complete reruns pass. Rejected-reload Herdr reporting also passes unchanged after restoration of the surviving runner.
+
+Resolved temporary F notes were removed from case-insensitive `issues.md` without deleting the existing unrelated `ISSUES.md` content. No callback deadline, forced process exit, new manager, payload policy or tenant-sandbox promise was added. Public inspection remains available after closure.
+
+Evidence is local macOS arm64 Node 26.8.2, Bun 1.4.2, deterministic inference and built workspace exports. Packed declaration/consumer closure, G services, unexecuted platforms/live credentials, remote CI and Greptile/conditional cumulative merge remain later-slice/parent work. The earlier native spool observation remains unattributed; no repair is claimed. No newly discovered out-of-scope change was made.
+
+### Contract amendments received
+
+"make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned publication gates. This child does not publish or claim the overall user task complete.

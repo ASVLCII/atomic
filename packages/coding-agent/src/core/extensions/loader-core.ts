@@ -173,32 +173,22 @@ async function loadExtension(
 			};
 		}
 
-		const extension = createExtension(extensionPath, resolvedPath);
-		const transaction = createExtensionAPI(
-			extension,
-			runtime,
+		const factorySpan = startTimingSpan(`loadExtensions.${extensionPath}.factory`, "extensions");
+		const extension = await loadExtensionFromFactory(
+			factory,
 			cwd,
 			eventBus,
+			runtime,
+			extensionPath,
 			workflowResourceProvider,
 			resourceLoaderInheritanceSnapshotProvider,
+			createExtension(extensionPath, resolvedPath),
 		);
-		const factorySpan = startTimingSpan(`loadExtensions.${extensionPath}.factory`, "extensions");
-		try {
-			await factory(transaction.api);
-			transaction.commit();
-		} catch (error) {
-			transaction.discard();
-			throw error;
-		}
 		endTimingSpan(factorySpan);
-		rememberConstruction(extension, runtime, {
-			factory,
-			workflowResourceProvider,
-			resourceLoaderInheritanceSnapshotProvider,
-		});
-		factoryAcquisitions.getStore()?.pending?.set(extension, { cwd, runtime });
 		return { extension, error: null };
 	} catch (err) {
+		// Ordinary discovery failures remain diagnostics; failed cleanup must reject creation.
+		if (err instanceof Error && "code" in err && err.code === "ShutdownFailed") throw err;
 		const message = err instanceof Error ? err.message : String(err);
 		return { extension: null, error: `Failed to load extension: ${message}` };
 	}
