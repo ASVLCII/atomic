@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { clampThinkingLevel, type Message, type ProviderHeaders, streamSimple } from "@bastani/pi-ai/compat";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "../config.js";
@@ -6,11 +6,14 @@ import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.js";
 import { restoreAnthropicReplayThinkingBlocks } from "./anthropic-thinking-guard.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
+import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
+import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
+import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { getModelFastRoute, streamWithFastRoute, withFastRouteStreamOptions } from "./fast-model-routing.ts";
 import { markLifecycleTiming } from "./lifecycle-timings.ts";
-import { withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
+import { isMandatoryResourceLoader, withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
 import { convertToLlm, repairOrphanToolResults } from "./messages.ts";
 import { findInitialModel, resolveRestoredModelReference } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.js";
@@ -21,6 +24,7 @@ import { scrubPreCompactionAssistantUsage } from "./provider-context-usage.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { registerStartupRollback, rollbackStartup } from "./session-startup-rollback.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
 import { getDefaultToolNames } from "./tools/index.ts";
@@ -94,6 +98,18 @@ function removeUnownedModelHeaders(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	return constructAgentSession(options, false);
+}
+
+/** Internal CLI assembly seam. Not exported from the package entrypoint. */
+export function createUnstartedAgentSession(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
+	return constructAgentSession(options, true);
+}
+
+async function constructAgentSession(
+	options: CreateAgentSessionOptions,
+	deferStart: boolean,
+): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
@@ -124,9 +140,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			cwd,
 			agentDir,
 			settingsManager,
+			builtinPackagePaths: getBuiltinPackagePaths(),
 		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
+	}
+	if (options.resourceLoader && !isMandatoryResourceLoader(resourceLoader)) {
+		resourceLoader = await withBuiltinResourceLoader(resourceLoader, cwd, agentDir);
 	}
 	resourceLoader = await withMandatoryResourceLoader(resourceLoader, cwd);
 
@@ -412,6 +432,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
+	const providerRollback = modelRuntime.createExtensionProviderTransaction();
 	const session = new AgentSession({
 		agent,
 		sessionManager,
@@ -432,6 +453,48 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		subagentPolicy: options.subagentPolicy,
 		systemPromptTransform: options.systemPromptTransform,
 	});
+	registerStartupRollback(session.extensionRunner, async (error) => {
+		const cleanupErrors: Error[] = [];
+		const unsubscribe = session.extensionRunner.onError((failure) => {
+			cleanupErrors.push(new Error(`${failure.extensionPath}: ${failure.error}`));
+		});
+		const record = (results: PromiseSettledResult<unknown>[]) => {
+			for (const result of results) {
+				if (result.status === "rejected")
+					cleanupErrors.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+			}
+		};
+		try {
+			record(await Promise.allSettled([session.abort(), session.closeSessionTasks()]));
+			record(
+				await Promise.allSettled([
+					emitSessionShutdownEvent(session.extensionRunner, { type: "session_shutdown", reason: "quit" }),
+				]),
+			);
+			record(await Promise.allSettled([providerRollback.commit(), settingsManager.flush()]));
+		} finally {
+			unsubscribe();
+			session.dispose();
+		}
+		if (cleanupErrors.length)
+			throw new AggregateError([error, ...cleanupErrors], "Extension startup failed and rollback reported errors");
+		throw error;
+	});
+	try {
+		for (const failure of resourceLoader.getExtensions().errors) {
+			const builtin = getBuiltinPackageLocations().find(({ packageDir }) => {
+				const path = relative(packageDir, failure.path);
+				return path !== ".." && !path.startsWith(`..${sep}`) && !path.startsWith(sep);
+			});
+			if (builtin)
+				throw Object.assign(new Error(`Builtin unavailable: ${builtin.packageName}: ${failure.error}`), {
+					code: "BuiltinUnavailable",
+				});
+		}
+		if (!deferStart) await session.bindExtensions(options.extensionBindings ?? {});
+	} catch (error) {
+		return rollbackStartup(session.extensionRunner, error instanceof Error ? error : new Error(String(error)));
+	}
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {

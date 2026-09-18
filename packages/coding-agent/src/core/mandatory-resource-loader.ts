@@ -169,3 +169,8 @@ export async function withMandatoryResourceLoader(loader: ResourceLoader, cwd: s
 export function limitMandatoryIntercomToTool(loader: ResourceLoader): void {
 	if (loader instanceof MandatoryResourceLoader) loader.limitToTool();
 }
+
+/** Services have already selected their resources, including deferred CLI startup. */
+export function isMandatoryResourceLoader(loader: ResourceLoader): boolean {
+	return loader instanceof MandatoryResourceLoader;
+}

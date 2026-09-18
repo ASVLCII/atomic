@@ -110,13 +110,18 @@ function getBuiltinPackageCandidateContext(): BuiltinPackageCandidateContext {
 }
 
 /** Atomic-owned builtin package roots paired with their verified descriptors. */
-export function getBuiltinPackageLocations(): BuiltinPackageLocation[] {
+export function getBuiltinPackageLocations(required = false): BuiltinPackageLocation[] {
 	const context = getBuiltinPackageCandidateContext();
 	return BUILTIN_PACKAGES.flatMap((descriptor) => {
 		const packageDir = firstExistingPackageDir(
 			[...descriptor.sourceCandidates(context), ...distCandidates(context, descriptor)],
 			descriptor,
 		);
+		if (!packageDir && required) {
+			throw Object.assign(new Error(`Builtin unavailable: ${descriptor.packageName}`), {
+				code: "BuiltinUnavailable",
+			});
+		}
 		return packageDir
 			? [{ packageName: descriptor.packageName, distDirName: descriptor.distDirName, packageDir }]
 			: [];
@@ -136,7 +141,7 @@ export function getBuiltinPackageLocations(): BuiltinPackageLocation[] {
  *   process executable dir -> builtin/<package>
  */
 export function getBuiltinPackagePaths(): string[] {
-	return getBuiltinPackageLocations().map(({ packageDir }) => packageDir);
+	return getBuiltinPackageLocations(true).map(({ packageDir }) => packageDir);
 }
 
 /** Built-in package roots whose extensions Atomic must load in every model session. */

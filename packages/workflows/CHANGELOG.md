@@ -44,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Jev launch routing now supports catalogs above 255 choices through bounded tournaments, retaining `none` in the final comparison and preserving exact user budgets. Partial batch results never authorize a launch ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
 - Fixed workflow routing with strict-schema providers such as Codex when budget limits are omitted or partially supplied, preserving exact limits and zero values without introducing null fields.
 - Workflow selection and automatic stage-model selection allow an initial attempt plus up to three repairs for malformed or schema-invalid answers, within the original decision deadline. Authentication/provider errors, cancellation and stale catalogs remain terminal; repairs never duplicate admission.
+- Workflow startup no longer removes the default `ask_user_question` tool in headless sessions. Without a UI, execution still returns the existing `no_ui` refusal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

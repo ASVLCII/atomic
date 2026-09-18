@@ -10,6 +10,7 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ExtensionProviderTransaction, ModelRuntime } from "./model-runtime.js";
 import type { PathMetadata } from "./package-manager.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { completeStartup, rollbackStartup } from "./session-startup-rollback.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
 import type { SlashCommandInfo } from "./slash-commands.js";
 
@@ -124,6 +125,38 @@ async function extendRunnerResources(
 	await loader.extendResources(extensionPaths);
 }
 
+const extensionStarts = new WeakMap<ExtensionRunner, Promise<void>>();
+
+function startExtensions(
+	session: AgentSession,
+	runner: ExtensionRunner,
+	loader: ResourceLoader,
+	event: AgentSession["_sessionStartEvent"],
+): Promise<void> {
+	const existing = extensionStarts.get(runner);
+	if (existing) return existing;
+	const start = Promise.resolve().then(async () => {
+		const failures: Error[] = [];
+		const unsubscribe = runner.onError((error) => {
+			if (error.event === "session_start" || error.event === "resources_discover") {
+				failures.push(new Error(`${error.extensionPath}: ${error.error}`));
+			}
+		});
+		try {
+			await runner.emit(event);
+			await extendRunnerResources(session, runner, loader, event.reason === "reload" ? "reload" : "startup");
+			if (failures.length) throw new AggregateError(failures, "Extension startup failed");
+			completeStartup(runner);
+		} catch (error) {
+			return rollbackStartup(runner, error instanceof Error ? error : new Error(String(error)));
+		} finally {
+			unsubscribe();
+		}
+	});
+	extensionStarts.set(runner, start);
+	return start;
+}
+
 export async function bindExtensions(this: AgentSession, bindings: ExtensionBindings): Promise<void> {
 	if (bindings.uiContext !== undefined) {
 		this._extensionUIContext = bindings.uiContext;
@@ -142,8 +175,9 @@ export async function bindExtensions(this: AgentSession, bindings: ExtensionBind
 	}
 
 	this._applyExtensionBindings(this._extensionRunner);
-	await this._extensionRunner.emit(this._sessionStartEvent);
-	await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+	await startExtensions(this, this._extensionRunner, this._resourceLoader, this._sessionStartEvent);
+	this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+	this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 	if (recoverProtectedStreamingCustomMessages(this) > 0) {
 		await this._continueQueuedAgentMessages();
 	}
@@ -427,15 +461,9 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 		await this._resourceLoader.reload();
 		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
 		await options?.beforeSessionStart?.();
-		const hasBindings =
-			this._extensionUIContext ||
-			this._extensionCommandContextActions ||
-			this._extensionShutdownHandler ||
-			this._extensionErrorListener;
-		if (hasBindings) {
-			await this._extensionRunner.emit({ type: "session_start", reason });
-			await this.extendResourcesFromExtensions(reason);
-		}
+		await startExtensions(this, this._extensionRunner, this._resourceLoader, { type: "session_start", reason });
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 		return;
 	}
 
@@ -473,15 +501,7 @@ export async function reload(this: AgentSession, options?: AgentSessionReloadOpt
 		candidateRunner.setUIContext(this._extensionUIContext, this._extensionMode);
 		candidateRunner.bindCommandContext(this._extensionCommandContextActions);
 		await options?.beforeSessionStart?.();
-		const hasBindings =
-			this._extensionUIContext ||
-			this._extensionCommandContextActions ||
-			this._extensionShutdownHandler ||
-			this._extensionErrorListener;
-		if (hasBindings) {
-			await candidateRunner.emit({ type: "session_start", reason });
-			await extendRunnerResources(this, candidateRunner, resourceTransaction.loader, reason);
-		}
+		await startExtensions(this, candidateRunner, resourceTransaction.loader, { type: "session_start", reason });
 		const preparedResources = resourceTransaction.prepareCommit?.();
 		if (preparedResources) {
 			commitPreparedResources = () => preparedResources.commit();

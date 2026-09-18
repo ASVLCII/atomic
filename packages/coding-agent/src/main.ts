@@ -42,12 +42,11 @@ import {
 import type { CreateAgentSessionRuntimeFactory } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
-	createAgentSessionFromServices,
+	createUnstartedAgentSessionFromServices,
 	prepareAgentSessionServices,
 } from "./core/agent-session-services.ts";
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
-import { getBuiltinPackagePaths } from "./core/builtin-packages.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { limitMandatoryIntercomToTool } from "./core/mandatory-resource-loader.ts";
 import { INTERACTIVE_MODEL_REFRESH_TIMEOUT_MS } from "./core/model-refresh-timeout.ts";
@@ -458,7 +457,7 @@ export async function main(argv: string[], options?: MainOptions) {
 	const autoTrustOnReloadCwd =
 		parsed.projectTrustOverride === undefined && !hasProjectTrustInputs(sessionCwd) ? sessionCwd : undefined;
 
-	const builtinPackagePaths = options?.builtinPackagePaths ?? getBuiltinPackagePaths();
+	const builtinPackagePaths = options?.builtinPackagePaths;
 	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
 	const projectTrustByCwd = new Map<string, boolean>();
 	const borrowedExtensionSourceTrustByPath = new Map<string, boolean>();
@@ -661,7 +660,7 @@ export async function main(argv: string[], options?: MainOptions) {
 				}
 			}
 
-			const created = await createAgentSessionFromServices({
+			const created = await createUnstartedAgentSessionFromServices({
 				services,
 				sessionManager,
 				sessionStartEvent,

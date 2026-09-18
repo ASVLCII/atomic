@@ -1,6 +1,7 @@
 import type { Api, Model } from "@bastani/pi-ai/compat";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession } from "./agent-session.js";
+import type { ExtensionBindings } from "./agent-session-types.ts";
 import type {
 	LoadExtensionsResult,
 	OrchestrationContext,
@@ -79,6 +80,8 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Host bindings installed before extension startup. Rebinding does not replay startup. */
+	extensionBindings?: ExtensionBindings;
 	/** Session-scoped orchestration policy exposed to extension/tool handlers. */
 	orchestrationContext?: OrchestrationContext;
 	/** Typed capability policy for an in-process subagent child. */

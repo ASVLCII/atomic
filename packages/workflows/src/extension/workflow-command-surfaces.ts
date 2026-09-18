@@ -117,13 +117,3 @@ export function formatStartupDiagnostics(
 		...(remaining > 0 ? [`- … ${remaining} more`] : []),
 	].join("\n");
 }
-
-const ASK_USER_QUESTION_TOOL_NAME = "ask_user_question";
-
-export function deAdvertiseAskUserQuestionWhenHeadless(pi: ExtensionAPI, hasUI: boolean | undefined): void {
-	if (hasUI !== false) return;
-	if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
-	const activeTools = pi.getActiveTools();
-	if (!activeTools.includes(ASK_USER_QUESTION_TOOL_NAME)) return;
-	pi.setActiveTools(activeTools.filter((toolName) => toolName !== ASK_USER_QUESTION_TOOL_NAME));
-}

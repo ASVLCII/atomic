@@ -112,6 +112,8 @@ test("SDK transactional reload retains the new reporter through retiring shutdow
 		});
 		const sessionManager = SessionManager.create(fake.dir, fake.dir);
 		const { session } = await createAgentSession({
+			// #3105: startup observers receive the host at factory creation, not by replaying startup.
+			extensionBindings: { mode: "tui", uiContext: { ...noOpUIContext } },
 			cwd: fake.dir,
 			agentDir: fake.dir,
 			resourceLoader,
@@ -361,6 +363,7 @@ test.each(["prepareCommit", "extendResources", "publishProviders"] as const)(
 			});
 			const sessionManager = SessionManager.create(fake.dir, fake.dir);
 			const { session } = await createAgentSession({
+				extensionBindings: { mode: "tui", uiContext: { ...noOpUIContext } },
 				cwd: fake.dir,
 				agentDir: fake.dir,
 				resourceLoader,

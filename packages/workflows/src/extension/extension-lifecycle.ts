@@ -11,7 +11,7 @@ import type { WorkflowExtensionRuntimeState } from "./extension-runtime-state.js
 import { resetWorkflowHilAnswerNotificationState } from "./hil-answer-notifications.js";
 import { resetWorkflowLifecycleNotificationState } from "./lifecycle-notifications.js";
 import type { ExtensionAPI } from "./public-types.js";
-import { deAdvertiseAskUserQuestionWhenHeadless, formatStartupDiagnostics } from "./workflow-command-surfaces.js";
+import { formatStartupDiagnostics } from "./workflow-command-surfaces.js";
 import { inFlightRunCount } from "./workflow-targets.js";
 
 let processShutdownInstalled = false;
@@ -102,7 +102,6 @@ export function registerWorkflowLifecycleHandlers(pi: ExtensionAPI, deps: Workfl
 				? (event as { readonly reason?: string }).reason
 				: undefined;
 		runtimeState.resetWorkflowDiscoveryForSession();
-		deAdvertiseAskUserQuestionWhenHeadless(pi, ctx?.hasUI);
 		await runtimeState.ensureWorkflowConfigLoaded();
 		if (replacementStopsWorkflows(reason)) {
 			killAllRuns({ store, cancellation: cancellationRegistry, persistence: runtimeState.persistenceRef.current });
