@@ -2512,10 +2512,9 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
-		// Match Atomic's kimi.com endpoint after models.dev split the regional coding plans.
-		const kimiCoding = data["kimi-code-plan-cn"] ?? data["kimi-for-coding"];
-		if (kimiCoding?.models) {
-			const kimiModels = kimiCoding.models as Record<string, ModelsDevModel>;
+		// The .com coding plan was renamed in models.dev; retain our existing provider and transport.
+		const kimiModels = data["kimi-code-plan-cn"]?.models ?? data["kimi-for-coding"]?.models;
+		if (kimiModels) {
 			const hasCanonicalModel = Object.prototype.hasOwnProperty.call(kimiModels, "kimi-for-coding");
 
 			const kimiAliases = new Set(["k2p5", "k2p6", "k2p7"]);
