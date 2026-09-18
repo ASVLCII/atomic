@@ -1244,3 +1244,85 @@ test("SDK rejects adapters without every required method", async () => {
 		await assert.rejects(hostSession({ humanInput: humanInput as never }), { code: "InvalidHostInput" });
 	}
 });
+
+// #3105: array holes must not bypass the questionnaire's runtime schema.
+test("SDK questionnaire rejects sparse answers and selections", async () => {
+	const params: QuestionParams = {
+		questions: [
+			{
+				question: "Choose?",
+				header: "",
+				multiSelect: true,
+				options: [
+					{ label: " A ", description: "" },
+					{ label: "B", description: "" },
+				],
+			},
+		],
+	};
+	for (const answers of [
+		Array(1),
+		[{ questionIndex: 0, question: "Choose?", kind: "multi", answer: null, selected: Array(1) }],
+	]) {
+		const fixture = await hostSession({
+			humanInput: callbackHost({ questionnaire: async () => ({ cancelled: false, answers }) }),
+		});
+		try {
+			const tool = fixture.session.agent.state.tools.find((entry) => entry.name === "ask_user_question")!;
+			await assert.rejects(tool.execute("sparse", params, new AbortController().signal), {
+				code: "InvalidHostInput",
+			});
+		} finally {
+			fixture.close();
+		}
+	}
+});
+
+// #3105: malformed accessor failures settle and release the owning request, not a detached promise.
+test("SDK questionnaire settles throwing reply validation and releases the request", async () => {
+	let identity!: HostInputOptions;
+	let malformed = true;
+	const valid: QuestionnaireResult = {
+		cancelled: false,
+		answers: [{ questionIndex: 0, question: "Choose?", kind: "option", answer: " A " }],
+	};
+	const fixture = await hostSession({
+		humanInput: callbackHost({
+			questionnaire: async (_params, options) => {
+				identity = options;
+				return malformed
+					? {
+							cancelled: false,
+							get answers(): QuestionnaireResult["answers"] {
+								throw new Error("broken reply accessor");
+							},
+						}
+					: valid;
+			},
+		}),
+	});
+	try {
+		const tool = fixture.session.agent.state.tools.find((entry) => entry.name === "ask_user_question")!;
+		const params: QuestionParams = {
+			questions: [
+				{
+					question: "Choose?",
+					header: "",
+					options: [
+						{ label: " A ", description: "" },
+						{ label: "B", description: "" },
+					],
+				},
+			],
+		};
+		await assert.rejects(tool.execute("throwing", params, new AbortController().signal), {
+			code: "InvalidHostInput",
+		});
+		await fixture.session.abort();
+		assert.equal(identity.signal.aborted, false, "settled request is no longer pending during abort");
+		malformed = false;
+		assert.equal((await tool.execute("valid", params, new AbortController().signal)).details, valid);
+	} finally {
+		fixture.close();
+	}
+}, 1000);

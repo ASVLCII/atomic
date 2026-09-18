@@ -67,3 +67,18 @@ D workflow durable gates, E child inheritance, F awaited disposal and replacemen
 - "and there is no addressable greptile feedback"
 
 The parent owns one cumulative PR after all slices, exact-head green CI and resolution of actionable Greptile feedback before conditional merge. This child does not push, create PRs or merge.
+
+## Review round 2 repair
+
+The six blocking reports from completion, evidence and risk reviewers group into two defects. Both are resolved locally; the previous claim of complete malformed-reply validation was incomplete.
+
+| Grouped finding | Root cause and repair | Durable evidence |
+| --- | --- | --- |
+| Sparse answers and selected labels bypass validation | Array every/some skip holes. Iterate dense validation-only copies, retaining the original response object and raw values. | `SDK questionnaire rejects sparse answers and selections` fails before repair with formatter TypeError and passes after; built Node fixture rejects both with InvalidHostInput. |
+| Throwing reply accessors escape owned settlement | The response continuation could throw into an ignored promise. Catch validator exceptions and reject the owning request with InvalidHostInput, allowing its existing finally cleanup. | `SDK questionnaire settles throwing reply validation and releases the request` fails before with timeout/unhandled rejection and passes after. It verifies released request signal remains un-aborted on subsequent session abort and the next valid reply retains object identity. The Node fixture catches InvalidHostInput and exits normally without an unhandled-rejection handler. |
+
+Round 2 reran every build/check/test command in the validation list above, using `/tmp/sdk-c-r2-` log prefixes: `build`, `check`, `package`, `runtime`, `scroll`, `root`, `questionnaire`, `preview`, and `node`. Build/check passed. Package suites passed 120 + 20 + 76 tests; root suites passed 19 + 107 + 12 tests. Total: **354 tests across 29 files, none skipped in acceptance runs**. Targeted red/green runs use name filters only during diagnosis, not as acceptance substitutes.
+
+`node test/fixtures/sdk-host-input-consumer.mjs` passed with zero stdout/stderr and normal process exit. The fixture also failed against the pre-repair built code (`/tmp/sdk-c-r2-node-red.log`). Reviewer probes reproduced sparse answer TypeError, accepted sparse selections and accessor-induced Node exit 1 before repair (`/tmp/sdk-c-r2-sparse-before.log`, `/tmp/sdk-c-r2-throw-before.log`). SDK red/green logs are `/tmp/sdk-c-r2-sparse-red.log`, `/tmp/sdk-c-r2-sparse-green.log`, `/tmp/sdk-c-r2-throw-red.log`, `/tmp/sdk-c-r2-green.log`.
+
+`qlty metrics --functions packages/coding-agent/src/core/extensions/host-input.ts` and `qlty smells packages/coding-agent/src/core/extensions/host-input.ts` completed with existing configuration unchanged; logs `/tmp/sdk-c-r2-qlty-{metrics,smells}.log`. Request complexity increased from 21 to 24 for the explicit exception boundary; questionnaire validation remains 22. The prior combined-suite beforeExit listener warning remains, and the standalone Node fixture remains silent. No unrelated cleanup, D–H work or external publication was performed. Existing guide and Unreleased validation guidance remain accurate and need no further change. Only this repair's resolved ISSUES.md section was removed; inherited entries remain untouched.

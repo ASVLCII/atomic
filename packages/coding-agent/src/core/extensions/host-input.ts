@@ -163,8 +163,12 @@ export class HostInputBridge {
 			if (controller.signal.aborted) onAbort();
 			response.then((value) => {
 				if (controller.signal.aborted) return;
-				if (!valid(value)) reject(hostInputError("InvalidHostInput"));
-				else resolve(value);
+				try {
+					if (!valid(value)) reject(hostInputError("InvalidHostInput"));
+					else resolve(value);
+				} catch {
+					reject(hostInputError("InvalidHostInput"));
+				}
 			}, reject);
 		});
 		return result.finally(cleanup);
@@ -192,7 +196,7 @@ function validQuestionnaire(value: QuestionnaireResult, params: QuestionParams):
 	)
 		return false;
 	const seen = new Set<number>();
-	return value.answers.every((answer) => {
+	return Array.from(value.answers).every((answer) => {
 		if (
 			!answer ||
 			typeof answer !== "object" ||
@@ -209,7 +213,7 @@ function validQuestionnaire(value: QuestionnaireResult, params: QuestionParams):
 		if (
 			answer.selected !== undefined &&
 			(!Array.isArray(answer.selected) ||
-				answer.selected.some(
+				Array.from(answer.selected).some(
 					(label) => typeof label !== "string" || !question.options.some((option) => option.label === label),
 				))
 		)

@@ -38,6 +38,19 @@ try {
 	const params = { questions: [{ question: "Choose?", header: "Choice", options: [{ label: "A", description: "" }, { label: "B", description: "" }] }] };
 	const result = await tool.execute("node-question", params, new AbortController().signal);
 	assert.equal(result.details.answers[0].answer, "  raw text\n");
+	// Malformed host accessors must reject the owned tool call without crashing Node.
+	for (const reply of [
+		{ cancelled: false, answers: Array(1) },
+		{ cancelled: false, answers: [{ questionIndex: 0, question: "Choose?", kind: "multi", answer: null, selected: Array(1) }] },
+		{ cancelled: false, get answers() { throw new Error("broken reply accessor"); } },
+	]) {
+		let request;
+		await session.bindExtensions({ humanInput: { ...host, questionnaire: async (_params, options) => { request = options; return reply; } } });
+		await assert.rejects(tool.execute("malformed", { questions: [{ ...params.questions[0], multiSelect: true }] }, new AbortController().signal), { code: "InvalidHostInput" });
+		await session.abort();
+		assert.equal(request.signal.aborted, false, "failed validation released its request");
+	}
+	await session.bindExtensions({ humanInput: host });
 	const pending = context.ui.confirm("Approve?", "Effect");
 	const refused = assert.rejects(pending, { code: "HumanInputCancelled" });
 	await session.abort();
