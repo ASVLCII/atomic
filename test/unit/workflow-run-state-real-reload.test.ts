@@ -1,8 +1,7 @@
 /**
- * Real second evaluation of the workflows module graph over one shared host
- * scope. `/reload` re-evaluates that graph through jiti (`tryNative: false`,
- * `atomicExtensionCache` bust, `moduleCache: false`) while the session event
- * bus stays put; this file drives that same host loader, not a stub of it.
+ * Real second evaluation of the workflows module graph over one explicit host
+ * lifecycle scope. `/reload` re-evaluates that graph through jiti while retaining
+ * ownership; a shared bus alone must never imply this internal transfer (#3105).
  */
 
 import assert from "node:assert/strict";
@@ -22,6 +21,7 @@ import type {
 	ExtensionFactory,
 	ExtensionRuntime,
 } from "../../packages/coding-agent/src/core/extensions/types.ts";
+import { sessionLifecycleScopes } from "../../packages/coding-agent/src/core/session-lifecycle-scope.ts";
 import type { DurableWorkflowBackend } from "../../packages/workflows/src/durable/backend.ts";
 import type { ToolControlRegistry } from "../../packages/workflows/src/engine/run-tool-control-registry.ts";
 import type { CancellationRegistry } from "../../packages/workflows/src/runs/background/cancellation-registry.ts";
@@ -338,8 +338,10 @@ async function releaseAndSettleGlobalReloadJobs(
 	await Promise.allSettled(jobs);
 }
 
-function createHostRuntime(): ReturnType<typeof createExtensionRuntime> {
+function createHostRuntime(scope: object): ReturnType<typeof createExtensionRuntime> {
 	const runtime = createExtensionRuntime();
+	// Model the explicit owner transfer performed by DefaultResourceLoader.prepareReload.
+	sessionLifecycleScopes.set(runtime, scope);
 	Object.assign(runtime, {
 		sendMessage: () => undefined,
 		sendMessages: () => undefined,
@@ -472,6 +474,7 @@ test(
 	"a second evaluation of the workflows module graph over one host scope sees and controls the first generation's run state",
 	async () => {
 		const bus = createEventBus();
+		const scope = {};
 		const widget = createWidgetUi();
 		let resolveCallback: (() => void) | undefined;
 		let callbackSettlements = 0;
@@ -481,7 +484,7 @@ test(
 			callbackSettlements += 1;
 		});
 		const first = await evaluateWorkflowGraph();
-		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createHostRuntime(scope));
 		await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, { hasUI: true, ui: widget.ui });
 		const ids = {
 			runId: "reload-run",
@@ -499,7 +502,7 @@ test(
 		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
 		const second = await evaluateWorkflowGraph();
 		assert.notEqual(second.store, first.store, "each evaluation holds its own facade");
-		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createHostRuntime(scope));
 		await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, { hasUI: true, ui: widget.ui });
 		const secondFactory = widget.calls.findLast((call) => call.factory !== undefined);
 		assert.ok(secondFactory?.factory, "the replacement generation must remount the active run");
@@ -558,6 +561,7 @@ test.sequential(
 
 		try {
 			const bus = trackedBus.bus;
+			const scope = {};
 			const widget = createWidgetUi();
 			const context = { hasUI: true, sessionId: "active-chat-turn", ui: widget.ui };
 			const first = await evaluateInstalledWorkflowGraph();
@@ -566,7 +570,7 @@ test.sequential(
 			const durableBackend = first.createInMemoryTestBackend();
 			first.setDurableBackend(durableBackend);
 			firstGeneration = first;
-			const firstRuntime = createHostRuntime();
+			const firstRuntime = createHostRuntime(scope);
 			runtimes.push(firstRuntime);
 			firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, firstRuntime);
 			await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, context);
@@ -666,7 +670,7 @@ test.sequential(
 			const second = await evaluateInstalledWorkflowGraph();
 			second.setDurableBackend(durableBackend);
 			secondGeneration = second;
-			const secondRuntime = createHostRuntime();
+			const secondRuntime = createHostRuntime(scope);
 			runtimes.push(secondRuntime);
 			secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, secondRuntime);
 			await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, context);
@@ -858,7 +862,7 @@ test(
 		const scopeA = createEventBus();
 		const scopeB = createEventBus();
 		const first = await evaluateWorkflowGraph();
-		await loadExtensionFromFactory(first.factory, repoRoot, scopeA, createExtensionRuntime());
+		await loadExtensionFromFactory(first.factory, repoRoot, scopeA, createHostRuntime(scopeA));
 		recordGenerationState(first, {
 			runId: "scope-a",
 			stageId: "stage-a",
@@ -868,12 +872,12 @@ test(
 		});
 
 		const second = await evaluateWorkflowGraph();
-		await loadExtensionFromFactory(second.factory, repoRoot, scopeB, createExtensionRuntime());
+		await loadExtensionFromFactory(second.factory, repoRoot, scopeB, createHostRuntime(scopeB));
 		assert.equal(second.store.runs().length, 0, "scope B must not see scope A's run");
 		assert.equal(second.jobTracker.has("scope-a"), false);
 
 		const rebound = await evaluateWorkflowGraph();
-		await loadExtensionFromFactory(rebound.factory, repoRoot, scopeA, createExtensionRuntime());
+		await loadExtensionFromFactory(rebound.factory, repoRoot, scopeA, createHostRuntime(scopeA));
 		assert.equal(rebound.store.runs()[0]?.id, "scope-a");
 		assert.equal(rebound.jobTracker.has("scope-a"), true);
 	},
@@ -884,8 +888,9 @@ test(
 	"facade-forwarded methods keep their class receiver",
 	async () => {
 		const bus = createEventBus();
+		const scope = {};
 		const first = await evaluateWorkflowGraph();
-		await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		await loadExtensionFromFactory(first.factory, repoRoot, bus, createHostRuntime(scope));
 		const controller = new AbortController();
 		first.cancellationRegistry.register("receiver-run", controller);
 		first.jobTracker.register({
@@ -894,7 +899,7 @@ test(
 			promise: Promise.resolve(),
 		});
 		const second = await evaluateWorkflowGraph();
-		await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		await loadExtensionFromFactory(second.factory, repoRoot, bus, createHostRuntime(scope));
 		const { register, isAborted, abort } = second.cancellationRegistry;
 		const { has, get } = second.jobTracker;
 		assert.equal(isAborted("receiver-run"), false);
@@ -914,7 +919,7 @@ test("every run-scoped singleton key carries an explicit version suffix", async 
 	}
 	const factorySource = await readText(join(workflowsSrc, "extension/extension-factory.ts"));
 	const childGuard = factorySource.indexOf("if (pi.subagentPolicy !== undefined) return;");
-	const adoption = factorySource.indexOf("adoptWorkflowSessionRunState(pi.events);");
+	const adoption = factorySource.indexOf("adoptWorkflowSessionRunState(pi.lifecycleScope ?? pi.events");
 	const adapters = factorySource.indexOf("const adapters = buildRuntimeAdapters(pi);");
 	assert.ok(childGuard >= 0 && childGuard < adoption, "factory must reject child sessions before adopting run state");
 	assert.ok(adoption < adapters, "factory must adopt host run state before building adapters");
@@ -924,9 +929,10 @@ test(
 	"repeated extension reload preserves pending input identity and answer clearing",
 	async () => {
 		const bus = createEventBus();
+		const scope = {};
 		const widget = createWidgetUi();
 		const first = await evaluateWorkflowGraph();
-		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createHostRuntime(scope));
 		await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, { hasUI: true, ui: widget.ui });
 		const runId = "reload-hil-run";
 		first.store.recordRunStart({
@@ -956,7 +962,7 @@ test(
 
 		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
 		const second = await evaluateWorkflowGraph();
-		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createHostRuntime(scope));
 		await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, { hasUI: true, ui: widget.ui });
 		assert.equal(second.store.runs()[0]?.id, runId);
 		assert.deepEqual(second.store.runs()[0]?.stages[0]?.pendingPrompt?.id, "reload-prompt");
@@ -980,9 +986,10 @@ test(
 	"transactional /reload remounts pending input after predecessor shutdown",
 	async () => {
 		const bus = createEventBus();
+		const scope = {};
 		const widget = createWidgetUi();
 		const first = await evaluateWorkflowGraph();
-		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createExtensionRuntime());
+		const firstExtension = await loadExtensionFromFactory(first.factory, repoRoot, bus, createHostRuntime(scope));
 		await emitSessionEvent(firstExtension, "session_start", { reason: "startup" }, { hasUI: true, ui: widget.ui });
 		const runId = "reload-hil-run-tx";
 		first.store.recordRunStart({
@@ -1004,7 +1011,7 @@ test(
 		);
 
 		const second = await evaluateWorkflowGraph();
-		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createExtensionRuntime());
+		const secondExtension = await loadExtensionFromFactory(second.factory, repoRoot, bus, createHostRuntime(scope));
 		await emitSessionEvent(secondExtension, "session_start", { reason: "reload" }, { hasUI: true, ui: widget.ui });
 		await emitSessionEvent(firstExtension, "session_shutdown", { reason: "reload" });
 		await Promise.resolve();

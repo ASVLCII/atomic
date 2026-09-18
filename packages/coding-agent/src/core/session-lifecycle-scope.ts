@@ -9,13 +9,13 @@ export interface SessionLifecycleContext {
 }
 export const sessionLifecycleCreation = new AsyncLocalStorage<SessionLifecycleContext>();
 export const sessionLifecycleScopes = new WeakMap<object, object>();
-const busScopes = new WeakMap<object, object>();
 
-export function lifecycleScopeForBus(bus: object): object {
-	let scope = busScopes.get(bus);
+/** Communication transports may be borrowed; only runtime/loader identities own a lifetime. */
+export function lifecycleScopeForOwner(owner: object): object {
+	let scope = sessionLifecycleScopes.get(owner);
 	if (!scope) {
 		scope = sessionLifecycleCreation.getStore()?.scope ?? {};
-		busScopes.set(bus, scope);
+		sessionLifecycleScopes.set(owner, scope);
 	}
 	return scope;
 }

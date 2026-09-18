@@ -15,8 +15,10 @@ import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.t
 import {
 	abortSessionWork,
 	drainSessionWork,
+	hasSessionReload,
 	renewSessionWork,
 	sessionGenerationClosing,
+	trackSessionReload,
 } from "./session-lifecycle-work.ts";
 import { completeStartup, rollbackStartup } from "./session-startup-rollback.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
@@ -28,6 +30,7 @@ class ExtensionPublicationGate {
 	private readonly startEffects: Array<() => void | Promise<void>> = [];
 	readonly providerTransaction: ExtensionProviderTransaction;
 	readonly providerIds = new Set<string>();
+	private readonly isClosed: () => boolean;
 	private readonly runner: ExtensionRunner;
 	private discarded = false;
 
@@ -35,8 +38,10 @@ class ExtensionPublicationGate {
 		resourceLoader: ResourceLoader,
 		runner: ExtensionRunner,
 		modelRuntime: ModelRuntime,
+		isClosed: () => boolean,
 		replacedProviderIds: Iterable<string>,
 	) {
+		this.isClosed = isClosed;
 		this.resourceLoader = resourceLoader;
 		this.runner = runner;
 		this.providerTransaction = modelRuntime.createExtensionProviderTransaction(replacedProviderIds);
@@ -69,12 +74,14 @@ class ExtensionPublicationGate {
 	}
 
 	private async publish(effects: Array<() => void | Promise<void>>): Promise<void> {
+		if (this.isClosed()) throw hostInputError("SessionClosed");
 		for (const effect of effects.splice(0)) {
 			try {
 				await effect();
 			} catch (error) {
 				this.report(error, "session_start");
 			}
+			if (this.isClosed()) throw hostInputError("SessionClosed");
 		}
 	}
 
@@ -475,15 +482,20 @@ export function _bindExtensionCore(
 }
 
 export async function reload(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
-	if (this._disposed || sessionGenerationClosing.has(this)) throw hostInputError("SessionClosed");
+	if (this._disposed || sessionGenerationClosing.has(this) || hasSessionReload(this))
+		throw hostInputError("SessionClosed");
 	sessionGenerationClosing.add(this);
+	return trackSessionReload(this, () => reloadAdmitted.call(this, options));
+}
+
+async function reloadAdmitted(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
 	try {
 		abortSessionWork(this);
 		this.abortBash();
 		this._extensionRunner.cancelHostInput();
 		if (this.isStreaming || this._activePromptCount > 0) await this.abort();
 		await this.closeSessionTasks();
-		await drainSessionWork(this);
+		await drainSessionWork(this, true);
 		renewSessionWork(this);
 		replaceSessionTaskOwner(this);
 		if (this._disposed) throw hostInputError("SessionClosed");
@@ -513,10 +525,12 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		resetApiProviders();
 		await this._resourceLoader.reload();
 		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
+		if (this._disposed) throw hostInputError("SessionClosed");
 		await options?.beforeSessionStart?.();
 		if (this._disposed) throw hostInputError("SessionClosed");
 		sessionGenerationClosing.delete(this);
 		await startExtensions(this, this._extensionRunner, this._resourceLoader, { type: "session_start", reason });
+		if (this._disposed) throw hostInputError("SessionClosed");
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 		return;
@@ -525,9 +539,6 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 	const settingsTransaction = await this.settingsManager.prepareReload();
 	const resourceTransaction = await prepareResourceReload(settingsTransaction.settingsManager);
 	const errors = resourceTransaction.loader.getExtensions().errors;
-	if (options?.failOnExtensionErrors && errors.length > 0) {
-		throw new Error(`Failed to load extensions: ${errors.map(({ path, error }) => `${path}: ${error}`).join("; ")}`);
-	}
 	const extensionsResult = resourceTransaction.loader.getExtensions();
 	for (const [name, value] of previousFlagValues) {
 		extensionsResult.runtime.flagValues.set(name, value);
@@ -547,6 +558,7 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		resourceTransaction.loader,
 		candidateRunner,
 		this._modelRuntime,
+		() => this._disposed,
 		this._extensionProviderIds,
 	);
 	let commitPreparedResources: (() => void) | undefined;
@@ -561,18 +573,40 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		candidateRunner.setUIContext(this._extensionUIContext, this._extensionMode);
 		candidateRunner.bindCommandContext(this._extensionCommandContextActions);
 		candidateRunner.bindChildSessionOptions(this._childSessionOptions);
+		if (options?.failOnExtensionErrors && errors.length > 0)
+			throw new Error(
+				`Failed to load extensions: ${errors.map(({ path, error }) => `${path}: ${error}`).join("; ")}`,
+			);
+		if (this._disposed) throw hostInputError("SessionClosed");
 		await options?.beforeSessionStart?.();
+		if (this._disposed) throw hostInputError("SessionClosed");
 		await startExtensions(this, candidateRunner, resourceTransaction.loader, { type: "session_start", reason });
+		if (this._disposed) throw hostInputError("SessionClosed");
 		const preparedResources = resourceTransaction.prepareCommit?.();
 		if (preparedResources) {
 			commitPreparedResources = () => preparedResources.commit();
 			rollbackPreparedResources = () => preparedResources.rollback();
 		}
 		await publication.publishProviders();
+		if (this._disposed) throw hostInputError("SessionClosed");
 	} catch (error) {
-		rollbackPreparedResources?.();
-		publication.discard();
-		candidateRunner.invalidate();
+		const failures: unknown[] = [];
+		for (const cleanup of [
+			() => rollbackPreparedResources?.(),
+			() => publication.discard(),
+			() => emitSessionShutdownEvent(candidateRunner, { type: "session_shutdown", reason: "reload" }),
+			() => candidateRunner.invalidate(),
+		]) {
+			try {
+				await cleanup();
+			} catch (failure) {
+				failures.push(failure);
+			}
+		}
+		if (failures.length)
+			throw Object.assign(new AggregateError([error, ...failures], "Reload rollback failed"), {
+				code: "ShutdownFailed",
+			});
 		throw error;
 	}
 

@@ -3,7 +3,7 @@ import type { KeyId } from "@earendil-works/pi-tui";
 import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "../event-bus.js";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
-import { lifecycleScopeForBus, sessionLifecycleScopes } from "../session-lifecycle-scope.ts";
+import { lifecycleScopeForOwner } from "../session-lifecycle-scope.ts";
 import {
 	emptyWorkflowResourceProvider,
 	normalizeWorkflowResourceProvider,
@@ -71,8 +71,7 @@ export function createExtensionAPI(
 		},
 	};
 	registerCanonicalEventBus(events, canonicalEventBusFor(eventBus));
-	const lifecycleScope = sessionLifecycleScopes.get(runtime) ?? lifecycleScopeForBus(canonicalEventBusFor(eventBus));
-	sessionLifecycleScopes.set(runtime, lifecycleScope);
+	const lifecycleScope = lifecycleScopeForOwner(runtime);
 	const api = {
 		lifecycleScope,
 		registerWorkflowActivityPublisher() {

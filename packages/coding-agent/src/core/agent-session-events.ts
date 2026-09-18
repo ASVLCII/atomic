@@ -35,7 +35,7 @@ import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./extensions/stale-context.ts";
 import type { SessionShutdownEvent } from "./extensions/types.ts";
 import type { StageAdmittedCustomMessage } from "./messages.ts";
 import { normalizeMessageContent } from "./messages.ts";
-import { abortSessionWork, drainSessionWork } from "./session-lifecycle-work.ts";
+import { abortSessionWork, drainSessionReload, drainSessionWork } from "./session-lifecycle-work.ts";
 
 export function _emit(this: AgentSession, event: AgentSessionEvent): void {
 	for (const l of this._eventListeners) {
@@ -542,6 +542,7 @@ export function closeAgentSession(
 		await attempt("lifetime", () => abortSessionWork(session));
 		await attempt("shell abort", () => abortBash.call(session));
 		await attempt("abort", () => abortCurrentGeneration.call(session));
+		await attempt("reload rollback", () => drainSessionReload(session));
 		await attempt("tasks", () => session.closeSessionTasks());
 		await attempt("summary", () => session.abortSessionSummary());
 		await attempt("active work", () => drainSessionWork(session));

@@ -245,6 +245,8 @@ interface AgentSession {
 
 Always `await session.dispose()` in `finally`. Disposal immediately refuses new work, cancels and drains owned operations, settles questions, shuts down extensions and releases session leases. Repeated calls await the same outcome. A `ShutdownFailed` error contains component failures in `errors`; cleanup still attempts the remaining components. Caller-supplied managers and model runtimes remain borrowed, and other sessions remain usable. `abort()` cancels current work without destroying the session.
 
+Disposal also waits for already-admitted prompt hooks and reload preparation. Ensure your extension and `beforeSessionStart` callbacks settle; a pending callback is not completed cleanup. A callback released after shutdown begins cannot start a provider turn or publish a reload candidate. Separate resource loaders may share an `eventBus` without sharing workflow ownership; closing one session leaves its sibling's pending workflows alone.
+
 `compact()` serializes older context to numbered lines, asks the session model for JSON deleted ranges, validates them, and mechanically reconstructs a durable verbatim transcript string. It appends a `compaction` entry with `details.strategy: "verbatim-lines"`; the recent tail remains ordinary messages. The model never authors replacement context text.
 
 `session.navigateTree()` rejects during streaming, compaction, or branch summarization rather than queueing the navigation. The active branch stays unchanged. Wait for the operation to finish before retrying.

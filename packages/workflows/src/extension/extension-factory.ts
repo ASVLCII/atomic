@@ -93,7 +93,7 @@ function factory(pi: ExtensionAPI): void {
 	// A child AgentSession is not a workflow owner. Loading this lifecycle there
 	// would rebind process-shared run state away from the parent host session.
 	if (pi.subagentPolicy !== undefined) return;
-	adoptWorkflowSessionRunState(pi.events, pi.lifecycleScope !== undefined);
+	adoptWorkflowSessionRunState(pi.lifecycleScope ?? pi.events, pi.lifecycleScope !== undefined);
 	const store = currentWorkflowStore();
 	const owner = captureWorkflowOwnerResources();
 	let disposeObservation: (() => void) | undefined;

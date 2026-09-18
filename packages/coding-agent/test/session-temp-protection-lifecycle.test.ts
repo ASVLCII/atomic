@@ -160,7 +160,8 @@ describe("AgentSession storage protection", () => {
 
 		assert.equal(getProtectedSessionTempDirs().has(tempDir), true, "a live session protects its temp tree");
 
-		session.dispose();
+		// #3105: the protection lease lasts through awaited persistence and cleanup.
+		await session.dispose();
 
 		assert.equal(getProtectedSessionTempDirs().has(tempDir), false, "a disposed session protects nothing");
 	});
@@ -172,7 +173,7 @@ describe("AgentSession storage protection", () => {
 
 		assert.equal(getProtectedSessionTempDirs().has(toolResults), true);
 
-		session.dispose();
+		await session.dispose();
 
 		assert.equal(getProtectedSessionTempDirs().has(toolResults), false);
 	});
@@ -183,7 +184,7 @@ describe("AgentSession storage protection", () => {
 		const incoming = await createSession(sessionDir);
 		const toolResults = join(sessionDir, TOOL_RESULTS_SUBDIR);
 
-		outgoing.dispose();
+		await outgoing.dispose();
 
 		assert.equal(
 			getProtectedSessionTempDirs().has(toolResults),
@@ -191,7 +192,7 @@ describe("AgentSession storage protection", () => {
 			"the replacement still holds its own claim on the shared directory",
 		);
 
-		incoming.dispose();
+		await incoming.dispose();
 		assert.equal(getProtectedSessionTempDirs().has(toolResults), false);
 	});
 });

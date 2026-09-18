@@ -28,6 +28,7 @@ import type {
 	ResourceLoaderReloadOptions,
 	ResourceLoaderReloadTransaction,
 } from "./resource-loader-types.ts";
+import { lifecycleScopeForOwner, sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { type PackageSource, SettingsManager } from "./settings-manager.ts";
 import { buildSkillCatalog, type SkillCatalog } from "./skill-catalog.ts";
 import type { Skill } from "./skills.ts";
@@ -296,11 +297,16 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	async loadProjectTrustExtensions(): Promise<LoadExtensionsResult> {
-		return loadProjectTrustExtensions(this);
+		return sessionLifecycleCreation.run({ scope: lifecycleScopeForOwner(this), claimed: true }, () =>
+			loadProjectTrustExtensions(this),
+		);
 	}
 
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
-		return reloadDefaultResourceLoader(this, options);
+		return sessionLifecycleCreation.run({ scope: lifecycleScopeForOwner(this), claimed: true }, async () => {
+			await reloadDefaultResourceLoader(this, options);
+			lifecycleScopeForOwner(this.getExtensions().runtime);
+		});
 	}
 	async prepareReload(
 		settingsManager: SettingsManager,
@@ -339,6 +345,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 						: [...this.trustedBorrowedProjectLocalSources],
 			},
 		});
+		sessionLifecycleScopes.set(candidate, lifecycleScopeForOwner(this));
 		await candidate.reload(options);
 		const prepareCommit = () => {
 			const eventBusCommit = eventBusTransaction.prepareCommit();

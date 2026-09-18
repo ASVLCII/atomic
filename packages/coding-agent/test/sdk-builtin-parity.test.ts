@@ -1801,3 +1801,355 @@ test("public disposal cancels a queued child without dispatching it", async () =
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: a shared communication bus is not a shared lifecycle owner.
+test("independent loaders sharing an event bus retain distinct scopes across reload", async () => {
+	const { createEventBus } = await import("../src/core/event-bus.ts");
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-shared-bus-"));
+	const eventBus = createEventBus();
+	const scopes: object[][] = [[], []];
+	const sessions: AgentSession[] = [];
+	try {
+		for (const ownerScopes of scopes) {
+			const settingsManager = SettingsManager.inMemory();
+			const resourceLoader = new DefaultResourceLoader({
+				cwd,
+				agentDir: join(cwd, "agent"),
+				settingsManager,
+				eventBus,
+				noExtensions: true,
+				extensionFactories: [
+					(pi) => {
+						ownerScopes.push(pi.lifecycleScope!);
+					},
+				],
+			});
+			await resourceLoader.reload();
+			const { session } = await createAgentSession({
+				cwd,
+				agentDir: join(cwd, "agent"),
+				settingsManager,
+				resourceLoader,
+				sessionManager: SessionManager.inMemory(cwd),
+				builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			});
+			sessions.push(session);
+		}
+		assert.notEqual(scopes[0]![0], scopes[1]![0]);
+		await sessions[0]!.reload();
+		assert.equal(scopes[0]![1], scopes[0]![0]);
+	} finally {
+		await Promise.all(sessions.map((session) => session.dispose()));
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: admitted callback work must settle before close; stale preflight cannot enter a provider.
+test.each(["input", "before_agent_start"] as const)("disposal drains suspended %s preflight", async (hook) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-preflight-close-"));
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const settingsManager = SettingsManager.inMemory();
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: null });
+	await modelRuntime.setRuntimeApiKey("anthropic", "fixture-key", {});
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on(hook, async () => {
+					entered.resolve();
+					await release.promise;
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		resourceLoader,
+		modelRuntime,
+		model: modelRuntime.getModels("anthropic")[0],
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	const provider = vi.spyOn(modelRuntime, "streamSimple").mockImplementation(() => {
+		throw new Error("provider sentinel");
+	});
+	const turn = session.prompt("verbatim  ");
+	const outcome = turn.then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	try {
+		await entered.promise;
+		let closed = false;
+		const closing = session.dispose().then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(closed, false, "pending callback is owned work, not completed cleanup");
+		release.resolve();
+		await closing;
+		assert.equal(((await outcome) as { code?: string })?.code, "SessionClosed");
+		assert.equal(provider.mock.calls.length, 0);
+	} finally {
+		release.resolve();
+		await outcome;
+		await session.dispose();
+		provider.mockRestore();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: both unstarted and partially started transactional candidates belong to close.
+test.each([
+	{ phase: "before", failure: "none" },
+	{ phase: "start", failure: "none" },
+	{ phase: "discover", failure: "none" },
+	{ phase: "old-shutdown", failure: "none" },
+	{ phase: "before", failure: "callback" },
+	{ phase: "start", failure: "callback" },
+	{ phase: "discover", failure: "cleanup" },
+] as const)("disposal drains reload suspended in $phase with $failure failure", async ({ phase, failure }) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-reload-close-"));
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const active = new Set<number>();
+	const stops: number[] = [];
+	let factories = 0;
+	const suspend = async () => {
+		entered.resolve();
+		await release.promise;
+		if (failure === "callback") throw new Error("callback rejected");
+	};
+	const settingsManager = SettingsManager.inMemory();
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++factories;
+				pi.on("session_start", async () => {
+					active.add(id);
+					if (id === 2 && phase === "start") await suspend();
+				});
+				pi.on("resources_discover", async () => {
+					if (id === 2 && phase === "discover") await suspend();
+				});
+				pi.on("session_shutdown", async () => {
+					active.delete(id);
+					stops.push(id);
+					if (id === 1 && phase === "old-shutdown") await suspend();
+					if (id === 2 && failure === "cleanup") throw new Error("candidate cleanup rejected");
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	const reload = session.reload({ beforeSessionStart: phase === "before" ? suspend : undefined });
+	const outcome = reload.then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	try {
+		await entered.promise;
+		let closed = false;
+		const closing = session.dispose().then(
+			() => {
+				closed = true;
+				return undefined;
+			},
+			(error: unknown) => {
+				closed = true;
+				return error;
+			},
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(closed, false);
+		release.resolve();
+		const closeError = await closing;
+		const reloadError = await outcome;
+		if (failure === "cleanup") {
+			assert.equal((closeError as { code?: string })?.code, "ShutdownFailed");
+			assert.equal((reloadError as { code?: string })?.code, "ShutdownFailed");
+			assert.match(String(reloadError), /Reload rollback failed/);
+		} else {
+			assert.equal(closeError, undefined);
+			if (failure === "none") assert.equal((reloadError as { code?: string })?.code, "SessionClosed");
+			else assert.ok(reloadError instanceof Error);
+		}
+		assert.equal(active.size, 0);
+		assert.equal(stops.filter((id) => id === 1).length, 1);
+		assert.equal(stops.filter((id) => id === 2).length, 1);
+		if (failure === "cleanup") await assert.rejects(session.dispose(), { code: "ShutdownFailed" });
+		else await session.dispose();
+	} finally {
+		release.resolve();
+		await outcome;
+		if (failure === "cleanup") await assert.rejects(session.dispose(), { code: "ShutdownFailed" });
+		else await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: tracking admitted prompts must not deadlock a reload invoked by their slash command.
+test("an admitted slash command can reload without waiting on its own prompt", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-command-reload-"));
+	const settingsManager = SettingsManager.inMemory();
+	let session!: AgentSession;
+	let starts = 0;
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_start", () => {
+					starts++;
+				});
+				pi.registerCommand("reload-self", {
+					description: "Reload this fixture",
+					handler: async () => {
+						await session.reload();
+					},
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	({ session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	}));
+	try {
+		await session.prompt("/reload-self");
+		assert.equal(starts, 2);
+		await session.prompt("/reload-self");
+		assert.equal(starts, 3);
+	} finally {
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: a settled rollback failure is still failed cleanup, not forgotten when close starts later.
+test("disposal retains a reload candidate cleanup failure after reload has rejected", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-rollback-failure-"));
+	const settingsManager = SettingsManager.inMemory();
+	let factories = 0;
+	const stops: number[] = [];
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++factories;
+				pi.on("session_shutdown", () => {
+					stops.push(id);
+					if (id === 2) throw new Error("candidate resource cleanup failed");
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		await assert.rejects(
+			session.reload({
+				beforeSessionStart: () => {
+					throw new Error("preparation failed");
+				},
+			}),
+			{ code: "ShutdownFailed" },
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		await assert.rejects(session.dispose(), { code: "ShutdownFailed" });
+		assert.deepEqual(stops, [2, 1]);
+	} finally {
+		await session.dispose().catch(() => {});
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: reopening prompt admission for startup effects does not finish the reload transaction.
+test("reload publication cannot admit an overlapping reload", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-reload-publication-"));
+	const settingsManager = SettingsManager.inMemory();
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	let factories = 0;
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++factories;
+				pi.on("session_start", () => {
+					if (id === 2) pi.sendUserMessage("startup input");
+				});
+				pi.on("input", async () => {
+					entered.resolve();
+					await release.promise;
+					return { action: "handled" };
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: join(cwd, "agent"),
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	const first = session.reload();
+	try {
+		await entered.promise;
+		const second = session.reload().then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		release.resolve();
+		await first;
+		assert.equal(((await second) as { code?: string })?.code, "SessionClosed");
+		assert.equal(factories, 2);
+	} finally {
+		release.resolve();
+		await first;
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

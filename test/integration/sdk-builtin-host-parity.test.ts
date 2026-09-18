@@ -818,6 +818,47 @@ test(
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
 );
 
+// #3105: supported shared buses do not transfer workflow lifetime ownership.
+test(
+	"built Node shared-bus sibling reload and disposal preserve a pending workflow and exit naturally",
+	() => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-shared-bus.mjs", import.meta.url))],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
+			distinctOwners: true,
+			siblingReloadedAndClosed: true,
+			retained: "running",
+		});
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
+// #3105: release admitted callbacks while disposal is pending, then require real cleanup and natural exit.
+test.each(["prompt", "reload"] as const)(
+	"built Node drains suspended %s admission before completing disposal",
+	(scenario) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-admission-drain.mjs", import.meta.url)),
+				scenario,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
+			scenario,
+			drained: true,
+			providerCalls: 0,
+			active: 0,
+		});
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
+);
+
 // #3105: duplicate answers are rejected by the runtime's pending identity, not only Promise settlement.
 test("durable prompt identity accepts one answer and refuses a repeated answer", async () => {
 	const store = createStore();
