@@ -123,6 +123,15 @@ export class StageUiBroker {
 		return undefined;
 	}
 
+	/** Runner-owned human hosts need the original questionnaire and live identity. */
+	peekStageQuestionnaire(runId: string, stageId: string) {
+		const hostKey = key(runId, stageId);
+		const adapter = this.adapters.get(hostKey);
+		const request = this.pending.get(hostKey);
+		if (!adapter?.questionnaireParams || !request) return undefined;
+		return { requestId: request.id, params: adapter.questionnaireParams, prompt: adapter.prompt };
+	}
+
 	/**
 	 * Headlessly answer a stage's pending brokered prompt. Resolves the awaiting
 	 * `ctx.ui.custom` promise with the adapter-built result. Returns `false` when

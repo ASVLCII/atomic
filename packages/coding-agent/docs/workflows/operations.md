@@ -156,7 +156,9 @@ In the TUI, `/workflow <name>` opens an inline input picker when the workflow de
 
 In non-interactive (`-p`, `--print`, or `--mode json`) sessions, named workflow dispatch waits for the terminal run snapshot and skips pickers. Because human input is runtime-only and workflows no longer carry a declaration-time HIL marker, headless dispatch does not reject a workflow because its source contains `ctx.ui.*`.
 
-If you copy a HIL workflow example into a headless session, it can pass dispatch and then fail when execution reaches the prompt with an error such as `atomic-workflows: interactive ctx.ui.confirm is unavailable in headless (non-interactive) mode; run the workflow in interactive mode or remove the interactive prompt from this stage` (the primitive name varies, including `ctx.ui.custom`). Run those workflows interactively, or guard/remove runtime `ctx.ui.*` calls before using headless mode.
+SDK applications can instead bind [human-input callbacks](/sdk#human-input-without-a-terminal) without a terminal. The same workflow definition can collect text, confirmation and stage questionnaires through that host, including in nested workflows. Ordinary unsupported dialogs refuse; durable approval prompts remain pending without a usable host. Do not remove or bypass a required approval to make a headless run finish. Custom terminal widgets still require a presentation host.
+
+Withdrawing an SDK adapter cancels its current presentation, not the durable approval. Bind a replacement adapter to answer a live pending request. To hand off a persisted run, gracefully quit it, retain its definition and durable storage, then use the existing resume command in the other host. Completed checkpointed tool results are reused; an effect without a saved checkpoint is not guaranteed exactly once. Inspect `status` for the current pending prompt before answering. Old or repeated answers cannot authorize a new request, and host rebinding never raises an exhausted budget.
 
 <p align="center"><img src="../images/workflow-input-picker.png" alt="Workflow Input Picker" width="600" /></p>
 

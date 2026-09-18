@@ -21,6 +21,7 @@
 - The workflow tool's run action now lets the router choose and dispatch from neutral task context, reports a duration estimate, and returns missing or invalid selected input contracts before admission. Brainstorming and inline preferences remain router-owned decisions.
 
 - SDK hosts can provide typed `HostInput` callbacks for confirmations, selection, text and questionnaires without a terminal. Replies are validated and carry session/request identity and cancellation; `onDiagnostic` receives session-attributed operational messages ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- SDK human-input callbacks now answer durable workflow approvals and stage questionnaires, including nested workflows, with workflow/run identity. Withdrawing or replacing a host keeps unresolved approvals pending and rejects stale replies; the same definition can resume under a different host without repeating checkpointed tool effects ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Changed
 

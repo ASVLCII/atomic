@@ -50,6 +50,7 @@ import {
 	workflowHeartbeatConsumedIdentity,
 	workflowHeartbeatContextInvalidation,
 } from "./workflow-heartbeat-scheduler.js";
+import { bindWorkflowHumanInput } from "./workflow-human-input.js";
 import { workflowModelCatalogFromContext } from "./workflow-model-catalog.js";
 import { makeMcpPort, makePersistencePort } from "./workflow-ports.js";
 import { createWorkflowReloadCoordinator } from "./workflow-reload-coordinator.js";
@@ -130,8 +131,21 @@ export interface WorkflowExtensionRuntimeState {
 export function createWorkflowExtensionRuntimeState(
 	pi: ExtensionAPI,
 	adapters: StageAdapters,
-	resolveCwd: () => string = () => pi.sessionManager?.getCwd?.() ?? process.cwd(),
+	resolveHostCwd?: () => string,
 ): WorkflowExtensionRuntimeState {
+	// #3105: discovery follows the SDK session, never the process working directory.
+	let contextCwd: string | undefined;
+	const resolveCwd = (): string => resolveHostCwd?.() ?? contextCwd ?? pi.sessionManager?.getCwd?.() ?? process.cwd();
+	let detachHumanInput: (() => void) | undefined;
+	pi.on?.("session_start", (_event, ctx) => {
+		contextCwd = ctx?.cwd ?? ctx?.sessionManager?.getCwd?.();
+		detachHumanInput?.();
+		detachHumanInput = ctx === undefined ? undefined : bindWorkflowHumanInput(store, ctx);
+	});
+	pi.on?.("session_shutdown", () => {
+		detachHumanInput?.();
+		detachHumanInput = undefined;
+	});
 	const persistenceRef = { current: makePersistencePort(pi, WORKFLOW_CONFIG_DEFAULTS.persistRuns) };
 	const mcpPort = makeMcpPort(pi);
 	const runtimeConfigRef: { current: WorkflowRuntimeConfig } = {
@@ -427,7 +441,7 @@ export function createWorkflowExtensionRuntimeState(
 
 	async function ensureWorkflowConfigLoaded(): Promise<void> {
 		const generation = workflowDiscoveryGeneration;
-		const configResult = await loadWorkflowConfig();
+		const configResult = await loadWorkflowConfig({ projectRoot: resolveCwd() });
 		if (!isWorkflowDiscoveryCurrent(generation)) return;
 		applyWorkflowConfig(configResult);
 		rebuildRuntime();
@@ -486,7 +500,7 @@ export function createWorkflowExtensionRuntimeState(
 		if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 			return supersededReloadReport(coalescedRequests);
 		}
-		const configResult = await loadWorkflowConfig();
+		const configResult = await loadWorkflowConfig({ projectRoot: resolveCwd() });
 		if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 			return supersededReloadReport(coalescedRequests, configResult);
 		}
@@ -496,14 +510,14 @@ export function createWorkflowExtensionRuntimeState(
 			const discoveryConfig =
 				hasGlobal || hasProject
 					? toScopedDiscoveryConfig(configResult.globalConfig ?? null, configResult.projectConfig ?? null, {
-							projectRoot: process.cwd(),
+							projectRoot: resolveCwd(),
 						})
 					: undefined;
 			const packageWorkflowPaths = await loadPackageWorkflowPaths();
 			if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 				return supersededReloadReport(coalescedRequests, configResult);
 			}
-			const result = await discoverWorkflows({ config: discoveryConfig, packageWorkflowPaths });
+			const result = await discoverWorkflows({ cwd: resolveCwd(), config: discoveryConfig, packageWorkflowPaths });
 			if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 				return supersededReloadReport(coalescedRequests, configResult, result);
 			}

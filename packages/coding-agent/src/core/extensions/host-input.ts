@@ -51,11 +51,16 @@ export function copyHostQuestionnaire(source: ExtensionUIContext, target: Extens
 	if (questionnaire) questionnaires.set(target, questionnaire);
 }
 
+// Private runner/builtin seam. Symbol identity survives the separately bundled
+// workflow extension; no request minting or host adapter is exposed publicly.
+const WORKFLOW_INPUT = Symbol.for("atomic-coding-agent/workflow-input@1");
+type WorkflowIdentity = Pick<HostInputOptions, "workflowRunId" | "workflowStageId">;
 /** One runner owns request settlement; host promises cannot revive a retired request. */
 export class HostInputBridge {
 	private adapter: HostInput | undefined;
 	private closed = false;
 	private readonly pending = new Set<AbortController>();
+	private readonly bindingListeners = new Set<() => void>();
 
 	private readonly sessionId: () => string;
 	private readonly signal: () => AbortSignal | undefined;
@@ -73,8 +78,10 @@ export class HostInputBridge {
 		) {
 			throw hostInputError("InvalidHostInput");
 		}
-		if (adapter !== this.adapter) this.cancel();
+		if (adapter === this.adapter) return;
+		this.cancel();
 		this.adapter = adapter;
+		for (const listener of this.bindingListeners) queueMicrotask(listener);
 	}
 
 	get available(): boolean {
@@ -90,41 +97,59 @@ export class HostInputBridge {
 		this.cancel();
 	}
 
-	wrap(ui: ExtensionUIContext, presentationHost?: HostInput): ExtensionUIContext {
+	wrap(ui: ExtensionUIContext, presentationHost?: HostInput, scope: WorkflowIdentity = {}): ExtensionUIContext {
 		const wrapped: ExtensionUIContext = {
 			...ui,
 			confirm: (title, message, options) =>
 				this.request(
 					(host, identity) => host.confirm(title, message, identity),
 					(value) => typeof value === "boolean",
-					options,
+					{ ...options, ...scope },
 				),
 			select: (title, choices, options) =>
 				this.request(
 					(host, identity) => host.select(title, choices, identity),
 					(value) => value === undefined || (typeof value === "string" && choices.includes(value)),
-					options,
+					{ ...options, ...scope },
 				),
 			input: (title, placeholder, options) =>
-				this.request((host, identity) => host.input(title, placeholder, identity), validText, options),
+				this.request((host, identity) => host.input(title, placeholder, identity), validText, {
+					...options,
+					...scope,
+				}),
 			editor: (title, initial, options) =>
-				this.request((host, identity) => host.editor(title, initial, identity), validText, options),
+				this.request((host, identity) => host.editor(title, initial, identity), validText, {
+					...options,
+					...scope,
+				}),
 		};
 		questionnaires.set(wrapped, (params, signal, present) =>
 			this.request(
 				(host, identity) =>
 					host === presentationHost && present ? present(identity.signal) : host.questionnaire(params, identity),
 				(value) => validQuestionnaire(value, params),
-				{ signal },
+				{ signal, ...scope },
 			),
 		);
+		Object.assign(wrapped, {
+			[WORKFLOW_INPUT]: {
+				subscribe: (listener: () => void) => {
+					this.bindingListeners.add(listener);
+					return () => this.bindingListeners.delete(listener);
+				},
+				scope: (workflowRunId: string, workflowStageId: string) => {
+					const scoped = this.wrap(ui, presentationHost, { workflowRunId, workflowStageId });
+					return { ui: scoped, questionnaire: getHostQuestionnaire(scoped)! };
+				},
+			},
+		});
 		return wrapped;
 	}
 
 	private request<T>(
 		invoke: (host: HostInput, identity: HostInputOptions) => Promise<T>,
 		valid: (value: T) => boolean,
-		options?: ExtensionUIDialogOptions,
+		options?: ExtensionUIDialogOptions & WorkflowIdentity,
 	): Promise<T> {
 		if (this.closed) return Promise.reject(hostInputError("SessionClosed"));
 		const host = this.adapter;
@@ -151,7 +176,13 @@ export class HostInputBridge {
 		let response: Promise<T>;
 		try {
 			response = Promise.resolve(
-				invoke(host, { signal: controller.signal, requestId: randomUUID(), sessionId: this.sessionId() }),
+				invoke(host, {
+					signal: controller.signal,
+					requestId: randomUUID(),
+					sessionId: this.sessionId(),
+					...(options?.workflowRunId !== undefined ? { workflowRunId: options.workflowRunId } : {}),
+					...(options?.workflowStageId !== undefined ? { workflowStageId: options.workflowStageId } : {}),
+				}),
 			);
 		} catch (error) {
 			cleanup();

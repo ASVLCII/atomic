@@ -83,10 +83,12 @@ export interface PiModelContext {
 }
 
 export interface PiCommandContext extends PiModelContext {
+	readonly cwd?: string;
 	ui: {
 		notify: (message: string, type?: "info" | "warning" | "error") => void;
 	} & PiUISurface;
 	hasUI?: boolean;
+	hasHumanInput?: boolean;
 }
 
 export interface PiFlagNamedOpts {

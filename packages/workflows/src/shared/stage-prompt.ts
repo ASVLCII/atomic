@@ -25,6 +25,7 @@
  *   - src/runs/foreground/executor.ts  ask_user_question watcher + readiness gate
  */
 
+import type { QuestionParams } from "@bastani/atomic";
 import type { StageInputKind, StageInputQuestion, StageInputRequest } from "./store-types.js";
 
 /**
@@ -62,6 +63,8 @@ interface BuiltResult {
  */
 export interface StagePromptAdapter {
 	readonly prompt: StageInputRequest;
+	/** Exact tool parameters, not the lossy display descriptor (notably previews). */
+	readonly questionnaireParams?: QuestionParams;
 	buildResult(answer: StageInputAnswer): unknown;
 }
 
@@ -333,6 +336,7 @@ export function buildStagePromptAdapter(
 	const prompt: StageInputRequest = { id, kind, questions, createdAt };
 	return {
 		prompt,
+		questionnaireParams: args as QuestionParams,
 		buildResult: (answer) => buildResult(questions, answer),
 	};
 }
