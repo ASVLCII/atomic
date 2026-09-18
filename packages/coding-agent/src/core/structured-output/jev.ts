@@ -1,4 +1,5 @@
 import type { Static, TSchema } from "typebox";
+import { InvalidDecisionOutputError } from "./invalid-output.js";
 import { JEV_STRUCTURED_OUTPUT_PROVIDER as provider } from "./resolver.js";
 import type { StructuredChoiceQuestion, StructuredOutputRequest, StructuredOutputResult } from "./types.js";
 
@@ -42,49 +43,43 @@ function sameKeys(value: Record<string, unknown>, keys: readonly string[]): bool
 }
 
 function parseResponse(value: unknown, questions: Readonly<Record<string, StructuredChoiceQuestion>>) {
-	const malformed = () =>
-		new Error(
-			"Malformed Jev structured decision response. Check the provider response contract and retry explicitly.",
-		);
-	if (
-		!isRecord(value) ||
-		typeof value.model !== "string" ||
-		!value.model.trim() ||
-		!isRecord(value.answers) ||
-		!isRecord(value.usage)
-	)
-		throw malformed();
-	if (!sameKeys(value.answers, Object.keys(questions))) throw malformed();
+	// Codes are static: never interpolate response values, question IDs, or credentials.
+	const malformed = (code: string) => {
+		const error = new InvalidDecisionOutputError(`Malformed Jev structured decision response (${code}).`);
+		if (
+			isRecord(value) &&
+			isRecord(value.usage) &&
+			tokenCount(value.usage.input_tokens) &&
+			tokenCount(value.usage.output_tokens)
+		)
+			error.usage = { inputTokens: value.usage.input_tokens, outputTokens: value.usage.output_tokens };
+		return error;
+	};
+	if (!isRecord(value)) throw malformed("response_shape");
+	if (typeof value.model !== "string" || !value.model.trim()) throw malformed("model");
+	if (!isRecord(value.answers)) throw malformed("answers_shape");
+	if (!isRecord(value.usage)) throw malformed("usage_shape");
+	if (!sameKeys(value.answers, Object.keys(questions))) throw malformed("answer_keys");
 	const { input_tokens, output_tokens } = value.usage;
-	if (!tokenCount(input_tokens) || !tokenCount(output_tokens)) throw malformed();
+	if (!tokenCount(input_tokens) || !tokenCount(output_tokens)) throw malformed("usage_tokens");
 	const answers = value.answers;
 	const ranked: Record<string, string[]> = Object.create(null);
 	const choices = Object.fromEntries(
 		Object.entries(questions).map(([id, question]) => {
 			const answer = answers[id];
-			if (
-				!isRecord(answer) ||
-				answer.type !== "choice" ||
-				typeof answer.choice !== "string" ||
-				!Object.hasOwn(question.criteria, answer.choice) ||
-				!probability(answer.confidence) ||
-				!isRecord(answer.probabilities)
-			)
-				throw malformed();
+			if (!isRecord(answer) || answer.type !== "choice") throw malformed("answer_type");
+			if (typeof answer.choice !== "string" || !Object.hasOwn(question.criteria, answer.choice))
+				throw malformed("choice_key");
+			if (!probability(answer.confidence)) throw malformed("confidence");
+			if (!isRecord(answer.probabilities)) throw malformed("probabilities_shape");
 			const probabilities = answer.probabilities;
-			if (
-				!sameKeys(probabilities, Object.keys(question.criteria)) ||
-				!Object.values(probabilities).every(probability)
-			)
-				throw malformed();
+			if (!sameKeys(probabilities, Object.keys(question.criteria))) throw malformed("probability_keys");
+			if (!Object.values(probabilities).every(probability)) throw malformed("probability_value");
 			const choice = answer.choice;
 			const values = Object.values(probabilities) as number[];
 			// Allow floating-point summation noise, not missing mass or a non-highest choice.
-			if (
-				Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) > 1e-6 ||
-				values.some((p) => p > (probabilities[choice] as number))
-			)
-				throw malformed();
+			if (Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) > 1e-6) throw malformed("probability_mass");
+			if (values.some((p) => p > (probabilities[choice] as number))) throw malformed("choice_not_highest");
 			ranked[id] = Object.keys(question.criteria).sort(
 				(a, b) => (probabilities[b] as number) - (probabilities[a] as number),
 			);
@@ -102,7 +97,7 @@ function parseResponse(value: unknown, questions: Readonly<Record<string, Struct
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 async function readResponse(response: Response, signal: AbortSignal): Promise<unknown> {
 	const reader = response.body?.getReader();
-	if (!reader) throw new Error("Jev returned an empty response.");
+	if (!reader) throw new InvalidDecisionOutputError("Jev returned an empty response.");
 	let bytes = 0;
 	let text = "";
 	const decoder = new TextDecoder();
@@ -134,7 +129,7 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<un
 		try {
 			return JSON.parse(text + decoder.decode());
 		} catch {
-			throw new Error("Jev returned malformed JSON; no decision was accepted.");
+			throw new InvalidDecisionOutputError("Jev returned malformed JSON; no decision was accepted.");
 		}
 	} finally {
 		signal.removeEventListener("abort", cancel);
@@ -146,7 +141,9 @@ async function askJev<T extends TSchema>(
 	request: StructuredOutputRequest<T>,
 	questionsToAsk: Readonly<Record<string, StructuredChoiceQuestion>>,
 	signal: AbortSignal,
+	assertActive: () => void,
 ) {
+	assertActive();
 	const questions = compileQuestions(questionsToAsk, request.instructions);
 	let apiKey: string | undefined;
 	try {
@@ -159,7 +156,7 @@ async function askJev<T extends TSchema>(
 	}
 	if (!apiKey)
 		throw new Error("typesafe-ai/jev requires an API key. Use /login typesafe-ai or set TYPESAFE_AI_API_KEY.");
-	signal.throwIfAborted();
+	assertActive();
 	let response: Response;
 	try {
 		// Direct fetch has no SDK retries. Reject redirects so credentials/state cannot change destinations.
@@ -192,7 +189,7 @@ async function askJev<T extends TSchema>(
 		throw new Error(`Jev HTTP ${response.status}. ${guidance} No automatic retry was made.`);
 	}
 	const parsed = parseResponse(await readResponse(response, signal), questionsToAsk);
-	signal.throwIfAborted();
+	assertActive();
 	return parsed;
 }
 
@@ -281,6 +278,7 @@ function* packRequests(jobs: ChoiceJob[], stateTokens: number, questionTokens: Q
 export async function inferJev<T extends TSchema>(
 	request: StructuredOutputRequest<T>,
 	signal: AbortSignal,
+	assertActive: () => void = () => signal.throwIfAborted(),
 ): Promise<StructuredOutputResult<Static<T>>> {
 	let pending = Object.entries(request.jev.questions);
 	const overflowing = new Set(
@@ -289,7 +287,7 @@ export async function inferJev<T extends TSchema>(
 			.map(([id]) => id),
 	);
 	if (!overflowing.size) {
-		const result = await askJev(request, request.jev.questions, signal);
+		const result = await askJev(request, request.jev.questions, signal, assertActive);
 		return {
 			value: request.jev.decode(result.choices),
 			model: provider.fullId,
@@ -304,13 +302,24 @@ export async function inferJev<T extends TSchema>(
 	const questionTokens = (q: StructuredChoiceQuestion) =>
 		estimateTokens(compileQuestions({ q }, request.instructions));
 	while (pending.length) {
-		signal.throwIfAborted();
+		assertActive();
 		const jobs = planRound(pending, overflowing, stateTokens, questionTokens);
 		const survivors = new Map<string, Set<string>>();
 		for (const group of packRequests(jobs, stateTokens, questionTokens)) {
-			signal.throwIfAborted();
+			assertActive();
 			const wire = Object.fromEntries(group.map((job) => [job.id, job.question]));
-			const result = await askJev(request, wire, signal);
+			let result: Awaited<ReturnType<typeof askJev<T>>>;
+			try {
+				result = await askJev(request, wire, signal, assertActive);
+			} catch (error) {
+				if (error instanceof InvalidDecisionOutputError) {
+					error.usage = {
+						inputTokens: usage.inputTokens + (error.usage?.inputTokens ?? 0),
+						outputTokens: usage.outputTokens + (error.usage?.outputTokens ?? 0),
+					};
+				}
+				throw error;
+			}
 			responseModel = result.responseModel;
 			usage.inputTokens += result.usage.inputTokens;
 			usage.outputTokens += result.usage.outputTokens;
@@ -340,7 +349,7 @@ export async function inferJev<T extends TSchema>(
 			];
 		});
 	}
-	signal.throwIfAborted();
+	assertActive();
 	return {
 		value: request.jev.decode(Object.fromEntries(Object.keys(request.jev.questions).map((id) => [id, choices[id]]))),
 		model: provider.fullId,

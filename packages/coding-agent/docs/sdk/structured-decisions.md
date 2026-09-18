@@ -13,7 +13,7 @@ Use `inferStructuredOutput()` from `@bastani/atomic` when an SDK integration nee
 
 For a general structured-output call, pass `model: { kind: "chat", fullId, model }` with a concrete model from the current registry, or `model: { kind: "jev", fullId: "typesafe-ai/jev" }`. Setting `routerModel` or exporting a TypeSafe key does not change this explicit selection.
 
-`inferRouterDecision()` is the shared entrypoint for prerequisite model-invoked workflow and subagent-auto routing. Only this entrypoint consults `routerModel` in [settings.json](/settings#routermodel). It takes `settings`, `modelRegistry` and the invocation-time `currentModel` instead of an explicit inference `model`. Resolution is:
+`inferRouterDecision()` is the shared entrypoint for prerequisite workflow selection and automatic subagent/workflow-stage model selection. Only this entrypoint consults `routerModel` in [settings.json](/settings#routermodel). It takes `settings`, `modelRegistry` and the invocation-time `currentModel` instead of an explicit inference `model`. Resolution is:
 
 1. A nonempty explicit, exact `routerModel` value.
 2. Otherwise `typesafe-ai/jev` when Jev credentials are configured through `/login typesafe-ai` or `TYPESAFE_AI_API_KEY`.
@@ -24,6 +24,12 @@ An invalid explicit router selection fails instead of falling back. `auto`, mode
 Extension tools can read the owning session's current routing setting with `ctx.getRouterModel()`. Pass `settings: { getRouterModel: () => ctx.getRouterModel() }`, `modelRegistry: ctx.modelRegistry` and `currentModel: ctx.model` to `inferRouterDecision()`. This preserves in-memory settings and project-trust behavior instead of loading a separate settings instance.
 
 Pass the full `ModelRegistry` to use saved Jev credentials with either decision API. Its provider-auth methods preserve normal credential resolution and logout behavior. Minimal custom adapters that omit `getProviderAuth` and `getProviderAuthStatus` retain environment-only Jev support. Never copy a resolved key into decision state.
+
+### Router repair attempts
+
+`inferRouterDecision()` allows an initial attempt plus **up to three repair retries** when an answer is malformed or fails the decision schema. This applies to ordinary models and Jev, with all attempts sharing the same deadline (30 seconds by default), state, candidates, and selected provider. A valid answer stops retries immediately; a valid `none` is not retried. Repairs may increase latency and provider usage, but never start a workflow or child before final validation.
+
+Input/configuration errors, authentication or provider failures, cancellation, timeout, and stale-catalog rejection are not repaired. There is no provider fallback or retry of an admitted action. Generic `inferStructuredOutput()` remains one-shot; it does not gain router repairs.
 
 ## Prepare a decision
 
@@ -87,11 +93,11 @@ For runtime catalogs, build schema, state and Choice candidates from the same sn
 
 ## Provider behavior and limits
 
-Ordinary models receive one `structured_output` result tool with the supplied schema. Atomic uses provider-aware serialization, requests strict sampling where supported, and validates the returned arguments without coercing values or removing extra fields. Use `additionalProperties: false` for closed objects. Providers without strict sampling must still return valid arguments. `toolChoice: "auto"` also supports models that reject forced tool use. A prose-only response, extra tool call, truncated response or invalid result fails without a repair prompt.
+Ordinary models receive one `structured_output` result tool with the supplied schema. Atomic uses provider-aware serialization, requests strict sampling where supported, and validates the returned arguments without coercing values or removing extra fields. Use `additionalProperties: false` for closed objects. Providers without strict sampling must still return valid arguments. `toolChoice: "auto"` also supports models that reject forced tool use. A prose-only response, extra tool call, truncated response or invalid result fails a generic `inferStructuredOutput()` call without a repair prompt; router calls can use the bounded repairs described above.
 
 Ordinary requests set `maxRetries: 0`, use HTTP/SSE rather than WebSocket transport fallback, and disable configured Anthropic server-side fallbacks for this request only. Custom provider implementations must honor these options and must not introduce their own inference retries or fallback requests.
 
-[TypeSafe Jev](/providers#typesafe-jev) accepts shared state and typed questions instead of JSON-schema generation. Atomic packs independent questions together without automatic retries. Question IDs are correlation keys, not instructions seen by Jev, so put complete semantics in each question's `instructions`. Describe the speculative premise of a conditional question and consume its answer only when that premise applies.
+[TypeSafe Jev](/providers#typesafe-jev) accepts shared state and typed questions instead of JSON-schema generation. Atomic packs independent questions together. Generic `inferStructuredOutput()` calls have no automatic retries; router calls can repair malformed or schema-invalid answers within their shared deadline. Question IDs are correlation keys, not instructions seen by Jev, so put complete semantics in each question's `instructions`. Describe the speculative premise of a conditional question and consume its answer only when that premise applies.
 
 Choices with up to 255 options keep their normal single comparison. Larger choices use a bounded tournament: every original option participates in stable batches of at most 255; each batch retains its top three by validated probabilities, with ties resolved by original order. Further shrinking rounds precede a final shared comparison. Probabilities are never compared across batches. Multiple named questions can mix small choices and tournaments; `decode` receives original option keys only after all judgments succeed. Empty choices fail; singletons still go to the provider.
 
@@ -103,10 +109,12 @@ Jev documents 32k tokens for state plus the longest question and 64k for state p
 
 ## Cancellation and failures
 
-The default deadline is 30 seconds for the entire decision, including all tournament rounds, authentication, transport and response reading. `timeoutMs` must be a positive integer no greater than 2147483647; zero does not disable it. Ordinary output is bounded by `maxTokens`, default 4096. Pass an `AbortSignal` to cancel. Cancellation, timeout or any failed batch rejects the whole call; no partial decision is returned, and late responses cannot invoke the Jev mapper.
+The default deadline is 30 seconds for the entire decision, including all router repair attempts, tournament rounds, authentication, transport and response reading. `timeoutMs` must be a positive integer no greater than 2147483647; zero does not disable it. Ordinary output is bounded by `maxTokens`, default 4096. Pass an `AbortSignal` to cancel. Cancellation or timeout rejects the whole call immediately; a failed batch yields no partial decision, and late responses cannot invoke the Jev mapper.
 
-No result is returned for missing state, invalid configuration, malformed output or provider failure. Keep action admission after the awaited result and check cancellation again at that boundary. Fix configuration or context before making a new explicit attempt. There are no semantic repairs, provider probes, recursive agents or hidden fallback inferences.
+No result is returned for missing state, invalid configuration, unrepaired malformed output or provider failure. Keep action admission after the awaited result and check cancellation again at that boundary. Fix configuration or context before making a new explicit attempt. Only router calls have bounded invalid-output repairs; neither API runs recursive agents, provider probes or hidden fallback inferences.
 
 Provider dispatch and response-reading failures return generic diagnostics rather than raw upstream errors, which may contain private input or credentials. Check provider configuration and connectivity before an explicit retry. Cancellation and timeout remain distinct errors.
 
 For Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_AI_API_KEY`; 422 means check the state/question contract; 429 and 529 mean wait before an explicit retry. Error messages omit upstream response bodies because they may echo private input.
+
+Malformed Jev response errors include a static diagnostic code, without response values or routing context. For example, `probability_mass` means the returned probabilities failed the sum-to-one tolerance, `probability_keys` means the options did not match, and `choice_not_highest` means the selected option was not highest-probability. Include the code when reporting a failure. Router calls may repair these errors before returning a final failure; generic calls fail immediately. No invalid decision is accepted.

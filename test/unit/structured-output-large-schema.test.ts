@@ -53,14 +53,15 @@ for (const [name, value] of [
 	["missing required effort", { model: pairs.at(-1)!.model }],
 	["null effort", { ...pairs.at(-1)!, effort: null }],
 ] as const) {
-	test(`ordinary routing rejects ${name} against all 1997 candidates without repair or normalization`, async () => {
+	test(`ordinary routing rejects ${name} against all 1997 candidates after bounded repairs without normalization`, async () => {
 		const before = structuredClone(value);
 		const { request, dispatch } = requestFor(value);
 		await assert.rejects(inferRouterDecision(request), {
 			name: "Error",
-			message: "Invalid structured output: response does not match the decision schema. No repair request was made.",
+			message:
+				"Invalid structured output: response does not match the decision schema. Routing output repair exhausted after 4 attempts.",
 		});
-		assert.equal(dispatch.mock.calls.length, 1);
+		assert.equal(dispatch.mock.calls.length, 4);
 		assert.deepEqual(value, before);
 	});
 }
@@ -86,9 +87,9 @@ for (const valid of [true, false]) {
 				await assert.rejects(inferRouterDecision(request), {
 					name: "Error",
 					message:
-						"Invalid structured output: response does not match the decision schema. No repair request was made.",
+						"Invalid structured output: response does not match the decision schema. Routing output repair exhausted after 4 attempts.",
 				});
-			assert.equal(fetch.mock.calls.length, 1);
+			assert.equal(fetch.mock.calls.length, valid ? 1 : 4);
 			assert.equal(dispatch.mock.calls.length, 0);
 		} finally {
 			vi.unstubAllGlobals();

@@ -68,7 +68,7 @@ async function startBackgroundShell(session: AgentSession, command: string, desc
 		},
 		randomUUID() as OperationId,
 	);
-	assert.ok(started.ok);
+	assert.ok(started.ok, started.ok ? undefined : JSON.stringify(started.error));
 	const observation = await supervisor.initialObservation(started.value, { kind: "background" });
 	assert.ok(observation.ok && observation.value.kind === "yielded");
 	return { host, supervisor, lease: started.value, taskId: observation.value.taskId };

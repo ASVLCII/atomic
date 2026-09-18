@@ -123,32 +123,33 @@ export async function routeExecutionModel(input: {
 			required: ["model", "effort"],
 			additionalProperties: false,
 		});
-		const result = await inferRouterDecision({
-			settings,
-			modelRegistry: ctx.modelRegistry,
-			currentModel: ctx.model,
-			state,
-			instructions,
-			schema,
-			jev: {
-				questions: {
-					pair: {
-						instructions,
-						criteria: Object.fromEntries(pairs.map((pair, index) => [`pair_${index}`, JSON.stringify(pair)])),
+		const result = await inferRouterDecision(
+			{
+				settings,
+				modelRegistry: ctx.modelRegistry,
+				currentModel: ctx.model,
+				state,
+				instructions,
+				schema,
+				jev: {
+					questions: {
+						pair: {
+							instructions,
+							criteria: Object.fromEntries(pairs.map((pair, index) => [`pair_${index}`, JSON.stringify(pair)])),
+						},
+					},
+					decode: (choices) => {
+						const pair = pairs[Number(choices.pair?.replace(/^pair_/, ""))];
+						if (!pair || choices.pair !== `pair_${pairs.indexOf(pair)}`)
+							throw new Error("Invalid execution model Choice.");
+						return { ...pair };
 					},
 				},
-				decode: (choices) => {
-					const pair = pairs[Number(choices.pair?.replace(/^pair_/, ""))];
-					if (!pair || choices.pair !== `pair_${pairs.indexOf(pair)}`)
-						throw new Error("Invalid execution model Choice.");
-					return { ...pair };
-				},
+				signal,
 			},
-			signal,
-		});
+			(value) => pairs.some((pair) => pair.model === value.model && pair.effort === value.effort),
+		);
 		selection = result.value;
-		if (!pairs.some((pair) => pair.model === result.value.model && pair.effort === result.value.effort))
-			throw new Error("Invalid structured output: model/effort pair is not eligible.");
 	}
 	const routerSelection = Object.freeze({ model: selection.model, effort: selection.effort });
 	const hasPair = (pair: ModelRouterOutput) =>

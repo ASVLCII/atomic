@@ -155,14 +155,14 @@ for (const args of [
 	{ route: "review", limit: -1 },
 	{},
 ]) {
-	test(`ordinary entrypoint strictly rejects ${JSON.stringify(args)} without repair`, async () => {
+	test(`ordinary router strictly rejects ${JSON.stringify(args)} after bounded repairs`, async () => {
 		const dispatch = vi.fn(() => messageStream(decisionMessage(args)));
 		const request = decisionRequest();
 		await assert.rejects(
 			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
 			/Invalid structured output/,
 		);
-		assert.equal(dispatch.mock.calls.length, 1);
+		assert.equal(dispatch.mock.calls.length, 4);
 	});
 }
 
@@ -180,7 +180,7 @@ for (const limit of [undefined, 0, 1.23456789, Number.MAX_SAFE_INTEGER]) {
 }
 
 for (const kind of ["text", "multiple", "wrong-tool", "error", "aborted", "length"] as const) {
-	test(`ordinary ${kind} response fails without another inference or executing a requested tool`, async () => {
+	test(`ordinary ${kind} response fails without executing a requested tool`, async () => {
 		const message = decisionMessage();
 		if (kind === "text") {
 			message.content = [{ type: "text", text: '{"route":"review"}' }];
@@ -197,7 +197,7 @@ for (const kind of ["text", "multiple", "wrong-tool", "error", "aborted", "lengt
 			inferRouterDecision({ ...request, modelRegistry: { ...request.modelRegistry, streamSimple: dispatch } }),
 			/Structured output/,
 		);
-		assert.equal(dispatch.mock.calls.length, 1);
+		assert.equal(dispatch.mock.calls.length, kind === "error" || kind === "aborted" ? 1 : 4);
 	});
 }
 
@@ -285,24 +285,24 @@ test("Jev body reader failure is private and never retried or decoded", async ()
 	assert.equal(decode.mock.calls.length, 0);
 });
 
-for (const kind of [
-	"unknown-choice",
-	"wrong-type",
-	"missing-answer",
-	"extra-answer",
-	"missing-probability",
-	"unknown-probability",
-	"bad-mass",
-	"not-highest",
-	"bad-confidence",
-	"missing-usage",
-	"bad-model",
-	"invalid-json",
-]) {
+for (const [kind, code] of Object.entries({
+	"unknown-choice": "choice_key",
+	"wrong-type": "answer_type",
+	"missing-answer": "answer_keys",
+	"extra-answer": "answer_keys",
+	"missing-probability": "probability_keys",
+	"unknown-probability": "probability_keys",
+	"bad-mass": "probability_mass",
+	"not-highest": "choice_not_highest",
+	"bad-confidence": "confidence",
+	"missing-usage": "usage_shape",
+	"bad-model": "model",
+	"invalid-json": "malformed JSON",
+})) {
 	test(`Jev rejects ${kind} and never invokes the mapper`, async () => {
 		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
 		const body = jevResponse();
-		if (kind === "unknown-choice") body.answers.route.choice = "__proto__";
+		if (kind === "unknown-choice") body.answers.route.choice = "private-response-value";
 		if (kind === "wrong-type") body.answers.route.type = "score";
 		if (kind === "missing-answer") Reflect.deleteProperty(body.answers, "budget");
 		if (kind === "extra-answer") Object.assign(body.answers, { surprise: body.answers.route });
@@ -319,9 +319,15 @@ for (const kind of [
 		const decode = vi.fn(request.jev.decode);
 		await assert.rejects(
 			inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
-			/[Mm]alformed/,
+			(error: Error) => {
+				assert.match(error.message, /[Mm]alformed/);
+				assert.ok(error.message.includes(code));
+				assert.doesNotMatch(error.message, /private-response-value|mock-key/);
+				assert.equal(error.cause, undefined);
+				return true;
+			},
 		);
-		assert.equal(transport.mock.calls.length, 1);
+		assert.equal(transport.mock.calls.length, 4);
 		assert.equal(decode.mock.calls.length, 0);
 	});
 }

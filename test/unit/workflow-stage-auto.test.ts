@@ -105,7 +105,7 @@ test("malformed stage decision admits no execution session", async () => {
 	const result = await run(def, {}, f);
 	assert.equal(result.status, "failed");
 	assert.equal(f.admissions.length, 0);
-	assert.equal(f.infer.mock.calls.length, 1);
+	assert.equal(f.infer.mock.calls.length, 4);
 });
 
 test("chain and parallel inherit auto and route expanded previous context", async () => {

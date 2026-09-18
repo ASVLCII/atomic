@@ -276,7 +276,7 @@ for (const failure of [
 	"extra-answer",
 	"http",
 ] as const) {
-	test(`overflow ${failure} fails without partial decode or retry`, async () => {
+	test(`overflow ${failure} fails without partial decode after bounded output repair`, async () => {
 		vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
 		const request = tournament(256);
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
@@ -296,7 +296,7 @@ for (const failure of [
 		});
 		vi.stubGlobal("fetch", fetch);
 		await assert.rejects(inferRouterDecision(request), /Malformed|HTTP 422/);
-		assert.equal(fetch.mock.calls.length, 1);
+		assert.equal(fetch.mock.calls.length, failure === "http" ? 1 : 4);
 		assert.equal(request.jev.decode.mock.calls.length, 0);
 	});
 }

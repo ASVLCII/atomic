@@ -263,7 +263,7 @@ test("provider failure, cancellation and late responses never become selections"
 	f.infer.mockImplementation(() => {
 		throw new Error("mock provider failure");
 	});
-	await assert.rejects(f.route(), /inference ended with error/);
+	await assert.rejects(f.route(), /provider request failed/);
 	const stream = createAssistantMessageEventStream();
 	const entered = Promise.withResolvers<void>();
 	f.infer.mockImplementation(() => {

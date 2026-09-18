@@ -255,7 +255,7 @@ for (const value of [
 		assert.equal("routerDecision" in result.details, false);
 		assert.equal("status" in result.details ? result.details.status : "", "failed");
 		f.noLaunch();
-		assert.equal(f.infer.mock.calls.length, 1);
+		assert.equal(f.infer.mock.calls.length, 4);
 	});
 }
 
@@ -565,7 +565,7 @@ for (const status of [401, 422, 429, 529]) {
 }
 
 for (const malformed of ["unknown-choice", "missing-budget", "wrong-type"]) {
-	test(`Jev ${malformed} fails closed without repair`, async () => {
+	test(`Jev ${malformed} fails closed after bounded repair`, async () => {
 		const f = fixture();
 		f.ctx.getRouterModel = () => "typesafe-ai/jev";
 		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
@@ -579,7 +579,7 @@ for (const malformed of ["unknown-choice", "missing-budget", "wrong-type"]) {
 		vi.stubGlobal("fetch", fetch);
 		const result = await f.call();
 		assert.equal("routerDecision" in result.details, false);
-		assert.equal(fetch.mock.calls.length, 1);
+		assert.equal(fetch.mock.calls.length, 4);
 		f.noLaunch();
 	});
 }

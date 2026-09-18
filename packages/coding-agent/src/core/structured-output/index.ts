@@ -7,6 +7,7 @@ import {
 	type JsonObject,
 	STRUCTURED_OUTPUT_TOOL_NAME,
 } from "../tools/structured-output.ts";
+import { InvalidDecisionOutputError } from "./invalid-output.js";
 import { inferJev, STRUCTURED_DECISION_POLICY } from "./jev.js";
 import { resolveRouterModel } from "./resolver.js";
 import type { RouterDecisionRequest, StructuredOutputRequest, StructuredOutputResult } from "./types.js";
@@ -69,6 +70,7 @@ async function inferChat<T extends TSchema>(
 	model: Model<Api>,
 	signal: AbortSignal,
 	timeoutMs: number,
+	assertActive: () => void,
 ): Promise<StructuredOutputResult<Static<T>>> {
 	// Anthropic catalog configuration may opt into server-side fallback. A decision must not.
 	const decisionModel =
@@ -77,6 +79,7 @@ async function inferChat<T extends TSchema>(
 			: model;
 	const tool = createStructuredOutputTool({ schema: request.schema });
 	let response: AssistantMessage;
+	assertActive();
 	try {
 		response = await request.modelRegistry
 			.streamSimple(
@@ -111,18 +114,24 @@ async function inferChat<T extends TSchema>(
 		);
 	}
 	signal.throwIfAborted();
-	if (response.stopReason !== "toolUse") {
+	if (response.stopReason === "error" || response.stopReason === "aborted")
 		throw new Error(
-			`Structured output inference ended with ${response.stopReason}; expected one structured_output call. Check provider configuration and retry explicitly.`,
+			`Structured output inference ended with ${response.stopReason}; provider request failed; no decision was accepted.`,
 		);
+	if (response.content.some((part) => part.type === "fallback"))
+		throw new Error("Structured output requires exactly one structured_output call and no provider fallback.");
+	if (response.stopReason !== "toolUse") {
+		const error = new InvalidDecisionOutputError("Structured output requires one structured_output call.");
+		error.usage = { inputTokens: response.usage.input, outputTokens: response.usage.output };
+		throw error;
 	}
 	const calls = response.content.filter((part) => part.type === "toolCall");
-	if (
-		calls.length !== 1 ||
-		calls[0].name !== STRUCTURED_OUTPUT_TOOL_NAME ||
-		response.content.some((part) => part.type === "fallback")
-	) {
-		throw new Error("Structured output requires exactly one structured_output call and no provider fallback.");
+	if (calls.length !== 1 || calls[0].name !== STRUCTURED_OUTPUT_TOOL_NAME) {
+		const error = new InvalidDecisionOutputError(
+			"Structured output requires exactly one structured_output call and no provider fallback.",
+		);
+		error.usage = { inputTokens: response.usage.input, outputTokens: response.usage.output };
+		throw error;
 	}
 	// These are result arguments, never executable tool calls. Strict validation happens below.
 	return {
@@ -133,9 +142,17 @@ async function inferChat<T extends TSchema>(
 	};
 }
 
-/** One bounded logical decision. No agent/session, tool execution, repair, retry or inference fallback. */
-export async function inferStructuredOutput<T extends TSchema>(
+/** General structured inference remains one-shot. */
+export function inferStructuredOutput<T extends TSchema>(
 	request: StructuredOutputRequest<T>,
+): Promise<StructuredOutputResult<Static<T>>> {
+	return inferDecision(request, 0);
+}
+
+async function inferDecision<T extends TSchema>(
+	request: StructuredOutputRequest<T>,
+	repairs: number,
+	validateDecision?: (value: Static<T>) => boolean,
 ): Promise<StructuredOutputResult<Static<T>>> {
 	request.signal?.throwIfAborted();
 	const timeoutMs = request.timeoutMs ?? DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS;
@@ -173,7 +190,7 @@ export async function inferStructuredOutput<T extends TSchema>(
 		schema: jsonSnapshot(request.schema),
 		jev: { questions, decode: request.jev.decode },
 	};
-	const selected = request.model;
+	const selected = request.model ? structuredClone(request.model) : request.model;
 	if (!selected || (selected.kind !== "chat" && selected.kind !== "jev")) {
 		throw new Error("Structured output requires an explicit concrete inference model.");
 	}
@@ -186,33 +203,71 @@ export async function inferStructuredOutput<T extends TSchema>(
 	const controller = new AbortController();
 	const abort = () => controller.abort(new Error("Structured output cancelled; no decision was accepted."));
 	request.signal?.addEventListener("abort", abort, { once: true });
-	const timer = setTimeout(
-		() =>
-			controller.abort(
-				new Error(
-					"Structured output timed out; no decision was accepted. Retry explicitly or select another inference model.",
-				),
+	const deadline = performance.now() + timeoutMs;
+	const expire = () =>
+		controller.abort(
+			new Error(
+				"Structured output timed out; no decision was accepted. Retry explicitly or select another inference model.",
 			),
-		timeoutMs,
-	);
+		);
+	const assertActive = () => {
+		if (performance.now() >= deadline && !controller.signal.aborted) expire();
+		controller.signal.throwIfAborted();
+	};
+	const timer = setTimeout(expire, timeoutMs);
 	try {
 		if (request.signal?.aborted) abort();
-		controller.signal.throwIfAborted();
-		const result = await raceWithAbortSignal(
-			selected.kind === "jev"
-				? inferJev(snapshot, controller.signal)
-				: inferChat(snapshot, selected.model, controller.signal, timeoutMs),
-			controller.signal,
-		);
-		controller.signal.throwIfAborted();
-		// Interpret this one-shot schema: compiling large catalog unions can overflow the JS engine.
-		// Never coerce strings/numbers, strip unknown fields or turn null into omission/zero.
-		const value = jsonSnapshot(result.value);
-		if (!Check(snapshot.schema, value))
-			throw new Error(
-				"Invalid structured output: response does not match the decision schema. No repair request was made.",
-			);
-		return { ...result, value };
+		const usage = { inputTokens: 0, outputTokens: 0 };
+		for (let attempt = 0; ; attempt++) {
+			assertActive();
+			const current =
+				attempt === 0
+					? snapshot
+					: {
+							...snapshot,
+							instructions: `${snapshot.instructions}\n\nThe previous response failed output validation. Return a complete valid decision satisfying the original schema, candidates and constraints. Do not change the task or invent values.`,
+						};
+			try {
+				const result = await raceWithAbortSignal(
+					selected.kind === "jev"
+						? inferJev(current, controller.signal, assertActive)
+						: inferChat(
+								current,
+								selected.model,
+								controller.signal,
+								Math.ceil(deadline - performance.now()),
+								assertActive,
+							),
+					controller.signal,
+				);
+				assertActive();
+				usage.inputTokens += result.usage.inputTokens;
+				usage.outputTokens += result.usage.outputTokens;
+				let value: Static<T>;
+				try {
+					value = jsonSnapshot(result.value);
+				} catch {
+					throw new InvalidDecisionOutputError("Invalid structured output: non-JSON decision.");
+				}
+				if (!Check(snapshot.schema, value) || (validateDecision && !validateDecision(value)))
+					throw new InvalidDecisionOutputError(
+						"Invalid structured output: response does not match the decision schema.",
+					);
+				assertActive();
+				return { ...result, value, usage };
+			} catch (error) {
+				assertActive();
+				if (!(error instanceof InvalidDecisionOutputError)) throw error;
+				if (error.usage) {
+					usage.inputTokens += error.usage.inputTokens;
+					usage.outputTokens += error.usage.outputTokens;
+				}
+				if (attempt >= repairs)
+					throw new Error(
+						`${error.message} ${repairs ? "Routing output repair exhausted after 4 attempts." : "No repair request was made."}`,
+					);
+			}
+		}
 	} finally {
 		clearTimeout(timer);
 		request.signal?.removeEventListener("abort", abort);
@@ -222,9 +277,11 @@ export async function inferStructuredOutput<T extends TSchema>(
 /** Resolve only prerequisite routing inference. Does not execute the selected action or alter chat/tools. */
 export async function inferRouterDecision<T extends TSchema>(
 	request: RouterDecisionRequest<T>,
+	/** Pure correlated-field validation against original candidates, never live admission checks. */
+	validateDecision?: (value: Static<T>) => boolean,
 ): Promise<StructuredOutputResult<Static<T>>> {
 	request.signal?.throwIfAborted();
 	const { settings, currentModel, ...inference } = request;
 	const model = resolveRouterModel({ settings, currentModel, modelRegistry: request.modelRegistry });
-	return inferStructuredOutput({ ...inference, model });
+	return inferDecision({ ...inference, model }, 3, validateDecision);
 }

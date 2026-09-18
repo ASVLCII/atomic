@@ -326,7 +326,10 @@ describe("MockExtensionAPI — tool registration", () => {
 	test("tool renderCall slot delegates correctly", () => {
 		const slot = mock.tools[0]!.opts.renderCall!;
 		const out = slot({ workflow: "test-wf", inputs: {}, action: "run" }, {} as never, {} as never);
-		assert.ok(out.includes("test-wf"));
+		assert.ok(out.includes("workflow: run"));
+		assert.ok(!out.includes("test-wf"));
+		const inspection = slot({ workflow: "test-wf", action: "inputs" }, {} as never, {} as never);
+		assert.ok(inspection.includes('workflow: show inputs for "test-wf"'));
 	});
 
 	test("tool renderResult slot delegates correctly", () => {

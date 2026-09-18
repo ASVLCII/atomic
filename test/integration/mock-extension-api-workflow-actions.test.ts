@@ -172,7 +172,7 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 		assert.match(r.error ?? "", /Invalid structured output/);
 		// The router's unknown selection is invalid; the legacy argument is not a pre-router gate.
 		assert.equal(r.runId, "");
-		assert.equal(inference.mock.calls.length, 1);
+		assert.equal(inference.mock.calls.length, 4);
 		assert.deepEqual(
 			defaultStore.runs().map((run) => run.id),
 			runsBefore,
