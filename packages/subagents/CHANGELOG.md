@@ -10,6 +10,7 @@
 
 - Automatic model routing with Jev no longer rejects catalogs above 255 eligible model/effort pairs. Every pair participates in a bounded tournament before final selection; context remains unchanged and any routing failure still prevents child launch ([#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - Automatic routing keeps eligible unsuffixed fallback models using the routed thinking level, while preserving explicit fallback efforts. Failed parallel routing cancels sibling routing requests before child admission ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
+- Automatic model selection now works with strict Responses-schema providers while retaining exact model/effort pair validation.
 
 ### Removed
 

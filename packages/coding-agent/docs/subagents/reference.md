@@ -19,6 +19,8 @@ subagent({
 
 The same value works on individual parallel tasks and in an agent definition's `model` field. A concrete call override wins over an agent's `auto` default. Omitting `model` keeps normal inheritance; it routes only when the effective agent model is `auto`. Each parallel task receives its own decision.
 
+Workflow stages also support [prompt-based `model: "auto"`](/workflows/authoring#automatic-stage-model-selection), using the same decision provider and evaluation guidance. Stage model selection is separate from choosing which workflow to launch.
+
 Atomic supplies the task, agent instructions, available provider-qualified models, supported efforts, and the actual text of the model-selection and evaluation guides shipped with your installed version. You do not need to read or attach those guides yourself. The router uses task-relevant evidence and cost/latency tradeoffs, not an unconditional benchmark winner or maximum effort. Benchmark measurement effort does not prescribe execution effort.
 
 The shared [`routerModel`](/settings#routermodel) setting chooses the model **making the decision**, not the child model. An explicit setting wins; otherwise Jev credentials saved through `/login typesafe-ai` or supplied by `TYPESAFE_AI_API_KEY` select Jev, then the current chat model is the fallback. Neither routing nor child fallback changes the parent chat model or the `structured_output` tool.

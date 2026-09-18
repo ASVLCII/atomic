@@ -73,7 +73,7 @@ test(
 				entered?.();
 				return held;
 			}
-			return messageStream(decisionMessage({ workflowType: "none", maxBudget: {} }));
+			return messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} }));
 		});
 		const settingsManager = SettingsManager.inMemory({
 			routerModel: "decision-test/chat",
@@ -137,7 +137,7 @@ test(
 			held.push({
 				type: "done",
 				reason: "toolUse",
-				message: decisionMessage({ workflowType: "host-changed", maxBudget: {} }),
+				message: decisionMessage({ estimatedDuration: "unknown", workflowType: "host-changed", maxBudget: {} }),
 			});
 			held = undefined;
 			// Real host lifetime guards reject the captured tool before it can publish any result.
@@ -146,7 +146,11 @@ test(
 			const fresh = await tool().execute("after", { ...args, inputs: { replacement: "Fresh inputs" } });
 			const freshDetails = fresh.details as WorkflowRegisteredToolResult;
 			assert.ok("routerDecision" in freshDetails);
-			assert.deepEqual(freshDetails.routerDecision, { workflowType: "none", maxBudget: {} });
+			assert.deepEqual(freshDetails.routerDecision, {
+				estimatedDuration: "unknown",
+				workflowType: "none",
+				maxBudget: {},
+			});
 			const catalog = captures.at(-1)!.workflows;
 			assert.ok(catalog.some((entry) => entry.name === "host-added"));
 			assert.ok(catalog.some((entry) => entry.name === "host-new-name"));

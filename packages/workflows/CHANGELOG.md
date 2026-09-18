@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Attached stage chats show `[stage: name]` on the composer top rule, a mounted question's top rule, and awaiting-input prompt borders ([#2886](https://github.com/bastani-inc/atomic/issues/2886), [#3013](https://github.com/bastani-inc/atomic/pull/3013) by [@sumitvairagar](https://github.com/sumitvairagar)).
 - Added live, bounded pending-input previews to the BACKGROUND widget, with per-workflow navigation and automatic clearing ([#2700](https://github.com/bastani-inc/atomic/pull/2700) by [@Shreyasd10](https://github.com/Shreyasd10)).
 - Added mandatory bounded routing before model-tool workflow launches, using explicit task state and the full current workflow catalog. Results show validated workflow/budget decisions as formatted JSON; `none` directs the caller to continue inline without launching, and changed registry approvals fail before admission. Routing context containing known configured credentials is rejected before either provider receives it. User `/workflow` commands and authored composition bypass the gate ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
+- Added prompt-based workflow-stage `model: "auto"` selection for stages, chains, and parallel tasks, with hard model constraints, shared router settings, and retained selection metadata across fallback and resume.
+- Model-tool `run` now dispatches the router-selected workflow without a caller-selected name, reports `estimatedDuration`, and returns the selected input contract without launching when values are missing or invalid. Routing considers conversational intent and whether a workflow is warranted.
 
 ### Fixed
 

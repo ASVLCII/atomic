@@ -7,10 +7,10 @@ import { decisionMessage, decisionModel, messageStream } from "./structured-outp
 export function workflowRouterState(budget?: WorkflowBudget): WorkflowRouterState {
 	return {
 		literalRequest: "Implement the approved change and validate it.",
-		intent: "Use tracked implementation and verification stages.",
+		intent: "Implement the approved change and validate it.",
 		conversation: [{ role: "user", text: "Implement only the approved change; do not publish." }],
 		constraints: ["Do not publish or widen scope."],
-		executionPreference: "workflow",
+		executionPreference: "unspecified",
 		documents: [
 			{ source: "task-contract", content: "Implement the change, run focused checks, and report results." },
 		],
@@ -31,7 +31,7 @@ export function workflowRouterContext(workflowType: string, maxBudget: WorkflowB
 		modelRegistry: {
 			getAvailable: () => [decisionModel],
 			getAll: () => [decisionModel],
-			streamSimple: () => messageStream(decisionMessage({ workflowType, maxBudget })),
+			streamSimple: () => messageStream(decisionMessage({ workflowType, maxBudget, estimatedDuration: "unknown" })),
 		},
 	};
 }

@@ -103,6 +103,8 @@ type RunResult = {
 	action: "run";
 	/** Validated routing decision; absent on inference/validation failure. */
 	routerDecision?: WorkflowRouterOutput;
+	estimatedDuration?: WorkflowRouterOutput["estimatedDuration"];
+	inputContract?: import("../shared/types.js").WorkflowDefinition["inputs"];
 	name?: string;
 	runId: string;
 	status: string;
@@ -420,6 +422,13 @@ function renderResultBody(result: WorkflowRegisteredToolResult | null | undefine
 			const r = result as RunResult;
 			if (r.status === "not_launched")
 				return renderNotice("WORKFLOW ROUTE", r.message ?? "No workflow launched.", opts, themed);
+			if (r.status === "needs_input")
+				return renderNotice(
+					"WORKFLOW INPUTS",
+					`${r.name ?? "Selected workflow"}: needs input — ${r.message ?? "No workflow was launched."}`,
+					opts,
+					themed,
+				);
 			if (partial) return renderNotice("WORKFLOW RUN", `${r.runId}: ${r.status} (in progress…)`, opts, themed);
 			if (r.status === "failed" && !r.runId) {
 				// Not-found path — render the error verbatim, no fake runId banner.

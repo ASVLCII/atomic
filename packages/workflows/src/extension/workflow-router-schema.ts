@@ -8,13 +8,20 @@ export const WorkflowRouterStateSchema = Type.Object(
 			minLength: 1,
 			description: "Literal authorized user request, with secrets removed.",
 		}),
-		intent: Type.String({ minLength: 1 }),
+		intent: Type.String({
+			minLength: 1,
+			description:
+				"Faithful task intent, including uncertainty. Do not invent an objective or advocate an assistant-selected workflow.",
+		}),
 		conversation: Type.Array(
 			Type.Object(
 				{ role: Type.String({ minLength: 1 }), text: Type.String({ minLength: 1 }) },
 				{ additionalProperties: false },
 			),
-			{ minItems: 1, description: "Relevant conversation text, not session paths." },
+			{
+				description:
+					"Relevant conversation text with actual roles, not session paths. Preserve explicit named-workflow or inline preferences as user provenance.",
+			},
 		),
 		constraints: Type.Array(Type.String({ minLength: 1 })),
 		executionPreference: Type.Union([Type.Literal("inline"), Type.Literal("workflow"), Type.Literal("unspecified")]),
@@ -24,7 +31,6 @@ export const WorkflowRouterStateSchema = Type.Object(
 				{ additionalProperties: false },
 			),
 			{
-				minItems: 1,
 				description:
 					"Relevant documentation content. Include task-specific operating guidance, not just paths or URLs.",
 			},

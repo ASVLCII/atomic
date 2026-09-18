@@ -36,13 +36,15 @@ export const WorkflowParametersSchema = Type.Object(
 	{
 		workflow: Type.Optional(
 			Type.String({
-				description: "Named workflow ID for named-workflow execution.",
+				description:
+					"Workflow ID for get/inputs inspection. Deprecated and ignored for model-tool run; only the router selects execution. This field is not user intent.",
 			}),
 		),
 		inputs: Type.Optional(
 			Type.Record(Type.String(), Type.Unknown(), {
 				default: {},
-				description: "Key/value inputs passed to a named workflow run.",
+				description:
+					"Unbound supplied inputs, validated with defaults against the router-selected workflow. Missing or invalid values return needs_input without launch.",
 			}),
 		),
 		budget: Type.Optional(WorkflowBudgetSchema),

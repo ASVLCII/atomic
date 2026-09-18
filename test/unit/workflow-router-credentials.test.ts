@@ -123,13 +123,26 @@ test("TypeSafe none preserves exact budget limits alongside credential-named con
 					confidence: 1,
 				},
 				budget: { type: "choice", choice: "preserve", probabilities: { preserve: 1 }, confidence: 1 },
+				duration: {
+					type: "choice",
+					choice: "unknown",
+					probabilities: {
+						unknown: 1,
+						under_5_minutes: 0,
+						"5_to_15_minutes": 0,
+						"15_to_60_minutes": 0,
+						"1_to_4_hours": 0,
+						over_4_hours: 0,
+					},
+					confidence: 1,
+				},
 			},
 			usage: { input_tokens: 20, output_tokens: 10 },
 		}),
 	);
 	vi.stubGlobal("fetch", transport);
 	const result = await f.route({ ...f.args, state: workflowRouterState(budget) });
-	assert.deepEqual(result.decision, { workflowType: "none", maxBudget: budget });
+	assert.deepEqual(result.decision, { estimatedDuration: "unknown", workflowType: "none", maxBudget: budget });
 	assert.equal(transport.mock.calls.length, 1);
 	assert.equal(f.infer.mock.calls.length, 0);
 });
@@ -172,6 +185,19 @@ function registeredFixture(metadata?: { field: string; text: string }) {
 					confidence: 1,
 				},
 				budget: { type: "choice", choice: "preserve", probabilities: { preserve: 1 }, confidence: 1 },
+				duration: {
+					type: "choice",
+					choice: "unknown",
+					probabilities: {
+						unknown: 1,
+						under_5_minutes: 0,
+						"5_to_15_minutes": 0,
+						"15_to_60_minutes": 0,
+						"1_to_4_hours": 0,
+						over_4_hours: 0,
+					},
+					confidence: 1,
+				},
 			},
 			usage: { input_tokens: 20, output_tokens: 10 },
 		}),
@@ -289,7 +315,11 @@ for (const action of ["run", undefined] as const) {
 				assert.ok("status" in result.details);
 				assert.equal(result.details.status, "not_launched");
 				assert.ok("routerDecision" in result.details);
-				assert.deepEqual(result.details.routerDecision, { workflowType: "none", maxBudget: {} });
+				assert.deepEqual(result.details.routerDecision, {
+					estimatedDuration: "unknown",
+					workflowType: "none",
+					maxBudget: {},
+				});
 				assert.equal(f.infer.mock.calls.length, provider === "ordinary" ? 1 : 0);
 				assert.equal(f.transport.mock.calls.length, provider === "jev" ? 1 : 0);
 				f.noLaunch();
@@ -425,7 +455,11 @@ test("safe OAuth metadata routes without refreshing tokens or executing credenti
 	assert.equal(f.infer.mock.calls.length, 1);
 	assert.equal(f.transport.mock.calls.length, 0);
 	assert.ok("routerDecision" in result.details);
-	assert.deepEqual(result.details.routerDecision, { workflowType: "none", maxBudget: {} });
+	assert.deepEqual(result.details.routerDecision, {
+		estimatedDuration: "unknown",
+		workflowType: "none",
+		maxBudget: {},
+	});
 	assert.equal(auth.mock.calls.length, 0);
 	assert.equal(command.mock.calls.length, 0);
 	assert.equal(spawn.mock.calls.length, 0);

@@ -12,6 +12,8 @@
 - Added opt-in subagent `model: "auto"` routing for single tasks, parallel tasks and agent defaults, using available model/effort pairs and shipped evaluation guidance. The shared `routerModel` setting selects the decision provider; invalid or stale decisions prevent child launch, and selected versus fallback execution models remain distinct in task metadata ([#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - TypeSafe Jev supports API-key login and logout through the normal credential store, with environment-key fallback. Saved Jev credentials can select the default router while Jev remains absent from chat-model selection.
 - Added a searchable Router model entry in `/settings`, saving automatic routing, Jev, or an available provider/model to `settings.json` without changing the chat model.
+- Added workflow-stage `model: "auto"` selection from actual prompts and evaluation guidance, with constrained model/effort pairs and separate selected versus execution metadata.
+- Workflow `run` now lets the router choose and dispatch from neutral task context, reports a duration estimate, and returns missing or invalid selected input contracts before admission. Brainstorming and inline preferences remain router-owned decisions.
 
 ### Changed
 
@@ -50,6 +52,7 @@
 - Workflow routing preserves omitted budget fields with strict-schema providers instead of rejecting their required null placeholders. Explicit zero and fractional limits retain their exact meaning.
 - Subagent auto routing uses the routed thinking level when checking unsuffixed fallbacks and cancels sibling routing requests when a parallel routing decision fails ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
 - The Router model picker updates an existing project override instead of silently changing a global default that the project ignores, and displays the save scope ([#3103](https://github.com/bastani-inc/atomic/pull/3103)).
+- Saved Jev credentials become available to automatic routing immediately after login, even during catalog refresh; stale refreshes no longer restore credentials after logout.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

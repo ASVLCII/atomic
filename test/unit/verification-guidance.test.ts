@@ -185,12 +185,12 @@ for (const order of [["workflow", "subagent"], ["subagent", "workflow"], ["subag
 	});
 }
 
-test("default constructed guidance permits complex inline tasks without changing quoted or default routing", () => {
+test("default constructed guidance delegates scoped intent interpretation to the router", () => {
 	const prompt = DEFAULT_PROMPT_GUIDANCE.join("\n");
-	executionModeContract(prompt);
-	assert.match(prompt, /Unless the user explicitly chooses inline execution for this task/);
+	assert.match(prompt, /router owns all semantic selection/);
+	assert.match(prompt, /Put explicit named-workflow/);
 	assert.match(prompt, /even when complex/);
-	assert.match(prompt, /Without an explicit execution-mode preference, skip workflows for tiny/);
+	assert.match(prompt, /Quoted examples and questions about inline code are not execution preferences/);
 	assert.match(prompt, /Do not extend a scoped preference to unrelated tasks/);
 	assert.match(prompt, /Do not claim already-completed work was undone/);
 });

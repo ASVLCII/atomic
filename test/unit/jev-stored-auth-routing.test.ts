@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.js";
+import { jevAuthProvider } from "../../packages/coding-agent/src/core/decision-provider.js";
 import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.js";
 import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
@@ -23,6 +24,81 @@ async function storedRuntime(key = "mock-stored-jev-key") {
 		allowModelNetwork: false,
 	});
 	return { runtime, registry: new ModelRegistry(runtime) };
+}
+
+for (const nextAuth of ["stored", "deleted", "environment"] as const) {
+	test(`saved Jev auth survives overlapping registration and subsequent ${nextAuth} auth`, async () => {
+		vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+		const runtime = await ModelRuntime.create({
+			modelsPath: null,
+			credentials: AuthStorage.inMemory(),
+			allowModelNetwork: false,
+		});
+		const provider = jevAuthProvider();
+		const apiKey = provider.auth.apiKey!;
+		const saveEntered = Promise.withResolvers<void>();
+		const releaseSave = Promise.withResolvers<void>();
+		const registrationEntered = Promise.withResolvers<void>();
+		const releaseRegistration = Promise.withResolvers<void>();
+		let phase: "idle" | "save" | "registration" = "idle";
+		const gatedProvider = {
+			...provider,
+			auth: {
+				...provider.auth,
+				apiKey: {
+					...apiKey,
+					check: async (options: Parameters<NonNullable<typeof apiKey.check>>[0]) => {
+						const resolved = await apiKey.resolve(options);
+						const result = resolved ? { type: "api_key" as const, source: resolved.source } : undefined;
+						if (phase === "save") {
+							saveEntered.resolve();
+							await releaseSave.promise;
+						} else if (phase === "registration") {
+							registrationEntered.resolve();
+							await releaseRegistration.promise;
+						}
+						return result;
+					},
+				},
+			},
+		};
+		const setup = runtime.createExtensionProviderTransaction();
+		setup.registerNativeProvider(gatedProvider);
+		await setup.commit();
+		phase = "save";
+		const save = runtime.saveCredential("typesafe-ai", { type: "api_key", key: "mock-saved-jev-key" });
+		await saveEntered.promise;
+		phase = "registration";
+		const registration = runtime.createExtensionProviderTransaction();
+		registration.registerNativeProvider(gatedProvider);
+		const refresh = registration.commit();
+		await registrationEntered.promise;
+		releaseSave.resolve();
+		try {
+			await save;
+			assert.deepEqual(runtime.getProviderAuthStatus("typesafe-ai"), { configured: true, source: "stored" });
+			const request = {
+				...decisionRequest(),
+				settings: SettingsManager.inMemory(),
+				modelRegistry: new ModelRegistry(runtime),
+			};
+			assert.equal(resolveRouterModel(request).kind, "jev");
+			phase = "idle";
+			if (nextAuth !== "stored") {
+				if (nextAuth === "environment") vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-next-env-key");
+				await runtime.logout("typesafe-ai");
+				assert.equal(runtime.getStoredCredentialType("typesafe-ai"), undefined);
+				assert.equal(resolveRouterModel(request).kind, nextAuth === "deleted" ? "chat" : "jev");
+			}
+		} finally {
+			phase = "idle";
+			releaseRegistration.resolve();
+			await refresh;
+		}
+		assert.equal(runtime.getProviderAuthStatus("typesafe-ai").configured, nextAuth !== "deleted");
+		assert.equal(runtime.getProviderAuthStatus("typesafe-ai").source, nextAuth === "deleted" ? undefined : nextAuth);
+		assert.equal(runtime.getStoredCredentialType("typesafe-ai"), nextAuth === "stored" ? "api_key" : undefined);
+	});
 }
 
 for (const environmentKey of ["", "mock-env-jev-key"]) {

@@ -173,6 +173,7 @@ export function createDurableStagePrimitive(input: {
 			...(isMidSessionResume
 				? {
 						resumeFromSessionFile: session.sessionFile,
+						routerSelection: session.routerSelection,
 						durableAccumulatedDurationMs: session.durationMs ?? 0,
 					}
 				: {}),
@@ -244,6 +245,7 @@ export function createDurableTaskPrimitive(input: {
 			...(session?.sessionFile !== undefined
 				? {
 						resumeFromSessionFile: session.sessionFile,
+						routerSelection: session.routerSelection,
 						durableAccumulatedDurationMs: session.durationMs ?? 0,
 					}
 				: {}),
@@ -396,6 +398,9 @@ function completeTaskResult(
 		...(base.modelAttempts !== undefined || checkpoint.modelAttempts !== undefined
 			? { modelAttempts: [...(base.modelAttempts ?? checkpoint.modelAttempts ?? [])] }
 			: {}),
+		...((base.routerSelection ?? checkpoint.routerSelection) !== undefined
+			? { routerSelection: base.routerSelection ?? checkpoint.routerSelection }
+			: {}),
 		...(base.warnings !== undefined || checkpoint.warnings !== undefined
 			? { warnings: [...(base.warnings ?? checkpoint.warnings ?? [])] }
 			: {}),
@@ -516,6 +521,7 @@ function taskCheckpointMetadata(result: WorkflowTaskResult): Partial<DurableStag
 		...(result.thinkingLevel !== undefined ? { thinkingLevel: result.thinkingLevel } : {}),
 		...(result.attemptedModels !== undefined ? { attemptedModels: [...result.attemptedModels] } : {}),
 		...(result.modelAttempts !== undefined ? { modelAttempts: [...result.modelAttempts] } : {}),
+		...(result.routerSelection !== undefined ? { routerSelection: result.routerSelection } : {}),
 		...(result.structured !== undefined ? { structured: result.structured } : {}),
 		...(result.artifacts !== undefined ? { artifacts: [...result.artifacts] } : {}),
 		...(result.warnings !== undefined ? { warnings: [...result.warnings] } : {}),
@@ -565,6 +571,7 @@ function mergeCheckpointHydrationMetadata(
 		...(replayValueCheckpoint.thinkingLevel === undefined ? metadataValue(checkpoints, "thinkingLevel") : {}),
 		...(replayValueCheckpoint.attemptedModels === undefined ? metadataValue(checkpoints, "attemptedModels") : {}),
 		...(replayValueCheckpoint.modelAttempts === undefined ? metadataValue(checkpoints, "modelAttempts") : {}),
+		...(replayValueCheckpoint.routerSelection === undefined ? metadataValue(checkpoints, "routerSelection") : {}),
 		...(replayValueCheckpoint.structured === undefined ? metadataValue(checkpoints, "structured") : {}),
 		...(replayValueCheckpoint.artifacts === undefined ? metadataValue(checkpoints, "artifacts") : {}),
 		...(replayValueCheckpoint.warnings === undefined ? metadataValue(checkpoints, "warnings") : {}),
@@ -678,6 +685,7 @@ export function recordCachedStageIntoStore(
 		...(checkpoint?.thinkingLevel !== undefined ? { thinkingLevel: checkpoint.thinkingLevel } : {}),
 		...(checkpoint?.attemptedModels !== undefined ? { attemptedModels: checkpoint.attemptedModels } : {}),
 		...(checkpoint?.modelAttempts !== undefined ? { modelAttempts: checkpoint.modelAttempts } : {}),
+		...(checkpoint?.routerSelection !== undefined ? { routerSelection: checkpoint.routerSelection } : {}),
 		...(checkpoint?.structured !== undefined ? { structured: checkpoint.structured } : {}),
 		...(checkpoint?.artifacts !== undefined ? { artifacts: checkpoint.artifacts } : {}),
 		...(checkpoint?.warnings !== undefined ? { warnings: checkpoint.warnings } : {}),

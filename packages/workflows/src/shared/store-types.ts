@@ -443,6 +443,7 @@ export interface StageSnapshot {
 	attemptedModels?: readonly string[];
 	/** Per-model fallback attempt outcomes. */
 	modelAttempts?: readonly import("./types.js").WorkflowModelAttempt[];
+	routerSelection?: import("@bastani/atomic").ModelRouterOutput;
 	/** Schema-backed task/stage value, when distinct from assistant text. */
 	structured?: WorkflowSerializableValue;
 	/** Worktree or output artifacts collected after a completed task. */

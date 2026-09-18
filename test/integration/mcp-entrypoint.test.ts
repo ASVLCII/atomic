@@ -193,7 +193,7 @@ describe("MCP entrypoints — workflow tool execute", () => {
 		stream.push({
 			type: "done",
 			reason: "toolUse",
-			message: decisionMessage({ workflowType: "mcp-restricted", maxBudget: {} }),
+			message: decisionMessage({ workflowType: "mcp-restricted", maxBudget: {}, estimatedDuration: "unknown" }),
 		});
 		const out = await pending;
 		await waitForToolResult(out);

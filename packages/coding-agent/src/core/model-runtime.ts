@@ -307,6 +307,7 @@ export class ModelRuntime implements Models {
 		this.snapshot = updateSnapshotModels(this.snapshot, [...this.models.getModels()]);
 	}
 	private async runAvailabilityRefresh(seq: number, errorSeq: number, signal: AbortSignal): Promise<void> {
+		const inputsGeneration = this.catalogInputsGeneration;
 		const providers = this.models.getProviders();
 		const [available, checks, credentials] = await Promise.all([
 			this.models.getAvailable(undefined, { signal }),
@@ -320,7 +321,7 @@ export class ModelRuntime implements Models {
 			),
 			this.credentials.list({ signal }),
 		]);
-		if (seq !== this.availabilityRefreshSeq) return;
+		if (seq !== this.availabilityRefreshSeq || inputsGeneration !== this.catalogInputsGeneration) return;
 		this.snapshot = createModelRuntimeSnapshot([...this.models.getModels()], [...available], checks, credentials);
 		if (errorSeq === this.availabilityErrorSeq) this.availabilityError = undefined;
 	}
@@ -337,6 +338,7 @@ export class ModelRuntime implements Models {
 		});
 	}
 	private async refreshProviderAvailability(providerId: string, signal: AbortSignal): Promise<void> {
+		const inputsGeneration = this.catalogInputsGeneration;
 		++this.availabilityRefreshSeq;
 		const providerSeq = (this.providerAvailabilitySeq.get(providerId) ?? 0) + 1;
 		this.providerAvailabilitySeq.set(providerId, providerSeq);
@@ -348,7 +350,11 @@ export class ModelRuntime implements Models {
 				this.credentials.read(providerId, { signal }),
 			]);
 			signal.throwIfAborted();
-			if (this.providerAvailabilitySeq.get(providerId) !== providerSeq) return;
+			if (
+				this.providerAvailabilitySeq.get(providerId) !== providerSeq ||
+				inputsGeneration !== this.catalogInputsGeneration
+			)
+				return;
 			const configuredProviders = new Set(this.snapshot.configuredProviders),
 				storedProviders = new Set(this.snapshot.storedProviders),
 				storedCredentialTypes = new Map(this.snapshot.storedCredentialTypes),
@@ -724,6 +730,15 @@ export class ModelRuntime implements Models {
 			await this.synchronizeCredentialState(providerId, "saveCredential", credential, async () => {
 				const result = await this.refresh({ providers: [providerId] });
 				this.assertCredentialRefreshSucceeded(providerId, result);
+				// A concurrent catalog refresh can supersede this provider's availability
+				// publication. The committed credential must still be visible when save returns.
+				this.snapshotGeneration += 1;
+				this.externalProviderAuthStatuses.delete(providerId);
+				this.snapshot = {
+					...addStoredCredentialProvider(this.snapshot, providerId, credential.type),
+					// Keep credential-filtered model availability from the refresh intact.
+					available: this.snapshot.available,
+				};
 			});
 		});
 	}

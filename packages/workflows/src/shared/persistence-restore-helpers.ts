@@ -1,5 +1,5 @@
 import { Value } from "typebox/value";
-import { isModelAttempts } from "../durable/dbos-envelope.js";
+import { isModelAttempts, isRouterSelection } from "../durable/dbos-envelope.js";
 import type { NormalizedSessionEntry as SessionEntry } from "./persistence-restore.js";
 import { workflowSerializableObjectSchema } from "./serializable.js";
 import type { Store } from "./store.js";
@@ -112,6 +112,8 @@ export function _buildStageSnapshots(
 				if (typeof sessionId === "string") snap.sessionId = sessionId;
 				if (typeof sessionFile === "string") snap.sessionFile = sessionFile;
 				if (isModelAttempts(modelAttempts)) snap.modelAttempts = modelAttempts as StageSnapshot["modelAttempts"];
+				if (isRouterSelection(entry.payload.routerSelection))
+					snap.routerSelection = Object.freeze({ ...entry.payload.routerSelection });
 				Object.assign(snap, replayMetadata(entry.payload), workflowChildMetadata(entry.payload));
 			}
 		}

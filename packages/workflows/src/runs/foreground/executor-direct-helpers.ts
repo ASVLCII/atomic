@@ -128,7 +128,19 @@ export function stageOptionsWithInputDefaults<T extends StageOptions>(
 ): T | undefined {
 	const defaults = withoutUndefinedProperties(inputDefaults);
 	if (Object.keys(defaults).length === 0) return options;
-	return { ...defaults, ...withoutUndefinedProperties(options ?? {}) } as T;
+	return {
+		...defaults,
+		...withoutUndefinedProperties(options ?? {}),
+		...(defaults.modelConstraints !== undefined && options?.modelConstraints !== undefined
+			? {
+					inheritedModelConstraints: [
+						...(defaults.inheritedModelConstraints ?? []),
+						defaults.modelConstraints,
+						...(options.inheritedModelConstraints ?? []),
+					],
+				}
+			: {}),
+	} as T;
 }
 
 export function stageOptionsWithGitWorktree<T extends StageOptions>(

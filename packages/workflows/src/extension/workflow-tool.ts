@@ -1,6 +1,7 @@
 import { getSupportedThinkingLevels } from "@bastani/pi-ai/compat";
 import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
+import { resolveAndValidateInputs } from "../runs/foreground/executor-inputs.js";
 import { workflowDependency } from "../sdk-surface.js";
 import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
 import { store } from "../shared/store.js";
@@ -143,23 +144,38 @@ export function makeExecuteWorkflowTool(
 					await awaitRequest(Promise.resolve(ensureWorkflowResourcesLoaded()));
 					const routed = await routeWorkflowLaunch(args, ctx, getRuntime, signal);
 					const { decision } = routed;
-					if (decision.workflowType === "none" || decision.workflowType !== routed.proposedName) {
+					if (decision.workflowType === "none") {
 						return {
 							action: "run",
 							runId: "",
 							status: "not_launched",
 							routerDecision: decision,
-							message:
-								decision.workflowType === "none"
-									? WORKFLOW_INLINE_GUIDANCE
-									: `Router selected "${decision.workflowType}" instead. No workflow was launched. Inspect its inputs and prepare fresh state for an explicit new call; do not reuse or remap the proposed workflow's inputs automatically.`,
+							estimatedDuration: decision.estimatedDuration,
+							message: WORKFLOW_INLINE_GUIDANCE,
 						};
 					}
 					routed.assertCurrent();
 					approvedRoute = routed;
+					const selected = getRuntime().registry.get(decision.workflowType)!;
+					let inputs: ReturnType<typeof resolveAndValidateInputs>;
+					try {
+						inputs = resolveAndValidateInputs(selected.inputs, args.inputs ?? {}, "selected workflow");
+					} catch {
+						return {
+							action: "run",
+							runId: "",
+							status: "needs_input",
+							name: selected.normalizedName,
+							routerDecision: decision,
+							estimatedDuration: decision.estimatedDuration,
+							inputContract: selected.inputs,
+							message:
+								"Selected workflow inputs are missing or invalid. Supply values matching inputContract from the user's actual context, or ask for required human input. No workflow was launched. A later run routes again; do not assume the same selection or remap stale inputs.",
+						};
+					}
 					const result = await awaitRequest(
 						getRuntime().dispatch(
-							{ ...args, workflow: routed.proposedName, budget: decision.maxBudget },
+							{ ...args, workflow: decision.workflowType, inputs, budget: decision.maxBudget },
 							{
 								policy,
 								origin: "agent",
@@ -172,7 +188,9 @@ export function makeExecuteWorkflowTool(
 							},
 						),
 					);
-					return result.action === "run" ? { ...result, routerDecision: decision } : result;
+					return result.action === "run"
+						? { ...result, routerDecision: decision, estimatedDuration: decision.estimatedDuration }
+						: result;
 				} catch (error) {
 					if (signal?.aborted) throw signal.reason ?? error;
 					// Once accepted, preserve the existing runtime error path rather than claim no launch.
@@ -190,7 +208,9 @@ export function makeExecuteWorkflowTool(
 						runId: "",
 						status: "failed",
 						stages: [],
-						...(routerDecision === undefined ? {} : { routerDecision }),
+						...(routerDecision === undefined
+							? {}
+							: { routerDecision, estimatedDuration: routerDecision.estimatedDuration }),
 						error:
 							error instanceof Error
 								? error.message

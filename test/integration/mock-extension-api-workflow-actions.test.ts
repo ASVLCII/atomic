@@ -152,7 +152,7 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 		}
 	});
 
-	test("action='run' for unknown workflow fails before routing without launching", async () => {
+	test("action='run' ignores an unknown legacy name and routes before rejecting an invalid decision", async () => {
 		const execute = mock.tools[0]!.opts.execute;
 		const ctx = workflowRouterContext("nonexistent-workflow-xyz");
 		const inference = vi.spyOn(ctx.modelRegistry!, "streamSimple");
@@ -169,13 +169,10 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 		);
 		const r = result as { action: "run"; runId: string; status: string; error?: string };
 		assert.equal(r.status, "failed");
-		assert.equal(
-			r.error,
-			"Proposed workflow is not registered. Inspect workflow list, author or reload its definition if needed, and retry with its current name.",
-		);
-		// Pre-router validation must not allocate a run or invoke inference.
+		assert.match(r.error ?? "", /Invalid structured output/);
+		// The router's unknown selection is invalid; the legacy argument is not a pre-router gate.
 		assert.equal(r.runId, "");
-		assert.equal(inference.mock.calls.length, 0);
+		assert.equal(inference.mock.calls.length, 1);
 		assert.deepEqual(
 			defaultStore.runs().map((run) => run.id),
 			runsBefore,

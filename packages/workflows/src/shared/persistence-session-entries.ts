@@ -100,6 +100,7 @@ export interface StageEndPayload {
 	readonly sessionId?: string;
 	readonly sessionFile?: string;
 	readonly modelAttempts?: readonly WorkflowModelAttempt[];
+	readonly routerSelection?: import("@bastani/atomic").ModelRouterOutput;
 	readonly replayKey?: string;
 	readonly replayedFromStageId?: string;
 	readonly replayed?: boolean;
@@ -227,6 +228,7 @@ export function appendStageEnd(api: PersistenceAPI, payload: StageEndPayload, op
 		...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
 		...(payload.sessionFile !== undefined ? { sessionFile: payload.sessionFile } : {}),
 		...(payload.modelAttempts !== undefined ? { modelAttempts: payload.modelAttempts } : {}),
+		...(payload.routerSelection !== undefined ? { routerSelection: payload.routerSelection } : {}),
 		...(payload.replayKey !== undefined ? { replayKey: payload.replayKey } : {}),
 		...(payload.replayedFromStageId !== undefined ? { replayedFromStageId: payload.replayedFromStageId } : {}),
 		...(payload.replayed !== undefined ? { replayed: payload.replayed } : {}),

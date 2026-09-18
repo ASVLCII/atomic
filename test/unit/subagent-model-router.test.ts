@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@bastani/atomic";
 import { type Api, createAssistantMessageEventStream, type Model } from "@bastani/pi-ai";
+import { Value } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import { applyAgentConfig } from "../../packages/subagents/src/agents/agent-management-helpers.js";
@@ -342,15 +343,14 @@ test("Jev covers 1997 pairs without filtering; ordinary router retains full cata
 	assert.equal(seen.size, 1997);
 	assert.ok(fetch.mock.calls.length > 1);
 	f.ctx.getRouterModel = () => "decision-test/chat";
-	f.infer.mockImplementation((_model, context) => {
-		assert.equal(JSON.parse(context.messages[0]!.content as string).state.catalog.length, 1997);
-		assert.ok(context.tools?.[0]);
-		assert.ok("anyOf" in context.tools[0].parameters);
-		assert.equal((context.tools[0].parameters.anyOf as object[]).length, 1997);
-		return messageStream(decisionMessage({ model: "decision-test/m255", effort: null }));
-	});
+	f.infer.mockImplementation(() => messageStream(decisionMessage({ model: "decision-test/m255", effort: null })));
 	assert.equal((await f.route()).routerSelection.model, "decision-test/m255");
 	assert.equal(f.infer.mock.calls.length, 1);
+	const context = f.infer.mock.calls[0]![1];
+	assert.equal(JSON.parse(context.messages[0]!.content as string).state.catalog.length, 1997);
+	assert.ok(context.tools?.[0]);
+	for (let index = 0; index < 1997; index++)
+		assert.equal(Value.Check(context.tools[0].parameters, { model: `decision-test/m${index}`, effort: null }), true);
 });
 
 test("configured credential text is rejected before inference", async () => {

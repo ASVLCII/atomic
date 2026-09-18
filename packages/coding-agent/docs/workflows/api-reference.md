@@ -35,12 +35,16 @@ interface WorkflowBudget {
 interface WorkflowRouterOutput {
   workflowType: string; // "none" or an exact name from the effective registry
   maxBudget: WorkflowBudget;
+  estimatedDuration: "unknown" | "under_5_minutes" | "5_to_15_minutes"
+    | "15_to_60_minutes" | "1_to_4_hours" | "over_4_hours";
 }
 ```
 
-State strings must be nonempty, with at least one conversation entry and one document containing actual text. `constraints` may be empty. `userBudget.provenance` quotes the user's instruction; `limits` preserves its exact numbers. The optional tool `budget` must match those limits. Budget objects reject unknown properties; duration and tokens are nonnegative integers, cost and warning percentage are nonnegative numbers. Omitted fields inherit, while zero disables only its field. The normalized router output has exactly the two required properties shown above and reuses the canonical budget contract.
+State strings must be nonempty when supplied. Conversation, documents and constraints arrays may be empty when no relevant context is available. Preserve actual uncertainty and user preferences, not an assistant-selected workflow. `userBudget.provenance` quotes the user's instruction; `limits` preserves exact numbers. Optional tool `budget` must match those limits. Omitted fields inherit and zero disables only its field. Duration and tokens are nonnegative integers; cost and warning percentage are nonnegative numbers. Unknown budget properties are rejected.
 
-The tool's JSON content and structured details expose a validated `routerDecision: WorkflowRouterOutput`. Matching selections retain normal launch `runId` and `status` metadata. `none` and different-workflow selections return `action: "run"`, `status: "not_launched"`, `runId: ""`, the decision and actionable `message`. `none` tells the caller to perform the task inline within existing authorization, not to report it complete or launch a fallback. A different selection requires fresh inputs/state for an explicit new call. Provider or validation failure does not fabricate a decision.
+Call `workflow({ action: "run", state, inputs })` without selecting a workflow name. Legacy `workflow` arguments on model-tool runs are deprecated and ignored, not user provenance. The router alone interprets named-workflow and inline preferences from factual state. Its validated `routerDecision` and top-level `estimatedDuration` appear in JSON content and structured details. A selected workflow launches after supplied inputs and declared defaults validate. Missing or invalid inputs return `status: "needs_input"`, `runId: ""`, the exact `inputContract`, decision and estimate, without admission. Obtain actual values or required human input and retry explicitly; the next call routes again, never remapping stale inputs to a new contract. `none` returns `status: "not_launched"` and means conversation, clarification or inline work, not completion, refusal or fallback launch. Routing failure does not fabricate a decision.
+
+`estimatedDuration` is a wall-clock range selected from task/catalog context, not measured timing or a guarantee. Minutes and hours are explicit in the value: under 5 minutes; 5–15 minutes; 15–60 minutes; 1–4 hours; over 4 hours; or `unknown` when evidence is insufficient. It is never `maxDurationMs`, a user budget, or permission to change limits. Report it only after the tool returns.
 
 Atomic supplies all effective registered workflow identities, descriptions, input contracts and inherited budgets in one bounded inference. It revalidates the registry before admission; a stale decision cannot launch a changed or removed definition. User-issued `/workflow` commands and authored `ctx.workflow(...)` composition bypass this gate. Inspection/control actions are unaffected, and workflow-stage tool restrictions remain enforced. See [Model-invoked launch routing](/workflows/operations#model-invoked-launch-routing) for a complete call, model selection, reload and error handling.
 
@@ -559,6 +563,12 @@ readonly model?: WorkflowModelValue; // string or supported SDK model object
 
 Selects the primary stage model. String values can carry the reasoning suffix described under [Reasoning levels](#reasoning-levels).
 
+Use `model: "auto"` for prompt-based selection of an execution model and supported effort before session admission. Omission and concrete models keep prior behavior. Shared chain/parallel defaults accept `auto`; each stage receives one decision. The router sees the final supplied prompt, including interpolated inputs and supplied task context, rather than only a stage name.
+
+`modelConstraints?: ModelConstraints` applies hard restrictions to auto selection and execution/compaction fallbacks. Fields are `allowedModels?: string[]`, `allowedEfforts?: (string | null)[]`, `maxInputCost?: number`, `maxOutputCost?: number`, `minContextWindow?: number`, and `requiredInputs?: ("text" | "image")[]`. Model IDs are exact provider/model IDs. Costs are catalog USD per million tokens including pricing tiers, not task budgets. Efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `null` for nonreasoning models. Empty allowlists admit nothing. Inherited and stage restrictions all hold; a task override cannot widen shared restrictions. An authored `thinkingLevel` restricts auto selection to that supported effort.
+
+An auto stage has no session until it receives prompt text. Model-dependent operations such as `compact()` or `cycleModel()` before that point report an error; call `prompt()` first or deliberately select a concrete model with `setModel()`. Session operations after admission keep their normal behavior.
+
 ### `fallbackModels` / `fallbackThinkingLevels`
 
 ```typescript
@@ -1004,6 +1014,7 @@ interface WorkflowTaskResult extends WorkflowTaskContext {
   readonly artifacts?: readonly WorkflowArtifact[];
   readonly model?: string;
   readonly thinkingLevel?: string;
+  readonly routerSelection?: { readonly model: string; readonly effort: string | null };
   readonly attemptedModels?: readonly string[];
   readonly modelAttempts?: readonly WorkflowModelAttempt[];
   readonly warnings?: readonly string[];
