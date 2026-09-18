@@ -18,6 +18,7 @@
 ### Changed
 
 - Install/update telemetry pings now go to the Atomic version-adoption endpoint instead of pi.dev. First-interactive-launch triggers, opt-outs, and the independent update check are unchanged ([#2498](https://github.com/bastani-inc/atomic/issues/2498)).
+- Automatic subagent and workflow-stage model selection no longer includes system prompts as agent metadata, reducing routing input. Execution prompts are unchanged; self-contained subagents still use their system prompt as the task when no task is supplied.
 
 ### Fixed
 

@@ -24,7 +24,7 @@ export async function routeSubagentModel(input: {
 	const route = await routeExecutionModel({
 		ctx,
 		task: input.task?.trim() ? input.task : agent.systemPrompt,
-		agent: { name: agent.name, description: agent.description, instructions: agent.systemPrompt },
+		agent: { name: agent.name, description: agent.description },
 		constraints: [
 			parseModelConstraints(agent.modelConstraints),
 			parseModelConstraints(input.modelConstraints),

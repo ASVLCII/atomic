@@ -82,6 +82,7 @@ test("public stage auto decides from actual prompt and shipped guides before adm
 	assert.equal(f.store.runs()[0]?.stages[0]?.model, "decision-test/chat");
 	const state = JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state;
 	assert.equal(state.task, "  Solve this actual task verbatim.  ");
+	assert.deepEqual(state.agent, { name: "not the task", description: "Workflow stage" });
 	assert.deepEqual(
 		state.documents.map((doc: { source: string }) => doc.source),
 		["model-selection.md", "evals.md"],
