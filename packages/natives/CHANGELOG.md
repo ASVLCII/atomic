@@ -5,6 +5,7 @@
 ### Fixed
 
 - Supervised commands no longer fail when retained output files collide after process IDs are reused; other output-file creation failures now include the operating-system error ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Command output files use timestamped random names and bounded collision retries, preventing retained files from indefinitely delaying startup without overwriting existing output.
 
 ## [0.9.19] - 2026-09-13
 
