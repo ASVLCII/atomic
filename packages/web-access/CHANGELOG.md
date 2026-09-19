@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Operational web diagnostics within SDK-owned work now use the session's diagnostic sink with redacted messages instead of printing credentials, paths or remote errors to console ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Timeout, cancellation and output-limit failures no longer hang when subprocess descendants keep output pipes open; cleanup preserves the original error.
 - Local video extraction recognizes Windows drive and UNC paths and converts file URLs using the host's native path rules.
+- `code_search` now shows the repository name and query while the call is pending, before an answer arrives.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 
