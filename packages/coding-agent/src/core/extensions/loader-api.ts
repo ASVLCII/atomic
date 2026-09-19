@@ -302,8 +302,10 @@ export function createExtensionAPI(
 
 		async refreshWorkflowResources() {
 			assertActive();
-			const refreshed = await workflowResources.refresh?.();
-			return [...(refreshed ?? workflowResources.get())];
+			return trackAPIWork(async () => {
+				const refreshed = await workflowResources.refresh?.();
+				return [...(refreshed ?? workflowResources.get())];
+			});
 		},
 
 		getResourceLoaderInheritanceSnapshot() {

@@ -83,6 +83,7 @@
 - Filtered creation and reload now retire omitted factories' APIs and subscriptions independently, preserving selected extensions. Captured extension actions refuse new work immediately during close/reload, while admitted subprocesses drain. Deferred shutdown after self-reload or command replacement can no longer mutate, acquire task hosts from, or send events into the successor ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Reload acquisition rollback no longer depends on a working extension getter. Shutdown and factory rollback now wait for tracked cleanup subprocesses after handlers return, while keeping fresh admission closed. Released event subscriptions and workflow publishers no longer retain completed release callbacks or their captured data after manual release or generation invalidation ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Factory rollback now refuses fresh work across all closing factories before awaiting cleanup and lets already-admitted callbacks finish before shutdown. Omitted factories drain independently of selected extensions sharing their runtime, preventing late resource leaks without blocking surviving extensions ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Workflow resource refreshes started through the extension API now finish before disposal, reload retirement or failed-factory cleanup, preventing late acquisitions from surviving successful shutdown ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 
