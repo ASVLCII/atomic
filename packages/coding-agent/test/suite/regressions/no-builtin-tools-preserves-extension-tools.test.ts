@@ -60,6 +60,8 @@ describe("noTools builtin mode keeps extension tools enabled", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
+			// #3105: isolate coding defaults from optional shipped extension tools.
+			builtins: { workflows: false, subagents: false, mcp: false, "web-access": false },
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			settingsManager,
 			sessionManager,
@@ -101,16 +103,16 @@ describe("noTools builtin mode keeps extension tools enabled", () => {
 		expect(session.systemPrompt).toContain("- intercom:");
 		expect(session.systemPrompt).not.toContain("- read:");
 		expect(session.systemPrompt).not.toContain("- bash:");
-		session.dispose();
+		await session.dispose();
 	});
 
-	it("keeps only mandatory Intercom when noTools is all", async () => {
+	it("exposes no tools when noTools is all", async () => {
 		const session = await createSession({ noTools: "all" });
 
-		expect(session.getAllTools().map((tool) => tool.name)).toEqual(["intercom"]);
-		expect(session.getActiveToolNames()).toEqual(["intercom"]);
-		expect(session.systemPrompt).toContain("- intercom:");
-		session.dispose();
+		expect(session.getAllTools().map((tool) => tool.name)).toEqual([]);
+		expect(session.getActiveToolNames()).toEqual([]);
+		expect(session.systemPrompt).not.toContain("- intercom:");
+		await session.dispose();
 	});
 
 	it("propagates noTools through service-based session creation", async () => {
@@ -129,9 +131,19 @@ describe("noTools builtin mode keeps extension tools enabled", () => {
 			noTools: "builtin",
 		});
 
-		expect(session.getActiveToolNames()).toEqual(["intercom"]);
+		// #3105: service composition includes all five shipped packages.
+		expect(session.getActiveToolNames().sort()).toEqual([
+			"code_search",
+			"fetch_content",
+			"get_search_content",
+			"intercom",
+			"mcp",
+			"subagent",
+			"web_search",
+			"workflow",
+		]);
 		expect(session.systemPrompt).toContain("- intercom:");
 		expect(session.systemPrompt).not.toContain("- read:");
-		session.dispose();
+		await session.dispose();
 	});
 });
