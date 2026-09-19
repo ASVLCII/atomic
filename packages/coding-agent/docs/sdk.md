@@ -263,6 +263,8 @@ An extension command may await `ctx.newSession()`, `ctx.fork()` or `ctx.switchSe
 
 Concurrent command replacements also register their handoff before waiting for publication. They do not block one another's retirement, but final disposal still waits for every command continuation and reports deferred cleanup failures. Reload candidate cleanup covers settings commit, resource activation and resource commit failures as well as preparation/startup failures.
 
+After a reload commits, runtime reconstruction can still fail in a custom loader. The retiring generation's shutdown and invalidation are attempted even then, and the installed candidate remains owned by the session for final disposal. If cleanup also fails, `ShutdownFailed` retains the reconstruction and cleanup causes rather than replacing the original error.
+
 For replacement initiated outside the retiring session's work, outgoing extension shutdown completes before successor creation. If it fails, no successor is created and retained workflow cleanup is still attempted. The operation rejects with its original failure and any additional cleanup causes; repeated runtime disposal retains the failed outcome.
 
 Overlapping replacement factories may finish out of order. Runtime retirement, publication and host rebinding are coordinated; displaced successors are closed, and a failed candidate cannot shut down a surviving successor's workflows. If every replacement fails, retained workflow cleanup still runs. Creation also rolls back owned extension acquisitions when context transforms or resource setup fail before the session constructor completes; borrowed discovery is not shut down.

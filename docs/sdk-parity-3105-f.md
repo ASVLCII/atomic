@@ -357,3 +357,36 @@ Temporary F debugging notes are removed; unrelated ISSUES.md content is unchange
 ### Contract amendments received
 
 "make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates.
+
+## Fifth continuation contract
+
+Preserve retiring-generation cleanup across all postcommit runtime reconstruction, including a throwing custom loader. Public failure/control and shutdown/invalidation failure cases must retain original and cleanup causes, clean both owned generations, preserve borrowed state, and pass build/check and complete parity/affected gates. Scope remains F; no publication or later-slice implementation.
+
+### Fifth batch acceptance and evidence
+
+The single consolidated root is repaired. Immediately after publication, the started candidate remains reachable from the session. Runtime reconstruction is captured separately from retiring shutdown and invalidation; all cleanup attempts run and aggregate failures retain the original setup cause. A plain reconstruction failure remains its original error when cleanup succeeds. No new API, owner manager or payload policy was introduced.
+
+| Required boundary | Current evidence |
+| --- | --- |
+| Postcommit rebuild failure retains both owners | Exact failure/control plus four source and four built Node cases require only candidate 4 after reload and no active resources after disposal; shutdown order is retiring 2 then candidate 4 |
+| Every retiring cleanup attempted; causes preserved | Source/Node shutdown and invalidation failure variants require the original setup error plus cleanup failure, invalidation attempted, and later disposal reporting ShutdownFailed rather than success |
+| Prior ownership, generation admission, APIs, raw data, sibling/stage resources | Complete SDK, host, lifecycle, queue and task selections pass unchanged prior assertions; public return identities/signatures and caller payload policy unchanged |
+| Durable RGR in both named parity suites | Exact failure exits1 before fix; source3 fail/1 control pass before fix,4 pass afterward. Built fixture sdk-host-postcommit-cleanup.mjs exits naturally in all4 modes |
+| Build/check, documentation, Unreleased, signed clean delivery | Normal gates below pass; SDK guide and Unreleased explain postcommit cleanup and causes. Normal signed commit/hook evidence is recorded in execution receipt |
+
+Debugger run `6635905d`; `/tmp/3105-f-fifth-execution.md` records execution. Exact commands and selectors: `/tmp/3105-f-fifth-commands.txt`.
+
+- Normal `npm run build` and `npm run check`: exit0, `/tmp/3105-f-fifth-{build,check}.log`.
+- Complete coding-agent selection: **72 files,631 passed**,14 unchanged credential/platform skips, `/tmp/3105-f-fifth-core.log`.
+- Complete host parity: **152/152 passed**, `/tmp/3105-f-fifth-host.log`.
+- Root lifecycle/MCP: **54 files,492 passed**, `/tmp/3105-f-fifth-unit.log`.
+- Observer/queue: **15 files,121 passed**,one unchanged platform skip, `/tmp/3105-f-fifth-queues.log`.
+- Tasks: **8 files,49 passed**, `/tmp/3105-f-fifth-tasks.log`.
+- Exact failure/control and four new Node modes: all exit0, `/tmp/3105-f-fifth-exact-green.log`; RED `/tmp/3105-f-fifth-{exact,source}-red.log`.
+- Supplemental qlty smells/metrics: exit0, `/tmp/3105-f-fifth-{qlty,metrics}.log`. Existing large-module warnings retained; config unchanged, no suppression.
+
+All runtime/test edits preceded these gates; only documentation and receipts followed. Temporary resolved F notes were removed while unrelated ISSUES.md content remains unchanged. No new skips, softened assertions, forced exit, private DBOS cleanup, other worktree writes or publication. The known native spool flake did not recur, but its cause remains unattributed and no repair is claimed. Evidence remains local macOS arm64 Node26.8.2 deterministic built exports, not G/H packed/live/platform or parent CI/publication proof.
+
+### Contract amendments received
+
+"make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates.

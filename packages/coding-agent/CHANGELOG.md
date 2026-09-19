@@ -36,6 +36,8 @@
 
 ### Fixed
 
+- Reload now retains retiring-generation shutdown and invalidation when postcommit runtime reconstruction fails, preserving both setup and cleanup causes and keeping the candidate owned for disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+
 - Stage-scoped durable workflow resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 
 - Explicit Intercom reply names and full session IDs keep their original identity through broker collision checks, unique UUID prefixes still canonicalize to the stored session ID, and hidden same-name collisions refuse regardless of letter case ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).

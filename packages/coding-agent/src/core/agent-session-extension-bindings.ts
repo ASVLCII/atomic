@@ -655,28 +655,41 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		throw error;
 	}
 
-	resetApiProviders();
-	this._extensionProviderIds = new Set(publication.providerIds);
-	extensionsResult.runtime.extensionProviderIds = new Set(publication.providerIds);
-	this.refreshCurrentModelFromRegistry();
-	// Keep the runner that received session_start: its resource leases belong to it,
-	// not to a third runner recreated at commit without a matching start event.
+	// Publication transferred ownership: keep the started candidate reachable even
+	// when reconstruction fails, and retain retiring cleanup through every step.
 	this._extensionRunner = candidateRunner;
-	if (this._extensionRunnerRef) this._extensionRunnerRef.current = candidateRunner;
-	this._bindExtensionCore(candidateRunner);
-	this._applyExtensionBindings(candidateRunner);
-	this._buildRuntime({
-		activeToolNames,
-		flagValues: previousFlagValues,
-		includeAllExtensionTools: true,
-		preserveRunner: true,
-	});
+	const failures: unknown[] = [];
 	try {
-		if (reason === "reload")
-			await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
-	} finally {
-		oldRunner.invalidate();
+		resetApiProviders();
+		this._extensionProviderIds = new Set(publication.providerIds);
+		extensionsResult.runtime.extensionProviderIds = new Set(publication.providerIds);
+		this.refreshCurrentModelFromRegistry();
+		if (this._extensionRunnerRef) this._extensionRunnerRef.current = candidateRunner;
+		this._bindExtensionCore(candidateRunner);
+		this._applyExtensionBindings(candidateRunner);
+		this._buildRuntime({
+			activeToolNames,
+			flagValues: previousFlagValues,
+			includeAllExtensionTools: true,
+			preserveRunner: true,
+		});
+	} catch (error) {
+		failures.push(error);
 	}
+	const setupFailed = failures.length > 0;
+	for (const cleanup of [
+		() => reason === "reload" && emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" }),
+		() => oldRunner.invalidate(),
+	]) {
+		try {
+			await cleanup();
+		} catch (error) {
+			failures.push(error);
+		}
+	}
+	if (failures.length > (setupFailed ? 1 : 0))
+		throw Object.assign(new AggregateError(failures, "Reload retiring cleanup failed"), { code: "ShutdownFailed" });
+	if (setupFailed) throw failures[0];
 	if (this._disposed) throw hostInputError("SessionClosed");
 	sessionGenerationClosing.delete(this);
 	// Startup observers need the successor task host. Keep admission sealed until

@@ -3210,3 +3210,105 @@ test.each(["activate", "commit", "settings", "activate-cleanup"])("reload public
 	}
 	assert.equal(active.size, 0);
 });
+
+// #3105: installing a successor must not lose retiring ownership if reconstruction throws.
+test.each(["failure", "shutdown", "invalidation", "control"])(
+	"postcommit rebuild retains retiring cleanup: %s",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-postcommit-cleanup-"));
+		const settingsManager = SettingsManager.inMemory();
+		const active = new Set<number>();
+		const stopped: number[] = [];
+		const setupError = new Error("postcommit prompt failed");
+		const shutdownError = new Error("retiring shutdown failed");
+		const invalidationError = new Error("retiring invalidation failed");
+		let committed = false;
+		let next = 0;
+		class Loader extends DefaultResourceLoader {
+			override getSystemPrompt() {
+				if (committed && mode !== "control") throw setupError;
+				return super.getSystemPrompt();
+			}
+			override async prepareReload(...args: Parameters<DefaultResourceLoader["prepareReload"]>) {
+				const transaction = await super.prepareReload(...args);
+				return {
+					...transaction,
+					prepareCommit: () => {
+						const prepared = transaction.prepareCommit!();
+						return {
+							...prepared,
+							commit: () => {
+								prepared.commit();
+								committed = true;
+							},
+						};
+					},
+				};
+			}
+		}
+		const resourceLoader = new Loader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					const id = ++next;
+					pi.on("session_start", () => {
+						active.add(id);
+					});
+					pi.on("session_shutdown", () => {
+						active.delete(id);
+						stopped.push(id);
+						if (id === 2 && mode === "shutdown") throw shutdownError;
+					});
+				},
+			],
+		});
+		await resourceLoader.reload();
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			resourceLoader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		});
+		const oldRunner = session.extensionRunner;
+		const invalidate = oldRunner.invalidate.bind(oldRunner);
+		let invalidated = false;
+		oldRunner.invalidate = (...args) => {
+			invalidated = true;
+			invalidate(...args);
+			if (mode === "invalidation") throw invalidationError;
+		};
+		const causes = (error: unknown): unknown[] =>
+			error instanceof AggregateError
+				? [error, ...error.errors.flatMap(causes)]
+				: error instanceof Error && error.cause
+					? [error, ...causes(error.cause)]
+					: [error];
+		try {
+			if (mode === "control") await session.reload();
+			else
+				await assert.rejects(session.reload(), (error) => {
+					const all = causes(error);
+					assert.ok(all.includes(setupError));
+					if (mode === "invalidation") assert.ok(all.includes(invalidationError));
+					if (mode === "shutdown") assert.match(all.map(String).join("\n"), /retiring shutdown failed/);
+					return true;
+				});
+			assert.deepEqual([...active], [4]);
+			assert.equal(invalidated, true);
+		} finally {
+			await session.dispose().catch((error) => {
+				assert.ok(mode === "shutdown" || mode === "invalidation");
+				assert.equal(error.code, "ShutdownFailed");
+			});
+			rmSync(cwd, { recursive: true, force: true });
+		}
+		assert.equal(active.size, 0);
+		assert.deepEqual(stopped, [2, 4]);
+	},
+);
