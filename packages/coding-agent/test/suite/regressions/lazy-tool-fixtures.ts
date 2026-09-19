@@ -39,6 +39,11 @@ export function runWebFixture<T>(heavySource: string, scriptBody: string): T {
 			join(tempDir, "index.ts"),
 			readFileSync(resolve(repoRoot, "packages/web-access/index.ts"), "utf-8"),
 		);
+		// #3105: the lightweight wrapper now routes owner diagnostics through this sibling.
+		writeFileSync(
+			join(tempDir, "diagnostics.ts"),
+			readFileSync(resolve(repoRoot, "packages/web-access/diagnostics.ts"), "utf-8"),
+		);
 		writeFileSync(
 			join(tempDir, "lifecycle-lease.ts"),
 			readFileSync(resolve(repoRoot, "packages/web-access/lifecycle-lease.ts"), "utf-8"),
@@ -82,6 +87,11 @@ export function runIntercomFixture<T>(heavySource: string, scriptBody: string): 
 		writeFileSync(join(tempDir, "package.json"), JSON.stringify({ type: "module" }));
 		const indexSource = readFileSync(resolve(repoRoot, "packages/intercom/index.ts"), "utf-8");
 		writeFileSync(join(tempDir, "index.ts"), indexSource);
+		// #3105: retain the production diagnostic routing in isolated lazy fixtures.
+		writeFileSync(
+			join(tempDir, "diagnostics.ts"),
+			readFileSync(resolve(repoRoot, "packages/intercom/diagnostics.ts"), "utf-8"),
+		);
 		writeFileSync(
 			join(tempDir, "context-owner.ts"),
 			readFileSync(resolve(repoRoot, "packages/intercom/context-owner.ts"), "utf-8"),

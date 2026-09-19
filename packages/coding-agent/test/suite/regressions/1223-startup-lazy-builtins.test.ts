@@ -64,6 +64,8 @@ function assertWebAccessRetriesRejectedInitializer(): void {
 		writeFileSync(join(tempDir, "package.json"), JSON.stringify({ type: "module" }));
 		writeFileSync(join(tempDir, "index.ts"), readRepoFile("packages/web-access/index.ts"));
 		writeFileSync(join(tempDir, "lifecycle-lease.ts"), readRepoFile("packages/web-access/lifecycle-lease.ts"));
+		// #3105: keep the lightweight wrapper's diagnostic dependency available.
+		writeFileSync(join(tempDir, "diagnostics.ts"), readRepoFile("packages/web-access/diagnostics.ts"));
 		writeFileSync(
 			join(tempDir, "result-renderers.ts"),
 			"export function renderWebAccessToolResult() { return undefined; }\n",
