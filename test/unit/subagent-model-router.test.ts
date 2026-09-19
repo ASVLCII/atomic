@@ -25,7 +25,7 @@ import {
 
 vi.mock("node:fs/promises", { spy: true });
 
-beforeEach(() => vi.stubEnv("TYPESAFE_AI_API_KEY", ""));
+beforeEach(() => vi.stubEnv("TYPESAFE_API_KEY", ""));
 afterEach(() => {
 	vi.unstubAllEnvs();
 	vi.unstubAllGlobals();
@@ -306,7 +306,7 @@ test("routing timeout is bounded with no semantic retry", async () => {
 
 test("Jev uses one Choice over complete pairs and deterministically maps the selected key", async () => {
 	const f = await fixture();
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
 	f.ctx.getRouterModel = () => "";
 	const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 		const body = JSON.parse(init?.body as string);
@@ -336,7 +336,7 @@ test("Jev covers 1997 pairs without filtering; ordinary router retains full cata
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(
 		Array.from({ length: 1997 }, (_, index) => ({ ...decisionModel, id: `m${index}` })),
 	);
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
 	f.ctx.getRouterModel = () => "";
 	const seen = new Set<string>();
 	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
@@ -396,7 +396,7 @@ for (const failure of ["stale", "provider"] as const) {
 		const catalog = vi
 			.spyOn(f.ctx.modelRegistry, "getAvailable")
 			.mockReturnValue(Array.from({ length: 256 }, (_, i) => ({ ...decisionModel, id: `m${i}` })));
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
 		f.ctx.getRouterModel = () => "";
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
 			const request = JSON.parse(String(init.body)) as JevFixtureRequest;

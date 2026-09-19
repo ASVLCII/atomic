@@ -154,7 +154,7 @@ for (const invalid of [null, false, 7, [], {}, "auto", " "]) {
 		const storage = new InMemorySettingsStorage();
 		storage.withLock("global", () => JSON.stringify({ routerModel: invalid }));
 		const settings = SettingsManager.fromStorage(storage);
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn<typeof fetch>();
 		vi.stubGlobal("fetch", transport);
 		await assert.rejects(inferRouterDecision({ ...decisionRequest(), settings }), /Invalid routerModel/);
@@ -209,7 +209,7 @@ for (const timeoutMs of [0, -1, 0.5, Infinity, NaN, 2 ** 31]) {
 }
 
 test("explicit Jev without its key fails without falling back to chat", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	await assert.rejects(
 		inferRouterDecision({
 			...decisionRequest(),
@@ -220,7 +220,7 @@ test("explicit Jev without its key fails without falling back to chat", async ()
 });
 
 test("Jev network errors do not leak transport messages or retry", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const transport = vi.fn(async () => {
 		throw new Error("private request body and key");
 	});
@@ -233,7 +233,7 @@ test("Jev network errors do not leak transport messages or retry", async () => {
 });
 
 test("Jev input snapshot cannot be changed while awaiting transport", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const late = Promise.withResolvers<Response>();
 	vi.stubGlobal("fetch", () => late.promise);
 	const request = decisionRequest();
@@ -253,7 +253,7 @@ test("Jev input snapshot cannot be changed while awaiting transport", async () =
 
 for (const reason of ["timeout", "oversized"] as const) {
 	test(`Jev ${reason} body is cancelled before mapping`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		vi.useFakeTimers();
 		const cancelled = vi.fn();
 		const body = new ReadableStream<Uint8Array>({

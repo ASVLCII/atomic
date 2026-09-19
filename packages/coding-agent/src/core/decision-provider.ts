@@ -5,7 +5,7 @@ export function jevAuthProvider(): Provider {
 	return createProvider({
 		id: "typesafe-ai",
 		name: "TypeSafe Jev",
-		auth: { apiKey: envApiKeyAuth("TypeSafe API key", ["TYPESAFE_AI_API_KEY"]) },
+		auth: { apiKey: envApiKeyAuth("TypeSafe API key", ["TYPESAFE_API_KEY"]) },
 		models: [],
 		api: {},
 	});

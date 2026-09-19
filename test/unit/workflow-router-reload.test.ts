@@ -63,7 +63,7 @@ async function fixture() {
 	vi.stubEnv("USERPROFILE", home);
 	vi.stubEnv("ATOMIC_CODING_AGENT_DIR", "");
 	vi.stubEnv("PI_CODING_AGENT_DIR", "");
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	let resources: readonly WorkflowResourceInfo[] = [];
 	let failRefresh = false;
 	const backend = new InMemoryDurableBackend();
@@ -141,7 +141,7 @@ async function inspectRoutes(f: RoutingHarness, _target: string) {
 	);
 	assert.match(ordinaryState.task.documents[0]!.content, /Implement the change/);
 	let jev: CapturedRequest | undefined;
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-jev-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-jev-key");
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(async (_url: string, init: RequestInit) => {

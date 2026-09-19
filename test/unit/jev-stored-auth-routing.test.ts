@@ -28,7 +28,7 @@ async function storedRuntime(key = "mock-stored-jev-key") {
 
 for (const nextAuth of ["stored", "deleted", "environment"] as const) {
 	test(`saved Jev auth survives overlapping registration and subsequent ${nextAuth} auth`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+		vi.stubEnv("TYPESAFE_API_KEY", "");
 		const runtime = await ModelRuntime.create({
 			modelsPath: null,
 			credentials: AuthStorage.inMemory(),
@@ -85,7 +85,7 @@ for (const nextAuth of ["stored", "deleted", "environment"] as const) {
 			assert.equal(resolveRouterModel(request).kind, "jev");
 			phase = "idle";
 			if (nextAuth !== "stored") {
-				if (nextAuth === "environment") vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-next-env-key");
+				if (nextAuth === "environment") vi.stubEnv("TYPESAFE_API_KEY", "mock-next-env-key");
 				await runtime.logout("typesafe-ai");
 				assert.equal(runtime.getStoredCredentialType("typesafe-ai"), undefined);
 				assert.equal(resolveRouterModel(request).kind, nextAuth === "deleted" ? "chat" : "jev");
@@ -103,7 +103,7 @@ for (const nextAuth of ["stored", "deleted", "environment"] as const) {
 
 for (const environmentKey of ["", "mock-env-jev-key"]) {
 	test(`stored Jev credentials route and authenticate without chat exposure, env=${Boolean(environmentKey)}`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", environmentKey);
+		vi.stubEnv("TYPESAFE_API_KEY", environmentKey);
 		const { runtime, registry } = await storedRuntime();
 		const transport = vi.fn(async (_url: string | URL | Request, options?: RequestInit) => {
 			assert.equal(new Headers(options?.headers).get("Authorization"), "Bearer mock-stored-jev-key");
@@ -133,7 +133,7 @@ for (const environmentKey of ["", "mock-env-jev-key"]) {
 }
 
 test("explicit chat router wins over saved Jev without resolving its key", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	const { registry } = await storedRuntime();
 	const getProviderAuth = vi.spyOn(registry, "getProviderAuth");
 	vi.spyOn(registry, "getAll").mockReturnValue([decisionModel]);
@@ -142,7 +142,7 @@ test("explicit chat router wins over saved Jev without resolving its key", async
 });
 
 test("Jev logout removes stored routing preference and falls back to environment when present", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	const { runtime, registry } = await storedRuntime();
 	const request = { ...decisionRequest(), settings: SettingsManager.inMemory(), modelRegistry: registry };
 	assert.equal(resolveRouterModel(request).kind, "jev");
@@ -156,7 +156,7 @@ test("Jev logout removes stored routing preference and falls back to environment
 	);
 	assert.equal(transport.mock.calls.length, 0);
 
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-env-remaining");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-env-remaining");
 	const next = await storedRuntime();
 	await next.runtime.logout("typesafe-ai");
 	assert.equal(resolveRouterModel({ ...request, modelRegistry: next.registry }).kind, "jev");
@@ -164,7 +164,7 @@ test("Jev logout removes stored routing preference and falls back to environment
 });
 
 test("saved Jev key interpolation uses ordinary auth resolution", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	vi.stubEnv("JEV_TEST_KEY", "mock-interpolated-key");
 	const { registry } = await storedRuntime("$JEV_TEST_KEY");
 	const transport = vi.fn(async (_url: string | URL | Request, options?: RequestInit) => {
@@ -181,7 +181,7 @@ test("saved Jev key interpolation uses ordinary auth resolution", async () => {
 });
 
 test("Jev auth failures are redacted and cannot fall back to environment credentials", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-env-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-env-key");
 	const request = decisionRequest();
 	const transport = vi.fn();
 	vi.stubGlobal("fetch", transport);

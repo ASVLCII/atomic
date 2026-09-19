@@ -79,7 +79,7 @@ for (const valid of [true, false]) {
 				usage: { input_tokens: 1, output_tokens: 1 },
 			}),
 		);
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "test-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "test-key");
 		vi.stubGlobal("fetch", fetch);
 		try {
 			if (valid) assert.deepEqual((await inferRouterDecision(request)).value, value);

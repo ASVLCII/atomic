@@ -44,7 +44,7 @@ for (const provider of ["structured", "jev"] as const) {
 		let calls = 0;
 		if (provider === "jev") {
 			ctx.getRouterModel = () => "typesafe-ai/jev";
-			vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+			vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 			vi.stubGlobal(
 				"fetch",
 				vi.fn(async (_url: string, init: RequestInit) => {
@@ -140,7 +140,7 @@ for (const scenario of [
 			const ctx = workflowRouterContext("actual-name");
 			if (provider === "jev") {
 				ctx.getRouterModel = () => "typesafe-ai/jev";
-				vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+				vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 				vi.stubGlobal(
 					"fetch",
 					vi.fn(async (_url: string, init: RequestInit) => {
@@ -209,7 +209,7 @@ for (const provider of ["structured", "jev"] as const) {
 		let received: object | undefined;
 		if (provider === "jev") {
 			ctx.getRouterModel = () => "typesafe-ai/jev";
-			vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+			vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 			vi.stubGlobal(
 				"fetch",
 				vi.fn(async (_url: string, init: RequestInit) => {

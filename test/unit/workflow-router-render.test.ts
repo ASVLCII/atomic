@@ -4,14 +4,14 @@ import { test } from "vitest";
 import { renderCall } from "../../packages/workflows/src/extension/render-call.js";
 import { renderResult, type WorkflowToolResult } from "../../packages/workflows/src/extension/render-result.js";
 
-// #3089: validated decisions must be visible to users, not only in model-facing tool metadata.
+// Run receipts retain status and identity without repeating routing metadata.
 for (const [workflowType, status, runId] of [
 	["none", "not_launched", ""],
 	["other-workflow", "not_launched", ""],
 	["approved-workflow", "running", "run-123"],
 	["approved-workflow", "failed", ""],
 ] as const) {
-	test(`visible router JSON for ${workflowType}/${status}`, () => {
+	test(`run hides router JSON for ${workflowType}/${status}`, () => {
 		const decision = {
 			workflowType,
 			maxBudget: { maxTokens: 0, maxCost: 1.125 },
@@ -27,12 +27,8 @@ for (const [workflowType, status, runId] of [
 		};
 		for (const plain of [false, true]) {
 			const rendered = renderResult(result, { plain, width: 80 });
-			assert.match(rendered, /ROUTER DECISION/);
-			assert.match(rendered, new RegExp(`"workflowType": "${workflowType}"`));
-			assert.match(rendered, /"maxTokens": 0/);
-			assert.match(rendered, /"maxCost": 1\.125/);
-			assert.match(rendered, /15min/);
-			assert.doesNotMatch(rendered, /maxDurationMs/);
+			assert.doesNotMatch(rendered, /ROUTER DECISION|workflowType|maxBudget|estimatedDuration/);
+			assert.equal(rendered, renderResult({ ...result, routerDecision: undefined }, { plain, width: 80 }));
 			if (workflowType === "none") assert.match(rendered, /Continue inline/);
 			if (status === "failed") assert.match(rendered, /Setup unavailable/);
 			if (runId) assert.match(rendered, /run-123/);
@@ -75,11 +71,40 @@ test("needs_input renders a selected but unlaunched workflow, including partial 
 			assert.match(rendered, /needs input/);
 			assert.match(rendered, /No workflow was launched/);
 			assert.match(rendered, /Required input: approval/);
-			assert.match(rendered, /ROUTER DECISION/);
+			assert.doesNotMatch(rendered, /ROUTER DECISION|workflowType|maxBudget|estimatedDuration/);
 			assert.doesNotMatch(rendered, /started in background|in progress|accepted|running/);
 		}
 	}
 });
+
+for (const status of ["running", "completed", "failed", "skipped", "cancelled", "blocked", "killed"] as const) {
+	test(`run preserves ${status} receipts with routing metadata`, () => {
+		const receipt: WorkflowToolResult = {
+			action: "run",
+			name: "chosen",
+			runId: "339e05a4-2289-408e-9076-d1a348f582ae",
+			status,
+		};
+		const decision = { workflowType: "chosen", maxBudget: {}, estimatedDuration: "unknown" as const };
+		for (const plain of [false, true]) {
+			for (const isPartial of [false, true]) {
+				for (const width of [32, 80]) {
+					const opts = { plain, isPartial, width };
+					const result: WorkflowToolResult = { ...receipt, routerDecision: decision };
+					const rendered = renderResult(result, opts);
+					assert.equal(rendered, renderResult(receipt, opts));
+					assert.doesNotMatch(rendered, /ROUTER DECISION|workflowType|maxBudget|estimatedDuration/);
+					assert.strictEqual(result.routerDecision, decision);
+					if (width === 80) {
+						assert.ok(rendered.includes(receipt.runId));
+						if (!isPartial) assert.match(rendered, /chosen/);
+					}
+					assert.ok(rendered.split("\n").every((line) => visibleWidth(line) <= width));
+				}
+			}
+		}
+	});
+}
 
 // #3106: presentation uses canonical labels directly for reservation and execution.
 for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", ">1d", "unknown"] as const) {

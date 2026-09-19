@@ -34,7 +34,7 @@ import {
 } from "../helpers/workflow-router.js";
 
 beforeEach(() => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 });
 afterEach(() => {
 	setDurableBackend(undefined);
@@ -358,7 +358,7 @@ test("user limits cannot be expanded, disabled, rounded, omitted or lack provena
 for (const setting of ["auto", "missing/model", " decision-test/chat"]) {
 	test(`invalid explicit routerModel ${setting} never falls back`, async () => {
 		const f = fixture();
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		f.ctx.getRouterModel = () => setting;
 		const fetch = vi.fn();
 		vi.stubGlobal("fetch", fetch);
@@ -550,7 +550,7 @@ function jevAnswer(request: JevRequest, selected = "none") {
 test("Jev fallback submits one request with complete registry, contextual Choice semantics and exact budget", async () => {
 	const f = fixture({ maxTokens: 0, maxCost: 0.123456789 });
 	f.ctx.getRouterModel = () => "";
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 		const request = JSON.parse(String(init?.body)) as JevRequest;
 		assert.equal(String(_url), "https://api.typesafe.ai/v1/systemone");
@@ -583,7 +583,7 @@ for (const status of [401, 422, 429, 529]) {
 	test(`Jev HTTP ${status} fails before any admission without retry or decision`, async () => {
 		const f = fixture();
 		f.ctx.getRouterModel = () => "";
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const fetch = vi.fn(async () => new Response("private provider payload", { status }));
 		vi.stubGlobal("fetch", fetch);
 		const result = await f.call();
@@ -600,7 +600,7 @@ for (const malformed of ["unknown-choice", "missing-budget", "wrong-type"]) {
 	test(`Jev ${malformed} fails closed after bounded repair`, async () => {
 		const f = fixture();
 		f.ctx.getRouterModel = () => "typesafe-ai/jev";
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 			const response = jevAnswer(JSON.parse(String(init?.body)) as JevRequest);
 			if (malformed === "unknown-choice") response.answers.workflow!.choice = "not-registered";
@@ -666,7 +666,7 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 		registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
 	f.replace(registry);
 	f.ctx.getRouterModel = () => "typesafe-ai/jev";
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const seen = new Set<string>();
 	let round = 0;
 	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
@@ -720,7 +720,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 	f.replace(registry);
 	assert.equal(f.runtime.registry.get("approved-change"), f.definition);
 	f.ctx.getRouterModel = () => "typesafe-ai/jev";
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const seen = new Set<string>();
 	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
 		const request = JSON.parse(String(init.body)) as JevFixtureRequest;
@@ -783,7 +783,7 @@ test("documentation paths alone are missing context, not usable documentation", 
 
 test("explicit concrete routerModel wins over Jev key at the workflow entrypoint", async () => {
 	const f = fixture();
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const fetch = vi.fn();
 	vi.stubGlobal("fetch", fetch);
 	f.infer.mockImplementation((model) => {
@@ -839,7 +839,7 @@ for (const failure of ["registry", "provider", "cancel"] as const) {
 			registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
 		f.replace(registry);
 		f.ctx.getRouterModel = () => "typesafe-ai/jev";
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const controller = new AbortController();
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
 			const request = JSON.parse(String(init.body)) as JevFixtureRequest;
