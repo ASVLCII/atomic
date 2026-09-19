@@ -31,6 +31,7 @@ import {
 	HostInputBridge,
 	hostInputError,
 } from "./host-input.js";
+import { originalRegistrationCallback } from "./loader-bindings.ts";
 import { boundExtensionRuntimes, runResourceRegistrationBatch } from "./loader-runtime.ts";
 import {
 	createExtensionCommandContext,
@@ -671,7 +672,14 @@ export class ExtensionRunner {
 	}
 
 	getEntryRenderer(customType: string): EntryRenderer | undefined {
-		return findEntryRenderer(this.extensions, customType);
+		const renderer = findEntryRenderer(this.extensions, customType);
+		return renderer ? originalRegistrationCallback(renderer) : undefined;
+	}
+
+	/** Invoke the session-owned registration without changing discovery identity. */
+	renderEntry(customType: string, ...args: Parameters<EntryRenderer>): ReturnType<EntryRenderer> {
+		this.assertActive();
+		return findEntryRenderer(this.extensions, customType)?.(...args);
 	}
 
 	getRegisteredCommands(): ResolvedCommand[] {

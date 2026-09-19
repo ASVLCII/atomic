@@ -639,6 +639,8 @@ Appending emits `entry_appended` with the durable entry. This lets extensions re
 
 Register a TUI renderer for durable custom entries created by `pi.appendEntry()`. These entries render in the transcript but do not enter model context.
 
+SDK hosts can inspect the original callback with `session.extensionRunner.getEntryRenderer(customType)`. To render through the owning session, call `session.extensionRunner.renderEntry(customType, entry, { expanded }, theme)`; retired runners reject rendering.
+
 ```typescript
 import { Text } from "@earendil-works/pi-tui";
 

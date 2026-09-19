@@ -3,6 +3,18 @@ import type { Extension, ExtensionRuntime } from "./types.ts";
 
 type Callback = (...args: never[]) => unknown;
 
+const originalCallbacks = new WeakMap<Callback, Callback>();
+
+function retainCallbackIdentity(wrapped: Callback, original: Callback): Callback {
+	originalCallbacks.set(wrapped, originalCallbacks.get(original) ?? original);
+	return wrapped;
+}
+
+/** Inspection returns the authored callback; hosts invoke its owned registration separately. */
+export function originalRegistrationCallback<T extends Callback>(callback: T): T {
+	return (originalCallbacks.get(callback) ?? callback) as T;
+}
+
 interface Invocation {
 	runtimes: Map<ExtensionRuntime, ExtensionRuntime>;
 	extensions: Map<Extension, Extension>;
@@ -75,7 +87,7 @@ export function prepareRegistrationCallbacks(extension: Extension): void {
 					const replacement = invocation.getStore()?.callbacks.get(wrapped);
 					return Reflect.apply(replacement ?? fn, this, args);
 				};
-				return wrapped;
+				return retainCallbackIdentity(wrapped, fn);
 			}),
 		);
 	}
@@ -142,12 +154,10 @@ export function bindRegistrationCallbacks(extension: Extension, bindings: Invoca
 		Reflect.set(
 			extension,
 			key,
-			copyRegistrations(
-				extension[key],
-				(fn) =>
-					function (this: unknown, ...args: unknown[]) {
-						return invocation.run(bindings, () => Reflect.apply(fn, this, args));
-					},
+			copyRegistrations(extension[key], (fn) =>
+				retainCallbackIdentity(function (this: unknown, ...args: unknown[]) {
+					return invocation.run(bindings, () => Reflect.apply(fn, this, args));
+				}, fn),
 			),
 		);
 	}
@@ -157,11 +167,9 @@ export function bindRegistrationCallbacks(extension: Extension, bindings: Invoca
 export function captureRegistrationInvocation<T>(value: T, sourceRuntime: ExtensionRuntime): T {
 	const bindings = invocation.getStore();
 	if (!bindings?.runtimes.has(sourceRuntime)) return value;
-	return copyRegistrations(
-		value,
-		(fn) =>
-			function (this: unknown, ...args: unknown[]) {
-				return invocation.run(bindings, () => Reflect.apply(fn, this, args));
-			},
+	return copyRegistrations(value, (fn) =>
+		retainCallbackIdentity(function (this: unknown, ...args: unknown[]) {
+			return invocation.run(bindings, () => Reflect.apply(fn, this, args));
+		}, fn),
 	);
 }

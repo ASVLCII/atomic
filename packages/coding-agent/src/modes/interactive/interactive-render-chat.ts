@@ -263,7 +263,8 @@ InteractiveModeBase.prototype.addCompactionCostNotice = function (
 InteractiveModeBase.prototype.addCustomEntryToChat = function (this: InteractiveModeBase, entry: CustomEntry): void {
 	const renderer = this.session.extensionRunner.getEntryRenderer(entry.customType);
 	if (!renderer) return;
-	const component = new CustomEntryComponent(entry, renderer);
+	const runner = this.session.extensionRunner;
+	const component = new CustomEntryComponent(entry, (...args) => runner.renderEntry(entry.customType, ...args));
 	component.setExpanded(this.toolOutputExpanded);
 	if (!component.hasContent()) return;
 	const streamingIndex = this.streamingComponent ? this.chatContainer.children.indexOf(this.streamingComponent) : -1;

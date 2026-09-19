@@ -30,7 +30,7 @@ import {
 	readStoredCredential,
 	sessionEntryToContextMessages,
 } from "../../packages/coding-agent/src/index.ts";
-import { initTheme } from "../../packages/coding-agent/src/modes/interactive/theme/theme.ts";
+import { initTheme, theme } from "../../packages/coding-agent/src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../packages/coding-agent/src/utils/ansi.ts";
 
 void (undefined as AgentSettledEvent | BeforeProviderHeadersEvent | EntryRenderer | InlineExtension | undefined);
@@ -88,6 +88,19 @@ test("entry renderer registration is discoverable", async () => {
 	);
 	assert.equal(runner.getEntryRenderer("state"), renderer);
 	assert.equal(runner.getEntryRenderer("missing"), undefined);
+	// #3105: discovery preserves identity while rendering enforces retirement.
+	initTheme("dark");
+	const entry = {
+		type: "custom",
+		id: "entry",
+		parentId: null,
+		timestamp: new Date().toISOString(),
+		customType: "state",
+		data: 1,
+	} as const;
+	assert.deepEqual(runner.renderEntry("state", entry, { expanded: false }, theme)?.render(5), ["entry"]);
+	runner.invalidate();
+	assert.throws(() => runner.renderEntry("state", entry, { expanded: false }, theme), /stale|no longer active/i);
 });
 
 test("CustomEntryComponent renders, suppresses empty output, propagates expansion, and boxes failures", () => {
