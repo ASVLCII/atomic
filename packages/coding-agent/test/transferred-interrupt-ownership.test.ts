@@ -74,6 +74,7 @@ describe("transferred interrupt ownership", () => {
 			{ triggerTurn: true, deliverAs: "interrupt" },
 		);
 		await sourceAbortObserved.promise;
+		expect(sourceAbort).toHaveBeenCalledTimes(1);
 		const sourceInternal = source.session as InterruptOwnerSession;
 		const interruptSettled = sourceInternal._interruptDeliveryQueue;
 
@@ -83,7 +84,8 @@ describe("transferred interrupt ownership", () => {
 
 		const replacementInternal = replacement.session as InterruptOwnerSession;
 		expect(replacementProviderCalls).toBe(1);
-		expect(sourceAbort).toHaveBeenCalledTimes(1);
+		// #3105: retirement performs a separate abort/drain after the interrupt settles.
+		expect(sourceAbort).toHaveBeenCalledTimes(2);
 		expect(replacementAbort).not.toHaveBeenCalled();
 		expect(sourceInternal._pendingInterruptDeliveries).toBe(0);
 		expect(sourceInternal._activeInterruptQueueHold).toBeUndefined();
@@ -164,6 +166,7 @@ describe("transferred interrupt ownership", () => {
 			{ triggerTurn: true, deliverAs: "interrupt" },
 		);
 		await sourceAbortObserved.promise;
+		expect(sourceAbort).toHaveBeenCalledTimes(1);
 		const sourceInternal = source.session as InterruptOwnerSession;
 		const interruptSettled = sourceInternal._interruptDeliveryQueue;
 
@@ -188,7 +191,8 @@ describe("transferred interrupt ownership", () => {
 		expect(await resume).toBe(true);
 
 		expect(replacementProviderCalls).toBe(0);
-		expect(sourceAbort).toHaveBeenCalledTimes(1);
+		// #3105: the source, never its replacement, receives the disposal abort.
+		expect(sourceAbort).toHaveBeenCalledTimes(2);
 		expect(replacementAbort).not.toHaveBeenCalled();
 		expect(sourceInternal._pendingInterruptDeliveries).toBe(0);
 		expect(sourceInternal._activeInterruptQueueHold).toBeUndefined();
