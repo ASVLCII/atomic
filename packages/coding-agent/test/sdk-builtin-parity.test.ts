@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@bastani/pi-ai/compat";
@@ -4800,3 +4801,67 @@ test.each(["dispose", "reload", "control", "error", "replay", "replay-error"])(
 		}
 	},
 );
+
+// #3105: discovering uncached direct tools must not connect a lazy MCP server.
+test("SDK MCP discovery stays lazy until an owned gateway call", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-lazy-mcp-"));
+	let requests = 0;
+	const server = createServer(async (request, response) => {
+		requests++;
+		if (request.method !== "POST") {
+			response.writeHead(405).end();
+			return;
+		}
+		let body = "";
+		for await (const chunk of request) body += chunk;
+		const message = JSON.parse(body) as { id?: number; method: string };
+		if (message.id === undefined) {
+			response.writeHead(202).end();
+			return;
+		}
+		const result =
+			message.method === "initialize"
+				? {
+						protocolVersion: "2024-11-05",
+						capabilities: { tools: {} },
+						serverInfo: { name: "fixture", version: "1" },
+					}
+				: { tools: [] };
+		response
+			.writeHead(200, { "Content-Type": "application/json" })
+			.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address && typeof address === "object");
+	writeFileSync(
+		join(cwd, ".mcp.json"),
+		JSON.stringify({
+			mcpServers: {
+				fixture: { url: `http://127.0.0.1:${address.port}/mcp`, directTools: true },
+			},
+		}),
+	);
+	vi.stubEnv("ATOMIC_CODING_AGENT_DIR", join(cwd, "agent"));
+	let session: AgentSession | undefined;
+	try {
+		({ session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory(),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+		}));
+		await new Promise((resolve) => setTimeout(resolve, 2_000));
+		assert.equal(requests, 0, "startup connected an uncached lazy server");
+		const gateway = session.agent.state.tools.find((tool) => tool.name === "mcp")!;
+		const result = await gateway.execute("connect", { connect: "fixture" }, new AbortController().signal);
+		assert.ok(requests > 0, "first owned use did not connect");
+		assert.equal(result.details?.error, undefined, JSON.stringify(result));
+	} finally {
+		await session?.dispose();
+		vi.unstubAllEnvs();
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

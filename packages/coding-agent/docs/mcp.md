@@ -63,6 +63,8 @@ Use the tool names returned by discovery. `args` is a JSON string, not an object
 
 To expose a server's tools directly in the agent's tool list, add `"directTools": true` to that server's configuration. To expose only selected tools, set `directTools` to an array of the original MCP tool names. The default is gateway-only access.
 
+In a headless SDK session, cached direct tools are available at startup, but discovery does not connect uncached lazy servers. Call the `mcp` gateway when you need them. Set the server's `lifecycle` to `"eager"` or `"keep-alive"` if it must connect during startup.
+
 ## Authentication
 
 For an OAuth server, run `/mcp-auth my-server` in an interactive session. You can also select the server in `/mcp` and press Enter or `Ctrl+A`. Run `/mcp logout my-server` to remove stored OAuth credentials and disconnect.

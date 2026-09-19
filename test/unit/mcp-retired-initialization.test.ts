@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, vi } from "vitest";
@@ -21,6 +21,11 @@ vi.mock("../../packages/mcp/init.js", () => ({
 // #3105: public disposal must distinguish cancellation from failed candidate cleanup.
 test.each([false, true])("retired MCP initialization cleanup failure=%s", async (fail) => {
 	const cwd = mkdtempSync(join(tmpdir(), "sdk-retired-mcp-"));
+	// #3105: this fixture deliberately requests initialization during startup.
+	writeFileSync(
+		join(cwd, ".mcp.json"),
+		JSON.stringify({ mcpServers: { fixture: { command: "fixture", lifecycle: "eager" } } }),
+	);
 	const entered = Promise.withResolvers<void>();
 	const release = Promise.withResolvers<void>();
 	let active = 0;

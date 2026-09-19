@@ -53,7 +53,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 	}
 }
 
-test("failed background MCP initialization retries once for concurrent same-generation callers", async () => {
+test("failed cold MCP initialization retries once for concurrent same-generation callers", async () => {
 	const configPath = join(tempDir, "mcp.json");
 	writeFileSync(configPath, JSON.stringify({ mcpServers: {} }), "utf8");
 	process.argv = [...originalArgv, "--mcp-config", configPath];
@@ -91,6 +91,10 @@ test("failed background MCP initialization retries once for concurrent same-gene
 	try {
 		mcpAdapter(api);
 		await handlers.get("session_start")?.({}, ctx);
+		// #3105: headless discovery is lazy; an owned call starts the failing attempt.
+		await tools
+			.find((tool) => tool.name === "mcp")!
+			.execute("initial", {}, new AbortController().signal, undefined, ctx);
 		await waitFor(() => errors.some((line) => line.includes("MCP initialization failed")));
 		assert.equal(getFlagCalls, 1);
 
@@ -307,6 +311,10 @@ test("shutdown during a same-generation retry prevents stale state publication a
 	try {
 		mcpAdapter(api);
 		await handlers.get("session_start")?.({}, ctx);
+		// #3105: headless discovery is lazy; an owned call starts the failing attempt.
+		await tools
+			.find((tool) => tool.name === "mcp")!
+			.execute("initial", {}, new AbortController().signal, undefined, ctx);
 		await waitFor(() => errors.some((line) => line.includes("MCP initialization failed")));
 		const proxy = tools.find((tool) => tool.name === "mcp");
 		assert.ok(proxy);

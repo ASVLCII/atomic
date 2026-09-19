@@ -1861,3 +1861,17 @@ test.each(["dispose", "reload", "control", "error", "replay", "replay-error", "o
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: local HTTP transport stays lazy and another session's close preserves its connection.
+test(
+	"built Node lazy MCP HTTP ownership",
+	() => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-lazy-mcp.mjs", import.meta.url))],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

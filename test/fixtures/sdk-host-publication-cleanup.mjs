@@ -21,7 +21,7 @@ try {
   const state = { entered, release, active: 0, attempts: 0, oauth: 0, fail: mode === "mcp-failure" };
   globalThis.mcpCleanupFixture = state;
   const mocks = {
-   "config.js": "export function loadMcpConfig(){return {mcpServers:{}};}",
+   "config.js": "export function loadMcpConfig(){return {mcpServers:{fixture:{lifecycle:'eager'}}};}",
    "utils.js": "export function getConfigPathFromArgv(){}",
    "command-registration.js": "export function registerMcpCommands(){}",
    "metadata-cache.js": "export function loadMetadataCache(){return null;}",

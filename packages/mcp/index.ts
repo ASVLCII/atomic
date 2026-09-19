@@ -302,7 +302,13 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 
     if (!isStartCurrent()) return;
     activeSession = { generation, ctx, cleanup };
-    void ensureMcpInitialized().catch(() => undefined);
+    // SDK discovery must not warm uncached lazy servers. Explicit startup
+    // lifecycles and terminal discovery retain their configured behavior.
+    if (ctx.hasUI || Object.values(renderConfig?.mcpServers ?? {}).some(
+      (server) => server.lifecycle === "eager" || server.lifecycle === "keep-alive",
+    )) {
+      void ensureMcpInitialized().catch(() => undefined);
+    }
   });
 
   pi.on("session_shutdown", async () => {

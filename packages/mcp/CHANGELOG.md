@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Final session shutdown now reports MCP cleanup failures and timeouts after attempting all cleanup, instead of silently treating them as success ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Retain unpublished initialization cleanup failures through awaited session shutdown instead of logging them and reporting success ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Headless SDK startup no longer connects lazy MCP servers just to discover uncached direct tools. Use the MCP gateway to discover them, or configure an eager lifecycle for startup connections ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.19] - 2026-09-13
 

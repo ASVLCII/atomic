@@ -48,7 +48,11 @@ test.each([false, true])("replacement waits for cleanup and final shutdown repor
 		]) {
 			writeFileSync(join(fixtureDir, file), readFileSync(join(repoRoot, "packages/mcp", file), "utf8"));
 		}
-		writeFileSync(join(fixtureDir, "config.ts"), `export function loadMcpConfig() { return { mcpServers: {} }; }\n`);
+		// #3105: startup cleanup coverage explicitly requests an eager lifecycle.
+		writeFileSync(
+			join(fixtureDir, "config.ts"),
+			`export function loadMcpConfig() { return { mcpServers: { fixture: { lifecycle: "eager" } } }; }\n`,
+		);
 		writeFileSync(join(fixtureDir, "utils.ts"), `export function getConfigPathFromArgv() { return undefined; }\n`);
 		writeFileSync(join(fixtureDir, "tool-result-renderer.ts"), `export function renderMcpToolResult() {}\n`);
 		writeFileSync(

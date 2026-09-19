@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Video and YouTube subprocess extraction now runs in Node-hosted SDK sessions as well as the compiled binary, with bounded output, cancellation and awaited child cleanup ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+
 ## [0.9.20-alpha.3] - 2026-09-16
 
 ### Fixed
