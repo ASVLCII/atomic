@@ -4290,3 +4290,369 @@ test.each(["manual", "invalidate", "throwing", "invalidate-throwing"])(
 		}
 	},
 );
+
+// #3105: a failed factory still owns acquisitions made by already-admitted callbacks.
+test("factory rollback drains admitted callbacks before shutdown", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-factory-predrain-"));
+	const settingsManager = SettingsManager.inMemory();
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(cwd, "auth"),
+		modelsPath: null,
+		allowModelNetwork: false,
+	});
+	let release!: () => void;
+	let entered!: () => void;
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const started = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const log: string[] = [];
+	const live = new Set<ReturnType<typeof setInterval>>();
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			async (pi) => {
+				pi.on("session_shutdown", () => {
+					log.push("shutdown");
+					for (const timer of live) clearInterval(timer);
+					live.clear();
+				});
+				pi.events.on("acquire", async () => {
+					log.push("started");
+					entered();
+					await held;
+					pi.events.on("late-owned-subscription", () => {});
+					live.add(setInterval(() => {}, 1000));
+					log.push("acquired");
+				});
+				pi.events.emit("acquire", {});
+				throw new Error("factory primary");
+			},
+		],
+	});
+	const creating = createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		modelRuntime,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		await started;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		const beforeRelease = [...log];
+		release();
+		const { session } = await creating;
+		await session.dispose();
+		assert.deepEqual(beforeRelease, ["started"]);
+		assert.deepEqual(log, ["started", "acquired", "shutdown"]);
+		assert.equal(live.size, 0);
+	} finally {
+		release();
+		await creating.then(
+			({ session }) => session.dispose(),
+			() => {},
+		);
+		for (const timer of live) clearInterval(timer);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: the failed attempt, not sequential cleanup, defines the closing set.
+test.each(["creation", "creation-error", "replay", "ordinary", "transaction", "transaction-overlap"])(
+	"factory rollback seals all owned peers (%s)",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-rollback-peers-"));
+		const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+		const modelRuntime = await ModelRuntime.create({
+			authPath: join(cwd, "auth"),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		let release!: () => void;
+		let entered!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const primary = new Error("setup rejected");
+		const cleanup = new Error("cleanup rejected");
+		let generation = 0;
+		let deliveries = 0;
+		let peer!: import("../src/core/extensions/types.ts").ExtensionAPI;
+		const shutdowns: string[] = [];
+		const reloading = mode === "ordinary" || mode.startsWith("transaction");
+		class Loader extends DefaultResourceLoader {
+			supportsTransactionalReload() {
+				return mode.startsWith("transaction");
+			}
+			async reload() {
+				await super.reload();
+				if (generation > 1) throw primary;
+			}
+			async prepareReload() {
+				await this.reload();
+				throw primary;
+			}
+		}
+		const LoaderClass = reloading || mode === "replay" ? Loader : DefaultResourceLoader;
+		const resourceLoader = new LoaderClass({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					const id = ++generation;
+					peer = pi;
+					pi.events.on("peer", () => {
+						deliveries++;
+					});
+					pi.on("session_shutdown", () => {
+						shutdowns.push(`peer${id}`);
+					});
+				},
+				(pi) => {
+					const id = generation;
+					pi.on("session_shutdown", async () => {
+						shutdowns.push(`held${id}`);
+						if ((!reloading && mode !== "replay") || id > 1) {
+							entered();
+							await held;
+						}
+						if (mode === "creation-error") throw cleanup;
+					});
+					if (mode === "replay" && id > 1) throw primary;
+				},
+			],
+		});
+		let session: AgentSession | undefined;
+		if (reloading || mode === "replay") await resourceLoader.reload();
+		if (reloading) {
+			session = new AgentSession({
+				agent: new Agent(),
+				cwd,
+				settingsManager,
+				modelRuntime,
+				resourceLoader,
+				sessionManager: SessionManager.inMemory(cwd),
+			});
+			await session.bindExtensions({});
+		}
+		const operation = (
+			reloading
+				? session!.reload()
+				: createAgentSession({
+						cwd,
+						agentDir: cwd,
+						settingsManager,
+						modelRuntime,
+						resourceLoader,
+						sessionManager: SessionManager.inMemory(cwd),
+						tools: [],
+						builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+						initialContextTransform() {
+							throw primary;
+						},
+					})
+		).then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		try {
+			await started;
+			let closed = false;
+			let closing: Promise<void> | undefined;
+			if (mode === "transaction-overlap") {
+				await session!.abort();
+				closing = session!.dispose().then(() => {
+					closed = true;
+				});
+				await new Promise((resolve) => setTimeout(resolve, 25));
+				assert.equal(closed, false, "terminal close escaped held factory rollback");
+			}
+			let execError: unknown;
+			try {
+				await peer.exec(process.execPath, ["-e", "process.stdout.write('fresh')"]);
+			} catch (error) {
+				execError = error;
+			}
+			let subscriptionError: unknown;
+			try {
+				peer.events.on("fresh", () => {});
+			} catch (error) {
+				subscriptionError = error;
+			}
+			let emitError: unknown;
+			try {
+				peer.events.emit("peer", {});
+			} catch (error) {
+				emitError = error;
+			}
+			release();
+			const error = await operation;
+			await closing;
+			assert.ok(execError, "closing peer admitted fresh exec");
+			assert.ok(subscriptionError, "closing peer admitted fresh subscription");
+			assert.ok(emitError, "closing peer admitted fresh bus emission");
+			assert.equal(deliveries, 0);
+			const causes = (value: unknown): unknown[] =>
+				value instanceof AggregateError ? [value, ...value.errors.flatMap(causes)] : [value];
+			assert.ok(causes(error).includes(primary));
+			if (mode === "creation-error") assert.ok(causes(error).includes(cleanup));
+			const id = reloading || mode === "replay" ? 2 : 1;
+			assert.equal(shutdowns.filter((value) => value === `peer${id}`).length, 1);
+			assert.equal(shutdowns.filter((value) => value === `held${id}`).length, 1);
+			if (mode === "replay") assert.ok(!shutdowns.includes("peer1"), "borrowed discovery was closed");
+		} finally {
+			release();
+			await operation;
+			await session?.dispose().catch(() => {});
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: omitted factories drain their own work, never a selected sibling's receipt.
+test.each([false, true])(
+	"factory rollback drains the omitted set without selected sibling work (startup failure=%s)",
+	async (startupFails) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-omitted-drain-"));
+		const settingsManager = SettingsManager.inMemory();
+		const modelRuntime = await ModelRuntime.create({
+			authPath: join(cwd, "auth"),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		const defer = () => {
+			let resolve!: () => void;
+			const promise = new Promise<void>((done) => {
+				resolve = done;
+			});
+			return { promise, resolve };
+		};
+		const selectedWork = defer(),
+			omittedWork = defer(),
+			cleanupWork = defer(),
+			entered = defer(),
+			admitted = defer();
+		const live = new Set<ReturnType<typeof setInterval>>();
+		const log: string[] = [];
+		let selected!: import("../src/core/extensions/types.ts").ExtensionAPI;
+		let omitted!: import("../src/core/extensions/types.ts").ExtensionAPI;
+		let other!: import("../src/core/extensions/types.ts").ExtensionAPI;
+		let unrelatedError: unknown;
+		const primary = new Error("startup rejected");
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					selected = pi;
+					pi.events.on("selected", async () => {
+						await selectedWork.promise;
+					});
+					pi.events.emit("selected", {});
+					pi.on("session_start", () => {
+						if (startupFails) throw primary;
+					});
+				},
+				(pi) => {
+					omitted = pi;
+					pi.on("session_shutdown", () => {
+						log.push("peer-shutdown");
+						for (const timer of live) clearInterval(timer);
+						live.clear();
+					});
+					pi.events.on("omitted", async () => {
+						admitted.resolve();
+						await omittedWork.promise;
+						pi.events.on("late", () => {});
+						try {
+							other.events.on("unrelated", () => {});
+						} catch (error) {
+							unrelatedError = error;
+						}
+						live.add(setInterval(() => {}, 1000));
+						log.push("acquired");
+					});
+					pi.events.emit("omitted", {});
+				},
+				(pi) => {
+					other = pi;
+					pi.on("session_shutdown", async () => {
+						log.push("last-shutdown");
+						entered.resolve();
+						await cleanupWork.promise;
+					});
+				},
+			],
+			extensionsOverride: (result) => ({ ...result, extensions: result.extensions.slice(0, 1) }),
+		});
+		let session: AgentSession | undefined;
+		let completed = false;
+		const creating = createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			modelRuntime,
+			resourceLoader: loader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		}).then(
+			(result) => {
+				session = result.session;
+				completed = true;
+				return undefined;
+			},
+			(error: unknown) => {
+				completed = true;
+				return error;
+			},
+		);
+		try {
+			await admitted.promise;
+			await new Promise((resolve) => setTimeout(resolve, 25));
+			assert.deepEqual(log, [], "all omitted callbacks precede the first shutdown");
+			assert.equal(
+				(await selected.exec(process.execPath, ["-e", "process.stdout.write('selected')"])).stdout,
+				"selected",
+			);
+			omittedWork.resolve();
+			await entered.promise;
+			assert.ok(unrelatedError, "admitted callback gained unrelated closing authority");
+			assert.throws(() => omitted.events.on("fresh", () => {}), /closed|stale/i);
+			cleanupWork.resolve();
+			if (startupFails) selectedWork.resolve();
+			await vi.waitFor(() => assert.ok(completed, "omitted cleanup waited on selected sibling"));
+			const error = await creating;
+			if (startupFails) assert.ok(error instanceof AggregateError);
+			else assert.equal(error, undefined);
+			assert.deepEqual(log, ["acquired", "last-shutdown", "peer-shutdown"]);
+			assert.equal(live.size, 0);
+			selectedWork.resolve();
+			await session?.dispose();
+		} finally {
+			selectedWork.resolve();
+			omittedWork.resolve();
+			cleanupWork.resolve();
+			await creating;
+			await session?.dispose().catch(() => {});
+			for (const timer of live) clearInterval(timer);
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);

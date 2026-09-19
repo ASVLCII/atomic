@@ -1820,3 +1820,30 @@ test.each([
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: failed factory batches seal together and drain before their cleanup hooks.
+test.each([
+	"drain-inline",
+	"drain-path",
+	"drain-error",
+	"drain-control",
+	"peer-creation",
+	"peer-error",
+	"peer-replay",
+	"peer-ordinary",
+	"peer-transaction",
+	"peer-transaction-overlap",
+	"subset",
+	"subset-startup",
+])(
+	"built Node factory rollback ownership (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-factory-rollback.mjs", import.meta.url)), mode],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

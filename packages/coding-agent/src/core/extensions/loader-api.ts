@@ -5,6 +5,7 @@ import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import { lifecycleScopeForOwner } from "../session-lifecycle-scope.ts";
+import { drainSessionWork, hasCallingSessionWork, trackSessionWork } from "../session-lifecycle-work.ts";
 import {
 	assertExtensionAction,
 	extensionWorkOpen,
@@ -45,6 +46,19 @@ const apiLifetime = Symbol.for("atomic.extension-api-lifetime.v1");
 type ExtensionWithLifetime = Extension & {
 	[apiLifetime]?: { retired: boolean; releases: Set<() => void>; cleanup?: AsyncLocalStorage<{ active: boolean }> };
 };
+
+/** Factory receipts must not include selected siblings sharing the runtime. */
+export async function drainExtensionAPIWork(extension: Extension): Promise<void> {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (lifetime) await drainSessionWork(lifetime);
+}
+
+export function sealExtensionAPI(extension: Extension): boolean {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (lifetime?.retired) return false;
+	if (lifetime) lifetime.cleanup ??= new AsyncLocalStorage<{ active: boolean }>();
+	return true;
+}
 
 /** Seal one unadopted factory without sealing its selected siblings' runtime. */
 export async function runExtensionAPICleanup(extension: Extension, operation: () => Promise<void>): Promise<void> {
@@ -104,11 +118,16 @@ export function createExtensionAPI(
 	const assertActive = (inspection = false) => {
 		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
 		if (lifetime?.retired) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
-		if (lifetime?.cleanup && !lifetime.cleanup.getStore()?.active) throw hostInputError("SessionClosed");
+		if (lifetime?.cleanup && !lifetime.cleanup.getStore()?.active && !hasCallingSessionWork(lifetime))
+			throw hostInputError("SessionClosed");
 		if (state === "failed")
 			throw new Error(`Extension "${extension.path}" failed to load and its API is no longer active.`);
 		runtime.assertActive();
 		if (!inspection) assertExtensionAction(resolveInvocationRuntime(originalRuntime));
+	};
+	const trackAPIWork = <T>(operation: () => Promise<T>): Promise<T> => {
+		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime]!;
+		return trackExtensionWork(resolveInvocationRuntime(originalRuntime), () => trackSessionWork(lifetime, operation));
 	};
 	const applyRuntimeChange = (change: { apply: () => void; rollback: () => void }) => {
 		if (state === "loading") pendingRuntimeChanges.push(change);
@@ -148,7 +167,9 @@ export function createExtensionAPI(
 				eventBus.on(channel, (data) => {
 					if (ownerLifetime?.retired || ownerLifetime?.cleanup || !extensionWorkOpen(ownerRuntime)) return;
 					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime))
-						return trackExtensionWork(ownerRuntime, async () => deliver(data));
+						return trackExtensionWork(ownerRuntime, () =>
+							trackSessionWork(ownerLifetime!, async () => deliver(data)),
+						);
 				}),
 			);
 			return unsubscribe;
@@ -331,9 +352,7 @@ export function createExtensionAPI(
 
 		exec(command: string, args: string[], options?: ExecOptions) {
 			assertActive();
-			return trackExtensionWork(resolveInvocationRuntime(originalRuntime), () =>
-				execCommand(command, args, options?.cwd ?? cwd, options),
-			);
+			return trackAPIWork(() => execCommand(command, args, options?.cwd ?? cwd, options));
 		},
 
 		getActiveTools(): string[] {

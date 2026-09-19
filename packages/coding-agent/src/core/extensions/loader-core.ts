@@ -75,7 +75,8 @@ export async function instantiateExtensions(target: LoadExtensionsResult, cwd: s
 				extensions.push(extension);
 				continue;
 			}
-			const extension = await loadExtensionFromFactory(
+			const extension = await loadOwnedExtensionFromFactory(
+				extensions,
 				recipe.factory,
 				cwd,
 				eventBus,
@@ -101,7 +102,7 @@ export async function instantiateExtensions(target: LoadExtensionsResult, cwd: s
 			extension.hidden = source.hidden;
 		}
 	} catch (error) {
-		const failures = await rollbackExtensionFactories(extensions, cwd, runtime);
+		const failures = await rollbackExtensionFactories(extensions, cwd);
 		try {
 			runtime.invalidate();
 		} catch (cleanupError) {
@@ -207,6 +208,31 @@ export async function loadExtensionFromFactory(
 	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider,
 	source?: Pick<Extension, "resolvedPath" | "sourceInfo">,
 ): Promise<Extension> {
+	return loadOwnedExtensionFromFactory(
+		[],
+		factory,
+		cwd,
+		eventBus,
+		runtime,
+		extensionPath,
+		workflowResourceProvider,
+		resourceLoaderInheritanceSnapshotProvider,
+		source,
+	);
+}
+
+/** Replay failure closes the whole fresh batch; ordinary discovery failure closes only itself. */
+async function loadOwnedExtensionFromFactory(
+	rollbackPeers: Extension[],
+	factory: ExtensionFactory,
+	cwd: string,
+	eventBus: EventBus,
+	runtime: ExtensionRuntime,
+	extensionPath: string,
+	workflowResourceProvider: WorkflowResourceProviderInput,
+	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider,
+	source?: Pick<Extension, "resolvedPath" | "sourceInfo">,
+): Promise<Extension> {
 	const extension = createExtension(extensionPath, source?.resolvedPath ?? extensionPath);
 	if (source) extension.sourceInfo = source.sourceInfo;
 	const resolvedCwd = resolvePath(cwd);
@@ -222,7 +248,7 @@ export async function loadExtensionFromFactory(
 		await factory(transaction.api);
 		transaction.commit();
 	} catch (error) {
-		const failures = await rollbackExtensionFactories([extension], resolvedCwd, runtime);
+		const failures = await rollbackExtensionFactories([...rollbackPeers.splice(0), extension], resolvedCwd);
 		try {
 			transaction.discard();
 		} catch (cleanupError) {

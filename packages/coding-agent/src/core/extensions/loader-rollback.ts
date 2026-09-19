@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { drainExtensionWork } from "./extension-work.ts";
-import { retireExtensionAPI, runExtensionAPICleanup } from "./loader-api.ts";
+import { drainExtensionAPIWork, retireExtensionAPI, runExtensionAPICleanup, sealExtensionAPI } from "./loader-api.ts";
 import { createExtensionContext } from "./runner-context.ts";
 import { noOpUIContext } from "./runner-ui.ts";
 import type { Extension, ExtensionRuntime } from "./types.ts";
@@ -13,14 +12,9 @@ export const factoryAcquisitions = new AsyncLocalStorage<{
 export async function rollbackFactoryAcquisitions(
 	retainedRuntimes: ReadonlySet<ExtensionRuntime> = new Set(),
 ): Promise<unknown[]> {
-	const acquired = factoryAcquisitions.getStore()?.pending;
-	const failures: unknown[] = [];
-	const runtimes = new Set<ExtensionRuntime>();
-	for (const [extension, { cwd, runtime }] of [...(acquired ?? [])].reverse()) {
-		failures.push(...(await rollbackExtensionFactories([extension], cwd, runtime)));
-		runtimes.add(runtime);
-	}
-	for (const runtime of runtimes) {
+	const acquired = [...(factoryAcquisitions.getStore()?.pending ?? [])];
+	const failures = await rollbackFactories(acquired.map(([extension, { cwd }]) => ({ extension, cwd })));
+	for (const runtime of new Set(acquired.map(([, entry]) => entry.runtime))) {
 		if (retainedRuntimes.has(runtime)) continue;
 		try {
 			runtime.invalidate();
@@ -32,16 +26,51 @@ export async function rollbackFactoryAcquisitions(
 }
 
 /** Factories can acquire resources before a session (and its runner) exists. */
-export async function rollbackExtensionFactories(
-	extensions: Extension[],
-	cwd: string,
-	runtime: ExtensionRuntime,
-): Promise<unknown[]> {
+export function rollbackExtensionFactories(extensions: Extension[], cwd: string): Promise<unknown[]> {
+	return rollbackFactories(extensions.map((extension) => ({ extension, cwd })));
+}
+
+async function rollbackFactories(entries: { extension: Extension; cwd: string }[]): Promise<unknown[]> {
+	// Seal the complete owned set before the first await, not one cleanup at a time.
+	const closing = entries.filter(({ extension }) => sealExtensionAPI(extension)).reverse();
+	for (const { extension } of closing) factoryAcquisitions.getStore()?.pending?.delete(extension);
+	// A selected sibling may share the runtime and even be invoking this rollback.
+	// Only these factories' receipts belong here; all must settle before any hook.
+	await Promise.all(closing.map(({ extension }) => drainExtensionAPIWork(extension)));
+	const failures: unknown[] = [];
+	for (const { extension, cwd } of closing) {
+		await runExtensionAPICleanup(extension, async () => {
+			for (const handler of extension.handlers.get("session_shutdown") ?? []) {
+				try {
+					await handler(
+						{ type: "session_shutdown", reason: factoryAcquisitions.getStore()?.replacement ? "new" : "quit" },
+						rollbackContext(cwd),
+					);
+				} catch (error) {
+					failures.push(error);
+				}
+			}
+		});
+		try {
+			await drainExtensionAPIWork(extension);
+		} catch (error) {
+			failures.push(error);
+		}
+		try {
+			retireExtensionAPI(extension);
+		} catch (error) {
+			failures.push(error);
+		}
+	}
+	return failures;
+}
+
+function rollbackContext(cwd: string) {
 	const unavailable = (): never => {
 		throw new Error("Session is not initialized during factory rollback");
 	};
 	const noop = () => {};
-	const context = createExtensionContext({
+	return createExtensionContext({
 		assertActive: noop,
 		getUIContext: () => noOpUIContext,
 		getMode: () => "print",
@@ -65,33 +94,6 @@ export async function rollbackExtensionFactories(
 		getSystemPrompt: () => "",
 		observeWorkflowActivity: unavailable,
 	});
-	const failures: unknown[] = [];
-	for (const extension of [...extensions].reverse()) {
-		factoryAcquisitions.getStore()?.pending?.delete(extension);
-		await runExtensionAPICleanup(extension, async () => {
-			for (const handler of extension.handlers.get("session_shutdown") ?? []) {
-				try {
-					await handler(
-						{ type: "session_shutdown", reason: factoryAcquisitions.getStore()?.replacement ? "new" : "quit" },
-						context,
-					);
-				} catch (error) {
-					failures.push(error);
-				}
-			}
-		});
-		try {
-			await drainExtensionWork(runtime);
-		} catch (error) {
-			failures.push(error);
-		}
-		try {
-			retireExtensionAPI(extension);
-		} catch (error) {
-			failures.push(error);
-		}
-	}
-	return failures;
 }
 
 export function factoryRollbackError(error: unknown, failures: unknown[]): unknown {
