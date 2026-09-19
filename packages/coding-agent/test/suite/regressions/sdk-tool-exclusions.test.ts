@@ -72,6 +72,8 @@ describe("SDK tool exclusions", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
+			// #3105: this fixture isolates coding-tool exclusions and Intercom.
+			builtins: { workflows: false, subagents: false, mcp: false, "web-access": false },
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			settingsManager,
 			sessionManager,
@@ -95,7 +97,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.agent.state.tools.map((tool) => tool.name)).not.toContain("ask_user_question");
 		expect(session.systemPrompt).not.toContain("ask_user_question");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("preserves question-tool fallback guidance for allowlisted sessions when excludedTools is omitted", async () => {
@@ -108,8 +110,8 @@ describe("SDK tool exclusions", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["intercom", "read"]);
-		expect(session.getActiveToolNames()).toEqual(["read", "intercom"]);
+		).toEqual(["read"]);
+		expect(session.getActiveToolNames()).toEqual(["read"]);
 		expect(session.systemPrompt).toContain("- read: Read a path selector.");
 		expect(session.systemPrompt).not.toContain("- ask_user_question:");
 		expect(session.systemPrompt).toContain(
@@ -120,7 +122,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.systemPrompt).toContain("continue fully autonomously on best judgment");
 		expect(session.systemPrompt).toContain("Preserve safety and authorization constraints");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("applies the tools allowlist before excludedTools", async () => {
@@ -134,13 +136,13 @@ describe("SDK tool exclusions", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["bash", "intercom", "read"]);
-		expect(session.getActiveToolNames().sort()).toEqual(["bash", "intercom", "read"]);
+		).toEqual(["bash", "read"]);
+		expect(session.getActiveToolNames().sort()).toEqual(["bash", "read"]);
 		expect(session.systemPrompt).toContain("- read: Read a path selector.");
 		expect(session.systemPrompt).toContain("- bash:");
 		expect(session.systemPrompt).not.toContain("ask_user_question");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("preserves noTools builtin behavior while making excluded names unavailable", async () => {
@@ -157,7 +159,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.systemPrompt).toContain("- intercom:");
 		expect(session.systemPrompt).not.toContain("ask_user_question");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("excludes SDK custom tools from the available and active tool sets", async () => {
@@ -182,7 +184,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.getActiveToolNames()).not.toContain("sdk_tool");
 		expect(session.systemPrompt).not.toContain("sdk_tool");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("excludes workflow from a real workflow-stage-style tool registry", async () => {
@@ -196,7 +198,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.getActiveToolNames()).not.toContain("workflow");
 		expect(session.getToolDefinition("workflow")).toBeUndefined();
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("keeps dynamically registered extension tools excluded after extensions bind", async () => {
@@ -211,7 +213,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.getActiveToolNames()).not.toContain("dynamic_tool");
 		expect(session.systemPrompt).not.toContain("dynamic_tool");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("reserves ordinary bundled Intercom against an SDK custom-tool collision", async () => {
@@ -221,8 +223,8 @@ describe("SDK tool exclusions", () => {
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			settingsManager: SettingsManager.create(tempDir, agentDir),
 			sessionManager: SessionManager.inMemory(tempDir),
-			tools: ["read"],
-			excludedTools: ["intercom", "bash"],
+			tools: ["read", "intercom"],
+			excludedTools: ["bash"],
 			customTools: [
 				{
 					name: "intercom",
@@ -243,11 +245,11 @@ describe("SDK tool exclusions", () => {
 			expect(session.getToolDefinition("bash")).toBeUndefined();
 			expect(session.getToolDefinition("contact_supervisor")).toBeUndefined();
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	});
 
-	it("keeps Intercom registered and active across SDK restrictions, mutation, and reload", async () => {
+	it("keeps Intercom excluded across SDK restrictions, mutation, and reload", async () => {
 		const session = await createSession({
 			extensionToolName: "intercom",
 			tools: ["read"],
@@ -261,13 +263,13 @@ describe("SDK tool exclusions", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["intercom", "read"]);
-		expect(session.getActiveToolNames()).toEqual(["read", "intercom"]);
+		).toEqual(["read"]);
+		expect(session.getActiveToolNames()).toEqual(["read"]);
 		expect(session.systemPrompt).not.toContain("contact_supervisor");
 
 		session.setActiveToolsByName([]);
-		expect(session.getActiveToolNames()).toEqual(["intercom"]);
-		expect(session.getToolDefinition("intercom")?.label).toBe("Intercom");
+		expect(session.getActiveToolNames()).toEqual([]);
+		expect(session.getToolDefinition("intercom")).toBeUndefined();
 		expect(session.systemPrompt).not.toContain("contact_supervisor");
 
 		await session.reload();
@@ -276,23 +278,23 @@ describe("SDK tool exclusions", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["intercom", "read"]);
-		expect(session.getActiveToolNames()).toEqual(["intercom", "read"]);
-		expect(session.getToolDefinition("intercom")).toBeDefined();
+		).toEqual(["read"]);
+		expect(session.getActiveToolNames()).toEqual(["read"]);
+		expect(session.getToolDefinition("intercom")).toBeUndefined();
 		expect(session.getToolDefinition("bash")).toBeUndefined();
 
-		session.dispose();
+		await session.dispose();
 	});
 
-	it("keeps only Intercom active when SDK noTools disables all other tools", async () => {
+	it("exposes no tools when SDK noTools disables all tools", async () => {
 		const session = await createSession({ extensionToolName: "intercom", noTools: "all" });
 
 		await session.bindExtensions({});
 
-		expect(session.getAllTools().map((tool) => tool.name)).toEqual(["intercom"]);
-		expect(session.getActiveToolNames()).toEqual(["intercom"]);
+		expect(session.getAllTools().map((tool) => tool.name)).toEqual([]);
+		expect(session.getActiveToolNames()).toEqual([]);
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("main CLI print/json exclusion removes ask_user_question while keeping workflow", async () => {
@@ -312,7 +314,7 @@ describe("SDK tool exclusions", () => {
 		expect(session.getToolDefinition("workflow")).toBeDefined();
 		expect(session.systemPrompt).not.toContain("ask_user_question");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("main CLI app-mode exclusion adds ask_user_question only for print/json", () => {
@@ -343,6 +345,6 @@ describe("SDK tool exclusions", () => {
 		expect(session.getActiveToolNames()).not.toContain("ask_user_question");
 		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "bash", "edit", "write", "todo"]));
 
-		session.dispose();
+		await session.dispose();
 	});
 });
