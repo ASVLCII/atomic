@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@bastani/atomic";
+import { reportMcpDiagnostic } from "./diagnostics.js";
 import type { McpExtensionState } from "./state.js";
 import type { ToolMetadata } from "./types.js";
 import { existsSync } from "node:fs";
@@ -129,7 +130,7 @@ export async function initializeMcp(
       if (ctx.hasUI) {
         ctx.ui.notify(`MCP: Failed to connect to ${name}: ${error}`, "error");
       }
-      console.error(`MCP: Failed to connect to ${name}: ${error}`);
+      reportMcpDiagnostic(pi, "MCP startup connection failed");
       continue;
     }
 

@@ -1875,3 +1875,22 @@ test(
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: the built logger uses owner sinks, not process console, including default no-sink SDK usage.
+test.each([false, true])(
+	"built Node MCP diagnostics are quiet withoutSink=%s",
+	(withoutSink) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-mcp-diagnostics.mjs", import.meta.url)),
+				...(withoutSink ? ["--without-sink"] : []),
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.equal(result.stderr.toString(), "");
+		assert.equal(result.stdout.toString().trim(), '{"verified":true}');
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

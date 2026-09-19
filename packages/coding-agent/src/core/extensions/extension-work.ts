@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { withBuiltinDiagnostics } from "../builtin-diagnostics.ts";
 import { drainSessionWork, hasCallingSessionWork, trackSessionWork } from "../session-lifecycle-work.ts";
 import { hostInputError } from "./host-input.js";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
@@ -40,7 +41,10 @@ export function extensionWorkOpen(runtime: ExtensionRuntime): boolean {
 }
 
 export function trackExtensionWork<T>(runtime: ExtensionRuntime, operation: () => Promise<T>): Promise<T> {
-	return (runtime as OwnedRuntime)[workBinding]?.run(operation) ?? trackSessionWork(runtime, operation);
+	return withBuiltinDiagnostics(
+		runtime,
+		() => (runtime as OwnedRuntime)[workBinding]?.run(operation) ?? trackSessionWork(runtime, operation),
+	);
 }
 
 export async function drainExtensionWork(runtime: ExtensionRuntime): Promise<void> {

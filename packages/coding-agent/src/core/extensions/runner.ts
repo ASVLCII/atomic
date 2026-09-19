@@ -10,6 +10,7 @@ import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
+import { lifecycleScopeForOwner, sessionLifecycleScopes } from "../session-lifecycle-scope.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
@@ -238,6 +239,7 @@ export class ExtensionRunner {
 	) {
 		this.extensions = extensions;
 		this.runtime = runtime;
+		sessionLifecycleScopes.set(this, lifecycleScopeForOwner(runtime));
 		this.runtime.workflowActivityHub.bindDispatcher((event, isCurrent) => this.emit(event, isCurrent));
 		this.uiContext = noOpUIContext;
 		this.cwd = cwd;
@@ -360,6 +362,18 @@ export class ExtensionRunner {
 		this.humanInput = humanInput;
 		this.humanInputBindingRevision = bindingRevision;
 		this.onDiagnostic = onDiagnostic;
+		// Internal builtin bridge: no new extension API and no interception of console.
+		Reflect.set(
+			lifecycleScopeForOwner(this.runtime),
+			Symbol.for("atomic.builtin-diagnostic.v1"),
+			(diagnostic: Omit<HostDiagnostic, "sessionId">) => {
+				try {
+					this.onDiagnostic?.({ ...diagnostic, sessionId: this.sessionManager.getSessionId() });
+				} catch {
+					// Observers cannot replace the primary service failure.
+				}
+			},
+		);
 		this.refreshHostInput();
 	}
 

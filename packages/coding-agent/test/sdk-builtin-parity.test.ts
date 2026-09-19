@@ -4865,3 +4865,50 @@ test("SDK MCP discovery stays lazy until an owned gateway call", async () => {
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: startup failures are operational diagnostics, not remote text printed by the SDK.
+test("MCP startup diagnostics are quiet, redacted and owner attributed", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-sdk-mcp-diagnostics-"));
+	const diagnostics: HostDiagnostic[][] = [[], []];
+	const sessions: AgentSession[] = [];
+	const errorOutput = vi.spyOn(console, "error").mockImplementation(() => {});
+	try {
+		for (let index = 0; index < 2; index++) {
+			const cwd = join(root, String(index));
+			mkdirSync(cwd);
+			writeFileSync(
+				join(cwd, ".mcp.json"),
+				JSON.stringify({
+					mcpServers: {
+						[`secret-supervisor-token-${index}`]: {
+							command: join(cwd, "missing-secret-credential"),
+							lifecycle: "eager",
+						},
+					},
+				}),
+			);
+			const { session } = await createAgentSession({
+				cwd,
+				agentDir: join(cwd, "agent"),
+				sessionManager: SessionManager.inMemory(cwd),
+				settingsManager: SettingsManager.inMemory(),
+				model: getModel("anthropic", "claude-sonnet-4-5")!,
+				extensionBindings: { onDiagnostic: (entry) => diagnostics[index]!.push(entry) },
+			});
+			sessions.push(session);
+			const gateway = session.agent.state.tools.find((tool) => tool.name === "mcp")!;
+			await gateway.execute("status", {}, new AbortController().signal);
+		}
+		assert.equal(errorOutput.mock.calls.length, 0, "MCP startup wrote unsolicited console output");
+		for (let index = 0; index < 2; index++) {
+			assert.ok(diagnostics[index]!.length > 0);
+			assert.ok(diagnostics[index]!.every((entry) => entry.sessionId === sessions[index]!.sessionId));
+			assert.doesNotMatch(JSON.stringify(diagnostics[index]), /secret|missing|supervisor-token/);
+			assert.equal(diagnostics[index]![0]!.source, "mcp");
+		}
+	} finally {
+		await Promise.all(sessions.map((session) => session.dispose()));
+		errorOutput.mockRestore();
+		rmSync(root, { recursive: true, force: true });
+	}
+});

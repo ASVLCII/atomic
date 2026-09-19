@@ -1,3 +1,5 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
+
 /**
  * Centralized logging for MCP UI operations.
  * Provides structured, contextual logs with levels.
@@ -64,6 +66,9 @@ class Logger {
 
   private emit(level: LogLevel, message: string, context?: LogContext, error?: Error): void {
     if (!this.shouldLog(level)) return;
+    // SDK-owned work routes only sanitized diagnostics to its owner's listener.
+    // In particular, global custom handlers must not observe another owner's raw data.
+    if (reportOwnedMcpLog(level)) return;
 
     const entry: LogEntry = {
       level,
