@@ -34,7 +34,7 @@ afterEach(() => {
 
 for (const routerModel of ["typesafe-ai/jev", "auto", "missing/model"]) {
 	test(`general structured-output inference ignores routerModel=${routerModel} and environment preference`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn(async () => Response.json(jevResponse()));
 		vi.stubGlobal("fetch", transport);
 		const settings = SettingsManager.inMemory({ routerModel });
@@ -60,7 +60,7 @@ for (const routerModel of ["typesafe-ai/jev", "auto", "missing/model"]) {
 }
 
 test("general structured-output can explicitly select Jev without reading router settings", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const transport = vi.fn(async () => Response.json(jevResponse()));
 	vi.stubGlobal("fetch", transport);
 	const request = decisionRequest();
@@ -71,7 +71,7 @@ test("general structured-output can explicitly select Jev without reading router
 });
 
 test("general structured output requires an explicit model even with router settings and a TypeSafe key", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const transport = vi.fn(async () => Response.json(jevResponse()));
 	vi.stubGlobal("fetch", transport);
 	// @ts-expect-error General calls do not inherit a router/chat selection, at compile time or runtime.
@@ -105,7 +105,7 @@ test("ordinary routing keeps the complete candidate set beyond Jev's Choice limi
 });
 
 test("routing entrypoint alone applies the routerModel setting", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const transport = vi.fn(async () => Response.json(jevResponse()));
 	vi.stubGlobal("fetch", transport);
 	const result = await inferRouterDecision({
@@ -118,7 +118,7 @@ test("routing entrypoint alone applies the routerModel setting", async () => {
 
 for (const routerModel of ["typesafe-ai/jev", "auto"]) {
 	test(`structured_output session tool keeps the chat model with routerModel=${routerModel}`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn(async () => Response.json(jevResponse()));
 		vi.stubGlobal("fetch", transport);
 		const dispatch = vi.fn((model, context) => {

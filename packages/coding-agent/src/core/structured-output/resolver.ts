@@ -8,7 +8,7 @@ export const JEV_STRUCTURED_OUTPUT_PROVIDER = Object.freeze({
 	fullId: "typesafe-ai/jev",
 	wireModel: "jev-latest",
 	endpoint: "https://api.typesafe.ai/v1/systemone",
-	apiKeyEnv: "TYPESAFE_AI_API_KEY",
+	apiKeyEnv: "TYPESAFE_API_KEY",
 	capabilities: Object.freeze({
 		structuredDecisions: true,
 		choice: true,
@@ -33,7 +33,7 @@ export function resolveRouterModel(options: RouterModelSelectionOptions): Struct
 		explicit === JEV_STRUCTURED_OUTPUT_PROVIDER.fullId ||
 		(!explicit &&
 			(options.modelRegistry.getProviderAuthStatus?.(JEV_STRUCTURED_OUTPUT_PROVIDER.id).configured ||
-				Boolean(process.env.TYPESAFE_AI_API_KEY?.trim())))
+				Boolean(process.env.TYPESAFE_API_KEY?.trim())))
 	) {
 		return { kind: "jev", fullId: JEV_STRUCTURED_OUTPUT_PROVIDER.fullId };
 	}

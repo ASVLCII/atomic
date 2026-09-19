@@ -23,7 +23,7 @@ import {
 } from "../helpers/structured-output.js";
 
 const dirs: string[] = [];
-beforeEach(() => vi.stubEnv("TYPESAFE_AI_API_KEY", ""));
+beforeEach(() => vi.stubEnv("TYPESAFE_API_KEY", ""));
 afterEach(() => {
 	vi.unstubAllEnvs();
 	vi.restoreAllMocks();

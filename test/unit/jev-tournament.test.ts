@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 test("small Jev questions share one direct request despite oversized unchanged state", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(2);
 	const state = { text: "x".repeat(128000) };
 	const questions = { workflow: request.jev.questions.pick, budget: request.jev.questions.pick };
@@ -29,7 +29,7 @@ test("small Jev questions share one direct request despite oversized unchanged s
 });
 
 test("singleton Jev decoder receives an ordinary object", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) =>
 		Response.json(jevFixtureResponse(JSON.parse(String(init.body)))),
 	);
@@ -50,7 +50,7 @@ test("singleton Jev decoder receives an ordinary object", async () => {
 });
 
 test("mixed Jev decoder preserves original question order and unusual keys", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) =>
 		Response.json(jevFixtureResponse(JSON.parse(String(init.body)))),
 	);
@@ -81,7 +81,7 @@ test("mixed Jev decoder preserves original question order and unusual keys", asy
 });
 
 test("Jev routes all 1997 original options through bounded batches and a shared final", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const criteria = Object.fromEntries(Array.from({ length: 1997 }, (_, i) => [`key_${i}`, `Candidate ${i}`]));
 	const calls: string[][][] = [];
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
@@ -127,7 +127,7 @@ test("Jev routes all 1997 original options through bounded batches and a shared 
 });
 
 test("mixed named questions cannot collide with tournament IDs", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const criteria = Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`key_${i}`, `Candidate ${i}`]));
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
 		const { questions } = JSON.parse(String(init.body)) as {
@@ -168,7 +168,7 @@ test("mixed named questions cannot collide with tournament IDs", async () => {
 });
 
 test("retained final option participates originally but does not replace batch top three", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const criteria = Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`key_${i}`, `Candidate ${i}`]));
 	const calls: string[][][] = [];
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
@@ -225,7 +225,7 @@ function tournament(count: number) {
 
 for (const count of [0, 1, 255, 256, 22000]) {
 	test(`Jev ${count} candidates terminate without dropping first-round participants`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 		const request = tournament(count);
 		const calls: JevFixtureRequest[] = [];
 		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
@@ -251,7 +251,7 @@ for (const count of [0, 1, 255, 256, 22000]) {
 }
 
 test("invalid retained key rejects before transport", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(256);
 	const fetch = vi.fn();
 	vi.stubGlobal("fetch", fetch);
@@ -277,7 +277,7 @@ for (const failure of [
 	"http",
 ] as const) {
 	test(`overflow ${failure} fails without partial decode after bounded output repair`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 		const request = tournament(256);
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body)) as JevFixtureRequest;
@@ -304,7 +304,7 @@ for (const failure of [
 for (const failure of ["cancel-before", "cancel-between", "timeout", "provider"] as const) {
 	test(`overflow ${failure} rejects the whole operation`, async () => {
 		vi.useFakeTimers();
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 		const request = tournament(256);
 		const controller = new AbortController();
 		if (failure === "cancel-before") controller.abort();
@@ -331,7 +331,7 @@ for (const failure of ["cancel-before", "cancel-between", "timeout", "provider"]
 }
 
 test("context packing repeats unchanged state, limits estimated question context, and sums actual calls", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(1000);
 	request.state = { task: "x".repeat(40000) };
 	request.jev.questions.pick.criteria = Object.fromEntries(
@@ -359,7 +359,7 @@ test("context packing repeats unchanged state, limits estimated question context
 
 for (const status of [200, 422]) {
 	test(`estimated oversized unchanged state is sent once and provider ${status} is authoritative`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 		const request = { ...tournament(1), state: { task: "x".repeat(300000) } };
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body)) as JevFixtureRequest;
@@ -374,7 +374,7 @@ for (const status of [200, 422]) {
 }
 
 test("minimum context batches still shrink with a retained option and singleton tails", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(256);
 	const calls: JevFixtureRequest[] = [];
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
@@ -395,7 +395,7 @@ test("minimum context batches still shrink with a retained option and singleton 
 });
 
 test("multiple overflowing questions preserve original keys independently", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(256);
 	const other = Object.fromEntries(
 		Object.keys(request.jev.questions.pick.criteria).map((key) => [`other_${key}`, key]),

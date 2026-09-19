@@ -29,7 +29,7 @@ afterEach(() => {
 	setDurableBackend(undefined);
 });
 async function fixture() {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	const infer = vi.fn<Parameters<typeof registeredDecisionRuntime>[0]>(() =>
 		messageStream(decisionMessage({ model: "decision-test/chat", effort: null })),
 	);
@@ -374,7 +374,7 @@ for (const auth of ["stored", "env"] as const) {
 	test(`stage auto selects Jev through normal ${auth} auth without Jev execution`, async () => {
 		const f = await fixture();
 		const key = "synthetic-stage-jev-key";
-		if (auth === "env") vi.stubEnv("TYPESAFE_AI_API_KEY", key);
+		if (auth === "env") vi.stubEnv("TYPESAFE_API_KEY", key);
 		else {
 			await f.decisionRuntime.saveCredential("typesafe-ai", { type: "api_key", key });
 		}

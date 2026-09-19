@@ -12,6 +12,7 @@
 - Factory rollback now covers pre-constructor setup and preserves all cleanup causes. Concurrent runtime replacements retire displaced successors and preserve surviving workflow ownership after candidate failure. Disposal cancels all shell calls with repeated caller IDs and reports real, session-attributed settings write failures without consuming shared manager errors ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Closing preserves queued conversation events and persistence, drains current and superseded background summaries, and rolls back candidate acquisitions when reload discovery fails before startup. Reload cleanup failures retain every original and cleanup cause ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Workflow model-tool calls now use `workflow route` with actual request/message/document text, then `workflow run` with the registered execution ID and inputs. Reservations retain one identity through admission and supported lifecycle operations; invalid inputs can be corrected without rerouting. Old run-as-router calls and duration values are rejected. Estimates use canonical quarter-hour labels through `1d`, plus unknown and `>1d`; budgets and approval gates remain unchanged ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
+- Renamed the TypeSafe Jev environment variable from `TYPESAFE_AI_API_KEY` to `TYPESAFE_API_KEY`. Update shell and deployment configuration; the old name is no longer recognized. Saved `/login typesafe-ai` credentials are unchanged.
 
 ### Added
 
