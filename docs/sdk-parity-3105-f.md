@@ -250,3 +250,39 @@ Evidence is local macOS arm64 Node 26.8.2, Bun 1.4.2, deterministic inference an
 ### Contract amendments received
 
 "make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned publication gates. This child does not publish or claim the overall user task complete.
+
+## Latest review repair contract
+
+The previous readiness claim is superseded by three reproduced failures. Frozen F acceptance now maps queued completion persistence to the persist/control public probe, reload preparation rollback and aggregate causes to both preparation probes, and current/superseded summary settlement to the independently released provider probe. All three require public source and built Node regressions, normal build/check, complete parity and affected suites, updated guides/Unreleased notes, and a signed clean commit. Existing API identity, raw inputs, admission seal, borrowed ownership, sibling survival and prior tests remain required; no G/H work or publication is included.
+
+### Repair evidence at the latest continuation
+
+All three latest reviewer roots are repaired. The persisted tests are the five public cases at the end of `sdk-builtin-parity.test.ts` and the six `built Node completion persistence and cleanup` cases in `sdk-builtin-host-parity.test.ts`, backed by `sdk-host-completion-cleanup.mjs`.
+
+| Requirement / state boundary | RED and current evidence |
+| --- | --- |
+| Active → closing drains already-admitted events and persists completed messages | Exact persist probe and source test failed with empty history. Completion delivery now explicitly retains its existing admission through the serialized event queue; fresh dispatch remains sealed. Source test checks start/end ordering and both persisted roles; Node fixture checks raw text. Exact control and repaired probe pass |
+| Reload preparation failure → candidate rollback, old generation survives | Both exact probes and two source cases failed with candidate 2 still live. Existing acquisition ledger now encloses transactional preparation. Every successful factory rolls back if preparation rejects; original and both earlier/later cleanup causes remain in ShutdownFailed. Tests require active=[1] after failure, shutdowns=[2,1] and active=[] after final close |
+| Current/superseded summary execution → cancellation → settlement → cleanup | Exact summary probe and one/two-summary source cases failed with close already resolved. Every summary launch uses existing session work accounting, retaining superseded settlement receipts; generation abort is combined with local cancellation. Source and Node cases require close pending before independent release, all signals aborted, zero active providers and no stale summary entry. Node also checks reload |
+| Exact APIs, raw values, ordering, borrowed ownership and sibling isolation | No session result/setter/dispose signature or payload policy changes. Existing parity, replacement, shared-owner and stage tests remain in complete passing selections. Caller managers and old reload generation are not rolled back |
+| Aggregate failure and repeated close | Failed preparation cleanup reaches existing reload failure retention, so reload and later disposal remain ShutdownFailed; all causes are checked. Existing repeated-close and component-attempt regressions pass |
+| Build/check, both complete parity files and affected suites | Commands/counts below. No new skips or removed assertions |
+| Docs, Unreleased, signed commit and no publication | SDK guide and current Unreleased explain queued persistence, summary settlement and candidate rollback. Normal signed commit/hook evidence is recorded in the handoff. No other checkout, G/H implementation or publication |
+
+Exact commands: `/tmp/3105-f-next-commands.txt`. Debugger execution receipt: `/tmp/3105-f-next-execution.md`; run identity `a568fef9`, progress artifact under `subagent-artifacts/progress/a568fef9/progress.md`.
+
+- Fresh normal `npm run build` and `npm run check`: exit 0, `/tmp/3105-f-next-{build,check}.log`.
+- Complete affected coding-agent selection: **72 files, 618 passed**, 14 unchanged credential/platform skips; `/tmp/3105-f-next-core-rerun.log`.
+- Complete host parity: **133/133 passed**, `/tmp/3105-f-next-host.log`.
+- Root lifecycle selection: **48 files, 477 passed**, `/tmp/3105-f-next-unit.log`.
+- Observer/queue selection: **15 files, 121 passed**, one existing platform skip; `/tmp/3105-f-next-queues.log`.
+- Task selection: **8 files, 49 passed**, `/tmp/3105-f-next-tasks-rerun.log`.
+- Final primary SDK suite after removing a no-op test cleanup: **94/94 passed**, `/tmp/3105-f-next-sdk-final.log`.
+- Exact five latest invocations, including the persistence control: exit 0, `/tmp/3105-f-next-exact-green.log`. Six built Node cases exit naturally, `/tmp/3105-f-next-node-green.log`.
+- Supplemental qlty smells/metrics exit 0, `/tmp/3105-f-next-{qlty,metrics}.log`; pre-existing large-module complexity remains reported, not suppressed. Config unchanged; normal Biome/typechecks remain authoritative.
+
+RED evidence: `/tmp/3105-f-next-{exact,persist,events,prepare,summary}-red.log`. The first persistence test scaffold awaited a serialized agent-end event before independently releasing agent-start and timed out; its corrected provider-completion barrier then reproduced the real empty-history assertion. A supplemental SDK-only command's shell budget expired at 120 seconds; its full rerun with a sufficient command budget passed in 151 seconds without changing test budgets.
+
+The known native spool observation recurred in the first broad core run and first task selection (`SpawnFailed: Output spool unavailable`). The unchanged isolated shell suite passed 15 tests; unchanged complete reruns passed 618 and 49 tests respectively. Bounded inspection locates failure at native spool `create_new` open but does not establish its OS error or cause. No native fix, retry masking, skipped assertion or universal absence of that intermittent failure is claimed. Logs retain both failures. Temporary resolved F notes were removed while unrelated `ISSUES.md` content remains unchanged.
+
+Evidence remains local macOS arm64 Node26.8.2 with deterministic providers and built exports. G/H, packed strict declaration closure, other platforms/live credentials, and parent-owned exact-head CI/Greptile/conditional merge remain deferred exactly as before. No new out-of-scope feature or refactor was added.

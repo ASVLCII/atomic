@@ -6,6 +6,11 @@ import { replaceSessionTaskOwner } from "./agent-session-tasks.ts";
 import type { AgentSessionReloadOptions, ExtensionBindings } from "./agent-session-types.ts";
 import { hostInputError } from "./extensions/host-input.js";
 import { ExtensionRunner } from "./extensions/index.js";
+import {
+	factoryAcquisitions,
+	factoryRollbackError,
+	rollbackFactoryAcquisitions,
+} from "./extensions/loader-rollback.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { bindExtensionContextPublication } from "./extensions/runner-context.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -561,7 +566,13 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 	}
 
 	const settingsTransaction = await this.settingsManager.prepareReload();
-	const resourceTransaction = await prepareResourceReload(settingsTransaction.settingsManager);
+	const resourceTransaction = await factoryAcquisitions.run({ pending: new Map(), replacement: true }, async () => {
+		try {
+			return await prepareResourceReload(settingsTransaction.settingsManager);
+		} catch (error) {
+			throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
+		}
+	});
 	const errors = resourceTransaction.loader.getExtensions().errors;
 	const extensionsResult = resourceTransaction.loader.getExtensions();
 	for (const [name, value] of previousFlagValues) {

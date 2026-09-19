@@ -2603,3 +2603,250 @@ test.each(["path", "inline"] as const)("failed %s factory rejects with original 
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: sealing fresh dispatch must not discard already completed conversation events.
+test("closing preserves queued message persistence and completion hooks", async () => {
+	const { createAssistantMessageEventStream } = await import("@bastani/pi-ai/compat");
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const completed = Promise.withResolvers<void>();
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-queued-persistence-"));
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
+	await modelRuntime.setRuntimeApiKey("anthropic", "fixture", {});
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+	const events: string[] = [];
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("agent_start", async () => {
+					entered.resolve();
+					await release.promise;
+				});
+				pi.on("message_start", (event) => {
+					events.push(`start:${event.message.role}`);
+				});
+				pi.on("message_end", (event) => {
+					events.push(`end:${event.message.role}`);
+				});
+			},
+		],
+	});
+	modelRuntime.streamSimple = (model) => {
+		const stream = createAssistantMessageEventStream();
+		queueMicrotask(() => {
+			stream.push({
+				type: "done",
+				reason: "stop",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "completed before close" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 1,
+						output: 1,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 2,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				},
+			});
+			stream.end();
+			completed.resolve();
+		});
+		return stream;
+	};
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		modelRuntime,
+		model: getModel("anthropic", "claude-sonnet-4-5"),
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		const turn = session.prompt("preserve this prompt");
+		await entered.promise;
+		await completed.promise;
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		const closing = session.dispose();
+		release.resolve();
+		await Promise.all([turn, closing]);
+		assert.deepEqual(
+			session.sessionManager.buildSessionContext().messages.map((message) => message.role),
+			["user", "assistant"],
+		);
+		assert.deepEqual(events, ["start:user", "end:user", "start:assistant", "end:assistant"]);
+	} finally {
+		release.resolve();
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: candidate factories belong to rollback even before a transaction/runner exists.
+test.each(["override", "cleanup"] as const)("failed reload preparation releases acquisitions: %s", async (failure) => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-prepare-rollback-"));
+	const settingsManager = SettingsManager.inMemory();
+	let fail = false;
+	let next = 0;
+	const active = new Set<number>();
+	const shutdowns: number[] = [];
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++next;
+				active.add(id);
+				pi.on("session_shutdown", () => {
+					active.delete(id);
+					shutdowns.push(id);
+					if (fail && id === 2 && failure === "cleanup") throw new Error("earlier cleanup failed");
+				});
+			},
+			(pi) => {
+				if (fail && failure === "cleanup") {
+					pi.on("session_shutdown", () => {
+						throw new Error("later cleanup failed");
+					});
+					throw new Error("later factory failed");
+				}
+			},
+		],
+		extensionsOverride: (base) => {
+			if (fail && failure === "override") throw new Error("override failed");
+			return base;
+		},
+	});
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		fail = true;
+		const error = await session.reload().then(
+			() => undefined,
+			(cause: unknown) => cause,
+		);
+		assert.ok(error instanceof Error);
+		assert.deepEqual([...active], [1], "borrowed old generation survives; failed candidate is released");
+		if (failure === "cleanup") {
+			assert.equal((error as Error & { code: string }).code, "ShutdownFailed");
+			const messages = (cause: unknown): string =>
+				cause instanceof AggregateError ? [...cause.errors].map(messages).join(";") : String(cause);
+			assert.match(messages(error), /later factory failed/);
+			assert.match(messages(error), /later cleanup failed/);
+			assert.match(messages(error), /earlier cleanup failed/);
+		}
+	} finally {
+		await session.dispose().catch((error) => {
+			if (failure !== "cleanup") throw error;
+			assert.equal(error.code, "ShutdownFailed");
+		});
+		rmSync(cwd, { recursive: true, force: true });
+	}
+	assert.deepEqual([...active], []);
+	assert.deepEqual(shutdowns, [2, 1]);
+});
+
+// #3105: cancellation of current and superseded summaries is not their settlement.
+test.each([1, 2])("disposal drains %i admitted background summaries", async (count) => {
+	const { createAssistantMessageEventStream } = await import("@bastani/pi-ai/compat");
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-summary-drain-"));
+	const release = Promise.withResolvers<void>();
+	const signals: AbortSignal[] = [];
+	let active = 0;
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
+	await modelRuntime.setRuntimeApiKey("anthropic", "fixture", {});
+	modelRuntime.streamSimple = (model, context, options) => {
+		const stream = createAssistantMessageEventStream();
+		const complete = () => {
+			stream.push({
+				type: "done",
+				reason: "stop",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "response" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 1,
+						output: 1,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 2,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				},
+			});
+			stream.end();
+		};
+		if (JSON.stringify(context.messages).includes("Describe this coding session in one short sentence")) {
+			active++;
+			signals.push(options!.signal!);
+			void release.promise.then(() => {
+				active--;
+				complete();
+			});
+		} else queueMicrotask(complete);
+		return stream;
+	};
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		modelRuntime,
+		model: getModel("anthropic", "claude-sonnet-4-5"),
+		settingsManager: SettingsManager.inMemory({ sessionSummary: { enabled: true } }),
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		extensionBindings: { mode: "rpc" },
+	});
+	try {
+		for (let index = 0; index < count; index++) {
+			await session.prompt(`turn ${index}`);
+			await vi.waitFor(() => assert.equal(active, index + 1));
+		}
+		let closed = false;
+		const closing = session.dispose().then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		const beforeRelease = closed;
+		assert.ok(signals.every((signal) => signal.aborted));
+		release.resolve();
+		await closing;
+		assert.equal(beforeRelease, false);
+		assert.equal(active, 0);
+		assert.equal(
+			session.sessionManager.getEntries().some((entry) => entry.type === "session_summary"),
+			false,
+		);
+	} finally {
+		release.resolve();
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

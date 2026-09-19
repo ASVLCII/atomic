@@ -720,8 +720,9 @@ export class ExtensionRunner {
 	async emit<TEvent extends RunnerEmitEvent>(
 		event: TEvent,
 		isCurrent?: () => boolean,
+		admitted = false,
 	): Promise<RunnerEmitResult<TEvent>> {
-		if (event.type !== "session_shutdown" && !extensionWorkOpen(this.runtime))
+		if (!admitted && event.type !== "session_shutdown" && !extensionWorkOpen(this.runtime))
 			return undefined as RunnerEmitResult<TEvent>;
 		const observerFailures: Error[] = [];
 		const result = await runResourceRegistrationBatch(
@@ -744,7 +745,7 @@ export class ExtensionRunner {
 					},
 					isCurrent,
 				),
-			event.type === "session_shutdown",
+			admitted || event.type === "session_shutdown",
 		);
 		if (observerFailures.length)
 			throw Object.assign(new AggregateError(observerFailures, "Shutdown observers failed"), {
@@ -753,9 +754,11 @@ export class ExtensionRunner {
 		return result;
 	}
 
-	async emitMessageEnd(event: MessageEndEvent): Promise<AgentMessage | undefined> {
-		return runResourceRegistrationBatch(this.runtime, () =>
-			runMessageEndHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+	async emitMessageEnd(event: MessageEndEvent, admitted = false): Promise<AgentMessage | undefined> {
+		return runResourceRegistrationBatch(
+			this.runtime,
+			() => runMessageEndHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+			admitted,
 		);
 	}
 

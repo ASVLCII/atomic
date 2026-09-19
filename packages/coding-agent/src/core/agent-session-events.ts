@@ -411,16 +411,16 @@ export function _replaceMessageInPlace(this: AgentSession, target: AgentMessage,
 export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent): Promise<void> {
 	if (event.type === "agent_start") {
 		this._turnIndex = 0;
-		await this._extensionRunner.emit({ type: "agent_start" });
+		await this._extensionRunner.emit({ type: "agent_start" }, undefined, true);
 	} else if (event.type === "agent_end") {
-		await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+		await this._extensionRunner.emit({ type: "agent_end", messages: event.messages }, undefined, true);
 	} else if (event.type === "turn_start") {
 		const extensionEvent: TurnStartEvent = {
 			type: "turn_start",
 			turnIndex: this._turnIndex,
 			timestamp: Date.now(),
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "turn_end") {
 		const extensionEvent: TurnEndEvent = {
 			type: "turn_end",
@@ -428,26 +428,27 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			message: event.message,
 			toolResults: event.toolResults,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 		this._turnIndex++;
 	} else if (event.type === "message_start") {
 		const extensionEvent: MessageStartEvent = {
 			type: "message_start",
 			message: event.message,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "message_update") {
 		const extensionEvent: MessageUpdateEvent = {
 			type: "message_update",
 			assistantMessageEvent: event.assistantMessageEvent,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "message_end") {
 		const extensionEvent: MessageEndEvent = {
 			type: "message_end",
 			message: event.message,
 		};
-		const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
+		// Agent-core already completed this message; closing must drain its hooks and persistence.
+		const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent, true);
 		if (replacement) {
 			this._replaceMessageInPlace(event.message, normalizeMessageContent(replacement));
 		}
@@ -458,7 +459,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			toolName: event.toolName,
 			args: event.args,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "tool_execution_update") {
 		const extensionEvent: ToolExecutionUpdateEvent = {
 			type: "tool_execution_update",
@@ -467,7 +468,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			args: event.args,
 			partialResult: event.partialResult,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "tool_execution_end") {
 		const extensionEvent: ToolExecutionEndEvent = {
 			type: "tool_execution_end",
@@ -476,7 +477,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			result: event.result,
 			isError: event.isError,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	}
 }
 

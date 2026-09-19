@@ -17,9 +17,9 @@ export const boundExtensionRuntimes = new WeakSet<ExtensionRuntime>();
 export async function runResourceRegistrationBatch<T>(
 	runtime: ExtensionRuntime,
 	run: () => Promise<T>,
-	shutdown = false,
+	completion = false,
 ): Promise<T> {
-	if (!shutdown && !extensionWorkOpen(runtime)) throw hostInputError("SessionClosed");
+	if (!completion && !extensionWorkOpen(runtime)) throw hostInputError("SessionClosed");
 	return trackExtensionWork(runtime, async () => {
 		if (!runtime.beginResourceRegistrationBatch || !runtime.endResourceRegistrationBatch) return run();
 		runtime.beginResourceRegistrationBatch();

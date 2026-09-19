@@ -1616,3 +1616,21 @@ test.each([
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: completion persistence and every candidate/provider acquisition survive closing until settled.
+test.each(["persist", "prepare", "prepare-cleanup", "summary", "summary-superseded", "summary-reload"])(
+	"built Node completion persistence and cleanup (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-completion-cleanup.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
