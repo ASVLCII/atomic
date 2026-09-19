@@ -3,11 +3,13 @@ import { inspectRun } from "../runs/background/status.js";
 import { resolveAndValidateInputs } from "../runs/foreground/executor-inputs.js";
 import { workflowDependency } from "../sdk-surface.js";
 import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
+import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import type { WorkflowExecutionPolicy } from "../shared/types.js";
 import type { PiExecuteContext, WorkflowToolArgs } from "./public-types.js";
 import type { WorkflowToolResult } from "./render-result.js";
 import type { ExtensionRuntime } from "./runtime.js";
 import { formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.js";
+import { assertWorkflowInstanceOwner } from "./workflow-instance-owner.js";
 import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
@@ -19,6 +21,7 @@ import {
 	isResolvedRunId,
 	isWorkflowStageToolContext,
 	resolveRunId,
+	resolveToolRunTarget,
 	topLevelExpandedSnapshots,
 } from "./workflow-targets.js";
 import { workflowAnswerAction } from "./workflow-tool-answer.js";
@@ -110,11 +113,21 @@ export function makeExecuteWorkflowTool(
 				stages: [],
 			};
 		}
-		if (action !== "run" && action !== "route") {
-			if (args.runId !== undefined && args.runId !== "--all")
-				reservations.assertOwner(args.runId, ctx, action === "resume");
-			else if (args.all || args.runId === "--all" || action === "status") {
-				for (const run of store.runs()) reservations.assertOwner(run.id, ctx, action === "resume");
+		const authorize = (id: string): void => {
+			assertWorkflowInstanceOwner(id, ctx, store);
+			if (action === "resume") reservations.assertCurrent(id);
+		};
+		if (action === "status" && args.runId === undefined) {
+			for (const run of topLevelWorkflowRuns(store.runs())) authorize(run.id);
+		} else if (["stages", "stage", "transcript", "pause", "quit", "answer"].includes(action)) {
+			const target = resolveToolRunTarget(args, "", store);
+			if (target.kind === "all" && (action === "pause" || action === "quit")) {
+				// Preauthorize the entire batch before the first control can mutate anything.
+				for (const run of topLevelWorkflowRuns(store.runs()).filter((run) => run.endedAt === undefined))
+					authorize(run.id);
+			} else if (target.kind === "run") {
+				authorize(target.runId);
+				args = { ...args, runId: target.runId };
 			}
 		}
 		const policy: WorkflowExecutionPolicy = workflowPolicyFromContext(ctx);
@@ -238,6 +251,7 @@ export function makeExecuteWorkflowTool(
 								origin: "agent",
 								signal,
 								reservedRunId: reserved.id,
+								modelOwner: reserved.owner,
 								assertRoutingCurrent: reserved.assertCurrent,
 								onRunAccepted: (id) => {
 									reserved.state = "admitted";
@@ -283,7 +297,7 @@ export function makeExecuteWorkflowTool(
 				return { action, operation, report: await awaitRequest(workflowDependency(operation)) };
 			}
 			case "status": {
-				const target = args.runId;
+				const target = args.runId?.trim();
 				if (target !== undefined) {
 					const resolved = resolveRunId(target, store);
 					if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
@@ -291,6 +305,7 @@ export function makeExecuteWorkflowTool(
 					}
 					if (resolved.kind === "not_found") {
 						const durable = await awaitRequest(getRuntime().inspectDurableWorkflow(target));
+						if (durable.kind === "found") authorize(durable.detail.runId);
 						return durable.kind === "found"
 							? { action: "statusDetail", runId: durable.detail.runId, detail: durable.detail }
 							: { action: "statusDetail", runId: target, error: durable.message };
@@ -298,6 +313,7 @@ export function makeExecuteWorkflowTool(
 					if (!isResolvedRunId(resolved)) {
 						return { action: "statusDetail", runId: target, error: `run not found: ${target}` };
 					}
+					authorize(resolved.runId);
 					const inspected = inspectRun(resolved.runId, owner);
 					if (!inspected.ok) {
 						return { action: "statusDetail", runId: target, error: `run not found: ${target}` };
@@ -336,6 +352,7 @@ export function makeExecuteWorkflowTool(
 			case "transcript": {
 				const resolved = await awaitRequest(resolveDurableInspectionSource(args, getRuntime(), owner));
 				if (resolved.kind === "error") return durableInspectionError(action, args.runId ?? "", resolved.message);
+				if (resolved.kind === "durable") authorize(resolved.runId);
 				const source = resolved.kind === "durable" ? resolved.source : owner;
 				const canonicalArgs = resolved.kind === "durable" ? { ...args, runId: resolved.runId } : args;
 				if (action === "stages") return workflowStagesResult(canonicalArgs, source);
@@ -359,6 +376,7 @@ export function makeExecuteWorkflowTool(
 						signal,
 						onRunAccepted,
 						owner,
+						authorize,
 					}),
 				);
 			default: {

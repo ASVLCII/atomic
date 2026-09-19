@@ -1,10 +1,11 @@
 import type { WorkflowDefinition } from "../shared/types.js";
 import type { PiExecuteContext } from "./public-types.js";
+import { workflowCaller } from "./workflow-instance-owner.js";
 import type { WorkflowRouterOutput } from "./workflow-router.js";
 
 export interface WorkflowReservation {
 	readonly id: string;
-	readonly owner: string | object;
+	readonly owner: string;
 	readonly definition: WorkflowDefinition;
 	readonly decision: WorkflowRouterOutput;
 	readonly assertCurrent: () => void;
@@ -15,10 +16,6 @@ export interface WorkflowReservation {
 export class WorkflowReservations {
 	private readonly entries = new Map<string, WorkflowReservation>();
 
-	private owner(ctx: PiExecuteContext): string | object {
-		return ctx.sessionId ?? ctx.sessionManager?.getSessionId?.() ?? ctx.sessionManager ?? ctx;
-	}
-
 	register(
 		ctx: PiExecuteContext,
 		definition: WorkflowDefinition,
@@ -27,7 +24,7 @@ export class WorkflowReservations {
 	): WorkflowReservation {
 		const entry: WorkflowReservation = {
 			id: crypto.randomUUID(),
-			owner: this.owner(ctx),
+			owner: workflowCaller(ctx),
 			definition,
 			decision: structuredClone(decision),
 			assertCurrent,
@@ -37,14 +34,8 @@ export class WorkflowReservations {
 		return entry;
 	}
 
-	assertOwner(id: string, ctx: PiExecuteContext, resume = false): void {
-		const matches = [...this.entries.values()].filter(
-			(entry) => entry.id === id || (id.length === 8 && entry.id.startsWith(id)),
-		);
-		for (const entry of matches) {
-			if (entry.owner !== this.owner(ctx)) throw new Error("Workflow instance belongs to another caller/session.");
-			if (resume) entry.assertCurrent();
-		}
+	assertCurrent(id: string): void {
+		this.entries.get(id)?.assertCurrent();
 	}
 
 	resolve(id: string | undefined, ctx: PiExecuteContext): WorkflowReservation {
@@ -52,7 +43,8 @@ export class WorkflowReservations {
 		const entry = this.entries.get(id);
 		if (!entry)
 			throw new Error("Unknown or expired workflowId. Route the current request before starting a new execution.");
-		if (entry.owner !== this.owner(ctx)) throw new Error("Workflow reservation belongs to another caller/session.");
+		if (entry.owner !== workflowCaller(ctx))
+			throw new Error("Workflow reservation belongs to another caller/session.");
 		if (entry.state === "invalidated")
 			throw new Error("Workflow reservation is invalidated. Make a fresh route request.");
 		try {

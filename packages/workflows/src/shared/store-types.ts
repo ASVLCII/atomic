@@ -526,6 +526,8 @@ export interface RunSnapshot extends RunExecutionState {
 	 * recorded it, in which case attribution is omitted rather than guessed.
 	 */
 	origin?: WorkflowActor;
+	/** Model-tool caller/session bound at admission; retained through every lifecycle transition. */
+	modelOwner?: string;
 	/** Timestamp recorded on the most recent resume from a paused state. */
 	resumedAt?: number;
 	result?: WorkflowOutputValues;

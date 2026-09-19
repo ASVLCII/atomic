@@ -273,6 +273,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		// recomputing it, so resuming an agent-started run still reads as one the
 		// agent started. Only the resume itself is attributed to its requester.
 		...(continuationOrigin !== undefined ? { origin: continuationOrigin } : {}),
+		modelOwner: opts.continuation?.source.modelOwner ?? opts.modelOwner,
 		// A resumed run reports the resume that produced it, never a fresh start —
 		// whether it continues under a new id or reclaims the original one.
 		...(opts.resumeActor !== undefined
@@ -903,6 +904,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 				...(runSnapshot.rootRunId !== undefined ? { rootRunId: runSnapshot.rootRunId } : {}),
 				...(runSnapshot.resumedFromRunId !== undefined ? { resumedFromRunId: runSnapshot.resumedFromRunId } : {}),
 				...(runSnapshot.origin !== undefined ? { origin: runSnapshot.origin } : {}),
+				modelOwner: runSnapshot.modelOwner,
 				...(runSnapshot.resumeFromStageId !== undefined
 					? { resumeFromStageId: runSnapshot.resumeFromStageId }
 					: {}),
@@ -924,6 +926,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 						? undefined
 						: {
 								...durableRootRegistration,
+								modelOwner: runSnapshot.modelOwner,
 								...workflowInvocationMetadata(
 									inputRuntimeDefaults,
 									workflowInvocationCwd,

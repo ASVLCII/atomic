@@ -348,6 +348,7 @@ async function resumeDurableWorkflowClaimed(
 		...deps.baseRunOpts,
 		...(handle.invocationCwd !== undefined ? { cwd: handle.invocationCwd } : {}),
 		...(handle.origin !== undefined ? { origin: handle.origin } : {}),
+		modelOwner: handle.modelOwner,
 		runId: resolved.workflowId,
 		durableBackend: backend,
 		...(toolContinuation === undefined ? {} : { continuation: toolContinuation }),

@@ -106,6 +106,7 @@ export interface DispatcherOpts {
 	onRunAccepted?: (runId: string) => void;
 	assertRoutingCurrent?: () => void;
 	reservedRunId?: string;
+	modelOwner?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +238,7 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 					cwd: opts.cwd,
 					defaultSessionDir: opts.defaultSessionDir,
 					...(opts.origin === undefined ? {} : { origin: opts.origin }),
+					modelOwner: opts.modelOwner,
 					...(possibleStages === undefined ? {} : { possibleStages }),
 					runId,
 					startupSignal: opts.signal,

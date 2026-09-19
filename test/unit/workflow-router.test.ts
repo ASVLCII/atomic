@@ -286,13 +286,15 @@ test("missing state and credential fields fail before inference", async () => {
 	f.noLaunch();
 });
 
-test("explicit inline preference reaches router and does not bypass its decision", async () => {
+// #3106: the explicit structured constraint overrides contrary provider judgments.
+test("explicit inline preference reaches router and prevents reservation", async () => {
 	const f = fixture();
 	f.args.state!.executionPreference = "inline";
 	const result = await f.call();
 	assert.equal(f.infer.mock.calls.length, 1);
-	assert.ok("runId" in result.details && result.details.runId);
-	await f.jobs.get(result.details.runId)!.promise;
+	assert.equal(result.details.action, "route");
+	assert.equal("workflowType" in result.details && result.details.workflowType, "none");
+	f.noLaunch();
 });
 
 for (const budget of [

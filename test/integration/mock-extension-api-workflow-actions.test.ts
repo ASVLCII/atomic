@@ -281,6 +281,8 @@ describe("MockExtensionAPI — tool list/status without name or inputs", () => {
 	let mock: ReturnType<typeof makeMock>;
 
 	beforeEach(() => {
+		// #3106: this empty-session schema fixture must not inherit another test's owned runs.
+		defaultStore.clear();
 		mock = makeMock();
 		factory(mock);
 	});

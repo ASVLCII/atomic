@@ -36,6 +36,8 @@ export interface WorkflowControlActionDeps {
 	signal?: AbortSignal;
 	onRunAccepted?: (runId: string) => void;
 	owner?: WorkflowOwnerResources;
+	/** Model-tool boundary only; slash/internal callers retain their explicit exception. */
+	authorize?: (runId: string) => void;
 }
 
 function controlFailure(action: "pause" | "quit" | "resume", runId: string, error: unknown): WorkflowToolResult {
@@ -307,7 +309,7 @@ async function resumeDurableShadow(
 	runId: string,
 	deps: Pick<
 		WorkflowControlActionDeps,
-		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner"
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner" | "authorize"
 	>,
 	budget?: WorkflowToolArgs["budget"],
 ): Promise<WorkflowToolResult> {
@@ -323,6 +325,7 @@ async function resumeDurableShadow(
 		warning = formatWorkflowResourceLoadWarning(error);
 	}
 	deps.signal?.throwIfAborted();
+	deps.authorize?.(runId);
 	const resumed = await runtime.resumeDurableWorkflow(runId, {
 		policy: deps.policy,
 		actor: "agent",
@@ -341,9 +344,10 @@ async function resumeDurableShadow(
 
 async function resumePreparedDurableTarget(
 	runId: string,
-	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy" | "signal" | "onRunAccepted">,
+	deps: Pick<WorkflowControlActionDeps, "getRuntime" | "policy" | "signal" | "onRunAccepted" | "authorize">,
 	budget?: WorkflowToolArgs["budget"],
 ): Promise<WorkflowToolResult> {
+	deps.authorize?.(runId);
 	try {
 		deps.signal?.throwIfAborted();
 		const resumed = await deps.getRuntime().resumeDurableWorkflow(runId, {
@@ -380,7 +384,7 @@ async function resolveExplicitDurableTarget(
 	args: WorkflowToolArgs,
 	deps: Pick<
 		WorkflowControlActionDeps,
-		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner"
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner" | "authorize"
 	>,
 	liveRuns: readonly RunSnapshot[] = [],
 ): Promise<WorkflowToolResult> {
@@ -404,6 +408,8 @@ async function resolveExplicitDurableTarget(
 	if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 		return { action: "resume", runId: target, status: "noop", message: resolved.message };
 	}
+	if (resolved.kind === "durable" || resolved.kind === "live" || resolved.kind === "completed")
+		deps.authorize?.(resolved.workflowId);
 	if (resolved.kind === "durable") {
 		const refusal = refuseStageScopedDurableResume(resolved.workflowId, args);
 		if (refusal !== undefined) return refusal;
@@ -421,6 +427,7 @@ async function resolveExplicitDurableTarget(
 		};
 	}
 	const durableHandle = getDurableBackend().getWorkflow(target);
+	if (durableHandle !== undefined) deps.authorize?.(target);
 	const isZeroProgressCandidate =
 		durableHandle !== undefined &&
 		(durableHandle.status === "paused" || durableHandle.status === "running") &&
@@ -446,7 +453,7 @@ export async function workflowResumeAction(
 	args: WorkflowToolArgs,
 	deps: Pick<
 		WorkflowControlActionDeps,
-		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner"
+		"getRuntime" | "policy" | "ensureWorkflowResourcesLoaded" | "signal" | "onRunAccepted" | "owner" | "authorize"
 	>,
 ): Promise<WorkflowToolResult> {
 	const owner = deps.owner ?? captureWorkflowOwnerResources();
@@ -471,6 +478,7 @@ export async function workflowResumeAction(
 		}
 		return { action: "resume", runId: target.target, status: "noop", message: target.message };
 	}
+	deps.authorize?.(target.runId);
 	// Any exact id or unique prefix has been normalized to the canonical full id,
 	// so it cannot disagree with the resolved run; the old re-resolution branch
 	// here is unreachable.

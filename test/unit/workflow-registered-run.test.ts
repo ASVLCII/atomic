@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { Type } from "typebox";
 import { afterEach, test, vi } from "vitest";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
+import type { DurableWorkflowBackend } from "../../packages/workflows/src/durable/backend.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
+import { DbosDurableBackend } from "../../packages/workflows/src/durable/dbos-backend.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
+import type { WorkflowToolArgs } from "../../packages/workflows/src/extension/public-types.js";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
 import { captureWorkflowOwnerResources } from "../../packages/workflows/src/extension/workflow-owner-resources.js";
 import { makeExecuteWorkflowTool } from "../../packages/workflows/src/extension/workflow-tool.js";
@@ -12,6 +15,7 @@ import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
 import { type JevFixtureRequest, jevFixtureResponse } from "../helpers/jev-tournament.js";
 import { workflowRouterContext } from "../helpers/workflow-router.js";
+import { createMockSdk, restoreMockSdkState, serializeMockSdkState } from "./durable-dbos-backend-helpers.js";
 import { waitForExecutorStagePendingPrompt } from "./executor-shared.js";
 
 afterEach(() => {
@@ -21,12 +25,18 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-function fixture(provider: "structured" | "jev" = "structured", lifecycle = false) {
-	setDurableBackend(new InMemoryDurableBackend());
+function fixture(
+	provider: "structured" | "jev" = "structured",
+	lifecycle = false,
+	failOnce = false,
+	backend: DurableWorkflowBackend = new InMemoryDurableBackend(),
+) {
+	setDurableBackend(backend);
 	const store = createStore();
 	const jobs = createJobTracker();
 	const body = vi.fn(async () => ({}));
 	let markGap!: () => void;
+	let gapCount = 0;
 	const gapReached = new Promise<void>((resolve) => {
 		markGap = resolve;
 	});
@@ -41,7 +51,12 @@ function fixture(provider: "structured" | "jev" = "structured", lifecycle = fals
 		outputs: {},
 		run: async (ctx) => {
 			await ctx.tool("effect", {}, body);
+			if (failOnce) {
+				failOnce = false;
+				throw new Error("Recoverable interruption after checkpoint");
+			}
 			if (lifecycle) {
+				gapCount++;
 				markGap();
 				await gap;
 				assert.equal(await ctx.ui.input("Approve next step"), "approved");
@@ -82,7 +97,21 @@ function fixture(provider: "structured" | "jev" = "structured", lifecycle = fals
 			}),
 		);
 	}
-	return { store, jobs, definition, execute, ctx, inference, body, runtime, gapReached, releaseGap };
+	return {
+		store,
+		jobs,
+		definition,
+		execute,
+		ctx,
+		inference,
+		body,
+		runtime,
+		gapReached,
+		releaseGap,
+		get gapCount() {
+			return gapCount;
+		},
+	};
 }
 
 // #3106: real model-tool admission, dispatcher and durable runner, deterministic inference.
@@ -230,3 +259,287 @@ test.each(["structured", "jev"] as const)(
 		assert.equal(f.body.mock.calls.length, 2);
 	},
 );
+
+// #3106: authorize the resolved default target, not the optional raw selector.
+test("foreign caller cannot pause the implicit active registered instance", async () => {
+	const f = fixture("structured", true);
+	try {
+		const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+		assert.equal(route.action, "route");
+		await f.execute({ action: "run", workflowId: route.workflowId, inputs: { objective: "approved" } }, f.ctx);
+		await f.gapReached;
+		await assert.rejects(f.execute({ action: "pause" }, { ...f.ctx, sessionId: "foreign" }), /another caller/);
+		assert.equal(f.store.runs()[0]!.status, "running");
+	} finally {
+		await f.execute({ action: "resume" }, f.ctx);
+		f.releaseGap();
+		const pending = await waitForExecutorStagePendingPrompt(f.store);
+		await f.execute({ action: "answer", runId: pending.runId, stageId: pending.stageId, text: "approved" }, f.ctx);
+		await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+	}
+});
+
+// #3106: recreating a tool must not dispose the admitted instance's authority.
+test("registered terminal ownership survives model tool recreation", async () => {
+	const f = fixture();
+	const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+	assert.equal(route.action, "route");
+	await f.execute({ action: "run", workflowId: route.workflowId, inputs: { objective: "approved" } }, f.ctx);
+	await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+	const recreated = makeExecuteWorkflowTool(
+		f.runtime,
+		() => undefined,
+		() => {},
+		{
+			...captureWorkflowOwnerResources(),
+			store: f.store,
+			jobs: f.jobs,
+		},
+	);
+	await assert.rejects(
+		recreated({ action: "status", runId: route.workflowId }, { ...f.ctx, sessionId: "foreign" }),
+		/another caller/,
+	);
+	const result = await recreated({ action: "status", runId: route.workflowId }, f.ctx);
+	assert.equal(result.action, "statusDetail");
+	assert.equal("detail" in result && result.detail.status, "completed");
+});
+
+// #3106: legal selectors stay legal for the owner and never grant a foreign caller authority.
+test("registered lifecycle authorizes padded/default/prefix selectors and prompts after recreation", async () => {
+	const f = fixture("structured", true);
+	const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+	assert.equal(route.action, "route");
+	const runId = route.workflowId;
+	await f.execute({ action: "run", workflowId: runId, inputs: { objective: "approved" } }, f.ctx);
+	await f.gapReached;
+	const execute = makeExecuteWorkflowTool(
+		f.runtime,
+		() => undefined,
+		() => {},
+		{
+			...captureWorkflowOwnerResources(),
+			store: f.store,
+			jobs: f.jobs,
+		},
+	);
+	const foreign = { ...f.ctx, sessionId: "foreign" };
+	for (const action of ["pause", "quit", "resume", "stages", "stage", "transcript", "answer"] as const) {
+		for (const selector of [undefined, "", "  ", runId, ` ${runId} `, runId.slice(0, 8).toUpperCase()]) {
+			await assert.rejects(execute({ action, runId: selector, text: "wrong" }, foreign), /another caller/);
+		}
+	}
+	assert.equal(f.store.runs()[0]!.status, "running");
+	const paused = await execute({ action: "pause", runId: ` ${runId} ` }, f.ctx);
+	assert.equal("status" in paused && paused.status, "paused");
+	await assert.rejects(execute({ action: "resume", runId: ` ${runId} ` }, foreign), /another caller/);
+	assert.equal(f.store.runs()[0]!.status, "paused");
+	const resumed = await execute({ action: "resume", runId: runId.slice(0, 8).toUpperCase() }, f.ctx);
+	assert.equal("status" in resumed && resumed.status, "ok");
+	f.releaseGap();
+	const pending = await waitForExecutorStagePendingPrompt(f.store);
+	await assert.rejects(
+		execute({ action: "answer", promptId: pending.promptId, text: "wrong" }, foreign),
+		/another caller/,
+	);
+	const answered = await execute({ action: "answer", text: "approved" }, f.ctx);
+	assert.equal("status" in answered && answered.status, "ok");
+	await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+	for (const action of ["status", "stages", "stage", "transcript"] as const) {
+		await assert.rejects(execute({ action, runId }, foreign), /another caller/);
+		const result = await execute({ action, runId, stageId: pending.stageId }, f.ctx);
+		assert.ok(!("error" in result) || !result.error, JSON.stringify(result));
+	}
+	assert.equal(f.body.mock.calls.length, 2);
+});
+
+// #3106: a mixed-owner batch must fail before mutating even its first authorized member.
+test.each(["pause", "quit"] as const)(
+	"%s bulk selectors preauthorize every actual target atomically",
+	async (action) => {
+		const f = fixture("structured", true);
+		const contexts = [f.ctx, { ...f.ctx, sessionId: "other-owner" }];
+		for (const ctx of contexts) {
+			const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, ctx);
+			assert.equal(route.action, "route");
+			await f.execute({ action: "run", workflowId: route.workflowId, inputs: { objective: "approved" } }, ctx);
+		}
+		await vi.waitFor(() => assert.equal(f.gapCount, 2));
+		assert.equal(f.store.runs().length, 2);
+		for (const selector of [
+			{ all: true },
+			{ runId: "--all" },
+			{ runId: " --all " },
+			{ all: true, runId: f.store.runs()[0]!.id },
+		]) {
+			await assert.rejects(f.execute({ action, ...selector }, f.ctx), /another caller/);
+			assert.ok(f.store.runs().every((run) => run.status === "running"));
+		}
+		f.releaseGap();
+		for (const [index, run] of f.store.runs().entries()) {
+			const stage = await vi.waitFor(() => {
+				const pending = f.store
+					.runs()
+					.find((candidate) => candidate.id === run.id)!
+					.stages.find((candidate) => candidate.pendingPrompt !== undefined);
+				assert.ok(pending);
+				return pending;
+			});
+			await f.execute({ action: "answer", runId: run.id, stageId: stage.id, text: "approved" }, contexts[index]!);
+		}
+		await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+		assert.equal(f.body.mock.calls.length, 4);
+	},
+);
+
+// #3106: a fresh runtime/store reads durable authority, not a prior closure or live snapshot.
+test("terminal ownership survives runtime replacement and durable-only inspection", async () => {
+	const sdk = createMockSdk();
+	const backend = new DbosDurableBackend(sdk);
+	const f = fixture("structured", false, false, backend);
+	const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+	assert.equal(route.action, "route");
+	await f.execute({ action: "run", workflowId: route.workflowId, inputs: { objective: "approved" } }, f.ctx);
+	await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+	await backend.flush();
+	const restoredSdk = createMockSdk();
+	restoreMockSdkState(restoredSdk, JSON.parse(JSON.stringify(serializeMockSdkState(sdk))));
+	setDurableBackend(new DbosDurableBackend(restoredSdk));
+	const store = createStore();
+	const jobs = createJobTracker();
+	const runtime = createExtensionRuntime({ registry: createRegistry().register(f.definition), store, jobs });
+	const execute = makeExecuteWorkflowTool(
+		runtime,
+		() => undefined,
+		() => {},
+		{ ...captureWorkflowOwnerResources(), store, jobs },
+	);
+	const foreign = { ...f.ctx, sessionId: "foreign" };
+	for (const action of ["status", "stages", "stage", "transcript", "resume"] as const) {
+		for (const runId of [route.workflowId, ` ${route.workflowId} `, route.workflowId.slice(0, 8).toUpperCase()]) {
+			await assert.rejects(execute({ action, runId }, foreign), /another caller/, `${action}: ${runId}`);
+		}
+	}
+	const status = await execute({ action: "status", runId: route.workflowId }, { ...f.ctx });
+	assert.equal(status.action, "statusDetail");
+	assert.equal("detail" in status && status.detail.status, "completed");
+	for (const args of [
+		{ action: "run", workflowId: route.workflowId },
+		{ workflowId: route.workflowId },
+	] satisfies WorkflowToolArgs[]) {
+		const result = await execute(args, f.ctx);
+		assert.equal("status" in result && result.status, "failed");
+	}
+	assert.equal(f.body.mock.calls.length, 1);
+});
+
+// #3106: durable resume after host replacement retains caller ownership and completed effects.
+test("checkpointed registered instance resumes under its owner after runtime replacement", async () => {
+	const f = fixture("structured", false, true);
+	const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+	assert.equal(route.action, "route");
+	const runId = route.workflowId;
+	await f.execute({ action: "run", workflowId: runId, inputs: { objective: "approved" } }, f.ctx);
+	await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+	const store = createStore();
+	const jobs = createJobTracker();
+	const runtime = createExtensionRuntime({ registry: createRegistry().register(f.definition), store, jobs });
+	const execute = makeExecuteWorkflowTool(
+		runtime,
+		() => undefined,
+		() => {},
+		{ ...captureWorkflowOwnerResources(), store, jobs },
+	);
+	for (const selector of [runId, ` ${runId} `, runId.slice(0, 8).toUpperCase()]) {
+		await assert.rejects(
+			execute({ action: "resume", runId: selector }, { ...f.ctx, sessionId: "foreign" }),
+			/another caller/,
+		);
+	}
+	assert.equal(f.body.mock.calls.length, 1);
+	const resumed = await execute({ action: "resume", runId: runId.slice(0, 8) }, { ...f.ctx });
+	assert.equal("status" in resumed && resumed.status, "running", JSON.stringify(resumed));
+	await Promise.all(jobs.runIds().map((id) => jobs.get(id)!.promise));
+	const terminal = await execute({ action: "status", runId }, f.ctx);
+	assert.equal("detail" in terminal && terminal.detail.status, "completed");
+	assert.equal(f.body.mock.calls.length, 1);
+	assert.equal(store.runs().length, 1);
+});
+
+// #3106: typed provider judgments cannot override an explicit structured inline constraint.
+test.each(["structured", "jev"] as const)(
+	"%s cannot reserve or execute contrary to explicit inline preference",
+	async (provider) => {
+		const f = fixture(provider);
+		const result = await f.execute(
+			{ action: "route", state: { task: "Implement inline", executionPreference: "inline" } },
+			f.ctx,
+		);
+		assert.equal(result.action, "route");
+		assert.equal(result.workflowType, "none");
+		assert.equal(result.workflowId, "");
+		const run = await f.execute(
+			{ action: "run", workflowId: result.workflowId, inputs: { objective: "approved" } },
+			f.ctx,
+		);
+		assert.equal("status" in run && run.status, "failed");
+		assert.equal(f.store.runs().length, 0);
+		assert.equal(f.body.mock.calls.length, 0);
+	},
+);
+
+// #3106: missing model-owner metadata fails closed, without gating explicit user/internal launches.
+test.each(["agent", "user", undefined] as const)(
+	"lifecycle admission distinguishes %s origin without model ownership",
+	async (origin) => {
+		const f = fixture();
+		const started = await f.runtime.dispatch(
+			{ action: "run", workflow: "registered", inputs: { objective: "approved" } },
+			{ origin },
+		);
+		assert.equal(started.action, "run");
+		await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+		const request = f.execute({ action: "status", runId: started.runId }, { ...f.ctx, sessionId: "foreign" });
+		if (origin === "agent") await assert.rejects(request, /ownership is unavailable/);
+		else {
+			const result = await request;
+			assert.equal("detail" in result && result.detail.status, "completed");
+		}
+	},
+);
+
+// #3106: preserve supported all selectors for callers owning every affected instance.
+test("owner can pause all and resume each independent registered instance", async () => {
+	const f = fixture("structured", true);
+	const ids: string[] = [];
+	for (let index = 0; index < 2; index++) {
+		const route = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+		assert.equal(route.action, "route");
+		ids.push(route.workflowId);
+		const started = await f.execute(
+			{ action: "run", workflowId: route.workflowId, inputs: { objective: "approved" } },
+			f.ctx,
+		);
+		assert.equal("status" in started && started.status, "running", JSON.stringify(started));
+	}
+	await vi.waitFor(() => assert.equal(f.gapCount, 2));
+	assert.equal(f.store.runs().length, 2);
+	const paused = await f.execute({ action: "pause", runId: " --all " }, f.ctx);
+	assert.match("message" in paused ? (paused.message ?? "") : "", /Paused 2 run/);
+	assert.ok(f.store.runs().every((run) => run.status === "paused"));
+	for (const runId of ids) await f.execute({ action: "resume", runId }, f.ctx);
+	f.releaseGap();
+	for (const runId of ids) {
+		await vi.waitFor(() =>
+			assert.ok(
+				f.store
+					.runs()
+					.find((run) => run.id === runId)!
+					.stages.some((stage) => stage.pendingPrompt),
+			),
+		);
+		await f.execute({ action: "answer", runId, text: "approved" }, f.ctx);
+	}
+	await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
+	assert.equal(f.body.mock.calls.length, 4);
+});

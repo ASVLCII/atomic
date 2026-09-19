@@ -137,6 +137,7 @@ export interface ExtensionRuntime extends DurableResumeRuntime {
 export interface RuntimeDispatchOptions {
 	/** Reserved model-tool identity, supplied only by the registered admission door. */
 	readonly reservedRunId?: string;
+	readonly modelOwner?: string;
 	readonly policy?: WorkflowExecutionPolicy;
 	/** Who launched this run. Only an attributable launcher supplies it. */
 	readonly origin?: WorkflowActor;
@@ -391,6 +392,7 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				policy: options?.policy,
 				assertRoutingCurrent: options?.assertRoutingCurrent,
 				reservedRunId: options?.reservedRunId,
+				modelOwner: options?.modelOwner,
 				...(options?.origin === undefined ? {} : { origin: options.origin }),
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 				...(options?.onRunAccepted === undefined ? {} : { onRunAccepted: options.onRunAccepted }),

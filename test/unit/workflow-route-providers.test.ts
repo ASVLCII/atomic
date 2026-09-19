@@ -133,44 +133,72 @@ for (const scenario of [
 		expected: "actual-name",
 	},
 ]) {
-	test(`router combines independent judgments: ${scenario.task}`, async () => {
-		const runtime = createExtensionRuntime({ registry: createRegistry().register(definition) });
-		const ctx = workflowRouterContext("actual-name");
-		vi.spyOn(ctx.modelRegistry!, "streamSimple").mockImplementation((_model, context) => {
-			assert.ok(JSON.stringify(context).includes(scenario.task));
-			return messageStream(
-				decisionMessage({
-					workflowType: "actual-name",
-					interaction: scenario.interaction,
-					complexity: scenario.complexity,
-					estimatedDuration: "15min",
-					maxBudget: {},
-				}),
-			);
-		});
-		const result = await routeWorkflowLaunch(
-			{
-				action: "route",
-				state: {
-					task: scenario.task,
-					conversation: [],
-					documents: [
-						{
-							source: "unread.md",
-							content: "Unavailable: unread.md could not be read. Its requirements are unknown.",
-						},
-						{
-							source: "notes",
-							content: "Summary: permission checks must remain; exact scope remains uncertain.",
-						},
-					],
+	test.each(["structured", "jev"] as const)(
+		`%s router combines independent judgments: ${scenario.task}`,
+		async (provider) => {
+			const runtime = createExtensionRuntime({ registry: createRegistry().register(definition) });
+			const ctx = workflowRouterContext("actual-name");
+			if (provider === "jev") {
+				ctx.getRouterModel = () => "typesafe-ai/jev";
+				vi.stubEnv("TYPESAFE_AI_API_KEY", "fixture-key");
+				vi.stubGlobal(
+					"fetch",
+					vi.fn(async (_url: string, init: RequestInit) => {
+						const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+						assert.ok(JSON.stringify(request.state).includes(scenario.task));
+						return Response.json(
+							jevFixtureResponse(
+								request,
+								(_keys, id) =>
+									({
+										workflow: "actual-name",
+										duration: "15min",
+										interaction: scenario.interaction,
+										complexity: scenario.complexity,
+										budget: "preserve",
+									})[id]!,
+							),
+						);
+					}),
+				);
+			} else {
+				vi.spyOn(ctx.modelRegistry!, "streamSimple").mockImplementation((_model, context) => {
+					assert.ok(JSON.stringify(context).includes(scenario.task));
+					return messageStream(
+						decisionMessage({
+							workflowType: "actual-name",
+							interaction: scenario.interaction,
+							complexity: scenario.complexity,
+							estimatedDuration: "15min",
+							maxBudget: {},
+						}),
+					);
+				});
+			}
+			const result = await routeWorkflowLaunch(
+				{
+					action: "route",
+					state: {
+						task: scenario.task,
+						conversation: [],
+						documents: [
+							{
+								source: "unread.md",
+								content: "Unavailable: unread.md could not be read. Its requirements are unknown.",
+							},
+							{
+								source: "notes",
+								content: "Summary: permission checks must remain; exact scope remains uncertain.",
+							},
+						],
+					},
 				},
-			},
-			ctx,
-			() => runtime,
-		);
-		assert.equal(result.decision.workflowType, scenario.expected);
-	});
+				ctx,
+				() => runtime,
+			);
+			assert.equal(result.decision.workflowType, scenario.expected);
+		},
+	);
 }
 
 // #3106: evidence stays verbatim and identifiers never cause implicit reads.
@@ -207,6 +235,7 @@ for (const provider of ["structured", "jev"] as const) {
 		for (const supplied of [
 			{ task: "Discuss this", conversation: [], documents: [] },
 			{ task: "Inspect spec.md" },
+			{ task: "Inspect available context", documents: [{ source: "reference", content: "docs/spec.md" }] },
 			{
 				task: "Review requirements",
 				documents: [
@@ -247,6 +276,10 @@ for (const provider of ["structured", "jev"] as const) {
 			),
 			/actual request, conversation and documentation text/,
 		);
-		assert.equal(received, undefined, "path-only evidence is rejected before inference, never dereferenced");
+		assert.equal(
+			received,
+			undefined,
+			"matching source/content evidence is rejected before inference, never dereferenced",
+		);
 	});
 }

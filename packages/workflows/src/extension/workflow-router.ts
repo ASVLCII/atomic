@@ -293,7 +293,9 @@ export async function routeWorkflowLaunch(
 	const value = result.value;
 	const decision: WorkflowRouterOutput = {
 		workflowType:
-			value.interaction === "conversational" || value.complexity === "inline_sufficient"
+			state.executionPreference === "inline" ||
+			value.interaction === "conversational" ||
+			value.complexity === "inline_sufficient"
 				? "none"
 				: value.workflowType,
 		maxBudget: value.maxBudget,

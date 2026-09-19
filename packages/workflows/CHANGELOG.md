@@ -56,6 +56,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Borrowed resource discovery no longer acquires a durability lease before session startup. Final cleanup releases the last started owner's lease even when outgoing session retirement fails ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Builtin classifier and category-action stages now retain Intercom coordination without overriding caller-disabled tools or packages.
 - Overlapping SDK workflow owners now answer and withdraw questionnaires through their own session's broker rather than a sibling's.
+- Retain registered model-tool instance ownership across reload and durable recovery, authorize normalized/default/bulk lifecycle targets before inspection or mutation, and enforce explicit inline preferences even against contrary routing judgments ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
