@@ -20,9 +20,13 @@ import {
 	createAgentSession,
 	createUnstartedAgentSession,
 } from "./sdk.ts";
+import { sessionLifecycleCreation } from "./session-lifecycle-scope.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { endTimingSpan, startTimingSpan } from "./timings.ts";
+
+// Prepared factories belong to the first session; later borrowers still get fresh instances.
+const serviceLifetimes = new WeakMap<AgentSessionServices, { scope: object; claimed: boolean }>();
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -160,6 +164,19 @@ export async function createAgentSessionServices(
 export async function prepareAgentSessionServices(
 	options: CreateAgentSessionServicesOptions,
 ): Promise<() => Promise<AgentSessionServices>> {
+	const lifetime = { scope: sessionLifecycleCreation.getStore()?.scope ?? {}, claimed: false };
+	const complete = await sessionLifecycleCreation.run(lifetime, () => prepareOwnedAgentSessionServices(options));
+	return () =>
+		sessionLifecycleCreation.run(lifetime, async () => {
+			const services = await complete();
+			serviceLifetimes.set(services, lifetime);
+			return services;
+		});
+}
+
+async function prepareOwnedAgentSessionServices(
+	options: CreateAgentSessionServicesOptions,
+): Promise<() => Promise<AgentSessionServices>> {
 	const cwd = resolvePath(options.cwd);
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getAgentDir();
 	const modelRuntimeSpan = startTimingSpan("createAgentSessionServices.modelRuntime");
@@ -255,6 +272,11 @@ function createSessionFromServices(
 	options: CreateAgentSessionFromServicesOptions,
 	factory: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>,
 ): Promise<CreateAgentSessionResult> {
+	const lifetime = serviceLifetimes.get(options.services);
+	if (lifetime && !lifetime.claimed) {
+		lifetime.claimed = true;
+		return sessionLifecycleCreation.run({ scope: lifetime.scope }, () => createSessionFromServices(options, factory));
+	}
 	return factory({
 		cwd: options.services.cwd,
 		agentDir: options.services.agentDir,
