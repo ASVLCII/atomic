@@ -1894,3 +1894,33 @@ test.each([false, true])(
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: borrowed builtin discovery must not share mutable web results or cleanup authority.
+test(
+	"built Node web result ownership across sibling reload and overlapping close",
+	() => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-web-owners.mjs", import.meta.url))],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.equal(result.stderr.toString(), "");
+		assert.equal(result.stdout.toString().trim(), '{"verified":true}');
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+// #3105: close unregisters one lease, never the shared broker or sibling identity.
+test(
+	"built Node Intercom lazy broker group authorization and independent leases",
+	() => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-intercom-owners.mjs", import.meta.url))],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.equal(result.stderr.toString(), "");
+		assert.equal(result.stdout.toString().trim(), '{"verified":true}');
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

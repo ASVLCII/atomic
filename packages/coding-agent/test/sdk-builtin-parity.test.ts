@@ -4912,3 +4912,64 @@ test("MCP startup diagnostics are quiet, redacted and owner attributed", async (
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+// #3105: local HTTP content and stored results belong to the session that fetched them.
+test("web results survive sibling initialization and overlapping close", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-sdk-web-owners-"));
+	const sessions: AgentSession[] = [];
+	const text = "Owner-local web content. ".repeat(100);
+	const server = createServer((_request, response) =>
+		response.writeHead(200, { "Content-Type": "text/plain" }).end(text),
+	);
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address && typeof address === "object");
+	const url = `http://127.0.0.1:${address.port}/content`;
+	const resourceLoader = new DefaultResourceLoader({
+		cwd: root,
+		agentDir: join(root, "agent"),
+		settingsManager: SettingsManager.inMemory(),
+		builtinPackagePaths: getBuiltinPackagePaths({ workflows: false, subagents: false, mcp: false, intercom: false }),
+	});
+	await resourceLoader.reload();
+	try {
+		for (let index = 0; index < 2; index++) {
+			const cwd = join(root, String(index));
+			mkdirSync(cwd);
+			const { session } = await createAgentSession({
+				cwd,
+				agentDir: join(root, "agent"),
+				sessionManager: SessionManager.inMemory(cwd),
+				resourceLoader,
+				settingsManager: SettingsManager.inMemory(),
+				model: getModel("anthropic", "claude-sonnet-4-5")!,
+				builtins: { workflows: false, subagents: false, mcp: false, intercom: false },
+			});
+			sessions.push(session);
+		}
+		const fetch = sessions[0]!.agent.state.tools.find((tool) => tool.name === "fetch_content")!;
+		const result = await fetch.execute("fetch", { urls: [url] }, new AbortController().signal);
+		const details = result.details as { responseId: string; successful: number };
+		assert.equal(details.successful, 1, JSON.stringify(result));
+		assert.match(JSON.stringify(result.content), /Owner-local web content/);
+		const siblingGet = sessions[1]!.agent.state.tools.find((tool) => tool.name === "get_search_content")!;
+		const invisible = await siblingGet.execute(
+			"read",
+			{ responseId: details.responseId, urlIndex: 0 },
+			new AbortController().signal,
+		);
+		assert.doesNotMatch(JSON.stringify(invisible.content), /Owner-local web content/);
+		await Promise.all([sessions[1]!.dispose(), sessions[1]!.dispose()]);
+		const get = sessions[0]!.agent.state.tools.find((tool) => tool.name === "get_search_content")!;
+		const retained = await get.execute(
+			"read",
+			{ responseId: details.responseId, urlIndex: 0 },
+			new AbortController().signal,
+		);
+		assert.match(JSON.stringify(retained.content), /Owner-local web content/);
+	} finally {
+		await Promise.all(sessions.map((session) => session.dispose()));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		rmSync(root, { recursive: true, force: true });
+	}
+});

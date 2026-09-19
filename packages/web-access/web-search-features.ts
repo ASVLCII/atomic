@@ -2,7 +2,7 @@ import { isStaleExtensionContextError, type ExtensionAPI, type ExtensionContext 
 import { fetchAllContent } from "./extract.js";
 import { clearCloneCache } from "./github-extract.js";
 import { registerContentTools } from "./content-tools.js";
-import { clearResults, generateId, restoreFromSession, storeResult, type StoredSearchData } from "./storage.js";
+import { createResultStorage, generateId, type ResultStorage, type StoredSearchData } from "./storage.js";
 import {
 	createActivityWidgetState,
 	refreshActivityForSession,
@@ -17,45 +17,46 @@ import { DEFAULT_SHORTCUTS, type WebSearchConfig } from "./web-search-config.js"
 import { registerWebSearchCommand } from "./web-search-command.js";
 import { registerWebSearchTool } from "./web-search-tool.js";
 
-const pendingFetches = new Map<string, AbortController>();
+export function registerWebSearchFeatures(pi: ExtensionAPI, initConfig: WebSearchConfig, storage: ResultStorage = createResultStorage()): void {
+	const { clearResults, restoreFromSession, storeResult } = storage;
+	const pendingFetches = new Map<string, AbortController>();
 
-const runtimeState: WebSearchRuntimeState = {
-	sessionActive: false,
-	pendingCurate: null,
-	activeCurator: null,
-	glimpseWin: null,
-};
+	const runtimeState: WebSearchRuntimeState = {
+		sessionActive: false,
+		pendingCurate: null,
+		activeCurator: null,
+		glimpseWin: null,
+	};
 
-const activityState = createActivityWidgetState();
+	const activityState = createActivityWidgetState();
 
-function abortPendingFetches(): void {
-	for (const controller of pendingFetches.values()) {
-		controller.abort();
+	function abortPendingFetches(): void {
+		for (const controller of pendingFetches.values()) {
+			controller.abort();
+		}
+		pendingFetches.clear();
 	}
-	pendingFetches.clear();
-}
 
-function closeCurator(): void {
-	const win = runtimeState.glimpseWin;
-	runtimeState.glimpseWin = null;
-	try { win?.close(); } catch {}
-	cancelPendingCurate(runtimeState);
-	if (runtimeState.activeCurator) {
-		runtimeState.activeCurator.close();
-		runtimeState.activeCurator = null;
+	function closeCurator(): void {
+		const win = runtimeState.glimpseWin;
+		runtimeState.glimpseWin = null;
+		try { win?.close(); } catch {}
+		cancelPendingCurate(runtimeState);
+		if (runtimeState.activeCurator) {
+			runtimeState.activeCurator.close();
+			runtimeState.activeCurator = null;
+		}
 	}
-}
 
-function handleSessionChange(ctx: ExtensionContext): void {
-	abortPendingFetches();
-	closeCurator();
-	clearCloneCache();
-	runtimeState.sessionActive = true;
-	restoreFromSession(ctx);
-	refreshActivityForSession(activityState, ctx);
-}
+	function handleSessionChange(ctx: ExtensionContext): void {
+		abortPendingFetches();
+		closeCurator();
+		clearCloneCache();
+		runtimeState.sessionActive = true;
+		restoreFromSession(ctx);
+		refreshActivityForSession(activityState, ctx);
+	}
 
-export function registerWebSearchFeatures(pi: ExtensionAPI, initConfig: WebSearchConfig): void {
 	const curateKey = initConfig.shortcuts?.curate || DEFAULT_SHORTCUTS.curate;
 	const activityKey = initConfig.shortcuts?.activity || DEFAULT_SHORTCUTS.activity;
 
@@ -120,7 +121,7 @@ export function registerWebSearchFeatures(pi: ExtensionAPI, initConfig: WebSearc
 		return fetchId;
 	}
 
-	const buildReturn: SearchReturnBuilder = (opts) => buildSearchReturn(opts, { pi, startBackgroundFetch });
+	const buildReturn: SearchReturnBuilder = (opts) => buildSearchReturn(opts, { pi, startBackgroundFetch, storage });
 	const openCuratorBrowser = (pc: PendingCurate, searchesComplete = true) => openCuratorBrowserForSearch(
 		{ pi, state: runtimeState, buildSearchReturn: buildReturn, closeCurator },
 		pc,
@@ -169,6 +170,7 @@ export function registerWebSearchFeatures(pi: ExtensionAPI, initConfig: WebSearc
 
 	registerContentTools(pi, {
 		maxInlineContent: MAX_INLINE_CONTENT,
+		storage,
 		stripThumbnails,
 		formatFullResults,
 	});

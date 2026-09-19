@@ -81,10 +81,8 @@ vi.mock("../../packages/web-access/content-tools.js", () => ({
 }));
 
 vi.mock("../../packages/web-access/storage.js", () => ({
-	clearResults: vi.fn(),
 	generateId: () => `fetch-${++state.nextFetchId}`,
-	restoreFromSession: vi.fn(),
-	storeResult: () => {},
+	createResultStorage: () => ({ clearResults: vi.fn(), restoreFromSession: vi.fn(), storeResult: vi.fn() }),
 }));
 
 vi.mock("../../packages/web-access/web-search-activity.js", () => ({
@@ -282,6 +280,27 @@ test("pending fetch cleanup waits for content-ready message admission", async ()
 	await shutdownSession();
 	assert.equal(state.fetchSignal.aborted, true);
 
+	admission.resolve();
+	await waitForNotifications();
+});
+
+// #3105: shutdown authority belongs to one instance even while notification admission is suspended.
+test("sibling shutdown preserves a pending fetch until its own owner closes", async () => {
+	const admission = deferred<void>();
+	setup({ contentAdmission: admission.promise });
+	await startSession();
+	const firstShutdown = state.handlers.get("session_shutdown")!;
+	buildBackgroundFetch();
+	await waitForNotifications();
+	const firstSignal = state.fetchSignal!;
+	assert.equal(firstSignal.aborted, false);
+
+	registerWebSearchFeatures(createPi(), {});
+	await startSession();
+	await shutdownSession();
+	assert.equal(firstSignal.aborted, false, "sibling retired another owner's admitted fetch");
+	await firstShutdown({}, {} as ExtensionContext);
+	assert.equal(firstSignal.aborted, true);
 	admission.resolve();
 	await waitForNotifications();
 });

@@ -10,19 +10,21 @@ import { fetchAllContent, type ExtractedContent } from "./extract.js";
 import { executeCodeSearch } from "./code-search.js";
 import {
 	generateId,
-	getResult,
-	storeResult,
+	createResultStorage,
+	type ResultStorage,
 	type QueryResultData,
 	type StoredSearchData,
 } from "./storage.js";
 
 interface RegisterContentToolsDeps {
+	storage?: ResultStorage;
 	maxInlineContent: number;
 	stripThumbnails(results: ExtractedContent[]): ExtractedContent[];
 	formatFullResults(queryData: QueryResultData): string;
 }
 
 export function registerContentTools(pi: ExtensionAPI, deps: RegisterContentToolsDeps): void {
+	const { getResult, storeResult } = deps.storage ?? createResultStorage();
 	pi.registerTool({
 		name: "code_search",
 		label: "Code Search",
