@@ -75,10 +75,12 @@ afterEach(() => {
 });
 
 describe("createAgentSession request-auth cancellation", () => {
-	const cleanup: Array<() => void> = [];
+	const cleanup: Array<() => void | Promise<void>> = [];
 
-	afterEach(() => {
-		for (const dispose of cleanup.splice(0).reverse()) dispose();
+	// #3105: finish session persistence before deleting the fixture directory.
+	afterEach(async () => {
+		vi.useRealTimers();
+		for (const dispose of cleanup.splice(0).reverse()) await dispose();
 	});
 
 	async function fixture({
@@ -309,6 +311,7 @@ describe("createAgentSession request-auth cancellation", () => {
 	it("keeps an ask_user_question wait past the auth bound and applies a fresh bound after the answer", async () => {
 		const entered = deferred();
 		const answer = deferred();
+		const releaseAuth = deferred();
 		let postAnswerAuth = false;
 		let turns = 0;
 		let f: Awaited<ReturnType<typeof fixture>>;
@@ -316,7 +319,7 @@ describe("createAgentSession request-auth cancellation", () => {
 		f = await fixture({
 			tools: [tool],
 			refresh: async (credential) => {
-				if (postAnswerAuth) return new Promise(() => {});
+				if (postAnswerAuth) await releaseAuth.promise;
 				return { ...credential, expires: Number.MAX_SAFE_INTEGER };
 			},
 			stream: (model: { api: string; provider: string; id: string }) => {
@@ -366,6 +369,8 @@ describe("createAgentSession request-auth cancellation", () => {
 				},
 			},
 		});
+		// #3105: settle the timed-out provider callback before disposal drains owned work.
+		cleanup.push(() => releaseAuth.resolve());
 		vi.useFakeTimers();
 		let done = false;
 		const pending = f.session.prompt("ask").finally(() => {
