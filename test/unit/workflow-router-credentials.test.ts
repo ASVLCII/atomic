@@ -51,7 +51,7 @@ vi.mock("child_process", async (importOriginal) => ({
 	}),
 }));
 beforeEach(() => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 });
 afterEach(() => {
 	setDurableBackend(undefined);
@@ -127,7 +127,7 @@ test("TypeSafe none preserves exact budget limits alongside credential-named con
 	const f = fixture();
 	const budget = { maxTokens: 0, maxCost: 0.123456789, warnAtPercent: 12.345 };
 	f.ctx.getRouterModel = () => "typesafe-ai/jev";
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const transport = vi.fn(jevNone);
 	vi.stubGlobal("fetch", transport);
 	const result = await f.route({ ...f.args, state: workflowRouterState(budget) });
@@ -207,13 +207,13 @@ const locations = [
 for (const action of ["route"] as const) {
 	for (const provider of ["ordinary", "jev"] as const) {
 		for (const [kind, key, envName] of [
-			["opaque", "opaque-round-two-3089", "TYPESAFE_AI_API_KEY"],
-			["escaped", 'opaque-"quote"-\\slash-\nline-\ttab', "TYPESAFE_AI_API_KEY"],
+			["opaque", "opaque-round-two-3089", "TYPESAFE_API_KEY"],
+			["escaped", 'opaque-"quote"-\\slash-\nline-\ttab', "TYPESAFE_API_KEY"],
 			["openai", "opaque-openai-repair-3089", "OPENAI_API_KEY"],
 		] as const) {
 			for (const location of locations) {
 				test(`rejects ${kind} key in ${location} (${action ?? "default"}, ${provider})`, async () => {
-					vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-auth");
+					vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-auth");
 					vi.stubEnv(envName, key);
 					const text = `Context ${key} end`;
 					const f = registeredFixture({ field: location, text });
@@ -270,7 +270,7 @@ for (const action of ["route"] as const) {
 		] as const) {
 			if (provider === "jev" && kind !== "configured") continue; // Jev itself requires authentication.
 			test(`safe context routes with ${kind} key (${action ?? "default"}, ${provider})`, async () => {
-				vi.stubEnv("TYPESAFE_AI_API_KEY", key);
+				vi.stubEnv("TYPESAFE_API_KEY", key);
 				const f = registeredFixture();
 				f.args.action = action;
 				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev" : "decision-test/chat");
@@ -307,7 +307,7 @@ for (const provider of ["ordinary", "jev"] as const) {
 	] as const) {
 		test(`registered ${provider} rejects ${source} without resolving auth`, async () => {
 			const key = 'synthetic-opaque-"auth"-\\value';
-			vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-jev-auth");
+			vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-auth");
 			const command = vi.mocked(childProcess.execSync);
 			const spawn = vi.mocked(childProcess.spawnSync);
 			command.mockClear();

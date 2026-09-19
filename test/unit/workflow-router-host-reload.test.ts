@@ -47,7 +47,7 @@ test(
 		vi.stubEnv("USERPROFILE", join(root, "home"));
 		vi.stubEnv("ATOMIC_CODING_AGENT_DIR", agentDir);
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+		vi.stubEnv("TYPESAFE_API_KEY", "");
 		const backend = new InMemoryDurableBackend();
 		setDurableBackend(backend);
 		const admissions = vi.spyOn(backend, "registerWorkflow");

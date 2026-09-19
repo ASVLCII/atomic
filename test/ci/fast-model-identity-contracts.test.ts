@@ -160,6 +160,8 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 
 /** Named in the removal bullets, so they must not resolve — that is the point of naming them. */
 const removedNames = new Set([
+	// PR #3114: the former TypeSafe environment variable is no longer recognized.
+	"TYPESAFE_AI_API_KEY",
 	"ATOMIC_CODEX_FAST_MODE",
 	"ENV_CODEX_FAST_MODE",
 	"CODEX_FAST_MODE_SERVICE_TIER",
@@ -218,6 +220,8 @@ const proseNames = new Set([
 	"PATH",
 	// Managed PostgreSQL port configuration is an environment variable, not a package-root export.
 	"ATOMIC_POSTGRES_PORT",
+	// PR #3114: the replacement TypeSafe environment variable is configuration, not an export.
+	"TYPESAFE_API_KEY",
 	"openrouter",
 	"flex",
 	"undefined",
@@ -420,6 +424,20 @@ test("changelog environment-variable prose does not exempt unknown or removed ex
 	assert.throws(
 		() => assertChangelogIdentifiersResolve(`Removed \`${deletedEnvName()}\`.`, () => true),
 		/still named in the package root exports/u,
+	);
+});
+
+// PR #3114: a renamed environment variable remains documented without becoming a root export.
+test("TypeSafe environment-variable migration preserves removed and unknown identifier checks", () => {
+	const block = "Renamed `TYPESAFE_AI_API_KEY` to `TYPESAFE_API_KEY`.";
+	assert.doesNotThrow(() => assertChangelogIdentifiersResolve(block, () => false));
+	assert.throws(
+		() => assertChangelogIdentifiersResolve(block, (name) => name === "TYPESAFE_AI_API_KEY"),
+		/still named in the package root exports/u,
+	);
+	assert.throws(
+		() => assertChangelogIdentifiersResolve("Supports `TYPESAFE_API_KEY_TYPO`.", () => false),
+		/not exported from the package root/u,
 	);
 });
 

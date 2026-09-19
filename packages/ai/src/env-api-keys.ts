@@ -118,7 +118,7 @@ export function containsKnownEnvCredential(serialized: string, env?: ProviderEnv
 	const names = [
 		...Object.values(apiKeyEnvMap),
 		ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV,
-		"COPILOT_GITHUB_TOKEN", "TYPESAFE_AI_API_KEY",
+		"COPILOT_GITHUB_TOKEN", "TYPESAFE_API_KEY",
 		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
 	];
 	return names.some((name) => {

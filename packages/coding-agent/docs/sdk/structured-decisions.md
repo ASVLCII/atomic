@@ -16,7 +16,7 @@ For a general structured-output call, pass `model: { kind: "chat", fullId, model
 `inferRouterDecision()` is the shared entrypoint for prerequisite workflow selection and automatic subagent/workflow-stage model selection. Only this entrypoint consults `routerModel` in [settings.json](/settings#routermodel). It takes `settings`, `modelRegistry` and the invocation-time `currentModel` instead of an explicit inference `model`. Resolution is:
 
 1. A nonempty explicit, exact `routerModel` value.
-2. Otherwise `typesafe-ai/jev` when Jev credentials are configured through `/login typesafe-ai` or `TYPESAFE_AI_API_KEY`.
+2. Otherwise `typesafe-ai/jev` when Jev credentials are configured through `/login typesafe-ai` or `TYPESAFE_API_KEY`.
 3. Otherwise the chat model supplied as `currentModel` at invocation time.
 
 An invalid explicit router selection fails instead of falling back. `auto`, model patterns, reasoning suffixes, and surrounding whitespace are not supported. Ordinary models must exist in the current configured catalog; their usual provider authentication applies. Catalog presence and an environment key do not prove live access, quota, or entitlement. The resolver never changes the chat model, the `structured_output` tool's model or saved defaults.
@@ -115,6 +115,6 @@ No result is returned for missing state, invalid configuration, unrepaired malfo
 
 Provider dispatch and response-reading failures return generic diagnostics rather than raw upstream errors, which may contain private input or credentials. Check provider configuration and connectivity before an explicit retry. Cancellation and timeout remain distinct errors.
 
-For Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_AI_API_KEY`; 422 means check the state/question contract; 429 and 529 mean wait before an explicit retry. Error messages omit upstream response bodies because they may echo private input.
+For Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_API_KEY`; 422 means check the state/question contract; 429 and 529 mean wait before an explicit retry. Error messages omit upstream response bodies because they may echo private input.
 
 Malformed Jev response errors include a static diagnostic code, without response values or routing context. For example, `probability_mass` means the returned probabilities failed the sum-to-one tolerance, `probability_keys` means the options did not match, and `choice_not_highest` means the selected option was not highest-probability. Include the code when reporting a failure. Router calls may repair these errors before returning a final failure; generic calls fail immediately. No invalid decision is accepted.

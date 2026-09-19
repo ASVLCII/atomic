@@ -52,7 +52,7 @@ for (const [setting, key, expected] of [
 	["", "   ", "test/chat"],
 ] as const) {
 	test(`resolver precedence: ${JSON.stringify(setting)}, key present=${Boolean(key.trim())}`, () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", key);
+		vi.stubEnv("TYPESAFE_API_KEY", key);
 		const settings = SettingsManager.inMemory({ routerModel: setting });
 		assert.equal(resolveRouterModel({ settings, modelRegistry, currentModel: chat }).fullId, expected);
 		assert.equal(settings.getDefaultModel(), undefined);
@@ -60,8 +60,30 @@ for (const [setting, key, expected] of [
 	});
 }
 
+test("Jev routing and direct requests use TYPESAFE_API_KEY without the old alias", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-obsolete-key");
+	vi.stubEnv("TYPESAFE_API_KEY", undefined);
+	const options = { settings: SettingsManager.inMemory(), modelRegistry, currentModel: chat };
+	assert.equal(getStructuredOutputProviders()[0].apiKeyEnv, "TYPESAFE_API_KEY");
+	assert.equal(resolveRouterModel(options).fullId, "test/chat");
+	const transport = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+		assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer synthetic-current-key");
+		return Response.json(jevResponse());
+	});
+	vi.stubGlobal("fetch", transport);
+	const request = { ...decisionRequest(), settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }) };
+	await assert.rejects(inferRouterDecision(request), {
+		message: "typesafe-ai/jev requires an API key. Use /login typesafe-ai or set TYPESAFE_API_KEY.",
+	});
+	assert.equal(transport.mock.calls.length, 0);
+	vi.stubEnv("TYPESAFE_API_KEY", "  synthetic-current-key  ");
+	assert.equal(resolveRouterModel(options).fullId, "typesafe-ai/jev");
+	assert.deepEqual((await inferRouterDecision(request)).value, { route: "review", limit: 1.23456789 });
+	assert.equal(transport.mock.calls.length, 1);
+});
+
 test("empty default reads the current chat model on each invocation", () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	const settings = SettingsManager.inMemory();
 	assert.equal(settings.getRouterModel(), "");
 	assert.equal(resolveRouterModel({ settings, modelRegistry, currentModel: alternate }).fullId, "test/alternate");
@@ -70,7 +92,7 @@ test("empty default reads the current chat model on each invocation", () => {
 
 for (const explicit of ["auto", "missing/model", "chat", "test/chat:high", " typesafe-ai/jev", " "]) {
 	test(`invalid explicit selection ${JSON.stringify(explicit)} never falls back to Jev or chat`, () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const settings = SettingsManager.inMemory({ routerModel: explicit });
 		assert.throws(() => resolveRouterModel({ settings, modelRegistry, currentModel: chat }), /Invalid routerModel/);
 	});
@@ -202,7 +224,7 @@ for (const kind of ["text", "multiple", "wrong-tool", "error", "aborted", "lengt
 }
 
 test("Jev entrypoint sends both Choice judgments together and maps exact values without a confidence gate", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-jev-secret");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-jev-secret");
 	const request = { ...decisionRequest(), settings: SettingsManager.inMemory() };
 	const transport = vi.fn(async (url, init) => {
 		assert.equal(url, "https://api.typesafe.ai/v1/systemone");
@@ -237,7 +259,7 @@ test("Jev entrypoint sends both Choice judgments together and maps exact values 
 
 for (const status of [401, 422, 429, 529]) {
 	test(`Jev HTTP ${status} fails once without leaking the response body`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn(async () => new Response("private echoed context and mock-key", { status }));
 		vi.stubGlobal("fetch", transport);
 		await assert.rejects(
@@ -254,7 +276,7 @@ for (const status of [401, 422, 429, 529]) {
 }
 
 test("Jev body reader failure is private and never retried or decoded", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-secret");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-secret");
 	const transport = vi.fn(
 		async () =>
 			new Response(
@@ -300,7 +322,7 @@ for (const [kind, code] of Object.entries({
 	"invalid-json": "malformed JSON",
 })) {
 	test(`Jev rejects ${kind} and never invokes the mapper`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const body = jevResponse();
 		if (kind === "unknown-choice") body.answers.route.choice = "private-response-value";
 		if (kind === "wrong-type") body.answers.route.type = "score";
@@ -333,7 +355,7 @@ for (const [kind, code] of Object.entries({
 }
 
 test("Jev decoded result must still satisfy the normalized schema", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	vi.stubGlobal("fetch", async () => Response.json(jevResponse()));
 	const request = decisionRequest();
 	await assert.rejects(
@@ -348,7 +370,7 @@ test("Jev decoded result must still satisfy the normalized schema", async () => 
 
 for (const count of [255]) {
 	test(`Jev ${count} candidates are never silently shortened`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const criteria = Object.fromEntries(
 			Array.from({ length: count }, (_, index) => [`c${index}`, `Candidate ${index}`]),
 		);
@@ -385,7 +407,7 @@ for (const kind of ["cancel", "timeout", "pre-cancel"] as const) {
 	for (const provider of ["ordinary", "jev"] as const) {
 		test(`${provider} ${kind} fences late inference and mapping`, async () => {
 			vi.useFakeTimers();
-			vi.stubEnv("TYPESAFE_AI_API_KEY", provider === "jev" ? "mock-key" : "");
+			vi.stubEnv("TYPESAFE_API_KEY", provider === "jev" ? "mock-key" : "");
 			const controller = new AbortController();
 			const stream = createAssistantMessageEventStream();
 			const lateHttp = Promise.withResolvers<Response>();
@@ -459,7 +481,7 @@ test("independent overlapping decisions cannot share state, candidates or cancel
 });
 
 test("model/effort pairs use one Choice and one closed union, preserving null versus off", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const pairs = [
 		{ model: "local/plain", effort: null },
 		{ model: "remote/reasoning", effort: "off" },
@@ -515,7 +537,7 @@ for (const provider of ["ordinary", "jev"] as const) {
 	for (const kind of ["cancel", "timeout"] as const) {
 		test(`${provider} transport rejection during ${kind} preserves the bounded failure`, async () => {
 			vi.useFakeTimers();
-			vi.stubEnv("TYPESAFE_AI_API_KEY", provider === "jev" ? "mock-key" : "");
+			vi.stubEnv("TYPESAFE_API_KEY", provider === "jev" ? "mock-key" : "");
 			const controller = new AbortController();
 			const started = Promise.withResolvers<void>();
 			const dispatch = vi.fn((_model, _context, options) => {

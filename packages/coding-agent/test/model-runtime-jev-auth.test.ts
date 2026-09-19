@@ -7,7 +7,7 @@ import { RpcProviderAuth } from "../src/modes/rpc/rpc-provider-auth.ts";
 afterEach(() => vi.unstubAllEnvs());
 
 test("Jev supports stored API-key login and logout without exposing chat models", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "environment-test-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "environment-test-key");
 	const credentials = AuthStorage.inMemory();
 	const runtime = await ModelRuntime.create({ credentials, modelsPath: null });
 	const provider = runtime.getProviders().find((candidate) => candidate.id === "typesafe-ai");
@@ -27,12 +27,12 @@ test("Jev supports stored API-key login and logout without exposing chat models"
 	await runtime.logout("typesafe-ai");
 	expect(credentials.peek("typesafe-ai")).toBeUndefined();
 	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("environment-test-key");
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	expect(await runtime.getAuth("typesafe-ai")).toBeUndefined();
 });
 
 test("Jev resolves stored environment references and removes stored-only availability on logout", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
 	const runtime = await ModelRuntime.create({
 		credentials: AuthStorage.inMemory({
 			"typesafe-ai": { type: "api_key", key: "$JEV_TEST_KEY", env: { JEV_TEST_KEY: "scoped-test-key" } },
@@ -59,4 +59,17 @@ test("isolated Jev login persists in the engine and returns no key or chat model
 	expect((await modelRuntime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("isolated-test-secret");
 	expect(JSON.stringify(result)).not.toContain("isolated-test-secret");
 	expect(result.models?.some((model) => model.provider === "typesafe-ai")).toBe(false);
+});
+
+test("Jev uses only TYPESAFE_API_KEY for environment authentication", async () => {
+	vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-obsolete-key");
+	vi.stubEnv("TYPESAFE_API_KEY", undefined);
+	const runtime = await ModelRuntime.create({ credentials: AuthStorage.inMemory(), modelsPath: null });
+	expect(await runtime.getAuth("typesafe-ai")).toBeUndefined();
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-current-key");
+	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("synthetic-current-key");
+	vi.stubEnv("TYPESAFE_AI_API_KEY", undefined);
+	expect((await runtime.getAuth("typesafe-ai"))?.auth.apiKey).toBe("synthetic-current-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "");
+	expect(await runtime.getAuth("typesafe-ai")).toBeUndefined();
 });

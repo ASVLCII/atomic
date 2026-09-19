@@ -157,7 +157,7 @@ describe("MCP entrypoints — workflow tool execute", () => {
 
 	let runtime: ReturnType<typeof buildTestRuntime>;
 	beforeEach(() => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "");
+		vi.stubEnv("TYPESAFE_API_KEY", "");
 		const { pi, emits: e } = makeMockPiWithEvents();
 		emits = e;
 		runtime = buildTestRuntime(pi);

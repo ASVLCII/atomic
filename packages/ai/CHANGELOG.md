@@ -10,6 +10,7 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 - Bedrock requests now honor explicit `maxRetries`, including zero for a single transport attempt, instead of silently using the AWS SDK retry default. Omitting the option preserves SDK/environment configuration ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - Kept Kimi Coding models available after the upstream catalog split into regional coding plans, preserving Atomic's existing kimi.com endpoint.
 - Model catalog declarations preserve JSON import attributes for strict NodeNext consumers without requiring `skipLibCheck` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Credential screening now recognizes `TYPESAFE_API_KEY` instead of `TYPESAFE_AI_API_KEY`, matching the renamed TypeSafe Jev environment variable.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

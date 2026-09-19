@@ -82,7 +82,7 @@ for (const failure of ["transport", "input", "provider"] as const)
 
 for (const kind of ["missing", "mass", "json"] as const)
 	test(`Jev repairs ${kind} output without changing criteria`, async () => {
-		vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-key");
+		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
 		const bad = jevResponse();
 		if (kind === "missing") Reflect.deleteProperty(bad.answers.route, "probabilities");
 		if (kind === "mass") bad.answers.route.probabilities.none = 0;
@@ -107,7 +107,7 @@ for (const kind of ["missing", "mass", "json"] as const)
 	});
 
 test("Jev HTTP authentication failure does not retry", async () => {
-	vi.stubEnv("TYPESAFE_AI_API_KEY", "synthetic-key");
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
 	const fetch = vi.fn(async () => new Response("private", { status: 401 }));
 	vi.stubGlobal("fetch", fetch);
 	await assert.rejects(

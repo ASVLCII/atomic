@@ -181,7 +181,7 @@ runTest(
 				assert.equal(hosted.resolveRouterModel, sdk.resolveRouterModel);
 				assert.equal(sdk.SettingsManager.inMemory().getRouterModel(), "");
 				assert.equal(sdk.getStructuredOutputProviders()[0].capabilities.chat, false);
-				process.env.TYPESAFE_AI_API_KEY = "mock-installed-key";
+				process.env.TYPESAFE_API_KEY = "mock-installed-key";
 				let requests = 0;
 				globalThis.fetch = async () => {
 					requests++;
