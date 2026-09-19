@@ -1640,6 +1640,7 @@ test.each([
 	"command",
 	"command-cleanup",
 	"command-create-failure",
+	"command-retired",
 	"ordinary",
 	"ordinary-cleanup",
 	"tool",
@@ -1748,6 +1749,33 @@ test.each(["subset", "none", "all", "startup", "cleanup"])(
 				fileURLToPath(new URL("../fixtures/sdk-host-filtered-acquisition.mjs", import.meta.url)),
 				mode,
 			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+// #3105: built exports preserve per-factory authority and direct action admission.
+test.each(["subset", "none", "all", "rollback", "cleanup"])(
+	"built Node filtered reload boundaries (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-filtered-reload.mjs", import.meta.url)), mode],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+test.each(["close", "reload", "rollback", "cancel", "drain"])(
+	"built Node direct extension admission (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-direct-admission.mjs", import.meta.url)), mode],
 			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
 		);
 		assert.equal(result.exitCode, 0, result.stderr.toString());

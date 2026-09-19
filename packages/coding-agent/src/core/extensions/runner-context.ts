@@ -29,6 +29,7 @@ export interface ExtensionContextSource {
 	getChildSessionOptions?: ExtensionContext["getChildSessionOptions"];
 	getExtensionPaths?(): string[];
 	assertActive(): void;
+	assertAction?(): void;
 	getUIContext(): ExtensionUIContext;
 	getMode(): ExtensionMode;
 	hasUI(): boolean;
@@ -150,6 +151,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 	const context: ExtensionContext = {
 		getChildSessionOptions: (options) => {
 			source.assertActive();
+			source.assertAction?.();
 			return source.getChildSessionOptions?.(options) ?? options;
 		},
 		getExtensionPaths: () => {
@@ -160,6 +162,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 			? {
 					getAgentTaskHost: () => {
 						source.assertActive();
+						source.assertAction?.();
 						return source.getAgentTaskHost!();
 					},
 				}
@@ -174,6 +177,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		observeWorkflowActivity: (observer) => {
 			source.assertActive();
+			source.assertAction?.();
 			return source.observeWorkflowActivity(observer);
 		},
 		get hasHumanInput() {
@@ -238,6 +242,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		abort: () => {
 			source.assertActive();
+			source.assertAction?.();
 			source.abort();
 		},
 		hasPendingMessages: () => {
@@ -246,6 +251,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		shutdown: () => {
 			source.assertActive();
+			source.assertAction?.();
 			source.shutdown();
 		},
 		getContextUsage: () => {
@@ -254,6 +260,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		compact: (options) => {
 			source.assertActive();
+			source.assertAction?.();
 			source.compact(options);
 		},
 		getRouterModel: () => {
@@ -299,22 +306,27 @@ export function createExtensionCommandContext(
 	};
 	context.newSession = (options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.newSession(options);
 	};
 	context.fork = (entryId, options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.fork(entryId, options);
 	};
 	context.navigateTree = (targetId, options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.navigateTree(targetId, options);
 	};
 	context.switchSession = (sessionPath, options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.switchSession(sessionPath, options);
 	};
 	context.reload = () => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.reload();
 	};
 	contextOwners.set(context, owner);

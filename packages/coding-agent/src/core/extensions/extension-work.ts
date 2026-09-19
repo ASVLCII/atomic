@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { drainSessionWork, trackSessionWork } from "../session-lifecycle-work.ts";
+import { drainSessionWork, hasCallingSessionWork, trackSessionWork } from "../session-lifecycle-work.ts";
+import { hostInputError } from "./host-input.js";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
 import type { ExtensionRuntime } from "./types.ts";
 
@@ -44,6 +45,19 @@ export function trackExtensionWork<T>(runtime: ExtensionRuntime, operation: () =
 
 export async function drainExtensionWork(runtime: ExtensionRuntime): Promise<void> {
 	await (runtime as OwnedRuntime)[workBinding]?.drain();
+}
+
+/** Cleanup may inspect its retired resources, but cannot act on a successor. */
+export function assertExtensionAction(runtime: ExtensionRuntime): void {
+	const binding = (runtime as OwnedRuntime)[workBinding];
+	if (binding?.revoked) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
+	if (binding?.sealed && !binding.cleanup.getStore()?.active && !hasCallingSessionWork(runtime))
+		throw hostInputError("SessionClosed");
+}
+
+export function isRetiredExtensionCleanup(runtime: ExtensionRuntime): boolean {
+	const binding = (runtime as OwnedRuntime)[workBinding];
+	return !!binding?.revoked && !!binding.cleanup.getStore()?.active;
 }
 
 /** Revoke capabilities without releasing resources still owned by admitted callbacks. */

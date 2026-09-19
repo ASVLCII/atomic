@@ -557,10 +557,13 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		try {
 			await reloadOwnedGeneration.call(this, options);
 		} catch (error) {
-			throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
+			throw factoryRollbackError(
+				error,
+				await rollbackFactoryAcquisitions(new Set([this._resourceLoader.getExtensions().runtime])),
+			);
 		}
 		// Custom discovery may be re-instantiated rather than adopted by the runner.
-		const failures = await rollbackFactoryAcquisitions();
+		const failures = await rollbackFactoryAcquisitions(new Set([this._resourceLoader.getExtensions().runtime]));
 		if (failures.length)
 			throw Object.assign(new AggregateError(failures, "Reload discovery cleanup failed"), {
 				code: "ShutdownFailed",
@@ -586,6 +589,13 @@ async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionR
 		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
 		for (const extension of this._resourceLoader.getExtensions().extensions)
 			factoryAcquisitions.getStore()?.pending?.delete(extension);
+		const discoveryFailures = await rollbackFactoryAcquisitions(
+			new Set([this._resourceLoader.getExtensions().runtime]),
+		);
+		if (discoveryFailures.length)
+			throw Object.assign(new AggregateError(discoveryFailures, "Reload discovery cleanup failed"), {
+				code: "ShutdownFailed",
+			});
 		if (this._disposed) throw hostInputError("SessionClosed");
 		await options?.beforeSessionStart?.();
 		if (this._disposed) throw hostInputError("SessionClosed");
@@ -628,7 +638,7 @@ async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionR
 		// The rollback below now owns these factories; discovery-only acquisitions
 		// remain in the enclosing ledger until the entire reload settles.
 		for (const extension of extensionsResult.extensions) factoryAcquisitions.getStore()?.pending?.delete(extension);
-		const discoveryFailures = await rollbackFactoryAcquisitions();
+		const discoveryFailures = await rollbackFactoryAcquisitions(new Set([extensionsResult.runtime]));
 		if (discoveryFailures.length)
 			throw Object.assign(new AggregateError(discoveryFailures, "Reload discovery cleanup failed"), {
 				code: "ShutdownFailed",

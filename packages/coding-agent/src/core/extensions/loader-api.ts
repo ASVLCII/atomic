@@ -4,7 +4,12 @@ import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import { lifecycleScopeForOwner } from "../session-lifecycle-scope.ts";
-import { extensionWorkOpen, trackExtensionWork } from "./extension-work.ts";
+import {
+	assertExtensionAction,
+	extensionWorkOpen,
+	isRetiredExtensionCleanup,
+	trackExtensionWork,
+} from "./extension-work.ts";
 import {
 	captureRegistrationInvocation as captureInvocation,
 	invocationExtension,
@@ -18,6 +23,7 @@ import {
 	type WorkflowResourceProviderInput,
 } from "./loader-resources.ts";
 import { boundExtensionRuntimes } from "./loader-runtime.ts";
+import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
 import type {
 	EntryRenderer,
 	Extension,
@@ -33,6 +39,28 @@ import type {
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
+const apiLifetime = Symbol.for("atomic.extension-api-lifetime.v1");
+type ExtensionWithLifetime = Extension & {
+	[apiLifetime]?: { retired: boolean; releases: Set<() => void> };
+};
+
+/** Retire one factory without invalidating a runtime shared with selected factories. */
+export function retireExtensionAPI(extension: Extension): void {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (!lifetime || lifetime.retired) return;
+	lifetime.retired = true;
+	const failures: unknown[] = [];
+	for (const release of lifetime.releases) {
+		try {
+			release();
+		} catch (error) {
+			failures.push(error);
+		}
+	}
+	lifetime.releases.clear();
+	if (failures.length) throw new AggregateError(failures, "Extension subscription retirement failed");
+}
+
 /**
  * Create the ExtensionAPI for an extension.
  * Registration methods write to the extension object.
@@ -47,6 +75,7 @@ export function createExtensionAPI(
 	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider,
 ): { api: ExtensionAPI; commit: () => void; discard: () => void } {
 	const originalRuntime = runtime;
+	(extension as ExtensionWithLifetime)[apiLifetime] = { retired: false, releases: new Set() };
 	const captureRegistrationInvocation = <T>(value: T): T => captureInvocation(value, originalRuntime);
 	runtime = invocationRuntime(runtime);
 	extension = invocationExtension(extension);
@@ -57,10 +86,12 @@ export function createExtensionAPI(
 	const initialFlagOwners = new Map(runtime.flagOwners);
 	const initialFlagOwnerOrigins = new Map(runtime.flagOwnerOrigins);
 	let state: "loading" | "active" | "failed" = "loading";
-	const assertActive = () => {
+	const assertActive = (inspection = false) => {
+		if ((extension as ExtensionWithLifetime)[apiLifetime]?.retired) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
 		if (state === "failed")
 			throw new Error(`Extension "${extension.path}" failed to load and its API is no longer active.`);
 		runtime.assertActive();
+		if (!inspection) assertExtensionAction(resolveInvocationRuntime(originalRuntime));
 	};
 	const applyRuntimeChange = (change: { apply: () => void; rollback: () => void }) => {
 		if (state === "loading") pendingRuntimeChanges.push(change);
@@ -72,20 +103,23 @@ export function createExtensionAPI(
 	// session-scoped state re-bind across module re-evaluation.
 	const events: EventBus = {
 		emit(channel, data) {
+			if (isRetiredExtensionCleanup(resolveInvocationRuntime(originalRuntime))) return;
 			assertActive();
 			eventBus.emit(channel, data);
 		},
 		on(channel, handler) {
 			const ownerRuntime = resolveInvocationRuntime(originalRuntime);
+			const ownerLifetime = (extension as ExtensionWithLifetime)[apiLifetime];
 			const deliver = captureRegistrationInvocation(handler);
 			assertActive();
 			const unsubscribe = runtime.trackEventBusSubscription(
 				eventBus.on(channel, (data) => {
-					if (!extensionWorkOpen(ownerRuntime)) return;
+					if (ownerLifetime?.retired || !extensionWorkOpen(ownerRuntime)) return;
 					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime))
 						return trackExtensionWork(ownerRuntime, async () => deliver(data));
 				}),
 			);
+			ownerLifetime?.releases.add(unsubscribe);
 			if (state === "loading") loadingUnsubscribers.push(unsubscribe);
 			return unsubscribe;
 		},
@@ -100,6 +134,7 @@ export function createExtensionAPI(
 		registerWorkflowActivityPublisher() {
 			assertActive();
 			const publisher = runtime.workflowActivityHub.registerWorkflowActivityPublisher();
+			(extension as ExtensionWithLifetime)[apiLifetime]?.releases.add(() => publisher.dispose());
 			if (state === "loading") loadingUnsubscribers.push(() => publisher.dispose());
 			return publisher;
 		},
@@ -205,14 +240,14 @@ export function createExtensionAPI(
 		},
 
 		getFlag(name: string): boolean | string | undefined {
-			assertActive();
+			assertActive(true);
 			const pendingDefault = runtime.getPendingFlagDefault?.(extension.path, name);
 			if (!extension.flags.has(name) && pendingDefault === undefined) return undefined;
 			return runtime.flagValues.get(name) ?? pendingDefault;
 		},
 
 		getWorkflowResources() {
-			assertActive();
+			assertActive(true);
 			return [...workflowResources.get()];
 		},
 
@@ -223,7 +258,7 @@ export function createExtensionAPI(
 		},
 
 		getResourceLoaderInheritanceSnapshot() {
-			assertActive();
+			assertActive(true);
 			return resourceLoaderInheritanceSnapshotProvider?.() ?? {};
 		},
 		getChildSessionOptions(options) {
@@ -257,7 +292,7 @@ export function createExtensionAPI(
 		},
 
 		getSessionName(): string | undefined {
-			assertActive();
+			assertActive(true);
 			return runtime.getSessionName();
 		},
 
@@ -268,16 +303,18 @@ export function createExtensionAPI(
 
 		exec(command: string, args: string[], options?: ExecOptions) {
 			assertActive();
-			return execCommand(command, args, options?.cwd ?? cwd, options);
+			return trackExtensionWork(resolveInvocationRuntime(originalRuntime), () =>
+				execCommand(command, args, options?.cwd ?? cwd, options),
+			);
 		},
 
 		getActiveTools(): string[] {
-			assertActive();
+			assertActive(true);
 			return runtime.getActiveToolsAfterRegistration?.(extension) ?? runtime.getActiveTools();
 		},
 
 		getAllTools() {
-			assertActive();
+			assertActive(true);
 			return runtime.getAllToolsAfterRegistration?.(extension) ?? runtime.getAllTools();
 		},
 
@@ -287,7 +324,7 @@ export function createExtensionAPI(
 		},
 
 		getCommands() {
-			assertActive();
+			assertActive(true);
 			return runtime.getCommandsAfterRegistration?.(extension) ?? runtime.getCommands();
 		},
 
@@ -297,7 +334,7 @@ export function createExtensionAPI(
 		},
 
 		getThinkingLevel() {
-			assertActive();
+			assertActive(true);
 			return runtime.getThinkingLevel();
 		},
 

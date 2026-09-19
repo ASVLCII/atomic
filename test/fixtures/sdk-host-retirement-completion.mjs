@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createAgentSession, createAgentSessionRuntime, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@bastani/atomic";
+import { createAgentSession, createAgentSessionRuntime, createEventBus, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@bastani/atomic";
 import { createAssistantMessageEventStream, getModel } from "@bastani/pi-ai/compat";
 
 // #3105: real Node retirement/settlement proof without forced exit or private cleanup.
@@ -26,6 +26,9 @@ try {
   let generations = 0;
   let active = 0;
   const events = [];
+  const eventBus = createEventBus();
+  const deliveries = [];
+  const cleaned = Promise.withResolvers();
   const count = mode === "command-dual" ? 2 : 1;
   const joinReplacement = Promise.withResolvers();
   let enteredCount = 0;
@@ -33,9 +36,10 @@ try {
   runtime = await createAgentSessionRuntime(async ({ sessionManager, sessionStartEvent }) => {
    const id = ++generations;
    if (id === 2 && mode === "command-create-failure") throw new Error("candidate failed");
-   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true, extensionFactories: [pi => {
+   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, eventBus, noExtensions: true, extensionFactories: [pi => {
+    pi.events.on("retired", () => { deliveries.push(id); });
     pi.on("thinking_level_select", async () => { peerEntered.resolve(); await peerRelease.promise; });
-    pi.on("session_shutdown", event => { events.push(`shutdown:${id}:${event.reason}`); if (id === 1) { active = 0; if (mode === "command-cleanup") throw new Error("retiring cleanup failed"); } });
+    pi.on("session_shutdown", event => { events.push(`shutdown:${id}:${event.reason}`); if (id === 1) { active = 0; pi.events.emit("retired"); cleaned.resolve(); if (mode === "command-cleanup") throw new Error("retiring cleanup failed"); } });
     pi.registerCommand("replace-me", { description: "fixture", handler: async (_args, ctx) => {
      entered.resolve();
      if (++enteredCount === 2) await joinReplacement.promise;
@@ -56,6 +60,11 @@ try {
   joinReplacement.resolve(); peerRelease.resolve(); await resumed.promise;
   assert.equal(generations, count + 1); assert.equal(events.some(event => event.startsWith("shutdown:1:")), false);
   await assert.rejects(session.prompt("late"), { code: "SessionClosed" });
+  if (mode === "command-retired") {
+    release.resolve(); await turn; await cleaned.promise; await delay(20);
+    assert.deepEqual(deliveries, []);
+    assert.equal(active, 0);
+  } else {
   let closed = false;
   expectedFailure = mode === "command-cleanup";
   const closing = runtime.dispose().then(() => { closed = true; }, error => { assert.ok(expectedFailure); assert.equal(error.code, "ShutdownFailed"); closed = true; });
@@ -64,6 +73,7 @@ try {
   await delay(20); assert.equal(closed, false); assert.equal(oldClosed, false);
   release.resolve(); await Promise.all([turn, closing, oldClosing]);
   assert.equal(active, 0); assert.ok(events.some(event => event.startsWith("shutdown:1:")));
+  }
  } else if (mode.startsWith("ordinary")) {
   let fail = false;
   let serial = 0;

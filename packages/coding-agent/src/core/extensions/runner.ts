@@ -14,6 +14,7 @@ import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
 import {
+	assertExtensionAction,
 	bindExtensionWork,
 	drainExtensionWork,
 	extensionWorkOpen,
@@ -662,7 +663,13 @@ export class ExtensionRunner {
 	}
 
 	getCommand(name: string): ResolvedCommand | undefined {
-		return resolveRegisteredCommands(this.extensions).find((command) => command.invocationName === name);
+		const command = resolveRegisteredCommands(this.extensions).find((entry) => entry.invocationName === name);
+		if (!command) return undefined;
+		return {
+			...command,
+			handler: (args, context) =>
+				runResourceRegistrationBatch(this.runtime, async () => command.handler(args, context)),
+		};
 	}
 
 	/**
@@ -684,6 +691,7 @@ export class ExtensionRunner {
 	private createContextSource(): ExtensionCommandContextSource {
 		return {
 			assertActive: () => this.assertActive(),
+			assertAction: () => assertExtensionAction(this.runtime),
 			getChildSessionOptions: (options) => this.runtime.getChildSessionOptions?.(options) ?? options,
 			getExtensionPaths: () => this.getExtensionPaths(),
 			observeWorkflowActivity: (observer) => this.runtime.workflowActivityHub.observeWorkflowActivity(observer),

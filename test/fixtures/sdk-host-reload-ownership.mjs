@@ -15,6 +15,7 @@ const cleanupFails = mode.endsWith("cleanup");
 const active = new Set();
 const stopped = [];
 const capabilities = new Map();
+const retiredDeliveries = [];
 let next = 0;
 let reloading = false;
 let invoking;
@@ -32,6 +33,7 @@ const resourceLoader = new (acquisitions || mode === "self-ordinary" ? Loader : 
     const id = ++next;
     if (acquisitions) active.add(id);
     pi.events.on("acquire", async () => { enter(); await gate; active.add(id); });
+    pi.events.on("retired-cleanup", () => { retiredDeliveries.push(id); });
     pi.on("session_start", (_event, ctx) => {
       capabilities.set(id, { write: () => pi.setSessionName(`generation-${id}`), host: () => ctx.getAgentTaskHost() });
       if (candidate && reloading) { pi.events.emit("acquire"); throw new Error("candidate startup failed"); }
@@ -44,6 +46,11 @@ const resourceLoader = new (acquisitions || mode === "self-ordinary" ? Loader : 
     } });
     pi.on("session_shutdown", (_event, ctx) => {
       assert.equal(ctx.cwd, cwd);
+      if (id === invoking) {
+        assert.throws(() => pi.setSessionName("retired-cleanup-write"), /stale|no longer active/i);
+        assert.throws(() => ctx.getAgentTaskHost(), /stale|no longer active/i);
+        pi.events.emit("retired-cleanup");
+      }
       stopped.push(id); active.delete(id);
       if (cleanupFails && id === (acquisitions ? 3 : candidate ? 2 : 1)) throw new Error("owned cleanup failed");
     });
@@ -90,6 +97,7 @@ try {
   }
   await session.dispose().catch(error => { assert.equal(cleanupFails, true); assert.equal(error.code, "ShutdownFailed"); });
   assert.deepEqual([...active], borrowed);
+  assert.deepEqual(retiredDeliveries, []);
   console.log(JSON.stringify({ mode, verified: true, active: [...active], stopped }));
 } finally {
   release();

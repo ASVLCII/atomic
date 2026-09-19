@@ -3017,6 +3017,9 @@ test.each([1, 2])(
 	"command replacement drains peers and retains %s continuations until terminal cleanup",
 	async (count) => {
 		const { createAgentSessionRuntime } = await import("../src/core/agent-session-runtime.ts");
+		const { createEventBus } = await import("../src/core/event-bus.ts");
+		const eventBus = createEventBus();
+		const retiredDeliveries: number[] = [];
 		const cwd = mkdtempSync(join(tmpdir(), "sdk-command-retirement-"));
 		const settingsManager = SettingsManager.inMemory();
 		const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
@@ -3039,8 +3042,12 @@ test.each([1, 2])(
 					agentDir: cwd,
 					settingsManager,
 					noExtensions: true,
+					eventBus,
 					extensionFactories: [
 						(pi) => {
+							pi.events.on("retired-replacement", () => {
+								retiredDeliveries.push(id);
+							});
 							pi.on("thinking_level_select", async () => {
 								peerEntered.resolve();
 								await peerRelease.promise;
@@ -3048,6 +3055,7 @@ test.each([1, 2])(
 							pi.on("session_shutdown", () => {
 								shutdowns.push(id);
 								if (id === 1) active = 0;
+								if (id === 1) pi.events.emit("retired-replacement");
 							});
 							pi.registerCommand("replace-me", {
 								description: "fixture",
@@ -3123,6 +3131,7 @@ test.each([1, 2])(
 			await Promise.all([turn, closing, oldClosing]);
 			assert.equal(active, 0);
 			assert.ok(shutdowns.includes(1));
+			assert.deepEqual(retiredDeliveries, [], "retired cleanup cannot deliver into a replacement sharing the bus");
 		} finally {
 			peerRelease.resolve();
 			joinReplacement.resolve();
@@ -3476,6 +3485,7 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 	const active = new Set<number>();
 	const shutdowns: number[] = [];
 	const capabilities: Array<{ write: () => void; host: () => object }> = [];
+	const retiredDeliveries: number[] = [];
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir: cwd,
@@ -3490,6 +3500,9 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 						host: () => ctx.getAgentTaskHost(),
 					});
 				});
+				pi.events.on("retired-cleanup", () => {
+					retiredDeliveries.push(id);
+				});
 				pi.registerCommand("reload-acquire", {
 					description: "reload then acquire",
 					handler: async () => {
@@ -3502,6 +3515,11 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 				pi.on("session_shutdown", (_event, ctx) => {
 					assert.equal(ctx.cwd, cwd, "shutdown retains scoped cleanup capabilities");
 					assert.equal(pi.getSessionName(), "generation-2");
+					if (id === 1) {
+						assert.throws(() => pi.setSessionName("retired-cleanup-write"), /stale|no longer active/i);
+						assert.throws(() => ctx.getAgentTaskHost(), /stale|no longer active/i);
+						pi.events.emit("retired-cleanup");
+					}
 					shutdowns.push(id);
 					active.delete(id);
 					if (id === 1 && cleanupFails) throw new Error("retiring cleanup failed");
@@ -3554,6 +3572,7 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 	}
 	assert.deepEqual(shutdowns, [1, 2]);
 	assert.equal(active.size, 0);
+	assert.deepEqual(retiredDeliveries, []);
 });
 
 // #3105: discovery selection cannot discard ownership or revoke selected capabilities.
@@ -3566,6 +3585,8 @@ test.each(["subset", "none", "all", "startup", "cleanup"])(
 		const stopped: string[] = [];
 		const started: string[] = [];
 		let calls = 0;
+		let omittedCalls = 0;
+		const writes = new Map<string, () => void>();
 		const loader = new DefaultResourceLoader({
 			cwd,
 			agentDir: cwd,
@@ -3573,8 +3594,10 @@ test.each(["subset", "none", "all", "startup", "cleanup"])(
 			noExtensions: true,
 			extensionFactories: ["keep", "omit"].map((name) => (pi) => {
 				active.add(name);
+				writes.set(name, () => pi.setSessionName("omitted-write"));
 				pi.events.on("selected-ping", () => {
 					if (name === "keep") calls++;
+					else omittedCalls++;
 				});
 				pi.registerCommand(name, {
 					description: name,
@@ -3625,10 +3648,12 @@ test.each(["subset", "none", "all", "startup", "cleanup"])(
 					session.extensionRunner.getRegisteredCommands().map((command) => command.name),
 					started,
 				);
+				if (mode !== "all") assert.throws(writes.get("omit")!, /stale|no longer active/i);
 				if (mode !== "none") {
 					await session.prompt("/keep");
 					assert.equal(session.sessionManager.getSessionName(), "selected");
 					assert.equal(calls, 1);
+					assert.equal(omittedCalls, mode === "all" ? 1 : 0, "omitted subscriptions are released");
 				}
 			}
 		} finally {
@@ -3639,3 +3664,327 @@ test.each(["subset", "none", "all", "startup", "cleanup"])(
 		assert.deepEqual(stopped.sort(), ["keep", "omit"]);
 	},
 );
+
+// #3105: reload transfers selected factories, not the shared runtime's omitted owners.
+test.each(["subset", "none", "all", "rollback", "cleanup"])(
+	"filtered reload preserves owner boundaries: %s",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-filtered-reload-"));
+		const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+		const records: Array<{ name: string; generation: number; calls: number; stops: number; write: () => void }> = [];
+		let generation = 0;
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: ["keep", "omit"].map((name) => (pi) => {
+				if (name === "keep") generation++;
+				const record = {
+					name,
+					generation,
+					calls: 0,
+					stops: 0,
+					write: () => pi.setSessionName(`selected-${generation}`),
+				};
+				records.push(record);
+				pi.events.on("selected-ping", () => {
+					record.calls++;
+				});
+				pi.registerCommand(name, {
+					description: name,
+					handler: async (_args, ctx) => {
+						record.write();
+						assert.ok(ctx.getAgentTaskHost());
+						pi.events.emit("selected-ping");
+					},
+				});
+				pi.on("session_shutdown", () => {
+					record.stops++;
+					if (mode === "cleanup" && record.generation === 2 && name === "omit")
+						throw new Error("omitted reload cleanup failed");
+				});
+			}),
+			extensionsOverride: (base) => ({
+				...base,
+				extensions: mode === "all" ? base.extensions : base.extensions.slice(0, mode === "none" ? 0 : 1),
+			}),
+		});
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			resourceLoader: loader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		});
+		try {
+			const reload = session.reload({
+				beforeSessionStart: async () => {
+					if (mode === "rollback") throw new Error("candidate rejected");
+				},
+			});
+			if (mode === "rollback" || mode === "cleanup") {
+				await assert.rejects(reload, mode === "rollback" ? /candidate rejected/ : { code: "ShutdownFailed" });
+				assert.equal(records.find((r) => r.generation === 1 && r.name === "keep")!.stops, 0);
+				for (const record of records.filter((r) => r.generation === 2)) {
+					assert.equal(record.stops, 1);
+					assert.throws(record.write, /stale|no longer active/i);
+				}
+			} else await reload;
+			if (mode !== "none") {
+				await session.prompt("/keep");
+				const current = mode === "rollback" || mode === "cleanup" ? 1 : 2;
+				assert.equal(records.find((r) => r.generation === current && r.name === "keep")!.calls, 1);
+				assert.equal(
+					records.find((r) => r.generation === current && r.name === "omit")!.calls,
+					mode === "all" ? 1 : 0,
+				);
+			}
+			for (const record of records.filter((r) => r.stops > 0))
+				assert.throws(record.write, /stale|no longer active/i);
+		} finally {
+			await session.dispose().catch((error) => {
+				assert.equal(mode, "cleanup");
+				assert.equal(error.code, "ShutdownFailed");
+			});
+			rmSync(cwd, { recursive: true, force: true });
+		}
+		assert.ok(records.every((r) => r.stops === 1));
+	},
+);
+
+// #3105: direct captured actions obey the same synchronous seal as dispatched work.
+test.each(["close", "reload", "rollback", "cancel"])(
+	"direct extension admission seals before awaiting: %s",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-direct-admission-"));
+		const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+		let api!: import("../src/index.js").ExtensionAPI;
+		let enter!: () => void;
+		let release!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			enter = resolve;
+		});
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let completedCleanup = false;
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_start", () => {
+						api = pi;
+					});
+					pi.on("session_shutdown", async () => {
+						if (mode === "close") {
+							enter();
+							await gate;
+							pi.appendEntry("cleanup", { complete: true });
+							completedCleanup = true;
+						}
+					});
+				},
+			],
+		});
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			resourceLoader: loader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		});
+		const exec = () => api.exec(process.execPath, ["-e", 'process.stdout.write("allowed")']);
+		let operation: Promise<void> | undefined;
+		let close: Promise<void> | undefined;
+		try {
+			assert.equal((await exec()).stdout, "allowed");
+			await session.abort();
+			assert.equal((await exec()).stdout, "allowed");
+			const retired = api;
+			operation =
+				mode === "close"
+					? session.dispose()
+					: session.reload({
+							beforeSessionStart: async () => {
+								enter();
+								await gate;
+								if (mode === "rollback") throw new Error("reject candidate");
+							},
+						});
+			void operation.catch(() => {});
+			const refuses = () => {
+				assert.throws(
+					() => retired.exec(process.execPath, ["-e", 'throw Error("must not launch")']),
+					/closed|stale|no longer active/i,
+				);
+				assert.throws(() => retired.setSessionName("unadmitted"), /closed|stale|no longer active/i);
+				assert.throws(
+					() => retired.registerCommand("unadmitted", { description: "forbidden", handler: async () => {} }),
+					/closed|stale|no longer active/i,
+				);
+				assert.throws(() => retired.events.on("unadmitted", () => {}), /closed|stale|no longer active/i);
+			};
+			refuses();
+			await entered;
+			refuses();
+			if (mode === "cancel") {
+				close = session.dispose();
+				void close.catch(() => {});
+			}
+			release();
+			if (mode === "rollback") await assert.rejects(operation, /reject candidate/);
+			else if (mode === "cancel") await assert.rejects(operation, { code: "SessionClosed" });
+			else await operation;
+			if (mode === "reload" || mode === "rollback") assert.equal((await exec()).stdout, "allowed");
+			if (mode === "close") assert.equal(completedCleanup, true);
+		} finally {
+			release();
+			await operation?.catch(() => {});
+			await (close ?? session.dispose());
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: a subprocess admitted before the seal remains owned through completion.
+test("direct extension execution drains before shutdown", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-exec-drain-"));
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+	let api!: import("../src/index.js").ExtensionAPI;
+	let shutdown = false;
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("session_start", () => {
+					api = pi;
+				});
+				pi.on("session_shutdown", () => {
+					shutdown = true;
+				});
+			},
+		],
+	});
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader: loader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	const child = api.exec(process.execPath, [
+		"-e",
+		'const fs=require("node:fs"); fs.writeFileSync("started", ""); const timer=setInterval(()=>{if(fs.existsSync("release")){clearInterval(timer);process.stdout.write("completed");}},10);',
+	]);
+	let close: Promise<void> | undefined;
+	try {
+		await vi.waitFor(() => assert.equal(existsSync(join(cwd, "started")), true));
+		close = session.dispose();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(shutdown, false, "shutdown cannot precede admitted subprocess completion");
+		writeFileSync(join(cwd, "release"), "");
+		assert.equal((await child).stdout, "completed");
+		await close;
+		assert.equal(shutdown, true);
+	} finally {
+		writeFileSync(join(cwd, "release"), "");
+		await child;
+		await (close ?? session.dispose());
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: replacement's deferred cleanup cannot notify a live successor on a borrowed bus.
+test("retired replacement cleanup cannot deliver successor events", async () => {
+	const { createAgentSessionRuntime } = await import("../src/core/agent-session-runtime.ts");
+	const { createEventBus } = await import("../src/core/event-bus.ts");
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-retired-replacement-"));
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
+	const eventBus = createEventBus();
+	const gate = Promise.withResolvers<void>();
+	const entered = Promise.withResolvers<void>();
+	const cleaned = Promise.withResolvers<void>();
+	const deliveries: number[] = [];
+	let generation = 0;
+	const runtime = await createAgentSessionRuntime(
+		async ({ sessionManager, sessionStartEvent }) => {
+			const id = ++generation;
+			const resourceLoader = new DefaultResourceLoader({
+				cwd,
+				agentDir: cwd,
+				settingsManager,
+				eventBus,
+				noExtensions: true,
+				extensionFactories: [
+					(pi) => {
+						pi.events.on("retired", () => {
+							deliveries.push(id);
+						});
+						pi.registerCommand("replace", {
+							description: "replace",
+							handler: async (_args, ctx) => {
+								await ctx.newSession();
+								entered.resolve();
+								await gate.promise;
+							},
+						});
+						pi.on("session_shutdown", () => {
+							if (id === 1) {
+								pi.events.emit("retired");
+								cleaned.resolve();
+							}
+						});
+					},
+				],
+			});
+			return {
+				...(await createAgentSession({
+					cwd,
+					agentDir: cwd,
+					settingsManager,
+					modelRuntime,
+					resourceLoader,
+					sessionManager,
+					sessionStartEvent,
+					tools: [],
+					builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+				})),
+				services: { cwd, agentDir: cwd, settingsManager, modelRuntime, resourceLoader, diagnostics: [] },
+				diagnostics: [],
+			};
+		},
+		{ cwd, agentDir: cwd, sessionManager: SessionManager.inMemory(cwd) },
+	);
+	await runtime.session.bindExtensions({
+		commandContextActions: { newSession: (options) => runtime.newSession(options) },
+	});
+	const prompt = runtime.session.prompt("/replace");
+	try {
+		await entered.promise;
+		gate.resolve();
+		await prompt;
+		await cleaned.promise;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.deepEqual(deliveries, []);
+		assert.equal(generation, 2);
+	} finally {
+		gate.resolve();
+		await prompt;
+		await runtime.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

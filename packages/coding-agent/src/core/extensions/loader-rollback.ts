@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { retireExtensionAPI } from "./loader-api.ts";
 import { createExtensionContext } from "./runner-context.ts";
 import { noOpUIContext } from "./runner-ui.ts";
 import type { Extension, ExtensionRuntime } from "./types.ts";
@@ -71,6 +72,11 @@ export async function rollbackExtensionFactories(extensions: Extension[], cwd: s
 			} catch (error) {
 				failures.push(error);
 			}
+		}
+		try {
+			retireExtensionAPI(extension);
+		} catch (error) {
+			failures.push(error);
 		}
 	}
 	return failures;
