@@ -20,7 +20,12 @@ import type { AuthStatus } from "./provider-composer.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
-import { drainSessionWork, hasCallingSessionWork, trackSessionWork } from "./session-lifecycle-work.ts";
+import {
+	drainSessionWork,
+	hasCallingSessionWork,
+	registerSessionRetirement,
+	trackSessionWork,
+} from "./session-lifecycle-work.ts";
 import { SessionManager } from "./session-manager.ts";
 
 /**
@@ -141,6 +146,7 @@ export class AgentSessionRuntime {
 	}
 
 	private replace<T>(operation: () => Promise<T>): Promise<T> {
+		registerSessionRetirement(this.session);
 		return this.admit(async () => {
 			this.replacements++;
 			let outcome: { value: T } | { error: unknown };

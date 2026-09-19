@@ -323,3 +323,37 @@ The first task selection again hit the already-disclosed native `SpawnFailed: Ou
 ### Contract amendments received
 
 "make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates. No publication occurred in this child.
+
+## Fourth continuation contract
+
+Repair the latest consolidated F batch without widening the contract. Concurrent replacement commands must hand off without circular peer draining while final disposal retains every continuation; transactional settings/resource publication failures must clean the candidate; unpublished MCP cleanup failures must remain explicit ShutdownFailed. Public source and built Node regressions, exact negative probes and controls, normal build/check and affected suites are the acceptance oracles. Existing ownership, payload, API and prior regression requirements remain unchanged.
+
+### Fourth batch acceptance and evidence
+
+| Required boundary | Repair and current evidence |
+| --- | --- |
+| Two admitted commands → retirement → successors without circular waiting | Register replacement ancestry before publication waits, retaining it until callback settlement. Peer drain wakes when another admitted command joins retirement. Source single/dual cases and built `command-dual` require generations=3 and both returns while unrelated work still drains |
+| Terminal disposal owns every continuation | Existing single-command and extended dual-command cases independently release post-return continuations only after both old-session/runtime disposal remain pending. No terminal exclusion was added; deferred failures remain covered by prior Node cases |
+| Candidate startup → settings commit/activate/resource commit → installed, or rollback | All publication callbacks remain inside candidate cleanup. Four source cases and built activate/commit/settings/activate-cleanup/control cases preserve the original generation, release candidates, and retain aggregate cleanup failure |
+| MCP retired initializer → candidate cleanup → explicit success/failure | Actual adapter with controlled initializer is exercised through public create/dispose in source and Node tests. Failure retains original/cleanup causes and returns ShutdownFailed; the control releases its resource. OAuth cleanup is attempted in both. This is deterministic adapter lifecycle proof, not G live-service coverage |
+| Prior F/A–E APIs, raw text, optional fields, ordering, borrowed/sibling resources | Public API signatures and payload policy unchanged; complete parity, queue, replacement, workflow and ownership selections remain passing. No new manager, normalization, test skip or borrowed-resource shutdown |
+| RGR, both named parity files, normal build/check, docs and signed clean delivery | Exact RED logs precede repairs; source/public Node regressions persist. SDK and MCP guides plus Unreleased notes describe repaired behavior. Commit/hook/signature receipt is in the execution handoff |
+
+Commands are recorded in `/tmp/3105-f-fourth-commands.txt`; debugger run `4bc671ac`, execution receipt `/tmp/3105-f-fourth-execution.md`.
+
+- Normal `npm run build` and `npm run check`: exit 0, `/tmp/3105-f-fourth-final-{build,check}.log`.
+- Complete coding-agent selection: **72 files, 627 passed**, 14 unchanged credential/platform skips, `/tmp/3105-f-fourth-core.log`.
+- Complete host parity: **148/148 passed**, `/tmp/3105-f-fourth-final-host.log`.
+- Root lifecycle plus affected MCP: **54 files, 492 passed**, `/tmp/3105-f-fourth-final-unit.log`.
+- Observer/queue: **15 files, 121 passed**, one unchanged platform skip, `/tmp/3105-f-fourth-queues.log`.
+- Tasks: **8 files, 49 passed**, `/tmp/3105-f-fourth-tasks.log`.
+- Seven exact probe/control invocations and eight built Node modes: all exit 0, `/tmp/3105-f-fourth-{exact,node}-green.log`. MCP failure intentionally retains active=1 because its cleanup throws; the oracle requires explicit ShutdownFailed, not fabricated successful release. Control active=0.
+- Supplemental qlty smells/metrics exit 0, `/tmp/3105-f-fourth-{qlty,metrics}.log`. Existing large-module complexity warnings remain visible; no suppression/config change.
+
+RED logs: `/tmp/3105-f-fourth-{exact,command,publication,mcp}-red.log`. The first command test scaffold shadowed the path `join` import; after renaming its barrier, single passed and dual reproduced the actual circular wait. The first Node MCP fixture accidentally bundled an unmocked `.ts` direct-tools import; matching both source suffixes removed that fixture-only diagnostic. The first root selection caught an extra aggregate wrapper changing the existing cleanup error shape; preserving the original shape when there is no unpublished failure made the unchanged assertion and complete rerun pass. None was suppressed or counted as passing evidence.
+
+Temporary F debugging notes are removed; unrelated ISSUES.md content is unchanged. The prior native spool flake did not recur in this batch, but its cause remains unattributed and no native repair is claimed. Evidence is local macOS arm64 Node26.8.2, deterministic inference and built workspace exports. G/H, packed/platform/live-provider coverage and parent publication/CI/Greptile gates remain deferred. No push, PR, merge, release or other-checkout writes.
+
+### Contract amendments received
+
+"make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates.

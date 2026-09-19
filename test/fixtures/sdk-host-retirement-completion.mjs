@@ -26,6 +26,10 @@ try {
   let generations = 0;
   let active = 0;
   const events = [];
+  const count = mode === "command-dual" ? 2 : 1;
+  const joinReplacement = Promise.withResolvers();
+  let enteredCount = 0;
+  let returnedCount = 0;
   runtime = await createAgentSessionRuntime(async ({ sessionManager, sessionStartEvent }) => {
    const id = ++generations;
    if (id === 2 && mode === "command-create-failure") throw new Error("candidate failed");
@@ -34,9 +38,10 @@ try {
     pi.on("session_shutdown", event => { events.push(`shutdown:${id}:${event.reason}`); if (id === 1) { active = 0; if (mode === "command-cleanup") throw new Error("retiring cleanup failed"); } });
     pi.registerCommand("replace-me", { description: "fixture", handler: async (_args, ctx) => {
      entered.resolve();
+     if (++enteredCount === 2) await joinReplacement.promise;
      if (mode === "command-create-failure") await assert.rejects(ctx.newSession(), /candidate failed/);
      else await ctx.newSession();
-     resumed.resolve();
+     if (++returnedCount === count) resumed.resolve();
      await release.promise;
      active++;
     } });
@@ -46,10 +51,10 @@ try {
   session = runtime.session;
   await session.bindExtensions({ commandContextActions: { waitForIdle: async () => {}, newSession: o => runtime.newSession(o), fork: (id,o) => runtime.fork(id,o), navigateTree: (id,o) => runtime.session.navigateTree(id,o), switchSession: (file,o) => runtime.switchSession(file,o), reload: () => runtime.session.reload() } });
   session.setThinkingLevel("high"); await peerEntered.promise;
-  const turn = session.prompt("/replace-me"); await entered.promise;
+  const turn = Promise.all(Array.from({ length: count }, () => session.prompt("/replace-me"))); await entered.promise;
   await delay(20); assert.equal(generations, 1); assert.deepEqual(events, []);
-  peerRelease.resolve(); await resumed.promise;
-  assert.equal(generations, 2); assert.deepEqual(events, []);
+  joinReplacement.resolve(); peerRelease.resolve(); await resumed.promise;
+  assert.equal(generations, count + 1); assert.equal(events.some(event => event.startsWith("shutdown:1:")), false);
   await assert.rejects(session.prompt("late"), { code: "SessionClosed" });
   let closed = false;
   expectedFailure = mode === "command-cleanup";

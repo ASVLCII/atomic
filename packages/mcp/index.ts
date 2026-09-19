@@ -43,6 +43,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
   let activeSession: ActiveMcpSession | null = null;
   let stateOwner: ActiveMcpSession | null = null;
   const cleanupBarrier = new McpSessionCleanupBarrier();
+  const unpublishedCleanupFailures: unknown[] = [];
 
   async function registerDirectToolsFromConfig(
     config: McpConfig,
@@ -216,7 +217,9 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         try {
           await shutdownState(candidate, "failed_initialization");
         } catch (cleanupError) {
-          console.error("MCP: failed to clean unpublished initialization state", cleanupError);
+          const failure = new AggregateError([error, cleanupError], "MCP initialization and candidate cleanup failed");
+          unpublishedCleanupFailures.push(failure);
+          throw failure;
         }
       }
       throw error;
@@ -319,7 +322,15 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       "session_shutdown",
       "MCP: session shutdown cleanup failed",
     );
-    await cleanupBarrier.close([retiredInitialization?.catch(() => undefined), stateCleanup]);
+    const failures: unknown[] = [];
+    try {
+      await cleanupBarrier.close([retiredInitialization?.catch(() => undefined), stateCleanup]);
+    } catch (error) {
+      if (!unpublishedCleanupFailures.length) throw error;
+      failures.push(error);
+    }
+    failures.push(...unpublishedCleanupFailures);
+    if (failures.length) throw new AggregateError(failures, "MCP session cleanup failed");
   });
 
   registerMcpCommands(pi, earlyConfigPath, async () => {

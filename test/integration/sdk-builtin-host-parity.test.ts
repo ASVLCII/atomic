@@ -1660,3 +1660,38 @@ test.each([
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: candidate ownership includes publication and retired initialization failures.
+test.each(["activate", "commit", "settings", "activate-cleanup", "control", "mcp-failure", "mcp-control"])(
+	"built Node publication and MCP cleanup (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-publication-cleanup.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
+
+test(
+	"built Node concurrent replacement commands retain terminal cleanup",
+	() => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-retirement-completion.mjs", import.meta.url)),
+				"command-dual",
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

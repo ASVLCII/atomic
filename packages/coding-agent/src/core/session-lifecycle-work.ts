@@ -6,6 +6,36 @@ const reloadCleanupFailures = new WeakMap<object, unknown[]>();
 const work = new WeakMap<object, Set<Promise<void>>>();
 const lifetimes = new WeakMap<object, AbortController>();
 export const sessionGenerationClosing = new WeakSet<object>();
+const retiringWork = new WeakMap<object, Set<Promise<void>>>();
+const retirementChanges = new WeakMap<object, { promise: Promise<void>; resolve: () => void }>();
+
+// Register before runtime publication can wait. Retain membership until the
+// invoking work settles, not merely until its replacement promise returns.
+export function registerSessionRetirement(session: object): void {
+	const ancestors = currentWork.getStore();
+	const retiring = retiringWork.get(session) ?? new Set<Promise<void>>();
+	retiringWork.set(session, retiring);
+	for (const item of work.get(session) ?? []) {
+		if (!ancestors?.has(item) || retiring.has(item)) continue;
+		retiring.add(item);
+		void item.then(() => retiring.delete(item));
+	}
+	retirementChanges.get(session)?.resolve();
+	retirementChanges.delete(session);
+}
+
+function retirementChanged(session: object): Promise<void> {
+	let change = retirementChanges.get(session);
+	if (!change) {
+		let resolve!: () => void;
+		const promise = new Promise<void>((done) => {
+			resolve = done;
+		});
+		change = { promise, resolve };
+		retirementChanges.set(session, change);
+	}
+	return change.promise;
+}
 
 export function assertSessionOpen(session: { _disposed: boolean }): void {
 	if (session._disposed || sessionGenerationClosing.has(session))
@@ -82,12 +112,20 @@ export function hasCallingSessionWork(session: object): boolean {
 
 // A /reload command may be admitted inside a prompt. It drains peers, not its own caller.
 // Terminal disposal never excludes callers: callback settlement remains part of cleanup.
-export async function drainSessionWork(session: object, excludeCallingWork = false): Promise<void> {
+export async function drainSessionWork(
+	session: object,
+	excludeCallingWork = false,
+	excludeRetiringWork = false,
+): Promise<void> {
 	const ancestors = excludeCallingWork ? currentWork.getStore() : undefined;
 	while (true) {
-		const pending = [...(work.get(session) ?? [])].filter((item) => !ancestors?.has(item));
+		const changed = excludeRetiringWork ? retirementChanged(session) : undefined;
+		const pending = [...(work.get(session) ?? [])].filter(
+			(item) => !ancestors?.has(item) && !(excludeRetiringWork && retiringWork.get(session)?.has(item)),
+		);
 		if (!pending.length) return;
-		await Promise.all(pending);
+		if (changed) await Promise.race([Promise.all(pending), changed]);
+		else await Promise.all(pending);
 	}
 }
 

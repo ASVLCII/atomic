@@ -3013,110 +3013,200 @@ test.each([false, true])(
 );
 
 // #3105: replacement hands off its invoking command, but terminal close still owns it.
-test("command replacement drains peers and retains its continuation until terminal cleanup", async () => {
-	const { createAgentSessionRuntime } = await import("../src/core/agent-session-runtime.ts");
-	const cwd = mkdtempSync(join(tmpdir(), "sdk-command-retirement-"));
-	const settingsManager = SettingsManager.inMemory();
-	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
-	const peerEntered = Promise.withResolvers<void>();
-	const peerRelease = Promise.withResolvers<void>();
-	const commandEntered = Promise.withResolvers<void>();
-	const continuation = Promise.withResolvers<void>();
-	let generations = 0;
-	let resumed = false;
-	let active = 0;
-	const shutdowns: number[] = [];
-	const runtime = await createAgentSessionRuntime(
-		async ({ sessionManager, sessionStartEvent }) => {
-			const id = ++generations;
-			const resourceLoader = new DefaultResourceLoader({
-				cwd,
-				agentDir: cwd,
-				settingsManager,
-				noExtensions: true,
-				extensionFactories: [
-					(pi) => {
-						pi.on("thinking_level_select", async () => {
-							peerEntered.resolve();
-							await peerRelease.promise;
-						});
-						pi.on("session_shutdown", () => {
-							shutdowns.push(id);
-							if (id === 1) active = 0;
-						});
-						pi.registerCommand("replace-me", {
-							description: "fixture",
-							handler: async (_args, ctx) => {
-								commandEntered.resolve();
-								await ctx.newSession();
-								resumed = true;
-								await continuation.promise;
-								active++;
-							},
-						});
-					},
-				],
-			});
-			return {
-				...(await createAgentSession({
+test.each([1, 2])(
+	"command replacement drains peers and retains %s continuations until terminal cleanup",
+	async (count) => {
+		const { createAgentSessionRuntime } = await import("../src/core/agent-session-runtime.ts");
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-command-retirement-"));
+		const settingsManager = SettingsManager.inMemory();
+		const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
+		const peerEntered = Promise.withResolvers<void>();
+		const peerRelease = Promise.withResolvers<void>();
+		const commandEntered = Promise.withResolvers<void>();
+		const continuation = Promise.withResolvers<void>();
+		let generations = 0;
+		let resumed = false;
+		let active = 0;
+		const shutdowns: number[] = [];
+		let entered = 0;
+		let returns = 0;
+		const joinReplacement = Promise.withResolvers<void>();
+		const runtime = await createAgentSessionRuntime(
+			async ({ sessionManager, sessionStartEvent }) => {
+				const id = ++generations;
+				const resourceLoader = new DefaultResourceLoader({
 					cwd,
 					agentDir: cwd,
-					sessionManager,
-					sessionStartEvent,
 					settingsManager,
-					modelRuntime,
-					model: getModel("anthropic", "claude-sonnet-4-5"),
-					resourceLoader,
-					builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
-				})),
-				services: { cwd, agentDir: cwd, settingsManager, modelRuntime, resourceLoader, diagnostics: [] },
-				diagnostics: [],
+					noExtensions: true,
+					extensionFactories: [
+						(pi) => {
+							pi.on("thinking_level_select", async () => {
+								peerEntered.resolve();
+								await peerRelease.promise;
+							});
+							pi.on("session_shutdown", () => {
+								shutdowns.push(id);
+								if (id === 1) active = 0;
+							});
+							pi.registerCommand("replace-me", {
+								description: "fixture",
+								handler: async (_args, ctx) => {
+									entered++;
+									commandEntered.resolve();
+									if (entered === 2) await joinReplacement.promise;
+									await ctx.newSession();
+									returns++;
+									resumed = returns === count;
+									await continuation.promise;
+									active++;
+								},
+							});
+						},
+					],
+				});
+				return {
+					...(await createAgentSession({
+						cwd,
+						agentDir: cwd,
+						sessionManager,
+						sessionStartEvent,
+						settingsManager,
+						modelRuntime,
+						model: getModel("anthropic", "claude-sonnet-4-5"),
+						resourceLoader,
+						builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+					})),
+					services: { cwd, agentDir: cwd, settingsManager, modelRuntime, resourceLoader, diagnostics: [] },
+					diagnostics: [],
+				};
+			},
+			{ cwd, agentDir: cwd, sessionManager: SessionManager.inMemory(cwd) },
+		);
+		const old = runtime.session;
+		await old.bindExtensions({
+			commandContextActions: {
+				waitForIdle: async () => {},
+				newSession: (options) => runtime.newSession(options),
+				fork: (id, options) => runtime.fork(id, options),
+				navigateTree: (id, options) => runtime.session.navigateTree(id, options),
+				switchSession: (file, options) => runtime.switchSession(file, options),
+				reload: () => runtime.session.reload(),
+			},
+		});
+		old.setThinkingLevel("high");
+		await peerEntered.promise;
+		const turns = Array.from({ length: count }, () => old.prompt("/replace-me"));
+		const turn = Promise.all(turns);
+		await commandEntered.promise;
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			assert.equal(generations, 1, "unrelated admitted work must drain before handoff");
+			joinReplacement.resolve();
+			peerRelease.resolve();
+			await vi.waitFor(() => assert.equal(resumed, true));
+			assert.equal(generations, count + 1);
+			assert.equal(shutdowns.includes(1), false, "old cleanup waits for every continuation");
+			await assert.rejects(old.prompt("late"), { code: "SessionClosed" });
+			let closed = false;
+			const closing = runtime.dispose().then(() => {
+				closed = true;
+			});
+			let oldClosed = false;
+			const oldClosing = old.dispose().then(() => {
+				oldClosed = true;
+			});
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			assert.equal(closed, false);
+			assert.equal(oldClosed, false);
+			continuation.resolve();
+			await Promise.all([turn, closing, oldClosing]);
+			assert.equal(active, 0);
+			assert.ok(shutdowns.includes(1));
+		} finally {
+			peerRelease.resolve();
+			joinReplacement.resolve();
+			continuation.resolve();
+			if (resumed) await runtime.dispose();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: publication is still candidate-owned until activation and commit succeed.
+test.each(["activate", "commit", "settings", "activate-cleanup"])("reload publication rollback at %s", async (mode) => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-publication-rollback-"));
+	const settingsManager = SettingsManager.inMemory();
+	const active = new Set<number>();
+	let next = 0;
+	class Loader extends DefaultResourceLoader {
+		override async prepareReload(...args: Parameters<DefaultResourceLoader["prepareReload"]>) {
+			const transaction = await super.prepareReload(...args);
+			return {
+				...transaction,
+				activate: (settings: SettingsManager) => {
+					if (mode.startsWith("activate")) throw new Error("activation failed");
+					transaction.activate(settings);
+				},
+				prepareCommit: () => {
+					const prepared = transaction.prepareCommit!();
+					return {
+						...prepared,
+						commit: () => {
+							if (mode === "commit") throw new Error("commit failed");
+							prepared.commit();
+						},
+					};
+				},
 			};
-		},
-		{ cwd, agentDir: cwd, sessionManager: SessionManager.inMemory(cwd) },
-	);
-	const old = runtime.session;
-	await old.bindExtensions({
-		commandContextActions: {
-			waitForIdle: async () => {},
-			newSession: (options) => runtime.newSession(options),
-			fork: (id, options) => runtime.fork(id, options),
-			navigateTree: (id, options) => runtime.session.navigateTree(id, options),
-			switchSession: (file, options) => runtime.switchSession(file, options),
-			reload: () => runtime.session.reload(),
-		},
+		}
+	}
+	const resourceLoader = new Loader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++next;
+				pi.on("session_start", () => {
+					active.add(id);
+				});
+				pi.on("session_shutdown", () => {
+					active.delete(id);
+					if (mode === "activate-cleanup" && id === 4) throw new Error("candidate cleanup failed");
+				});
+			},
+		],
 	});
-	old.setThinkingLevel("high");
-	await peerEntered.promise;
-	const turn = old.prompt("/replace-me");
-	await commandEntered.promise;
+	await resourceLoader.reload();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	if (mode === "settings") {
+		const prepare = settingsManager.prepareReload.bind(settingsManager);
+		settingsManager.prepareReload = async () => ({
+			...(await prepare()),
+			commit: () => {
+				throw new Error("settings commit failed");
+			},
+		});
+	}
 	try {
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		assert.equal(generations, 1, "unrelated admitted work must drain before handoff");
-		peerRelease.resolve();
-		await vi.waitFor(() => assert.equal(resumed, true));
-		assert.equal(generations, 2);
-		assert.deepEqual(shutdowns, [], "old cleanup waits for the continuation");
-		await assert.rejects(old.prompt("late"), { code: "SessionClosed" });
-		let closed = false;
-		const closing = runtime.dispose().then(() => {
-			closed = true;
-		});
-		let oldClosed = false;
-		const oldClosing = old.dispose().then(() => {
-			oldClosed = true;
-		});
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		assert.equal(closed, false);
-		assert.equal(oldClosed, false);
-		continuation.resolve();
-		await Promise.all([turn, closing, oldClosing]);
-		assert.equal(active, 0);
-		assert.ok(shutdowns.includes(1));
+		await assert.rejects(session.reload(), mode.endsWith("cleanup") ? { code: "ShutdownFailed" } : /failed/);
+		assert.deepEqual([...active], [2], "only the original generation remains owned");
 	} finally {
-		peerRelease.resolve();
-		continuation.resolve();
-		if (resumed) await runtime.dispose();
+		await session.dispose().catch((error) => {
+			if (!mode.endsWith("cleanup")) throw error;
+			assert.equal(error.code, "ShutdownFailed");
+		});
 		rmSync(cwd, { recursive: true, force: true });
 	}
+	assert.equal(active.size, 0);
 });

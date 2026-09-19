@@ -630,6 +630,10 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		}
 		await publication.publishProviders();
 		if (this._disposed) throw hostInputError("SessionClosed");
+		settingsTransaction.commit();
+		resourceTransaction.activate(this.settingsManager);
+		if (commitPreparedResources) commitPreparedResources();
+		else resourceTransaction.commit();
 	} catch (error) {
 		const failures: unknown[] = [];
 		for (const cleanup of [
@@ -651,10 +655,6 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		throw error;
 	}
 
-	settingsTransaction.commit();
-	resourceTransaction.activate(this.settingsManager);
-	if (commitPreparedResources) commitPreparedResources();
-	else resourceTransaction.commit();
 	resetApiProviders();
 	this._extensionProviderIds = new Set(publication.providerIds);
 	extensionsResult.runtime.extensionProviderIds = new Set(publication.providerIds);

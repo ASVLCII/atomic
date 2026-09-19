@@ -555,7 +555,7 @@ export function closeAgentSession(
 		await attempt("tasks", () => session.closeSessionTasks());
 		await attempt("summary", () => session.abortSessionSummary());
 		if (handoff) {
-			await attempt("peer work", () => drainSessionWork(session, true));
+			await attempt("peer work", () => drainSessionWork(session, true, true));
 			if (errors.length)
 				retired.reject(
 					Object.assign(new AggregateError(errors, "Session retirement failed"), { code: "ShutdownFailed" }),
