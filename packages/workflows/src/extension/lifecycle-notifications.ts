@@ -92,8 +92,6 @@ export interface WorkflowLifecycleNoticeDetails {
 	readonly actor?: WorkflowActor;
 	/** Who launched the run, when the launch was attributed. */
 	readonly origin?: WorkflowActor;
-	/** Source run this run continues, for a resumed continuation with a fresh id. */
-	readonly continuedFromRunId?: string;
 	readonly createdAt: number;
 }
 
@@ -427,9 +425,7 @@ export function formatWorkflowLifecycleNoticeText(details: WorkflowLifecycleNoti
 		const resumedStage = details.stageName ?? details.stageId;
 		const stageText = resumedStage ? `${origin === "" ? "" : ","} at stage ${resumedStage}` : "";
 		const scopeText = details.scope === "stage" ? "stage of workflow" : "workflow";
-		const continues =
-			details.continuedFromRunId === undefined ? "" : `, continuing run ${details.continuedFromRunId}`;
-		return `▶ ${actor} resumed the ${scopeText} "${workflowName}" (run ${details.runId}${continues})${origin}${stageText}. It is running again in the background.`;
+		return `▶ ${actor} resumed the ${scopeText} "${workflowName}" (run ${details.runId})${origin}${stageText}. It is running again in the background.`;
 	}
 	const prompt = details.promptMessage ? ` Prompt: ${details.promptMessage}` : "";
 	if (details.scope === "run") {
@@ -523,9 +519,6 @@ function makeControlNotice(run: RunSnapshot, occurrence: ControlOccurrence): Wor
 		...(occurrence.actor !== undefined ? { actor: occurrence.actor } : {}),
 		// The origin clause is omitted entirely for a run that never recorded one.
 		...(occurrence.kind !== "started" && run.origin !== undefined ? { origin: run.origin } : {}),
-		...(occurrence.kind === "resumed" && run.resumedFromRunId !== undefined
-			? { continuedFromRunId: run.resumedFromRunId }
-			: {}),
 		createdAt: occurrence.at,
 	};
 }
@@ -732,7 +725,6 @@ function renderLifecycleNoticeCard(
 		fields: [
 			{ label: "workflow", value: details.workflowName },
 			{ label: "run", value: details.runId },
-			{ label: "continues", value: details.continuedFromRunId },
 			{ label: "stage", value: stage },
 			{ label: "tool", value: tool },
 			{ label: "actor", value: details.actor, tone: "muted" },

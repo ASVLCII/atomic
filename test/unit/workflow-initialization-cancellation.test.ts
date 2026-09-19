@@ -53,14 +53,12 @@ for (const outcome of ["resolve", "reject"] as const) {
 		const caller = new AbortController();
 		const reason = new Error("user interrupted startup");
 		let acceptedId: string | undefined;
-		const pending = execute(
-			{ action: "run", workflow: definition.name, state: workflowRouterState() },
-			workflowRouterContext(definition.normalizedName),
-			caller.signal,
-			(id) => {
-				acceptedId = id;
-			},
-		);
+		const context = workflowRouterContext(definition.normalizedName);
+		const routed = await execute({ action: "route", state: workflowRouterState() }, context);
+		assert.ok("workflowId" in routed && routed.workflowId);
+		const pending = execute({ action: "run", workflowId: routed.workflowId }, context, caller.signal, (id) => {
+			acceptedId = id;
+		});
 		const rejected = assert.rejects(pending, (error) => error === reason);
 		await entered.promise;
 		assert.ok(acceptedId);
@@ -299,7 +297,8 @@ test("failed-run resume abort cancels startup and leaves the source available", 
 			}
 		}
 	}
-	setDurableBackend(new DelayedFirstFlush());
+	const backend = new DelayedFirstFlush();
+	setDurableBackend(backend);
 	const store = createStore();
 	const jobs = createJobTracker();
 	let calls = 0;
@@ -314,6 +313,14 @@ test("failed-run resume abort cancels startup and leaves the source available", 
 		},
 	});
 	const sourceId = crypto.randomUUID();
+	backend.registerWorkflow({
+		workflowId: sourceId,
+		name: definition.name,
+		inputs: {},
+		status: "failed",
+		createdAt: 1,
+		resumable: true,
+	});
 	store.recordRunStart({
 		id: sourceId,
 		name: definition.name,
@@ -419,6 +426,11 @@ test("durable resume cancellation during its claim restores the source without l
 	const pending = runtime.resumeDurableWorkflow(runId, { signal: caller.signal }).catch((error) => error);
 	await claimed.promise;
 	caller.abort(reason);
+	// #3106: cancellation returns promptly, but the unsettled claim retains exclusion.
+	assert.equal(await pending, reason);
+	const duplicate = await runtime.resumeDurableWorkflow(runId);
+	assert.equal(duplicate.ok, false);
+	assert.equal(calls, 0);
 	release.resolve();
 	const result = await pending;
 	await jobs.get(runId)?.promise;

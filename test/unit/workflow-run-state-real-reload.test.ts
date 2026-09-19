@@ -215,6 +215,7 @@ type GlobalIncidentState = Record<string, GlobalIncidentStateEntry>;
 interface WorkflowDispatchDetails {
 	readonly action: string;
 	readonly runId: string;
+	readonly workflowId: string;
 	readonly status: string;
 	readonly error?: string;
 }
@@ -586,14 +587,20 @@ test.sequential(
 			assert.equal(beforeLaunchReload.status, "ok", beforeLaunchReload.error);
 
 			const widgetCallStart = widget.calls.length;
+			const routed = await executeWorkflowTool(
+				firstExtension,
+				"agent-route",
+				{ action: "route", state: workflowRouterState() },
+				{ ...workflowRouterContext("global-publish-watch"), ...context },
+			);
+			assert.equal(routed.status, "reserved", routed.error);
 			const launched = await executeWorkflowTool(
 				firstExtension,
 				"agent-run",
 				{
 					action: "run",
-					workflow: "global-publish-watch",
+					workflowId: routed.workflowId,
 					inputs: { label: "agent" },
-					state: workflowRouterState(),
 				},
 				{ ...workflowRouterContext("global-publish-watch"), ...context },
 			);

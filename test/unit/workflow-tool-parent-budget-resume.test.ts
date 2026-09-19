@@ -224,10 +224,11 @@ test("raised-budget continuation replays tool-parented parallel tasks", async ()
 		assert.equal(resumed.action, "resume");
 		if (resumed.action !== "resume") return;
 		assert.equal(resumed.status, "running", resumed.message);
-		assert.notEqual(resumed.runId, source.id);
+		// #3106: a budget correction continues the same instance and checkpoints.
+		assert.equal(resumed.runId, source.id);
 		const continuation = await waitForRun(
 			store,
-			(candidate) => candidate.resumedFromRunId === source.id && candidate.status === "completed",
+			(candidate) => candidate.id === source.id && candidate.status === "completed",
 		);
 
 		assert.equal(toolCalls, 1);

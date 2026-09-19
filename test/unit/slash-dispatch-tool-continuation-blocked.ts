@@ -61,7 +61,8 @@ describe("tool run-control actions", () => {
 		assert.equal(wasDispatched(), false);
 		assert.match((result as { error?: string }).error ?? "", /workflows cannot invoke workflows/);
 	}
-	test("makeExecuteWorkflowTool resume starts linked continuation for active blocked recoverable workflow", async () => {
+	// #3106: continuation keeps the execution identity and completed effects.
+	test("makeExecuteWorkflowTool resumes the same active blocked recoverable workflow", async () => {
 		const sourceRunId = testRunId(`resume-tool-blocked-${Date.now()}`);
 		const def = workflow({
 			name: "tool-resume-blocked-wf",
@@ -182,10 +183,8 @@ describe("tool run-control actions", () => {
 			message: string;
 		};
 		assert.equal(r.status, "running");
-		// New-id continuation: the block resumes under a fresh run id, and the
-		// durable source is left blocked/resumable (not mutated).
-		assert.notEqual(r.runId, sourceRunId);
-		assert.match(r.message, /Resuming blocked workflow/);
+		assert.equal(r.runId, sourceRunId);
+		assert.match(r.message, /Resuming durable workflow.*completed checkpoints will be replayed/);
 		await jobTracker.get(r.runId)?.promise;
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		// The completed "first" stage replays from the retained snapshot without
@@ -195,7 +194,8 @@ describe("tool run-control actions", () => {
 		assert.equal(continued.status, "completed");
 		assert.equal(continued.resumedFromRunId, sourceRunId);
 		assert.equal(continued.stages[0]!.replayed, true);
-		assert.equal(durableBackend.getWorkflow(sourceRunId)?.status, "blocked");
+		assert.equal(durableBackend.getWorkflow(sourceRunId)?.status, "completed");
+		assert.equal(store.runs().filter((run) => run.id === sourceRunId).length, 1);
 	});
 	test("active blocked continuation atomically claims its durable source", async () => {
 		const sourceRunId = testRunId(`resume-claim-${Date.now()}`);
@@ -255,17 +255,13 @@ describe("tool run-control actions", () => {
 
 		assert.equal(accepted.length, 1);
 		assert.equal(rejected.length, 1);
-		assert.match(
-			rejected[0]!.message,
-			/not a resumable workflow run|changed while resume was pending|already being resumed/u,
-		);
+		assert.match(rejected[0]!.message, /already running or has a pending resume admission/u);
 		const continuationId = accepted[0]!.ok ? accepted[0]!.runId : "";
-		// New-id continuation: the winner runs under a fresh id, and the
-		// durable source is left blocked/resumable (not cancelled).
-		assert.notEqual(continuationId, sourceRunId);
+		assert.equal(continuationId, sourceRunId);
 		await jobTracker.get(continuationId)?.promise;
 		await new Promise((resolve) => setTimeout(resolve, 10));
-		assert.equal(backend.getWorkflow(sourceRunId)?.status, "blocked");
+		assert.equal(backend.getWorkflow(sourceRunId)?.status, "completed");
+		assert.equal(store.runs().filter((run) => run.id === sourceRunId).length, 1);
 	});
 
 	test("makeExecuteWorkflowTool resume finalizes restored blocked source run", async () => {
@@ -387,12 +383,11 @@ describe("tool run-control actions", () => {
 		const r = result as { action: string; status: string; runId: string };
 		assert.equal(r.action, "resume");
 		assert.equal(r.status, "running");
-		// New-id continuation: the restored block resumes under a fresh run id.
-		assert.notEqual(r.runId, sourceRunId);
+		assert.equal(r.runId, sourceRunId);
 
 		await promptStarted;
 		assert.deepEqual(calls, ["second:first-old"]);
-		// The continuation is the one in-flight run (the source was killed).
+		// The original identity is the only in-flight instance.
 		const inFlight = store.runs().filter((run) => run.endedAt === undefined);
 		assert.deepEqual(
 			inFlight.map((run) => run.id),

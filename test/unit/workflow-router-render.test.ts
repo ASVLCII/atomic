@@ -15,7 +15,7 @@ for (const [workflowType, status, runId] of [
 		const decision = {
 			workflowType,
 			maxBudget: { maxTokens: 0, maxCost: 1.125 },
-			estimatedDuration: "5_to_15_minutes" as const,
+			estimatedDuration: "15min" as const,
 		};
 		const result: WorkflowToolResult = {
 			action: "run",
@@ -31,7 +31,7 @@ for (const [workflowType, status, runId] of [
 			assert.match(rendered, new RegExp(`"workflowType": "${workflowType}"`));
 			assert.match(rendered, /"maxTokens": 0/);
 			assert.match(rendered, /"maxCost": 1\.125/);
-			assert.match(rendered, /5_to_15_minutes/);
+			assert.match(rendered, /15min/);
 			assert.doesNotMatch(rendered, /maxDurationMs/);
 			if (workflowType === "none") assert.match(rendered, /Continue inline/);
 			if (status === "failed") assert.match(rendered, /Setup unavailable/);
@@ -80,3 +80,23 @@ test("needs_input renders a selected but unlaunched workflow, including partial 
 		}
 	}
 });
+
+// #3106: presentation uses canonical labels directly for reservation and execution.
+for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", ">1d", "unknown"] as const) {
+	test(`route presents ${estimatedDuration} without a display conversion`, () => {
+		const rendered = renderResult(
+			{
+				action: "route",
+				workflowType: "goal",
+				workflowId: "reserved-id",
+				status: "reserved",
+				estimatedDuration,
+				routerDecision: { workflowType: "goal", estimatedDuration, maxBudget: {} },
+			},
+			{ plain: true, width: 80 },
+		);
+		assert.ok(rendered.includes(estimatedDuration));
+		assert.ok(rendered.split("\n").every((line) => visibleWidth(line) <= 80));
+		assert.doesNotMatch(rendered, /started in background/);
+	});
+}

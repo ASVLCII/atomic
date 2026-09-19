@@ -129,17 +129,25 @@ export default workflow({
 		);
 
 		try {
+			const ctx = { ...workflowRouterContext("tool-headless-lifecycle"), hasUI: false };
+			const route = await resource.tool.execute(
+				"route",
+				{ action: "route", state: workflowRouterState() },
+				undefined,
+				undefined,
+				ctx,
+			);
+			assert.equal(route.details.action, "route");
 			const result = await resource.tool.execute(
 				"tool-headless-lifecycle-call",
 				{
 					action: "run",
-					workflow: "tool-headless-lifecycle",
+					workflowId: route.details.workflowId,
 					inputs: {},
-					state: workflowRouterState(),
 				},
 				undefined,
 				undefined,
-				{ ...workflowRouterContext("tool-headless-lifecycle"), hasUI: false },
+				ctx,
 			);
 
 			assert.equal(result.details.action, "run");
@@ -151,7 +159,7 @@ export default workflow({
 					{ action: "status", runId: run.runId },
 					undefined,
 					undefined,
-					{ ...workflowRouterContext("tool-headless-lifecycle"), hasUI: false },
+					ctx,
 				);
 				assert.equal(status.details.detail.status, "completed");
 				assert.deepEqual(status.details.detail.result, { ok: true, source: "tool" });

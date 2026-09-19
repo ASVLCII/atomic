@@ -13,6 +13,7 @@ import { createExtensionRuntime } from "../../packages/workflows/src/extension/r
 import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
+import { testRunId } from "../helpers/run-id.js";
 import { createMockSdk } from "./durable-dbos-backend-helpers.js";
 
 afterEach(() => {
@@ -26,26 +27,21 @@ for (const sourceStatus of ["blocked", "failed"] as const) {
 	for (const mode of ["frozen", "refusing"] as const) {
 		test(`${sourceStatus} continuation skips cleanup after ${mode} admission and leaves source resumable`, async () => {
 			vi.useFakeTimers();
-			const sourceId = "source";
+			const sourceId = testRunId("resume-unavailable-source");
 			const sdk = createMockSdk();
 			let outage = false;
 			const reads = vi.fn();
 			const backend = new DbosDurableBackend({
 				...sdk,
-				startWorkflow: async (...args) => {
-					if (args[0] === sourceId) return sdk.startWorkflow(...args);
-					outage = true;
-					if (mode === "refusing") throw new DbosDependencyError();
-					const signal = dbosAdmissionContext.getStore();
-					assert.ok(signal);
-					await new Promise<never>((_, reject) =>
-						signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
-					);
-				},
 				listStepRecords: async (id) => {
 					if (!outage) return sdk.listStepRecords(id);
 					reads(id);
-					return new Promise<never>(() => {});
+					if (mode === "refusing") throw new DbosDependencyError();
+					const signal = dbosAdmissionContext.getStore();
+					assert.ok(signal);
+					return new Promise<never>((_, reject) =>
+						signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+					);
 				},
 				retrieveWorkflow: async (id) => {
 					if (!outage) return sdk.retrieveWorkflow(id);
@@ -106,7 +102,7 @@ for (const sourceStatus of ["blocked", "failed"] as const) {
 			});
 			// A second attempt also proves the active-blocked claim was released.
 			for (let attempt = 0; attempt < 2; attempt++) {
-				outage = false;
+				outage = true;
 				let settled = false;
 				let continuationId = "";
 				const pending = runtime
@@ -129,16 +125,15 @@ for (const sourceStatus of ["blocked", "failed"] as const) {
 				assert.equal(result.ok, false);
 				if (result.ok) assert.fail("unavailable admission cannot succeed");
 				assert.equal(result.reason, "insufficient_state");
-				assert.match(result.message, /cleanup skipped: database admission unavailable.*source left resumable/u);
+				assert.match(result.message, /No executor was launched/u);
 				assert.match(result.message, /Workflow database (admission timed out|unavailable during admission)/u);
-				assert.ok(continuationId);
-				assert.equal(store.runs().find((entry) => entry.id === continuationId)?.status, "failed");
+				assert.equal(continuationId, "");
 				assert.deepEqual(
 					store.runs().find((entry) => entry.id === sourceId),
 					source,
 				);
 			}
-			assert.equal(reads.mock.calls.length, 0);
+			assert.equal(reads.mock.calls.length, 2, "only the two bounded admission reads, no cleanup reads");
 			assert.equal(author.mock.calls.length, 0);
 			assert.deepEqual(sdk.state.deletions, []);
 			assert.equal(backend.getWorkflow(sourceId)?.status, sourceStatus);

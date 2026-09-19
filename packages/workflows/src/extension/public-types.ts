@@ -222,6 +222,8 @@ export interface ExtensionAPI {
 
 export interface WorkflowToolArgs {
 	workflow?: string;
+	/** Code-registered execution identity required by model-tool run. */
+	workflowId?: string;
 	inputs?: WorkflowInputValues;
 	/** Required context for model-tool launches, not workflow definition inputs. */
 	state?: WorkflowRouterState;
@@ -229,6 +231,7 @@ export interface WorkflowToolArgs {
 	budget?: WorkflowBudget;
 	action?:
 		| "models"
+		| "route"
 		| "run"
 		| "list"
 		| "get"

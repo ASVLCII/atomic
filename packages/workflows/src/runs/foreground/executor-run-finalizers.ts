@@ -23,12 +23,12 @@ export function createRunFinalizers(input: {
 	readonly drainWorkflowExitCleanups: (reason?: string) => Promise<void>;
 	readonly assertSuccessfulCompletion: () => void;
 }): RunFinalizers {
-	const finalizeWorkflowExitValidationFailure = (err: unknown, exitReason?: string): RunResult => {
+	const finalizeWorkflowExitValidationFailure = (err: unknown, exitReason?: string, resumable = false): RunResult => {
 		const failure = input.classifyExecutorFailure(err);
 		const classifiedMetadata = runFailureMetadata(failure, input.runSnapshot.stages);
 		const metadata = {
 			...classifiedMetadata,
-			resumable: false,
+			resumable,
 			...(exitReason !== undefined ? { exitReason } : {}),
 		} as const;
 		const recorded = input.activeStore.recordRunEnd(
@@ -50,7 +50,7 @@ export function createRunFinalizers(input: {
 			...(metadata.failureDisposition !== undefined ? { failureDisposition: metadata.failureDisposition } : {}),
 			failureMessage: metadata.failureMessage,
 			...(metadata.failedStageId !== undefined ? { failedStageId: metadata.failedStageId } : {}),
-			resumable: false,
+			resumable,
 			...(metadata.exitReason !== undefined ? { exitReason: metadata.exitReason } : {}),
 			...(metadata.retryAfterMs !== undefined ? { retryAfterMs: metadata.retryAfterMs } : {}),
 			ts: Date.now(),
@@ -74,9 +74,17 @@ export function createRunFinalizers(input: {
 			return finalizeWorkflowExitValidationFailure(signal.validationError, signal.reason);
 		}
 
+		// #3106: refusing an unconsumed replay frontier must not terminalize the
+		// original instance. Output-contract failures below remain nonresumable.
+		if (signal.status === "completed") {
+			try {
+				input.assertSuccessfulCompletion();
+			} catch (err) {
+				return finalizeWorkflowExitValidationFailure(err, undefined, true);
+			}
+		}
 		let outputs: WorkflowOutputValues | undefined;
 		try {
-			if (signal.status === "completed") input.assertSuccessfulCompletion();
 			outputs = normalizeWorkflowExitOutput(input.def.name, signal.outputSnapshot);
 			assertWorkflowExitOutputs(input.def.name, outputs, input.def.outputs);
 		} catch (err) {

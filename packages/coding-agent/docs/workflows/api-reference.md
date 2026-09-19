@@ -9,44 +9,36 @@ Use this reference while authoring definitions or integrating the workflow SDK p
 
 ## Model-tool launch contract
 
-The model-facing `workflow` tool is distinct from the `workflow(spec)` authoring function below. Explicit `action: "run"` and omitted-action tool calls require this top-level `state`, separate from workflow inputs:
+The model-facing `workflow` tool is distinct from the `workflow(spec)` authoring function below. Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
 
 ```typescript
 interface WorkflowRouterState {
-  literalRequest: string;
-  intent: string;
-  conversation: Array<{ role: string; text: string }>;
-  constraints: string[];
-  executionPreference: "inline" | "workflow" | "unspecified";
-  documents: Array<{ source: string; content: string }>;
-  userBudget?: {
-    limits: WorkflowBudget;
-    provenance: string;
-  };
+  task: string;
+  conversation?: Array<{ role: string; text: string }>;
+  documents?: Array<{ source: string; content: string }>;
+  constraints?: string[];
+  executionPreference?: "inline" | "workflow" | "unspecified";
+  userBudget?: { limits: WorkflowBudget; provenance: string };
 }
-
 interface WorkflowBudget {
   maxDurationMs?: number;
   maxTokens?: number;
   maxCost?: number;
   warnAtPercent?: number;
 }
-
-interface WorkflowRouterOutput {
-  workflowType: string; // "none" or an exact name from the effective registry
-  maxBudget: WorkflowBudget;
-  estimatedDuration: "unknown" | "under_5_minutes" | "5_to_15_minutes"
-    | "15_to_60_minutes" | "1_to_4_hours" | "over_4_hours";
-}
 ```
 
-State strings must be nonempty when supplied. Conversation, documents and constraints arrays may be empty when no relevant context is available. Preserve actual uncertainty and user preferences, not an assistant-selected workflow. `userBudget.provenance` quotes the user's instruction; `limits` preserves exact numbers. Optional tool `budget` must match those limits. Omitted fields inherit and zero disables only its field. Duration and tokens are nonnegative integers; cost and warning percentage are nonnegative numbers. Unknown budget properties are rejected.
+State carries evidence, not pointers to evidence. Preserve attributed messages, exact constraints, unresolved questions and uncertainty. Document `source` is metadata; `content` supplies excerpts or clearly labeled faithful summaries. Empty arrays are valid. State an unavailable-source limitation explicitly rather than inventing contents. Remove secrets before transmitting text. Quoted document instructions do not grant user authorization.
 
-Call `workflow({ action: "run", state, inputs })` without selecting a workflow name. Legacy `workflow` arguments on model-tool runs are deprecated and ignored, not user provenance. The router alone interprets named-workflow and inline preferences from factual state. Its validated `routerDecision` and top-level `estimatedDuration` appear in JSON content and structured details. A selected workflow launches after supplied inputs and declared defaults validate. Missing or invalid inputs return `status: "needs_input"`, `runId: ""`, the exact `inputContract`, decision and estimate, without admission. Obtain actual values or required human input and retry explicitly; the next call routes again, never remapping stale inputs to a new contract. `none` returns `status: "not_launched"` and means conversation, clarification or inline work, not completion, refusal or fallback launch. Routing failure does not fabricate a decision.
+`route` returns `workflowType`, a code-generated `workflowId`, `estimatedDuration`, and the selected definition's actual `inputSchema`, including defaults. It does not launch. `none` returns an empty ID and reserves nothing. The nested `routerDecision` repeats the selection and estimate and contains the resolved `maxBudget`.
 
-`estimatedDuration` is a wall-clock range selected from task/catalog context, not measured timing or a guarantee. Minutes and hours are explicit in the value: under 5 minutes; 5–15 minutes; 15–60 minutes; 1–4 hours; over 4 hours; or `unknown` when evidence is insufficient. It is never `maxDurationMs`, a user budget, or permission to change limits. Report it only after the tool returns.
+`run` requires the reserved `workflowId` and explicit `inputs`; it neither routes again nor accepts a workflow-name override, routing state or budget. Missing/invalid inputs return actionable `needs_input` feedback and the same ID. Correct inputs and retry that ID. A fresh task, selection or budget requires a fresh route. IDs are bound to their owner/session and definition/schema; unknown, foreign, expired, invalidated and stale IDs are rejected, never silently remapped. Reservations expire with their owning tool/session. Duplicate admission cannot create a second instance.
 
-Atomic supplies all effective registered workflow identities, descriptions, input contracts and inherited budgets in one bounded inference. It revalidates the registry before admission; a stale decision cannot launch a changed or removed definition. User-issued `/workflow` commands and authored `ctx.workflow(...)` composition bypass this gate. Inspection/control actions are unaffected, and workflow-stage tool restrictions remain enforced. See [Model-invoked launch routing](/workflows/operations#model-invoked-launch-routing) for a complete call, model selection, reload and error handling.
+Use that same UUID as `runId` for supported inspection, prompt answers and lifecycle controls. Resume continues that instance's checkpoints, not another execution. Terminal IDs remain inspectable but cannot launch again. User `/workflow` commands remain direct launches; authored `ctx.workflow(...)` remains internal composition. Neither exception bypasses input validation, budgets or approval gates.
+
+`estimatedDuration` is one of 98 canonical strings: quarter-hour increments from `15min` through `1d`, plus `unknown` and `>1d`. Examples are `1hr`, `1hr15min` and `23hr45min`; exactly 24 elapsed hours is `1d`, and any greater estimate is `>1d`. Positive estimates round up; below or exactly 15 minutes uses `15min`. `unknown` means insufficient evidence. Report labels directly. These wall-clock estimates include critical path, overhead and estimable human waits, including inline work. Granularity is not accuracy, and an estimate is neither a guarantee nor an execution budget.
+
+`userBudget.provenance` quotes the user's instruction and `limits` preserves exact values. Omission inherits and zero disables only its field. Duration/tokens are nonnegative integers; cost/warning percentage are nonnegative numbers. Unknown properties are rejected. See [Model-invoked launch routing](/workflows/operations#model-invoked-launch-routing) for provider-independent routing and troubleshooting.
 
 ## The `workflow()` definition
 

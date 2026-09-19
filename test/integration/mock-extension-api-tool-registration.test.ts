@@ -65,12 +65,12 @@ describe("MockExtensionAPI — tool registration", () => {
 		assert.doesNotMatch(description, /kill/);
 	});
 
-	test("README workflow tool description stays in sync", () => {
+	// #3106: caller docs keep the concise contract, not a duplicated full tool prompt.
+	test("README explains route then registered run without duplicating the tool description", () => {
 		const readme = readFileSync(join(process.cwd(), "packages/workflows/README.md"), "utf8");
-		assert.ok(
-			readme.includes(`"description": "${WORKFLOW_TOOL_DESCRIPTION}",`),
-			"README JSON example includes WORKFLOW_TOOL_DESCRIPTION",
-		);
+		assert.ok(readme.includes("Call `workflow route` with the actual request"));
+		assert.ok(readme.includes("call `workflow run` with the registered workflow ID"));
+		assert.ok(!readme.includes(WORKFLOW_TOOL_DESCRIPTION));
 	});
 
 	test("tool has parameters schema (TypeBox object)", () => {
@@ -137,6 +137,7 @@ describe("MockExtensionAPI — tool registration", () => {
 			"quit",
 			"reload",
 			"resume",
+			"route",
 			"run",
 			"stage",
 			"stages",

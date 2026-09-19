@@ -202,14 +202,12 @@ export function expectRegisteredCommand(commands: RegisteredCommand[], name: str
 }
 
 export const EXPECTED_WORKFLOW_DESCRIPTION_TOKENS = [
-	"registered builtin, project, user, or package workflow",
-	"All model-tool selection belongs to the router",
-	"Supply neutral top-level state",
-	"legacy workflow arguments are deprecated and ignored",
-	"routerDecision:{workflowType,maxBudget,estimatedDuration}",
-	"needs_input includes the exact inputContract and no admission",
-	"None means converse, clarify or work inline",
-	"never turn brainstorming into an invented implementation objective",
+	"Call workflow route",
+	"actual request",
+	"registered workflow ID",
+	"If it returns none, continue inline",
+	"invalid inputs can be corrected using the same ID",
+	"No name override or omitted-action launch",
 	"custom TypeScript workflow",
 	"inline with normal coding tools",
 	"discover with list/get/inputs",

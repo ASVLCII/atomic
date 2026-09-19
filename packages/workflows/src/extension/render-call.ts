@@ -9,9 +9,11 @@ import { truncateToWidth } from "../tui/text-helpers.js";
 /** Renderer-only subset of the canonical WorkflowToolArgs from index.ts. */
 export interface WorkflowToolArgs {
 	workflow?: string;
+	workflowId?: string;
 	inputs?: WorkflowInputValues;
 	action?:
 		| "models"
+		| "route"
 		| "run"
 		| "list"
 		| "get"
@@ -31,6 +33,7 @@ export interface WorkflowToolArgs {
 }
 
 function runTarget(args: WorkflowToolArgs): string | undefined {
+	if (args.workflowId !== undefined) return args.workflowId;
 	if (args.workflow !== undefined && args.workflow.trim().length > 0) return args.workflow;
 	if (args.runId !== undefined && args.runId.trim().length > 0) return args.runId;
 	return undefined;
@@ -71,6 +74,9 @@ export function renderCall(args: WorkflowToolArgs, opts: RenderCallOpts = {}): s
 			break;
 		case "inputs":
 			line = name === undefined ? "workflow: show inputs" : `workflow: show inputs for ${quoted(name)}`;
+			break;
+		case "route":
+			line = "workflow: route";
 			break;
 		case "run":
 			line = "workflow: run";

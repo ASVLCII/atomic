@@ -27,11 +27,11 @@ import {
 import { resolveAndValidateInputs } from "../runs/foreground/executor-inputs.js";
 import type { RunOpts } from "../runs/foreground/executor-types.js";
 import { isFullRunId, resolveRunIdTarget } from "../shared/run-id.js";
-import type { RunSnapshot } from "../shared/store-types.js";
 import type { WorkflowDefinition, WorkflowInputValues } from "../shared/types.js";
 import type { WorkflowRegistry } from "../workflows/registry.js";
 import { type DurableWorkflowBackend, resumableEntryFromHandle } from "./backend.js";
 import { durableWorkflowRunSnapshots } from "./completed-catalog.js";
+import { boundedAdmission, dbosAdmissionContext } from "./dbos-admission.js";
 import { getAtomicExecutorId } from "./dbos-sdk-handle.js";
 import { getDurableBackend } from "./factory.js";
 import { isDurableWorkflowResumable, isForeignLiveWorkflow } from "./resume-eligibility.js";
@@ -105,8 +105,39 @@ export function resolveDurableEntry(
 	return catalog.find((entry) => entry.workflowId === resolution.runId);
 }
 
-/** Resume by DBOS workflow id and replay current persisted checkpoints. */
+const pendingResumes = new WeakMap<DurableWorkflowBackend, Set<string>>();
+const unsettledResumeClaims = new WeakMap<DurableWorkflowBackend, Set<string>>();
+
+/** Serialize admission per durable identity, including callers from different runtime views. */
 export async function resumeDurableWorkflow(
+	workflowId: string,
+	deps: ResumeDurableDeps,
+	catalog?: readonly ResumableWorkflowEntry[],
+): Promise<ResumeDurableResult> {
+	const backend = deps.durableBackend ?? getDurableBackend();
+	const target = resolveDurableEntry(workflowId, catalog ?? backend.listResumableWorkflows());
+	const id = target !== undefined && !("kind" in target) ? target.workflowId : workflowId;
+	let pending = pendingResumes.get(backend);
+	if (pending === undefined) {
+		pending = new Set();
+		pendingResumes.set(backend, pending);
+	}
+	if (pending.has(id) || unsettledResumeClaims.get(backend)?.has(id) || deps.jobs?.has(id))
+		return {
+			ok: false,
+			reason: "not_resumable",
+			message: `Workflow ${id} is already running or has a pending resume admission.`,
+		};
+	pending.add(id);
+	try {
+		return await resumeDurableWorkflowClaimed(workflowId, deps, catalog);
+	} finally {
+		pending.delete(id);
+	}
+}
+
+/** Resume by DBOS workflow id and replay current persisted checkpoints. */
+async function resumeDurableWorkflowClaimed(
 	workflowId: string,
 	deps: ResumeDurableDeps,
 	catalog?: readonly ResumableWorkflowEntry[],
@@ -229,7 +260,7 @@ export async function resumeDurableWorkflow(
 			message: `invalid_inputs: ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
-	let toolContinuation: RunOpts["continuation"];
+	let toolContinuation: RunOpts["continuation"] = deps.baseRunOpts.continuation;
 	if (
 		handle.status === "failed" &&
 		(handle.failedToolNodeId !== undefined ||
@@ -246,16 +277,65 @@ export async function resumeDurableWorkflow(
 		toolContinuation = { source: source!, resumeFromToolNodeId: frontier.toolNodeId };
 	}
 	deps.signal?.throwIfAborted();
+	const sourceFailure = {
+		error: handle.error,
+		exited: handle.exited,
+		exitReason: handle.exitReason,
+		failureKind: handle.failureKind,
+		failureCode: handle.failureCode,
+		failureRecoverability: handle.failureRecoverability,
+		failureDisposition: handle.failureDisposition,
+		failedToolNodeId: handle.failedToolNodeId,
+	};
+	const sourceSnapshot =
+		toolContinuation?.source ?? deps.baseRunOpts.store?.runs().find((run) => run.id === resolved.workflowId);
 
 	// Claim resume against concurrent deletion through the required transition seam.
-	const claimed = await backend.transitionWorkflowStatus(
-		resolved.workflowId,
-		[handle.status],
-		"running",
-		undefined,
-		undefined,
-		resolved.updatedAt,
-	);
+	let claimed: boolean;
+	try {
+		claimed = await boundedAdmission(
+			(signal) =>
+				dbosAdmissionContext.run(signal, async () => {
+					let unsettled = unsettledResumeClaims.get(backend);
+					if (unsettled === undefined) {
+						unsettled = new Set();
+						unsettledResumeClaims.set(backend, unsettled);
+					}
+					unsettled.add(resolved.workflowId);
+					try {
+						const accepted = await backend.transitionWorkflowStatus(
+							resolved.workflowId,
+							[handle.status],
+							"running",
+							undefined,
+							undefined,
+							resolved.updatedAt,
+						);
+						if (accepted && signal.aborted && backend.getWorkflow(resolved.workflowId)?.status === "running") {
+							backend.setWorkflowStatus(
+								resolved.workflowId,
+								handle.status,
+								handle.pendingPrompts,
+								handle.resumable,
+								sourceFailure,
+							);
+							await backend.flush(resolved.workflowId);
+						}
+						return accepted;
+					} finally {
+						unsettled.delete(resolved.workflowId);
+					}
+				}),
+			deps.signal,
+		);
+	} catch (error) {
+		if (deps.signal?.aborted) throw deps.signal.reason ?? error;
+		return {
+			ok: false,
+			reason: "startup_failed",
+			message: `Failed to resume durable workflow ${resolved.workflowId}: ${error instanceof Error ? error.message : String(error)} No executor was launched; inspect the retained instance before retrying.`,
+		};
+	}
 	if (!claimed) {
 		return {
 			ok: false,
@@ -263,7 +343,6 @@ export async function resumeDurableWorkflow(
 			message: `Workflow ${resolved.workflowId} changed while resume was pending; refresh the workflow list and try again.`,
 		};
 	}
-	removeDurableResumeShadowRuns(deps.baseRunOpts.store, resolved.workflowId);
 
 	const resumeRunOpts: RunOpts = {
 		...deps.baseRunOpts,
@@ -280,10 +359,45 @@ export async function resumeDurableWorkflow(
 			...resumeRunOpts,
 			startupSignal: deps.signal,
 			...(deps.jobs !== undefined ? { jobs: deps.jobs } : {}),
+			onRawSettled: async (_ok, result, error) => {
+				const message = result?.error ?? (error instanceof Error ? error.message : String(error));
+				if (
+					toolContinuation !== undefined &&
+					(message.includes("insufficient_state: replay topology mismatch") ||
+						message.includes("insufficient_state: replay topology ambiguous"))
+				) {
+					const current = deps.baseRunOpts.store?.runs().find((run) => run.id === resolved.workflowId);
+					// Do not undo a concurrent terminal control decision.
+					if (current?.status === "failed" && current.error === message) {
+						backend.setWorkflowStatus(
+							resolved.workflowId,
+							handle.status,
+							handle.pendingPrompts,
+							handle.resumable,
+							sourceFailure,
+						);
+						await backend.flush(resolved.workflowId);
+						if (
+							deps.baseRunOpts.store?.runs().find((run) => run.id === resolved.workflowId) === current &&
+							current.status === "failed" &&
+							current.error === message
+						) {
+							deps.baseRunOpts.store.recordRunStart({ ...toolContinuation.source, error: message });
+						}
+					}
+				}
+			},
 		});
 	} catch (error) {
-		backend.setWorkflowStatus(resolved.workflowId, handle.status, handle.pendingPrompts, handle.resumable);
+		backend.setWorkflowStatus(
+			resolved.workflowId,
+			handle.status,
+			handle.pendingPrompts,
+			handle.resumable,
+			sourceFailure,
+		);
 		await backend.flush(resolved.workflowId);
+		if (sourceSnapshot !== undefined) deps.baseRunOpts.store?.recordRunStart(sourceSnapshot);
 		return {
 			ok: false,
 			reason: "startup_failed",
@@ -301,9 +415,16 @@ export async function resumeDurableWorkflow(
 			`Workflow ${resolved.workflowId} ended before startup admission`,
 		);
 		if (!backend.isAdmissionUnavailable?.(resolved.workflowId)) {
-			deps.baseRunOpts.store?.removeRun(accepted.runId);
-			backend.setWorkflowStatus(resolved.workflowId, handle.status, handle.pendingPrompts, handle.resumable);
+			if (sourceSnapshot === undefined) deps.baseRunOpts.store?.removeRun(accepted.runId);
+			backend.setWorkflowStatus(
+				resolved.workflowId,
+				handle.status,
+				handle.pendingPrompts,
+				handle.resumable,
+				sourceFailure,
+			);
 			await backend.flush(resolved.workflowId);
+			if (sourceSnapshot !== undefined) deps.baseRunOpts.store?.recordRunStart(sourceSnapshot);
 		}
 		return {
 			ok: false,
@@ -321,18 +442,6 @@ export async function resumeDurableWorkflow(
 	};
 }
 
-function isDurableResumeShadow(run: RunSnapshot): boolean {
-	return run.endedAt !== undefined || run.exitReason === "quit" || run.status === "paused";
-}
-
-function removeDurableResumeShadowRuns(store: RunOpts["store"], workflowId: string): void {
-	if (store === undefined) return;
-	for (;;) {
-		const existing = store.runs().find((run) => run.id === workflowId);
-		if (existing === undefined || !isDurableResumeShadow(existing)) return;
-		if (!store.removeRun(workflowId)) return;
-	}
-}
 function foreignRunningResult(name: string, workflowId: string): ResumeDurableResult {
 	return {
 		ok: false,

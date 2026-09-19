@@ -11,6 +11,7 @@ import {
 	workflowPauseAction,
 	workflowResumeAction,
 } from "../../packages/workflows/src/extension/workflow-tool-control.js";
+import { jobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { restoreOnSessionStart, type SessionEntry } from "../../packages/workflows/src/shared/persistence-restore.js";
 import { createStore, store } from "../../packages/workflows/src/shared/store.js";
 import type { RunSnapshot } from "../../packages/workflows/src/shared/store-types.js";
@@ -110,6 +111,7 @@ test.each([
 		assert.ok(aborted.action === "pause");
 		assert.equal(aborted.status, "cancelled");
 		await waitFor(() => store.runs().some((run) => run.id === runId && run.endedAt !== undefined));
+		await jobTracker.get(runId)?.promise;
 		const source = store.runs().find((run) => run.id === runId)!;
 		assert.equal(source.status, "failed");
 		const restoredSessionStore = createStore();
@@ -227,18 +229,10 @@ test.each([
 			return;
 		}
 		assert.equal(resumed.status, "running", resumed.message);
-		await waitFor(() =>
-			store
-				.runs()
-				.some(
-					(run) =>
-						(run.resumedFromRunId === runId || (mode === "dbos-direct" && run.id === runId)) &&
-						run.endedAt !== undefined,
-				),
-		);
-		const continuation = store
-			.runs()
-			.find((run) => run.resumedFromRunId === runId || (mode === "dbos-direct" && run.id === runId))!;
+		// #3106: wait for the same executor's settlement, including failed replay restoration.
+		await jobTracker.get(resumed.runId)?.promise;
+		const continuation = store.runs().find((run) => run.id === runId)!;
+		assert.equal(resumed.runId, runId);
 		if (mode === "changed-args") {
 			assert.equal(continuation.status, "failed");
 			assert.match(continuation.error ?? "", /insufficient_state/);
@@ -273,7 +267,7 @@ test.each([
 	},
 );
 
-// #3038: repeated fresh-ID tool-frontier continuations must retain completed topology and timing.
+// #3038, #3106: repeated same-ID resumes retain completed topology and timing.
 test.each(["live", "restored"] as const)(
 	"public repeated tool-frontier continuation preserves two interleaved stages and effects (%s)",
 	async (mode) => {
@@ -325,6 +319,7 @@ test.each(["live", "restored"] as const)(
 		const started = await runtime.dispatch({ action: "run", workflow: definition.name, inputs: {} });
 		assert.ok(started.action === "run");
 		await waitFor(() => store.runs().some((run) => run.id === started.runId && run.endedAt !== undefined));
+		await jobTracker.get(started.runId)?.promise;
 		let source = store.runs().find((run) => run.id === started.runId)!;
 		const timing = source.stages.map(({ startedAt, endedAt, durationMs }) => ({ startedAt, endedAt, durationMs }));
 		for (let hop = 1; hop <= 2; hop++) {
@@ -340,9 +335,9 @@ test.each(["live", "restored"] as const)(
 			}
 			const resumed = await runtime.resumeFailedRun(source.id);
 			assert.ok(resumed.ok, resumed.message);
-			await waitFor(() => store.runs().some((run) => run.id === resumed.runId && run.endedAt !== undefined));
+			await jobTracker.get(resumed.runId)?.promise;
 			const continuation = store.runs().find((run) => run.id === resumed.runId)!;
-			assert.notEqual(continuation.id, source.id);
+			assert.equal(continuation.id, source.id);
 			assert.equal(continuation.status, hop === 1 ? "failed" : "completed", continuation.error);
 			assert.deepEqual(
 				continuation.stages.map(({ startedAt, endedAt, durationMs }) => ({ startedAt, endedAt, durationMs })),

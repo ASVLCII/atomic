@@ -98,6 +98,7 @@ function setupReviewerResume(overrides: Partial<RunSnapshot> = {}) {
 	return { backend, calls, jobs, runtime };
 }
 
+// #3106: checkpoint continuation retains the execution identity.
 test("tool resumes an ended recoverable blocked root at its failed reviewer without repeating completed work", async () => {
 	const { backend, calls, jobs, runtime } = setupReviewerResume();
 	const result = await workflowResumeAction(
@@ -106,15 +107,14 @@ test("tool resumes an ended recoverable blocked root at its failed reviewer with
 	);
 	assert.ok(result.action === "resume");
 	assert.equal(result.status, "running", JSON.stringify(result));
-	assert.notEqual(result.runId, sourceId);
+	assert.equal(result.runId, sourceId);
 	await jobs.get(result.runId)?.promise;
-	assert.deepEqual(calls, ["review:retained preparation", "finish"]);
+	assert.deepEqual(calls, ["review:retained preparation", "finish"], JSON.stringify(store.runs()));
 	const continuation = store.runs().find((run) => run.id === result.runId);
 	assert.equal(continuation?.status, "completed");
 	assert.equal(continuation?.resumedFromRunId, sourceId);
 	assert.equal(continuation?.stages.find((stage) => stage.name === "prepare")?.replayed, true);
-	assert.equal(backend.getWorkflow(sourceId)?.status, "blocked");
-	assert.equal(backend.getWorkflow(sourceId)?.resumable, true);
+	assert.equal(backend.getWorkflow(sourceId)?.status, "completed");
 });
 
 test.each(["blocked", "failed", "killed"] as const)(
@@ -185,7 +185,7 @@ test("CLI continues the exact ended blocked root through the real runtime", asyn
 	const { runtime, calls, jobs } = setupReviewerResume();
 	const result = await resumeCommand(runtime);
 	assert.deepEqual(result.errors, []);
-	assert.match(result.messages.join("\n"), /Resuming blocked/);
+	assert.match(result.messages.join("\n"), /Resuming durable/);
 	assert.match(result.messages.join("\n"), new RegExp(sourceId));
 	const [continuationId] = jobs.runIds();
 	assert.ok(continuationId);
@@ -203,8 +203,8 @@ test("runtime admits one ended blocked continuation and refuses a duplicate", as
 	assert.equal(accepted.length, 1);
 	assert.equal(results.filter((result) => !result.ok && result.reason === "not_resumable").length, 1);
 	await jobs.get(accepted[0]!.runId)?.promise;
-	assert.deepEqual(calls, ["review:retained preparation", "finish"]);
-	assert.equal(store.runs().find((run) => run.id === sourceId)?.status, "killed");
+	assert.deepEqual(calls, ["review:retained preparation", "finish"], JSON.stringify(store.runs()));
+	assert.equal(store.runs().find((run) => run.id === sourceId)?.status, "completed");
 	assert.equal(
 		isWorkflowRunResumable(workflowRunResumeCandidate(store.runs().find((run) => run.id === sourceId)!)),
 		false,

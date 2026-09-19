@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Breaking Changes
 
 - Headless launches return an accepted run identity for status inspection, without input pickers. Required durable gates remain pending until an authorized host or answer arrives, including when no host was initially bound. Explicit runtime execution policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Model-tool execution now requires `route` with content-bearing `state.task`, then `run` with the returned registered `workflowId` and validated inputs. Route returns the input schema without launching; input correction reuses the ID without rerouting. Old run-as-router calls and duration values are rejected. Estimates use 98 canonical quarter-hour labels through `1d`, plus `unknown` and `>1d`, without changing budgets ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
 
 ### Added
 
@@ -18,7 +19,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added live, bounded pending-input previews to the BACKGROUND widget, with per-workflow navigation and automatic clearing ([#2700](https://github.com/bastani-inc/atomic/pull/2700) by [@Shreyasd10](https://github.com/Shreyasd10)).
 - Added mandatory bounded routing before model-tool workflow launches, using explicit task state and the full current workflow catalog. Results show validated workflow/budget decisions as formatted JSON; `none` directs the caller to continue inline without launching, and changed registry approvals fail before admission. Routing context containing known configured credentials is rejected before either provider receives it. User `/workflow` commands and authored composition bypass the gate ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
 - Added prompt-based workflow-stage `model: "auto"` selection for stages, chains, and parallel tasks, with hard model constraints, shared router settings, and retained selection metadata across fallback and resume.
-- Model-tool `run` now dispatches the router-selected workflow without a caller-selected name, reports `estimatedDuration`, and returns the selected input contract without launching when values are missing or invalid. Routing considers conversational intent and whether a workflow is warranted.
 - Workflow input and durable approvals can use SDK human-input callbacks without terminal rendering, including nested stage questionnaires with original previews, selections and notes. Pending approvals survive host withdrawal and can be re-presented or resumed under another host without accepting stale answers ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Fixed

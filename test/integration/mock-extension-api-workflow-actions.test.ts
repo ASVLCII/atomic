@@ -83,16 +83,18 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 
 	test("action='run' for fan-out-and-synthesize returns a non-placeholder runId", async () => {
 		const execute = mock.tools[0]!.opts.execute;
+		const ctx = workflowRouterContext("fan-out-and-synthesize");
+		const route = await runTool(execute, { action: "route", state: workflowRouterState() }, ctx);
+		assert.equal(route.action, "route");
 		// Background dispatch returns `status: "running"` synchronously with a real UUID.
 		const result = await runTool(
 			execute,
 			{
-				workflow: "fan-out-and-synthesize",
+				workflowId: route.workflowId,
 				inputs: { prompt: "test query", max_branches: 1 },
 				action: "run",
-				state: workflowRouterState(),
 			},
-			workflowRouterContext("fan-out-and-synthesize"),
+			ctx,
 		);
 		assert.equal(result.action, "run");
 		const r = result as {
@@ -120,15 +122,17 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 
 	test("action='run' without adapters reports honest failure, not a stub", async () => {
 		const execute = mock.tools[0]!.opts.execute;
+		const ctx = workflowRouterContext("fan-out-and-synthesize");
+		const route = await runTool(execute, { action: "route", state: workflowRouterState() }, ctx);
+		assert.equal(route.action, "route");
 		const result = await runTool(
 			execute,
 			{
-				workflow: "fan-out-and-synthesize",
+				workflowId: route.workflowId,
 				inputs: { prompt: "test", max_branches: 1 },
 				action: "run",
-				state: workflowRouterState(),
 			},
-			workflowRouterContext("fan-out-and-synthesize"),
+			ctx,
 		);
 		const r = result as {
 			action: "run";
@@ -152,7 +156,7 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 		}
 	});
 
-	test("action='run' ignores an unknown legacy name and routes before rejecting an invalid decision", async () => {
+	test("action='run' rejects a legacy workflow name without routing or admission", async () => {
 		const execute = mock.tools[0]!.opts.execute;
 		const ctx = workflowRouterContext("nonexistent-workflow-xyz");
 		const inference = vi.spyOn(ctx.modelRegistry!, "streamSimple");
@@ -169,10 +173,9 @@ describe("MockExtensionAPI — tool run returns non-placeholder runId and termin
 		);
 		const r = result as { action: "run"; runId: string; status: string; error?: string };
 		assert.equal(r.status, "failed");
-		assert.match(r.error ?? "", /Invalid structured output/);
-		// The router's unknown selection is invalid; the legacy argument is not a pre-router gate.
+		assert.match(r.error ?? "", /registered workflowId/);
 		assert.equal(r.runId, "");
-		assert.equal(inference.mock.calls.length, 4);
+		assert.equal(inference.mock.calls.length, 0);
 		assert.deepEqual(
 			defaultStore.runs().map((run) => run.id),
 			runsBefore,

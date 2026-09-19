@@ -642,9 +642,8 @@ export function installWorkflowHeartbeatScheduler(
 	 * Taking the minimum means the record can only restore the original anchor,
 	 * never advance it.
 	 *
-	 * A failed-run continuation legitimately starts a new series: it carries a
-	 * fresh run id, and the slice-1 identity is `runId + scheduledAt`, so it is a
-	 * different run and reads no record of its own.
+	 * Failed/blocked checkpoint continuation also retains this identity and
+	 * cadence; only a newly routed execution starts an independent series.
 	 */
 	function resolveAnchorAt(run: WorkflowHeartbeatRun): number {
 		const cached = state.anchorAt.get(run.id);

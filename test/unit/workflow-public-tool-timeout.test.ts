@@ -93,12 +93,22 @@ describe("public workflow tool request deadline", () => {
 		});
 		const runtime = createExtensionRuntime({ definitions: [definition] });
 		const tool = registeredTool(makeExecuteWorkflowTool(runtime, () => undefined));
+		const ctx = workflowRouterContext(definition.normalizedName);
+		const route = await tool.execute(
+			"route",
+			{ action: "route", state: workflowRouterState() },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(route.details.action, "route");
+		assert.ok("workflowId" in route.details);
 		const pending = tool.execute(
 			"auth-rejection",
-			{ action: "run", workflow: definition.name, state: workflowRouterState() },
+			{ action: "run", workflowId: route.details.workflowId },
 			undefined,
 			undefined,
-			workflowRouterContext(definition.normalizedName),
+			ctx,
 		);
 		await vi.advanceTimersByTimeAsync(0);
 		const result = await pending;
@@ -158,15 +168,19 @@ describe("public workflow tool request deadline", () => {
 			});
 			const runtime = createExtensionRuntime({ definitions: [definition] });
 			const tool = registeredTool(makeExecuteWorkflowTool(runtime, () => undefined));
+			const ctx = workflowRouterContext(definition.normalizedName);
+			const route = await tool.execute(
+				"route",
+				{ action: "route", state: workflowRouterState() },
+				undefined,
+				undefined,
+				ctx,
+			);
+			assert.equal(route.details.action, "route");
+			assert.ok("workflowId" in route.details);
 			let settled = false;
 			const pending = tool
-				.execute(
-					mode,
-					{ action: "run", workflow: definition.name, state: workflowRouterState() },
-					undefined,
-					undefined,
-					workflowRouterContext(definition.normalizedName),
-				)
+				.execute(mode, { action: "run", workflowId: route.details.workflowId }, undefined, undefined, ctx)
 				.then((result) => {
 					settled = true;
 					return result;
@@ -187,7 +201,7 @@ describe("public workflow tool request deadline", () => {
 			assert.match(error, /may remain without admission metadata/u);
 			assert.equal(reads.mock.calls.length, 0, "no unfenced cleanup reads after unavailable admission");
 			assert.equal(workflowStore.runs().find((run) => run.id === runId)?.status, "failed");
-			const status = await tool.execute("inspect-outage", { action: "status", runId }, undefined, undefined, {});
+			const status = await tool.execute("inspect-outage", { action: "status", runId }, undefined, undefined, ctx);
 			assert.equal(status.details.action, "statusDetail");
 			assert.equal("detail" in status.details ? status.details.detail.status : undefined, "failed");
 			await vi.advanceTimersByTimeAsync(WORKFLOW_TOOL_REQUEST_TIMEOUT_MS);
@@ -406,13 +420,23 @@ describe("public workflow tool request deadline", () => {
 			}
 			return result;
 		});
+		const ctx = workflowRouterContext(definition.normalizedName);
+		const route = await tool.execute(
+			"route",
+			{ action: "route", state: workflowRouterState() },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(route.details.action, "route");
+		assert.ok("workflowId" in route.details);
 
 		const pending = tool.execute(
 			"delayed-acknowledgement",
-			{ action: "run", workflow: definition.name, state: workflowRouterState() },
+			{ action: "run", workflowId: route.details.workflowId },
 			undefined,
 			undefined,
-			workflowRouterContext(definition.normalizedName),
+			ctx,
 		);
 		await vi.advanceTimersByTimeAsync(0);
 		await bodyEntered.promise;
@@ -436,7 +460,7 @@ describe("public workflow tool request deadline", () => {
 			{ action: "status", runId },
 			undefined,
 			undefined,
-			{},
+			ctx,
 		);
 		assert.equal(exactStatus.details.action, "statusDetail");
 		assert.equal("runId" in exactStatus.details ? exactStatus.details.runId : undefined, runId);
@@ -475,11 +499,10 @@ describe("public workflow tool request deadline", () => {
 		const runtime = createExtensionRuntime({ definitions: [definition], store });
 		const execute = makeExecuteWorkflowTool(runtime, () => undefined);
 		const controller = new AbortController();
-		const acknowledgement = await execute(
-			{ action: "run", workflow: "public-timeout-background-ack", state: workflowRouterState() },
-			workflowRouterContext(definition.normalizedName),
-			controller.signal,
-		);
+		const ctx = workflowRouterContext(definition.normalizedName);
+		const route = await execute({ action: "route", state: workflowRouterState() }, ctx);
+		assert.equal(route.action, "route");
+		const acknowledgement = await execute({ action: "run", workflowId: route.workflowId }, ctx, controller.signal);
 		assert.equal(acknowledgement.action, "run");
 		assert.equal("status" in acknowledgement ? acknowledgement.status : undefined, "running");
 		await bodyEntered.promise;

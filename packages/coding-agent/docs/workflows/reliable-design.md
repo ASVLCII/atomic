@@ -349,48 +349,29 @@ export default workflow({
 
 The workflow binding creates or validates the reusable worktree before `run` starts. The first durable tool then creates or checks out the requested feature branch, so worktree setup's detached checkout never becomes the implementation branch. The item run owns branch setup → implementation → bounded review/repair → deterministic checks → push → PR creation. A failed review or check fails that item before push/PR.
 
-Inspect the new definition with `workflow({ action: "inputs", workflow: "issue-to-pr" })`. The following model-tool calls supply factual per-item state and unbound inputs, not a selected workflow. Each call routes independently; only an admitted workflow gets a run ID. Inspect `routerDecision`, `estimatedDuration`, and any `needs_input` contract before treating it as launched. A different selection validates inputs against that different definition; `none` launches nothing. For deliberate exact-name execution, use user-issued `/workflow` commands instead. Admit no third run until one ends to preserve the bound of 2.
+Route each item with its actual request and constraints. Inspect the returned `inputSchema`, then prepare inputs and run its registered ID. Reservations do not count as executing runs. Admit no third run until one ends to preserve the bound of 2. If routing returns `none`, continue that item inline. Explicit user `/workflow` commands remain available for deliberate exact-name launches.
 
 ```ts
-workflow({
-  action: "run",
-  state: {
-    literalRequest: "Fix cache-key normalization for issue #2101 and create its PR after validation.",
-    intent: "Fix cache-key normalization for issue #2101 and create its PR after validation.",
-    conversation: [],
-    constraints: ["Use the supplied separate worktree and branch; at most two concurrent item runs."],
-    executionPreference: "unspecified",
-    documents: [],
-  },
-  inputs: {
-    issue: "#2101 fix cache-key normalization",
-    git_worktree_dir: "../atomic-issue-2101",
-    base_ref: "origin/main",
-    pr_base: "main",
-    branch: "fix/2101-cache-key",
-    checks: [["bun", "test", "test/unit/cache-key.test.ts"]],
-  },
-})
+workflow({ action: "route", state: {
+  task: "Fix cache-key normalization for issue #2101 and create its PR after validation.",
+  constraints: ["Use ../atomic-issue-2101 and branch fix/2101-cache-key; at most two concurrent item runs."],
+}})
+// If the returned inputSchema declares these inputs:
+workflow({ action: "run", workflowId: "returned-id-for-2101", inputs: {
+  issue: "#2101 fix cache-key normalization",
+  git_worktree_dir: "../atomic-issue-2101", base_ref: "origin/main", pr_base: "main",
+  branch: "fix/2101-cache-key", checks: [["npm", "run", "test:unit", "--", "test/unit/cache-key.test.ts"]],
+}})
 
-workflow({
-  action: "run",
-  state: {
-    literalRequest: "Correct CLI help output for issue #2102 and create its PR after validation.",
-    intent: "Correct CLI help output for issue #2102 and create its PR after validation.",
-    conversation: [],
-    constraints: ["Use the supplied separate worktree and branch; at most two concurrent item runs."],
-    executionPreference: "unspecified",
-    documents: [],
-  },
-  inputs: {
-    issue: "#2102 correct CLI help output",
-    git_worktree_dir: "../atomic-issue-2102",
-    base_ref: "origin/main",
-    pr_base: "main",
-    branch: "fix/2102-cli-help",
-    checks: [["bun", "test", "test/unit/cli-help.test.ts"]],
-  },
-})
+workflow({ action: "route", state: {
+  task: "Correct CLI help output for issue #2102 and create its PR after validation.",
+  constraints: ["Use ../atomic-issue-2102 and branch fix/2102-cli-help; at most two concurrent item runs."],
+}})
+workflow({ action: "run", workflowId: "returned-id-for-2102", inputs: {
+  issue: "#2102 correct CLI help output",
+  git_worktree_dir: "../atomic-issue-2102", base_ref: "origin/main", pr_base: "main",
+  branch: "fix/2102-cli-help", checks: [["npm", "run", "test:unit", "--", "test/unit/cli-help.test.ts"]],
+}})
 ```
 
 For a longer queue, wait for a terminal lifecycle notice before filling an open slot; do not poll. Keep each returned top-level run ID with its item metadata. Lifecycle notices carry terminal status/error, not declared workflow outputs.
@@ -525,12 +506,12 @@ The tags are plain text, so they work anywhere text becomes a stage prompt — y
 **Run inputs.** Workflows inject their inputs into stage prompts, so anything you tag in an input is inherited by the stages that receive it:
 
 ```
-workflow({ action: "run", state: {
-  literalRequest: "Research and implement issue #2170. Do not touch the release pipeline.",
-  intent: "Research and implement issue #2170. Do not touch the release pipeline.",
-  conversation: [], constraints: ["Do not touch the release pipeline."],
-  executionPreference: "unspecified", documents: [],
-}, inputs: {
+workflow({ action: "route", state: {
+  task: "Research and implement issue #2170. Do not touch the release pipeline.",
+  documents: [{ source: "issue #2170", content: issueBody }],
+}})
+// Inspect inputSchema before preparing these inputs:
+workflow({ action: "run", workflowId: "returned-execution-id", inputs: {
   prompt: "<keepContext>\nResearch and implement issue #2170. Do not touch the release pipeline.\n</keepContext>\n\n" + issueBody,
   acceptance_criteria: "<keepContext>\n1. ...\n2. ...\n</keepContext>",
 }})

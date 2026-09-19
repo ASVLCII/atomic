@@ -44,9 +44,9 @@ export function launchDetachedUntilStartup<
 	const accepted = runDetached(def, inputs, {
 		...opts,
 		onWorkflowStartReady: startup.onWorkflowStartReady,
-		onRawSettled: (ok, result, error) => {
+		onRawSettled: async (ok, result, error) => {
 			try {
-				priorSettled?.(ok, result, error);
+				await priorSettled?.(ok, result, error);
 			} finally {
 				startup.onRawSettled(ok, result, error);
 			}

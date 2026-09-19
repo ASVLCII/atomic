@@ -364,11 +364,11 @@ describe("workflow lazy-startup review follow-up fixes", () => {
 			},
 		);
 
-		const result = await handler(
-			{ action: "run", workflow: "lazy model run", inputs: {}, state: workflowRouterState() },
-			workflowRouterContext("lazy-model-run"),
-		);
-
+		const ctx = workflowRouterContext("lazy-model-run");
+		const route = await handler({ action: "route", state: workflowRouterState() }, ctx);
+		assert.equal(route.action, "route");
+		assert.equal(route.status, "reserved");
+		const result = await handler({ action: "run", workflowId: route.workflowId, inputs: {} }, ctx);
 		assert.equal(ensureCalls, 1);
 		assert.equal(result.action, "run");
 		assert.equal(result.status, "running");

@@ -84,7 +84,7 @@ workflow({ action: "models" })
 The workflow tool action surface is:
 
 - discovery: `list`, `get`, `inputs`, plus `models` for the configured model catalog
-- execution: named `run` with validated `workflow`, `inputs`, and top-level routing `state`
+- execution: `route` with content-bearing `state`, then `run` with the registered `workflowId` and validated `inputs`
 - inspection: `status`, `stages`, `stage`, `transcript`
 - prompt response: `answer`; run control: `pause`, `quit`, `resume`; free-form stage communication: ordinary Intercom `send`/live `ask` to `workflow:<rootRunId>/<segment>[/<segment>...]` path targets, including `*` and `**` globs
 - rediscovery: `reload`
@@ -122,24 +122,19 @@ Named launches wait only for **startup admission**, not for workflow completion.
 
 A model may launch in the foreground only when the user explicitly requests it or foreground execution is technically required, and it must tell the user before launching.
 
-Let the router choose using task context and known inputs:
+Route before preparing workflow-specific inputs:
 
 ```ts
 workflow({
-  action: "run", // Omitting action also invokes the launch router.
-  inputs: { prompt: "map workflow runtime by subsystem", max_concurrency: 4 },
+  action: "route",
   state: {
-    literalRequest: "Map the workflow runtime by subsystem, with parallel research and a synthesis.",
-    intent: "Produce a subsystem map with source references.",
+    task: "Map the workflow runtime by subsystem, with parallel research and a synthesis.",
     conversation: [{ role: "user", text: "Read-only research; do not edit files." }],
-    constraints: ["Read-only; cite source files; do not modify the repository."],
-    executionPreference: "unspecified",
-    documents: [{
-      source: "Approved research brief",
-      content: "Compare discovery, dispatch, execution and persistence. Research independently, then synthesize their boundaries and dependencies.",
-    }],
+    documents: [{ source: "Approved research brief", content: "Compare discovery, dispatch, execution and persistence." }],
   },
 })
+// Inspect the returned inputSchema, then use the returned workflowId:
+workflow({ action: "run", workflowId: "returned-execution-id", inputs: { prompt: "map workflow runtime by subsystem" } })
 ```
 
 To deliberately bypass model-tool routing, the user can issue an explicit command:
@@ -166,17 +161,13 @@ Graph node cards show each model stage's effective model and thinking level abov
 
 ## Model-invoked launch routing
 
-Every model-tool `action: "run"` call, including calls that omit `action`, requires top-level `state`. Atomic makes one bounded logical routing decision before workflow admission or execution. The state belongs to the tool call, not the workflow's `inputs` schema. Inspection and control actions do not route. User-issued `/workflow <name>` commands and programmatic `ctx.workflow(...)` composition bypass the router; workflow stages still cannot call the workflow tool to launch another workflow.
+Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
 
-Prepare state before calling the tool:
+`state.task` is the actual request. Optional `conversation` contains attributed `{ role, text }` messages; optional `documents` contains `{ source, content }` excerpts or clearly labeled faithful summaries. Preserve uncertainty and explicit constraints. Empty arrays are valid. Paths/URLs are provenance metadata, not implicit reads. Read authorized sources before routing when needed; if unavailable, state that limitation in the content. Remove secrets before transmission. Document quotations do not become user authorization.
 
-- Copy the literal request into `literalRequest`, preserve intent and uncertainty in `intent`, and include relevant conversation with actual `{ role, text }` provenance. Do not preselect or advocate a workflow.
-- Include restrictions and actual execution preferences, including explicit named-workflow, inline, no-workflow or quickly requests. The router interprets these; the caller does not select or override the route. Brainstorming, exploratory discussion, unclear goals and unjustified workflow overhead generally favor `none`, meaning continue conversation, clarify or work inline.
-- Include supplied relevant documents as `{ source, content }` with actual text, not paths alone. Conversation and document arrays may be empty when no relevant context exists; do not invent it.
-- If the user specified budget limits, put their exact values in `userBudget.limits` and quote the instruction in `userBudget.provenance`. Omit this field when no override was requested.
-- Remove credentials and other secrets from all supplied text and workflow inputs. The selected router provider receives this context. Credential checks are not a substitute for reviewing what you send.
+Only route performs inference. Run rejects omitted/empty/unknown/foreign/stale IDs and name overrides. It accepts the selected schema's explicit inputs without resending state, rerouting or calling an extraction model. Invalid inputs do not consume a valid reservation. User `/workflow` commands and authored `ctx.workflow(...)` remain direct and internal execution paths respectively, with their existing safety contracts.
 
-Call `workflow({ action: "run", state, inputs })` without choosing a workflow name. Atomic supplies every effective registry contract and inherited budget. Legacy model-tool `workflow` names are deprecated and ignored, never treated as user provenance. Actual user-requested workflow names belong in conversation/state. Workflow-specific input values do not bias routing; Atomic validates them against the selected contract afterward. Catalog descriptions cannot establish user preferences or authorization.
+If the user specified budget limits, preserve exact values in `state.userBudget.limits` and quote the instruction in `provenance`. Omission inherits limits and zero disables only its field. A reservation is permission to attempt validated admission, not blanket approval for side effects.
 
 ### Choose the inference model
 
@@ -192,30 +183,22 @@ The router has one 30-second deadline for the whole decision, including an initi
 
 ### Read the decision
 
-Results expose `routerDecision` with `workflowType`, `maxBudget` and `estimatedDuration`, and repeat `estimatedDuration` at top level. Report the selection and estimate only after the tool returns. Duration values are `unknown`, `under_5_minutes`, `5_to_15_minutes`, `15_to_60_minutes`, `1_to_4_hours` or `over_4_hours`. These are unmeasured wall-clock ranges from task/catalog context, not guarantees, `maxDurationMs` or budgets; `unknown` means insufficient evidence.
+Route results expose `workflowType`, `workflowId`, `estimatedDuration`, and the named selection's actual `inputSchema` with defaults. The nested `routerDecision` repeats the selection and estimate and includes resolved `maxBudget`. Reservations are not executing runs and do not appear in run listings. They expire with the owning tool/session and invalidate when the registry or selected schema changes; route again rather than reusing a stale ID.
 
-The tool's visible result also shows a **ROUTER DECISION** panel with indented JSON, followed by the launch status or inline guidance. A launch-setup failure retains the validated decision unless a registry change has made it stale; it does not imply that a workflow started.
+Duration labels are quarter-hour increments from `15min` through `1d`, plus `unknown` and `>1d`. Report the labels directly, for example `1hr15min`. Positive estimates round up, including work under 15 minutes; exactly 24 elapsed hours is `1d`, anything greater is `>1d`. `unknown` means insufficient evidence. Wall-clock estimates include overhead, critical path and estimable human waits, including inline work. Granularity does not imply accuracy; estimates are neither guarantees nor execution budgets.
 
 | Decision | Result and next step |
 | --- | --- |
-| `workflowType: "none"` | `status: "not_launched"`, `runId: ""`, and guidance to continue inline within the existing authorized scope. No workflow or fallback runs. The router has not done the task; do not automatically reroute. |
-| Any selected registered workflow | Supplied inputs and declared defaults validate before launch. Normal run ID/status, decision and estimate are returned. |
-| Missing or invalid selected inputs | `status: "needs_input"`, `runId: ""`, exact `inputContract`, decision and estimate. Obtain actual missing values or ask the user; a later run routes again and never remaps stale inputs. No admission occurs. |
+| `workflowType: "none"` | `workflowId: ""`, `status: "not_launched"`. Continue inline; the task has not been completed. |
+| Named selection | `status: "reserved"`, unique `workflowId`, actual `inputSchema`. Prepare inputs, then run that ID. |
+| Missing/invalid run inputs | `status: "needs_input"`, same ID, exact `inputContract` and validation feedback. Correct inputs and retry without rerouting. |
+| Successful run admission | The reserved ID becomes the run ID. Inspect/control that instance; duplicates cannot create another executor. |
 
-For example, an inline decision without budget overrides returns:
+Keep the same ID for status, inspection, pause/resume, pending-prompt answers and cancellation. Concurrent run/resume requests cannot own two executors. Resume preserves completed checkpoints. A terminal ID supports inspection, not relaunch; a new execution requires a new route. Different IDs may execute independently in parallel.
 
-```json
-{
-  "action": "run",
-  "runId": "",
-  "status": "not_launched",
-  "routerDecision": { "workflowType": "none", "maxBudget": {}, "estimatedDuration": "unknown" },
-  "estimatedDuration": "unknown",
-  "message": "Continue the requested task inline within the existing authorized scope. No workflow was launched; the router has not performed or completed the task. Do not launch a fallback workflow or automatically reroute this decision."
-}
-```
+Routing, provider and launch failures remain errors, never `none` or successful execution. If a response is lost, inspect the reserved ID; retrying cannot launch a second instance.
 
-`maxBudget` preserves exact explicit user limits, including zero and omitted fields, even when no workflow launches. An empty object means inherit for a selected workflow, not unlimited execution. No workflow budget is installed for inline work, but the user's limits and authorization still apply. An optional top-level `budget` must match `state.userBudget.limits` exactly; estimates are not permission to add or expand limits.
+`maxBudget` preserves exact explicit user limits, including zero and omitted fields, even when no workflow launches. An empty object means inherit for a selected workflow, not unlimited execution. No workflow budget is installed for inline work, but the user's limits and authorization still apply. Run does not accept top-level budget overrides; route again to change constraints. Estimates never authorize adding or expanding limits.
 
 Missing context, invalid output after the repair allowance, provider errors, timeout and cancellation are failures, not `none` decisions. They prevent launch and expose no fabricated `routerDecision`. Correct the reported problem and retry explicitly when authorized. Cancellation or a late response cannot start a workflow after the routing attempt ends. The separate two-minute workflow-tool request deadline still covers the whole request, including subsequent startup admission.
 
@@ -482,13 +465,11 @@ Streaming lifecycle delivery now deliberately splits display from reconciliation
 
 The visible card preserves the lifecycle custom type, raw notice text, exact details payload (including omitted optional fields), and display behavior. Each deduplicated occurrence has exactly one visible/persisted lifecycle card; the internal reconciliation is hidden and persisted separately only after agent-core consumes it at the provider-safe boundary. If the process exits after card admission but before consumption, startup finds the unresolved marker and queues that hidden correction once; repeated startup binding skips an already queued intent, and the persisted hidden completion suppresses all later restores. Protection is registered before public card listeners run. Session replacement and shutdown fail closed while the hidden input remains queued, since persisting it before a pending tool result would break provider protocol order; host-owned invalidation work does not run on that failed teardown. A transient reconciliation write failure retries persistence without re-queueing model input or creating another card. Physical session appends restore the exact prior file length after a partial write failure, so a later card or reconciliation retry cannot inherit a malformed JSONL tail or phantom parent. Before session replacement or shutdown can discard consumed in-memory recovery state, Atomic flushes the reconciliation again; if that write still fails, disposal stops and keeps the current session recoverable. `clearQueue()` restores only protected references it actually removed, so a reference already drained into core-local in-flight state is not aliased. Stage-session delivery transfer moves protection only with transferred queued references and leaves in-flight ownership at the source. Delivery is acknowledged only after the display card append succeeds; while the invoking chat remains active, a rejected admission retains its original payload and retries with capped backoff even if the run changes state or notification configuration is reinstalled. Session replacement cancels those admission attempts and clears their payloads rather than waking an unrelated chat with an uninspectable old run. Awaiting-input workflow states are tracked for dedupe/restore, but they do not enqueue main-chat connect cards or wake the model; prompt state remains visible through workflow status/connect surfaces.
 
-When an active recoverable block is resumed in-process, Atomic dispatches a fresh-ID continuation that replays the source's completed stages and re-runs the failed one. The durable source is left untouched (stays `blocked`/resumable) so it remains discoverable and recoverable, including a zero-checkpoint first-stage block, if the process dies before the continuation settles. The local source snapshot is killed when that continuation is admitted, so this session has one active run. A fail-closed topology mismatch puts the blocked snapshot back so the same session can retry. A process-local claim prevents a concurrent same-session double-dispatch.
+Resume of a recoverable block continues the same workflow ID and reuses completed checkpoints. It does not reroute, allocate a replacement instance or replay completed effects. Concurrent admission is refused while another executor or resume owns the instance. A fail-closed topology mismatch preserves the prior resumable snapshot and prompt answers for inspection and a corrected retry.
 
-Ended recoverable blocks, including reviewer execution failures, use this same in-process continuation path. A resume response that only returns an unchanged blocked snapshot or refuses a non-resumable target reports no progress, not success. Inspect the returned continuation ID rather than assuming the original snapshot became running.
+An unchanged blocked result or a non-resumable refusal is not progress. Inspect status under the same ID after resume. For provider/auth blocks, resolve the reported cause first: quota limits need recovery; expired or missing OAuth needs normal login; authentication preparation timeouts require checking the credential source. Then explicitly resume. Human-input waits and progressing model streams remain separate from authentication preparation deadlines.
 
-If status shows a recoverable provider or auth block, inspect the reported error first. Rate limits need quota recovery; expired or missing OAuth needs a normal `/login` (or equivalent) for that provider. A request-auth preparation timeout means that provider's credential source did not settle in 15 seconds — check the source and resume; it is not itself a login failure. Then resume explicitly with `/workflow resume <run-id>` or `workflow({ action: "resume", runId })`, and use the continuation ID in the result rather than assuming the blocked snapshot became running. Request-auth preparation uses one 15-second bound per model request so a hung credential refresh cannot keep a stage `running` for hours. That bound does not cancel human-input waits, in-flight tools, or a slow but progressing model stream.
-
-Completed top-level `ctx.tool` nodes also replay into the fresh run. See [`ctx.tool` — durable cached tool execution](#ctx-tool-—-durable-cached-tool-execution). A fail-closed topology mismatch ends that continuation; the durable source stays blocked and resumable, and the same session can retry after the continuation settles.
+Completed top-level `ctx.tool` nodes replay under the same ID. See [`ctx.tool` — durable cached tool execution](#ctx-tool-—-durable-cached-tool-execution). A fail-closed topology mismatch preserves the previous resumable state; retry only after restoring the matching contract.
 
 Attributed control actions on a top-level run report themselves too. `/workflow <name>` emits a `WORKFLOW STARTED` notice (`▶`), `/workflow quit` a `WORKFLOW QUIT` notice (`⏹`, warning tone, carrying a `resumable` field), and `/workflow resume` a `WORKFLOW RESUMED` notice (`▶`). These travel the same steer delivery, capped-backoff retry, and notice-card path as the failure notice. The quit text states that the stop was deliberate and user-requested and tells the model not to resume the run or take the work over unless asked, with `/workflow resume <run-id>` as the card hint; the resumed text does not, because the run is progressing again.
 
@@ -496,7 +477,7 @@ Attributed control actions on a top-level run report themselves too. `/workflow 
 
 **Two attributions.** *Origin* is who launched the run and renders on every kind as "which you started" or "which the user started"; it is set once at dispatch, persisted through session restore and durable resume, and inherited by a continuation from the run it continues. *Actor* is who performed this one event and renders as "The user resumed" or "You resumed". They differ routinely — the agent starts a run and the user quits it. A run with no recorded origin, including a restored snapshot, omits the clause entirely rather than guessing.
 
-**One notice per attributed request.** A whole-run resume reports at run scope; a stage-scoped resume reports at stage scope when siblings remain paused. A quit reports only the quit, never the pause it publishes on the way. Notices are deduplicated by run id and occurrence timestamp, so repeated snapshot invalidations at one unchanged state emit one. Resuming reports a resume and never a start, whoever asked for it. Resuming a failed or blocked run launches a continuation under a fresh run id, and its notice names both; resuming a quit run reuses the original workflow id so durable checkpoints replay. A run already started, paused, or quit when notifications install — restore, replay, `/reload`, or a session-preserving reinstall — is seeded as delivered and stays silent, and nested child runs never notify at top level.
+**One notice per attributed request.** A whole-run resume reports at run scope; a stage-scoped resume reports at stage scope when siblings remain paused. A quit reports only the quit, never the pause it publishes on the way. Notices are deduplicated by run id and occurrence timestamp, so repeated snapshot invalidations at one unchanged state emit one. Resuming reports a resume and never a start, whoever asked for it. Resuming a supported failed, blocked or paused run retains its execution id and replays completed checkpoints without repeating effects. A run already started, paused, or quit when notifications install — restore, replay, `/reload`, or a session-preserving reinstall — is seeded as delivered and stays silent, and nested child runs never notify at top level.
 
 Configure lifecycle behavior with `workflowNotifications.enabled` (default `true`) and `workflowNotifications.notifyOn` (default `["started", "completed", "failed", "blocked", "budget_warning", "awaiting_input", "paused", "quit", "resumed"]`). A config that pins `notifyOn` explicitly keeps exactly the kinds it lists, so `notifyOn: ["failed"]` suppresses every control notice. `budget_warning` is delivered once per run and dimension through the same lifecycle-notice renderer.
 
@@ -644,9 +625,9 @@ A later cancellation does not replace an already-selected tool failure's origina
 
 Set `failureMode: "return"` when a failed check is expected data for a later repair stage. Atomic runs all configured retries first, then returns a `WorkflowToolOutcome<TValue>`. A successful callback returns `{ ok: true, value, attempts, cached }`. An exhausted callback failure returns `{ ok: false, error, attempts, cached }`; `error` preserves integer `exitCode` and string or byte-buffer `stdout`/`stderr` when the thrown value exposes them. The live and restored tool node stays `failed`, while the workflow body may continue and complete. On replay, Atomic returns the same stored outcome with `cached: true` and does not run the callback again.
 
-On a fresh-ID continuation, completed top-level `ctx.tool` nodes replay into the new run and keep their graph identity as parents of downstream stages, including concurrent `Promise.all` fan-out. A `failureMode: "return"` checkpoint, success or `return_failure`, is reused as the recorded outcome rather than re-running the callback. A later fresh-ID hop reuses that result only when the intermediate run republished the checkpoint under its own id. That republish is best-effort; if it does not land, the next hop runs the callback again.
+On resume, completed top-level `ctx.tool` nodes retain their graph identity and cached outcomes, including concurrent `Promise.all` fan-out. A `failureMode: "return"` checkpoint, success or `return_failure`, is reused rather than running the callback again. All continuation attempts use the same run identity and checkpoint history.
 
-Start a new run, or change the tool name or args, to force a completed return-mode callback to execute again. A continuation will not. Inspection-only `tool-failure:` throwing records stay out of the replay cache, so those calls run again. Completed child stages replay; incomplete siblings follow their ordinary continuation policy. When the source checkpoint has topology, a fresh-ID continuation fails closed if it admits a live parent the restored set does not include. Replayed siblings that settle before the next sibling spawns still keep the source parents, including concurrent root-level tools with no seed stage. A topology-less checkpoint skips that check and infers parents on the continuation. A fail-closed mismatch ends the continuation; the blocked source stays resumable in the same session, including its recorded prompt answers and BLOCKED notice, and no terminal source entry is persisted. `/workflow resume` can be retried without asking those questions again. After a non-mismatch continuation settles, Atomic persists the superseded source as terminal so a rebuilt session cannot resurrect it.
+A new execution requires a new route-issued ID. Resume must match the retained workflow/checkpoint contract; do not change tool names or arguments to replay completed side effects. Inspection-only throwing records are not success checkpoints, so unfinished calls may execute again. Topology mismatches fail closed before unmatched live work is admitted; retained prompt answers and the prior resumable snapshot remain available for a corrected retry. An effect without a saved checkpoint is not guaranteed exactly once.
 
 Recoverable output is explicit data flow. Atomic does not add a failed tool outcome to a later stage prompt. The workflow author must place the needed fields in `prompt`, `previous`, an output, or an artifact. Each persisted error text field is best-effort secret-redacted with the workflow persistence rules and limited to 16 KiB of UTF-8; truncated fields keep the final bytes with a marker. Keep the database sensitive even with this filter.
 
@@ -752,7 +733,7 @@ Fresh processes hydrate the same typed DBOS checkpoints before resume. Older rec
 
 Restored session lifecycle entries may omit completed tool nodes. Resume fills those missing graph nodes from retained typed durable checkpoints while preserving the session's existing nodes for validation. It does not replace corrupt local parent edges with a different graph. Tool names, including line terminators, are preserved verbatim and require the same typed frontier evidence.
 
-A tool-frontier continuation must reach and consume the exact unfinished tool before reporting `completed`, whether the body returns normally or calls `ctx.exit({ status: "completed" })`. Omitting the call, including by changing control flow, fails with `insufficient_state: replay topology mismatch` and the pending tool's exact ID. A substituted tool is rejected before its callback runs. While that frontier is pending, completed model and child-workflow predecessors can replay, but new model stages, tasks, and child workflows cannot execute in its place. Stage and task worktree setup also waits for live admission. Replaying completed predecessors alone is not proof of completion. The failed continuation publishes no successful run result; the retained source remains available for inspection and, on fresh-ID continuation, another resume after restoring the matching flow. Quit, kill, caught targeted cancellation, and intentional non-completed exits retain their existing behavior.
+A tool-frontier continuation must reach and consume the exact unfinished tool before reporting `completed`, whether the body returns normally or calls `ctx.exit({ status: "completed" })`. Omitting the call, including by changing control flow, fails with `insufficient_state: replay topology mismatch` and the pending tool's exact ID. A substituted tool is rejected before its callback runs. While that frontier is pending, completed model and child-workflow predecessors can replay, but new model stages, tasks, and child workflows cannot execute in its place. Stage and task worktree setup also waits for live admission. Replaying completed predecessors alone is not proof of completion. Failed replay publishes no successful result; inspect the same ID and restore the matching flow before another supported resume. Quit, kill, caught targeted cancellation, and intentional non-completed exits retain their existing behavior.
 
 To load a locally patched runtime from its checkout:
 
@@ -891,11 +872,9 @@ A successful rescan may still contain per-resource diagnostics. Both reload surf
 
 ## Run budgets
 
-Set an optional `budget` on workflow extension config, an authored `workflow({...})` definition, a `workflow({ action: "run" })` tool call, or a `workflow({ action: "resume" })` continuation to raise or narrow the ceiling. Each field resolves independently: run override, then definition, then config default. An omitted field falls through; a present `0` disables that dimension.
+Set an optional `budget` on workflow extension config or an authored definition. Model-tool requests supply explicit user overrides in `route` state as `userBudget: { limits, provenance }`; `run` uses that registered budget and does not accept overrides. Approved `resume` calls may supply `budget`. Each field resolves independently: run override, then definition, then config default. Omission inherits; `0` disables only its dimension.
 
-Budgets are operator-selected. Atomic's agent guidance treats "no budget" as the correct default: the agent passes a `budget` on a `run` or `resume` call only when you asked for a limit, and otherwise omits the field so the definition and config resolve normally. A cap the agent invented would stop an otherwise healthy run at a duration, token, or cost boundary you never chose, and the stop reads as a workflow failure rather than as an added override. When you do state a limit, only the fields you named are passed; the rest keep falling through.
-
-For model-tool launches, declare requested overrides in `state.userBudget` with their exact instruction provenance. If you also pass top-level `budget`, it must contain the same fields and values. The router preserves that declaration rather than inventing a cap, rounding values or converting omissions to zero. See [Model-invoked launch routing](#model-invoked-launch-routing).
+Budgets are operator-selected. Never invent a cap or convert an estimate into one. Preserve the exact fields and values the user requested and quote their instruction in provenance. Raising an exhausted budget requires approval. See [Model-invoked launch routing](#model-invoked-launch-routing).
 
 ```ts
 export default workflow({

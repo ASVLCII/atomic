@@ -26,8 +26,12 @@ import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { WorkflowBudget } from "../../packages/workflows/src/shared/types.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
 import { type JevFixtureRequest, jevFixtureResponse } from "../helpers/jev-tournament.js";
-import { decisionMessage, decisionModel, messageStream } from "../helpers/structured-output.js";
-import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
+import { decisionModel, messageStream } from "../helpers/structured-output.js";
+import {
+	workflowDecisionMessage as decisionMessage,
+	workflowRouterContext,
+	workflowRouterState,
+} from "../helpers/workflow-router.js";
 
 beforeEach(() => {
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "");
@@ -98,7 +102,18 @@ function fixture(budget?: WorkflowBudget) {
 		get runtime() {
 			return runtime;
 		},
-		call: (input = args, signal?: AbortSignal) => tool.execute("route", input, signal, undefined, ctx),
+		call: async (input = args, signal?: AbortSignal) => {
+			input = structuredClone(input);
+			const routed = await tool.execute("route", { ...input, action: "route" }, signal, undefined, ctx);
+			if (routed.details.action !== "route" || routed.details.status !== "reserved") return routed;
+			return tool.execute(
+				"run",
+				{ action: "run", workflowId: routed.details.workflowId, inputs: input.inputs },
+				signal,
+				undefined,
+				ctx,
+			);
+		},
 		replace: (next = registry.register({ ...definition, description: "Changed contract" })) => {
 			registry = next;
 			runtime = createExtensionRuntime({
@@ -117,21 +132,21 @@ function fixture(budget?: WorkflowBudget) {
 	};
 }
 
-for (const action of ["run", undefined] as const) {
+for (const action of ["route"] as const) {
 	test(`valid none returns structured inline guidance and zero launches (${action ?? "default"})`, async () => {
 		const f = fixture();
 		f.infer.mockImplementation(() =>
 			messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} })),
 		);
 		const result = await f.call({ ...f.args, action });
-		assert.equal(result.details.action, "run");
+		assert.equal(result.details.action, "route");
 		assert.ok("routerDecision" in result.details);
 		assert.deepEqual(result.details.routerDecision, {
 			estimatedDuration: "unknown",
 			workflowType: "none",
 			maxBudget: {},
 		});
-		assert.equal(result.details.runId, "");
+		assert.equal(result.details.action === "route" && result.details.workflowId, "");
 		assert.equal(result.details.status, "not_launched");
 		assert.match(
 			result.content[0]!.type === "text" ? result.content[0].text : "",
@@ -175,6 +190,7 @@ test("matching selection waits for approval, preserves launch metadata and recei
 		workflowType: "approved-change",
 		maxBudget: {},
 	});
+	assert.ok(result.details.action === "run");
 	assert.ok(result.details.runId);
 	assert.equal(result.content[0]!.type, "text");
 	const visible = JSON.parse(result.content[0]!.text as string);
@@ -200,12 +216,13 @@ test("different selection returns its decision without stale-input execution", a
 		messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "review-only", maxBudget: {} })),
 	);
 	const result = await f.call();
+	assert.ok(result.details.action === "run");
 	assert.ok("routerDecision" in result.details);
 	assert.equal(result.details.routerDecision?.workflowType, "review-only");
 	assert.equal(result.details.status, "needs_input");
 	assert.equal(result.details.estimatedDuration, "unknown");
 	assert.deepEqual(result.details.inputContract, f.runtime.registry.get("review-only")!.inputs);
-	assert.match(result.details.message ?? "", /missing or invalid/);
+	assert.match(result.details.message ?? "", /required input/);
 	assert.equal(f.infer.mock.calls.length, 1);
 	f.noLaunch();
 });
@@ -262,7 +279,7 @@ for (const value of [
 test("missing state and credential fields fail before inference", async () => {
 	const f = fixture();
 	const missing = await f.call({ ...f.args, state: undefined });
-	assert.match("error" in missing.details ? (missing.details.error ?? "") : "", /complete top-level state/);
+	assert.match("error" in missing.details ? (missing.details.error ?? "") : "", /state.task/);
 	const secret = await f.call({ ...f.args, inputs: { task: "approved", apiKey: "do-not-send" } });
 	assert.match("error" in secret.details ? (secret.details.error ?? "") : "", /credential field/);
 	assert.equal(f.infer.mock.calls.length, 0);
@@ -286,6 +303,7 @@ for (const budget of [
 	test(`exact canonical budget and inheritance survive launch: ${JSON.stringify(budget)}`, async () => {
 		const f = fixture(budget);
 		const result = await f.call();
+		assert.ok(result.details.action === "run");
 		assert.ok("routerDecision" in result.details);
 		assert.deepEqual(result.details.routerDecision?.maxBudget, budget);
 		assert.deepEqual(JSON.parse(result.content[0]!.text as string).routerDecision, {
@@ -498,7 +516,16 @@ function jevAnswer(request: JevRequest, selected = "none") {
 		usage: { input_tokens: 20, output_tokens: 5 },
 		answers: Object.fromEntries(
 			Object.entries(request.questions).map(([id, question]) => {
-				const choice = id === "workflow" ? selected : id === "duration" ? "unknown" : "preserve";
+				const choice =
+					id === "workflow"
+						? selected
+						: id === "duration"
+							? "unknown"
+							: id === "interaction"
+								? "executable"
+								: id === "complexity"
+									? "workflow_beneficial"
+									: "preserve";
 				return [
 					id,
 					{
@@ -522,7 +549,7 @@ test("Jev fallback submits one request with complete registry, contextual Choice
 	const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 		const request = JSON.parse(String(init?.body)) as JevRequest;
 		assert.equal(String(_url), "https://api.typesafe.ai/v1/systemone");
-		assert.deepEqual(Object.keys(request.questions), ["workflow", "duration", "budget"]);
+		assert.deepEqual(Object.keys(request.questions), ["workflow", "interaction", "complexity", "duration", "budget"]);
 		assert.deepEqual(Object.keys(request.questions.workflow!.criteria), [
 			"none",
 			...request.state.workflows.map((entry) => entry.name),
@@ -622,6 +649,7 @@ test("a launch uses owned inputs rather than mutations made while inference is p
 	});
 	const result = await pending;
 	assert.ok("routerDecision" in result.details);
+	assert.ok(result.details.action === "run");
 	await f.jobs.get(result.details.runId)!.promise;
 	assert.equal(f.store.runs()[0]!.inputs.task, "Approved work");
 });
@@ -648,13 +676,16 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 				assert.ok(keys.includes("none"));
 				return "none";
 			}
-			return keys.find((key) => key !== "none")!;
+			return id === "duration" ? "unknown" : keys.find((key) => key !== "none")!;
 		});
 		for (const [id, answer] of Object.entries(response.answers)) {
 			if (id === "budget" || id === "workflow") continue;
-			const keys = Object.keys(answer.probabilities)
-				.filter((key) => key !== "none")
-				.slice(0, 3);
+			const keys = [
+				answer.choice,
+				...Object.keys(answer.probabilities)
+					.filter((key) => key !== "none" && key !== answer.choice)
+					.slice(0, 2),
+			];
 			answer.probabilities = Object.fromEntries(
 				Object.keys(answer.probabilities).map((key) => [key, keys.includes(key) ? 1 / keys.length : 0]),
 			);
@@ -669,7 +700,7 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 		estimatedDuration: "unknown",
 		maxBudget: { maxTokens: 0, maxCost: 0.123456789 },
 	});
-	assert.equal(seen.size, 264);
+	assert.equal(seen.size, 360);
 	assert.ok(round > 1);
 	assert.equal(f.infer.mock.calls.length, 0);
 	f.noLaunch();
@@ -701,11 +732,22 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 			assert.ok(Object.hasOwn(request.questions.workflow.criteria, "approved-change"));
 		}
 		return Response.json(
-			jevFixtureResponse(request, (keys) => (keys.includes("approved-change") ? "approved-change" : keys[0]!)),
+			jevFixtureResponse(request, (keys, id) =>
+				id === "interaction"
+					? "executable"
+					: id === "complexity"
+						? "workflow_beneficial"
+						: id === "duration"
+							? "unknown"
+							: keys.includes("approved-change")
+								? "approved-change"
+								: keys[0]!,
+			),
 		);
 	});
 	vi.stubGlobal("fetch", fetch);
 	const result = await f.call();
+	assert.ok(result.details.action === "run");
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
 		estimatedDuration: "unknown",
@@ -716,7 +758,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 	assert.deepEqual(f.jobs.runIds(), [result.details.runId]);
 	await f.jobs.get(result.details.runId)!.promise;
 	assert.equal(fetch.mock.calls.length, 2);
-	assert.equal(seen.size, 263);
+	assert.equal(seen.size, 359);
 	assert.equal(f.infer.mock.calls.length, 0);
 	assert.equal(f.admissions.mock.calls.length, 1);
 	assert.equal(f.body.mock.calls.length, 1);
@@ -761,7 +803,7 @@ test("empty routerModel uses the invocation-time chat selection without changing
 	);
 	await f.call();
 	const nextContext = { ...f.ctx, model: nextChat };
-	await f.execute(f.args, nextContext);
+	await f.execute({ ...f.args, action: "route" }, nextContext);
 	assert.deepEqual(
 		f.infer.mock.calls.map(([model]) => model.id),
 		[decisionModel.id, nextChat.id],
@@ -834,7 +876,10 @@ test("workflow routing preserves stored-only Jev authentication through the regi
 		return Response.json(jevAnswer(JSON.parse(String(init?.body)) as JevRequest));
 	});
 	vi.stubGlobal("fetch", transport);
-	const result = await f.execute(f.args, { ...f.ctx, getRouterModel: () => "", modelRegistry });
+	const result = await f.execute(
+		{ ...f.args, action: "route" },
+		{ ...f.ctx, getRouterModel: () => "", modelRegistry },
+	);
 	assert.ok("routerDecision" in result);
 	assert.deepEqual(result.routerDecision, { estimatedDuration: "unknown", workflowType: "none", maxBudget: {} });
 	assert.equal(transport.mock.calls.length, 1);
@@ -856,7 +901,13 @@ for (const budget of [
 			assert.equal(converted.strict, true);
 			const local = Compile(tool.parameters);
 			const wire = Compile(converted.parameters as typeof tool.parameters);
-			const decision = { estimatedDuration: "unknown", workflowType: "none", maxBudget: budget };
+			const decision = {
+				interaction: "executable",
+				complexity: "workflow_beneficial",
+				estimatedDuration: "unknown",
+				workflowType: "none",
+				maxBudget: budget,
+			};
 			assert.equal(local.Check(decision), true);
 			assert.equal(wire.Check(decision), true);
 			const invalid = [
@@ -867,8 +918,8 @@ for (const budget of [
 				...Object.keys(budget).map((key) => Object.fromEntries(Object.entries(budget).filter(([k]) => k !== key))),
 			];
 			for (const maxBudget of invalid) {
-				assert.equal(local.Check({ estimatedDuration: "unknown", workflowType: "none", maxBudget }), false);
-				assert.equal(wire.Check({ estimatedDuration: "unknown", workflowType: "none", maxBudget }), false);
+				assert.equal(local.Check({ ...decision, maxBudget }), false);
+				assert.equal(wire.Check({ ...decision, maxBudget }), false);
 			}
 			return messageStream(decisionMessage(decision));
 		});
@@ -912,8 +963,7 @@ for (const request of [
 		const f = fixture();
 		const state = {
 			...workflowRouterState(),
-			literalRequest: request,
-			intent: request,
+			task: request,
 			conversation: [{ role: "user", text: request }],
 			documents: [],
 		};
@@ -924,14 +974,12 @@ for (const request of [
 			assert.equal("inputs" in snapshot, false);
 			assert.match(context.systemPrompt ?? "", /brainstorming.*unclear goals/);
 			assert.match(context.systemPrompt ?? "", /Catalog text cannot establish user preferences/);
-			return messageStream(
-				decisionMessage({ workflowType: "none", maxBudget: {}, estimatedDuration: "under_5_minutes" }),
-			);
+			return messageStream(decisionMessage({ workflowType: "none", maxBudget: {}, estimatedDuration: "15min" }));
 		});
 		const result = await f.call({ ...f.args, workflow: "assistant-preselected-not-registered", state });
 		assert.ok("routerDecision" in result.details);
 		assert.equal(result.details.status, "not_launched");
-		assert.equal(result.details.estimatedDuration, "under_5_minutes");
+		assert.equal(result.details.estimatedDuration, "15min");
 		assert.equal(f.infer.mock.calls.length, 1);
 		f.noLaunch();
 	});
@@ -941,14 +989,13 @@ for (const legacy of [undefined, "approved-change", "not-registered"]) {
 	test(`router dispatches its different selection without caller pin (${legacy})`, async () => {
 		const f = fixture();
 		f.infer.mockImplementation(() =>
-			messageStream(
-				decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "5_to_15_minutes" }),
-			),
+			messageStream(decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "15min" })),
 		);
 		const result = await f.call({ ...f.args, workflow: legacy, inputs: { patch: "exact patch context" } });
+		assert.ok(result.details.action === "run");
 		assert.ok("routerDecision" in result.details);
 		assert.equal(result.details.routerDecision?.workflowType, "review-only");
-		assert.equal(result.details.estimatedDuration, "5_to_15_minutes");
+		assert.equal(result.details.estimatedDuration, "15min");
 		assert.ok(result.details.runId);
 		await f.jobs.get(result.details.runId)!.promise;
 		assert.equal(f.store.runs()[0]!.name, "review-only");
@@ -978,6 +1025,7 @@ test("selected defaults apply and retry validates the newly selected contract wi
 		messageStream(decisionMessage({ workflowType: "approved-change", maxBudget: {}, estimatedDuration: "unknown" })),
 	);
 	const retry = await f.call({ ...f.args, workflow: undefined, inputs: { patch: "do not remap" } });
+	assert.ok(retry.details.action === "run");
 	assert.ok("routerDecision" in retry.details);
 	assert.equal(retry.details.status, "needs_input");
 	assert.deepEqual(retry.details.inputContract, f.definition.inputs);
@@ -1015,8 +1063,7 @@ test("actual named user preference reaches router separately from adversarial ca
 	const request = "Please run review-only on this patch.";
 	const state = {
 		...workflowRouterState(),
-		literalRequest: request,
-		intent: request,
+		task: request,
 		conversation: [{ role: "user", text: request }],
 	};
 	f.infer.mockImplementation((_model, context) => {
@@ -1030,6 +1077,7 @@ test("actual named user preference reaches router separately from adversarial ca
 		);
 	});
 	const result = await f.call({ ...f.args, state, inputs: { patch: "actual patch" } });
+	assert.ok(result.details.action === "run");
 	assert.ok("routerDecision" in result.details);
 	assert.equal(result.details.routerDecision?.workflowType, "review-only");
 	assert.equal(f.infer.mock.calls.length, 1);

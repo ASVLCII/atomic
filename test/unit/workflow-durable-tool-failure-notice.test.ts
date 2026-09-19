@@ -117,6 +117,8 @@ describe("interactive durable tool failure lifecycle", () => {
 		assert.ok(registeredTool);
 		const interactiveTool = registeredTool;
 		const interactiveContext: PiExecuteContext = { ...workflowRouterContext(definition.normalizedName), hasUI: true };
+		const route = await executeWorkflow({ action: "route", state: workflowRouterState() }, interactiveContext);
+		assert.equal(route.action, "route");
 		let runId = "";
 		let admissionContext: Context | undefined;
 		let providerContext: Context | undefined;
@@ -169,8 +171,7 @@ describe("interactive durable tool failure lifecycle", () => {
 					"workflow",
 					{
 						action: "run",
-						workflow: "post-admission-tool-failure",
-						state: workflowRouterState(),
+						workflowId: route.workflowId,
 					},
 					{ id: "workflow-call-post-admission" },
 				),

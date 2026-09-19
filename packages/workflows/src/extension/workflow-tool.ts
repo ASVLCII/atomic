@@ -12,7 +12,8 @@ import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./wo
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
 import { raceWorkflowRequestAbort } from "./workflow-request-abort.js";
-import { routeWorkflowLaunch, WORKFLOW_INLINE_GUIDANCE } from "./workflow-router.js";
+import { WorkflowReservations } from "./workflow-reservations.js";
+import { routeWorkflowLaunch, WORKFLOW_INLINE_GUIDANCE, type WorkflowRouterOutput } from "./workflow-router.js";
 import { buildWorkflowStatusListing, setWorkflowStatusRenderRuns } from "./workflow-status-summary.js";
 import {
 	isResolvedRunId,
@@ -83,6 +84,7 @@ export function makeExecuteWorkflowTool(
 	onRunAccepted?: (runId: string) => void,
 ) => Promise<WorkflowToolResult> {
 	const { store, toolControlRegistry } = owner;
+	const reservations = new WorkflowReservations();
 	return async function executeWorkflowTool(
 		args: WorkflowToolArgs,
 		ctx: PiExecuteContext,
@@ -90,7 +92,14 @@ export function makeExecuteWorkflowTool(
 		onRunAccepted?: (runId: string) => void,
 	): Promise<WorkflowToolResult> {
 		signal?.throwIfAborted();
-		const action = args.action ?? "run";
+		if (args.action === undefined)
+			return {
+				action: "run",
+				runId: "",
+				status: "failed",
+				error: "An explicit action is required. Route first, then run the registered workflowId.",
+			};
+		const action = args.action;
 		const runId = args.runId ?? "";
 		if (isWorkflowStageToolContext(ctx)) {
 			return {
@@ -101,9 +110,16 @@ export function makeExecuteWorkflowTool(
 				stages: [],
 			};
 		}
+		if (action !== "run" && action !== "route") {
+			if (args.runId !== undefined && args.runId !== "--all")
+				reservations.assertOwner(args.runId, ctx, action === "resume");
+			else if (args.all || args.runId === "--all" || action === "status") {
+				for (const run of store.runs()) reservations.assertOwner(run.id, ctx, action === "resume");
+			}
+		}
 		const policy: WorkflowExecutionPolicy = workflowPolicyFromContext(ctx);
 		const getRuntime = (): ExtensionRuntime => {
-			signal?.throwIfAborted();
+			// Reservation validation must not retain the route request's abort signal.
 			return typeof runtime === "function" ? runtime(ctx) : runtime;
 		};
 		const awaitRequest = <T>(operation: Promise<T>): Promise<T> => raceWorkflowRequestAbort(operation, signal);
@@ -137,86 +153,128 @@ export function makeExecuteWorkflowTool(
 				await ensureWorkflowResourcesVisible();
 				return awaitRequest(getRuntime().dispatch(args, { policy, signal }));
 			}
-			case "run": {
-				let acceptedRunId: string | undefined;
-				let approvedRoute: Awaited<ReturnType<typeof routeWorkflowLaunch>> | undefined;
+			case "route": {
 				try {
 					args = structuredClone(args);
-					// Do not turn a missing/failed initial resource load into a partial routing catalog.
 					await awaitRequest(Promise.resolve(ensureWorkflowResourcesLoaded()));
 					const routed = await routeWorkflowLaunch(args, ctx, getRuntime, signal);
 					const { decision } = routed;
-					if (decision.workflowType === "none") {
+					if (decision.workflowType === "none")
 						return {
-							action: "run",
-							runId: "",
+							action,
+							workflowType: "none",
+							workflowId: "",
 							status: "not_launched",
 							routerDecision: decision,
 							estimatedDuration: decision.estimatedDuration,
 							message: WORKFLOW_INLINE_GUIDANCE,
 						};
-					}
 					routed.assertCurrent();
-					approvedRoute = routed;
 					const selected = getRuntime().registry.get(decision.workflowType)!;
+					const entry = reservations.register(ctx, selected, decision, routed.assertCurrent);
+					return {
+						action,
+						workflowType: decision.workflowType,
+						workflowId: entry.id,
+						status: "reserved",
+						routerDecision: decision,
+						estimatedDuration: decision.estimatedDuration,
+						inputSchema: structuredClone(selected.inputs),
+					};
+				} catch (error) {
+					if (signal?.aborted) throw signal.reason ?? error;
+					return {
+						action,
+						workflowType: "",
+						workflowId: "",
+						status: "failed",
+						error: error instanceof Error ? error.message : String(error),
+					};
+				}
+			}
+			case "run": {
+				let entry: ReturnType<WorkflowReservations["resolve"]> | undefined;
+				let claimed = false;
+				try {
+					entry = reservations.resolve(args.workflowId, ctx);
+					if (args.workflow !== undefined || args.state !== undefined || args.budget !== undefined)
+						throw new Error(
+							"Run accepts the registered workflowId and inputs, not a workflow override, routing state or budget. Make a fresh route request to change the selection or constraints.",
+						);
+					if (entry.state !== "reserved") {
+						const snapshot = store.runs().find((run) => run.id === entry!.id);
+						throw new Error(
+							snapshot?.endedAt !== undefined
+								? "Terminal workflowId cannot launch again. Inspect this instance or route a new execution."
+								: `Workflow ${entry.id} is already ${entry.state}; inspect or control that instance, do not launch another executor.`,
+						);
+					}
+					const { decision, definition } = entry;
 					let inputs: ReturnType<typeof resolveAndValidateInputs>;
 					try {
-						inputs = resolveAndValidateInputs(selected.inputs, args.inputs ?? {}, "selected workflow");
-					} catch {
+						inputs = resolveAndValidateInputs(definition.inputs, args.inputs ?? {}, "selected workflow");
+					} catch (error) {
 						return {
-							action: "run",
-							runId: "",
+							action,
+							runId: entry.id,
+							workflowId: entry.id,
 							status: "needs_input",
-							name: selected.normalizedName,
-							routerDecision: decision,
+							name: definition.normalizedName,
+							routerDecision: structuredClone(decision),
 							estimatedDuration: decision.estimatedDuration,
-							inputContract: selected.inputs,
-							message:
-								"Selected workflow inputs are missing or invalid. Supply values matching inputContract from the user's actual context, or ask for required human input. No workflow was launched. A later run routes again; do not assume the same selection or remap stale inputs.",
+							inputContract: structuredClone(definition.inputs),
+							message: `${error instanceof Error ? error.message : String(error)} Correct inputs and retry run with the same workflowId. No workflow was launched.`,
 						};
 					}
+					// No await between checking the reservation and claiming admission.
+					entry.state = "admitting";
+					claimed = true;
+					const reserved = entry;
 					const result = await awaitRequest(
 						getRuntime().dispatch(
-							{ ...args, workflow: decision.workflowType, inputs, budget: decision.maxBudget },
+							{ action: "run", workflow: definition.normalizedName, inputs, budget: decision.maxBudget },
 							{
 								policy,
 								origin: "agent",
 								signal,
-								assertRoutingCurrent: routed.assertCurrent,
+								reservedRunId: reserved.id,
+								assertRoutingCurrent: reserved.assertCurrent,
 								onRunAccepted: (id) => {
-									acceptedRunId = id;
+									reserved.state = "admitted";
 									onRunAccepted?.(id);
 								},
 							},
 						),
 					);
+					if (reserved.state === "admitting") reserved.state = "reserved";
 					return result.action === "run"
-						? { ...result, routerDecision: decision, estimatedDuration: decision.estimatedDuration }
+						? {
+								...result,
+								workflowId: reserved.id,
+								routerDecision: structuredClone(decision),
+								estimatedDuration: decision.estimatedDuration,
+							}
 						: result;
 				} catch (error) {
+					if (claimed && entry?.state === "admitting") entry.state = "reserved";
 					if (signal?.aborted) throw signal.reason ?? error;
-					// Once accepted, preserve the existing runtime error path rather than claim no launch.
-					if (acceptedRunId !== undefined) throw error;
-					// A setup error does not erase a valid decision, but a registry change does.
-					let routerDecision: NonNullable<typeof approvedRoute>["decision"] | undefined;
+					if (claimed && entry?.state === "admitted") throw error;
+					let decision: WorkflowRouterOutput | undefined;
 					try {
-						approvedRoute?.assertCurrent();
-						routerDecision = approvedRoute?.decision;
+						entry?.assertCurrent();
+						decision = entry?.decision;
 					} catch {
-						routerDecision = undefined;
+						decision = undefined;
 					}
 					return {
-						action: "run",
-						runId: "",
+						action,
+						runId: entry?.id ?? "",
+						workflowId: entry?.id ?? "",
 						status: "failed",
-						stages: [],
-						...(routerDecision === undefined
+						...(decision === undefined
 							? {}
-							: { routerDecision, estimatedDuration: routerDecision.estimatedDuration }),
-						error:
-							error instanceof Error
-								? error.message
-								: "Workflow routing failed. No workflow was launched; retry explicitly.",
+							: { routerDecision: structuredClone(decision), estimatedDuration: decision.estimatedDuration }),
+						error: error instanceof Error ? error.message : String(error),
 					};
 				}
 			}

@@ -10,6 +10,7 @@ import {
 	workflowQuitAction,
 	workflowResumeAction,
 } from "../../packages/workflows/src/extension/workflow-tool-control.js";
+import { jobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { killRun } from "../../packages/workflows/src/runs/background/status.js";
 import { restoreOnSessionStart, type SessionEntry } from "../../packages/workflows/src/shared/persistence-restore.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
@@ -233,14 +234,15 @@ test.each(
 		);
 		assert.ok(resumed.action === "resume");
 		assert.equal(resumed.status, "running", resumed.message);
+		assert.equal(resumed.runId, source.id); // #3106: no continuation fork.
 		if (ending === "kill") {
 			await waitFor(() => awaitingKill);
-			const pending = store.runs().find((run) => run.resumedFromRunId === source.id)!;
+			const pending = store.runs().find((run) => run.id === source.id)!;
 			assert.equal(killRun(pending.id, { store }).ok, true);
 			beforeKill.resolve();
 		} else if (ending === "caught-cancel" || ending === "quit") {
 			await waitFor(() => targetCalls === 2);
-			const pending = store.runs().find((run) => run.resumedFromRunId === source.id)!;
+			const pending = store.runs().find((run) => run.id === source.id)!;
 			if (ending === "quit") {
 				await workflowQuitAction({ action: "quit", runId: pending.id });
 				assert.equal(pending.status, "paused");
@@ -251,10 +253,11 @@ test.each(
 			}
 			await workflowPauseAction({ action: "pause", runId: pending.id, stageId: target.id });
 		}
-		const isContinuation = (run: { id: string; resumedFromRunId?: string }): boolean =>
-			durableOnly ? run.id === source.id : run.resumedFromRunId === source.id;
+		const isContinuation = (run: { id: string }): boolean => run.id === source.id;
 		await waitFor(() => store.runs().some((run) => isContinuation(run) && run.endedAt !== undefined));
+		await jobTracker.get(source.id)?.promise;
 		const continuation = store.runs().find(isContinuation)!;
+		assert.equal(store.runs().filter(isContinuation).length, 1);
 		if (ending === "kill" || ending === "caught-cancel") {
 			assert.equal(continuation.status, ending === "kill" ? "killed" : "completed");
 			assert.doesNotMatch(continuation.error ?? "", /replay topology mismatch/);

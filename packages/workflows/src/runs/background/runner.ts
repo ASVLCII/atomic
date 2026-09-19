@@ -66,7 +66,7 @@ export interface DetachedRunOpts extends Omit<RunOpts, "signal" | "cancellation"
 	 * RunResult; rejection includes the thrown setup/final-flush error. The job
 	 * promise still resolves either way.
 	 */
-	onRawSettled?: (ok: boolean, result: RunResult | undefined, error: unknown | undefined) => void;
+	onRawSettled?: (ok: boolean, result: RunResult | undefined, error: unknown | undefined) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,9 +188,9 @@ export function runDetached<TInputs extends WorkflowInputValues, TRunInputs exte
 		settleJob();
 		throw error;
 	}
-	const settle = (ok: boolean, result: RunResult | undefined, error: unknown | undefined): void => {
+	const settle = async (ok: boolean, result: RunResult | undefined, error: unknown | undefined): Promise<void> => {
 		try {
-			onRawSettled?.(ok, result, error);
+			await onRawSettled?.(ok, result, error);
 		} catch {
 			// Settlement observers must not become unhandled rejections.
 		} finally {

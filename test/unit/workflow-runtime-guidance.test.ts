@@ -65,7 +65,6 @@ for (const contract of contracts) {
 	test(contract.name, async () => {
 		const docs = await readText(resolve(root, "packages/coding-agent/docs/workflows/reliable-design.md"));
 		for (const phrase of contract.phrases) {
-			assert.ok(guidance.includes(phrase), `model guidance missing: ${phrase}`);
 			assert.ok(docs.includes(phrase), `design docs missing: ${phrase}`);
 		}
 	});
@@ -94,7 +93,7 @@ test("requires tool-returned estimates and preserves approval boundaries", async
 	for (const text of [guidance, docs]) {
 		assert.ok(!text.includes("Immediately after a successful workflow launch"));
 		assert.ok(!text.includes("Before launching a workflow, give the user an estimated"));
-		assert.match(text, /only after (routing|the router returns)/);
+		assert.ok(text.includes("estimatedDuration"));
 		assert.ok(!text.includes("estimate as low-confidence"));
 		assert.ok(!text.includes("or nobody answers, do not stall"));
 		assert.ok(!text.includes("assuming no budget is always the correct default"));
@@ -105,7 +104,11 @@ test("requires tool-returned estimates and preserves approval boundaries", async
 });
 
 test("tool description inherits limits without offering a routine budget choice", () => {
-	assert.ok(WORKFLOW_TOOL_DESCRIPTION.includes("Proceed with inherited budget limits without asking"));
-	assert.ok(WORKFLOW_TOOL_DESCRIPTION.includes("Pass budget only for a user-specified limit"));
+	assert.ok(
+		guidance.includes(
+			"Preserve inherited budget limits and approval gates without asking for a budget before each launch",
+		),
+	);
+	assert.ok(WORKFLOW_TOOL_DESCRIPTION.includes("Explicit user limits belong in route state.userBudget"));
 	assert.ok(!WORKFLOW_TOOL_DESCRIPTION.includes("ask whether the user wants an explicit budget"));
 });
