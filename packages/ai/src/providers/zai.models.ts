@@ -4,5 +4,5 @@
 import values from "./data/zai.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const ZAI_MODELS: ModelCatalog<typeof values, "zai"> =
+export const ZAI_MODELS: ModelCatalog<typeof import("./data/zai.json", { with: { type: "json" } }), "zai"> =
 	flattenModelCatalog("zai", values);

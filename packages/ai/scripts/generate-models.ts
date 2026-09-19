@@ -3395,7 +3395,9 @@ async function generateModels() {
 					let output = generatedHeader;
 					output += `import values from "./data/${providerId}.json" with { type: "json" };\n`;
 					output += `import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";\n\n`;
-					output += `export const ${catalogConstName(providerId)}: ModelCatalog<typeof values, ${JSON.stringify(providerId)}> =\n`;
+					// Keep the JSON attribute in the public type query: declaration emit can drop
+					// attributes from value imports retained only for `typeof values` (#3105).
+					output += `export const ${catalogConstName(providerId)}: ModelCatalog<typeof import("./data/${providerId}.json", { with: { type: "json" } }), ${JSON.stringify(providerId)}> =\n`;
 					output += `\tflattenModelCatalog(${JSON.stringify(providerId)}, values);\n`;
 					const filename = `${providerId}.models.ts`;
 					generatedShardFiles.add(filename);

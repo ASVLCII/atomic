@@ -4,5 +4,5 @@
 import values from "./data/openrouter.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const OPENROUTER_MODELS: ModelCatalog<typeof values, "openrouter"> =
+export const OPENROUTER_MODELS: ModelCatalog<typeof import("./data/openrouter.json", { with: { type: "json" } }), "openrouter"> =
 	flattenModelCatalog("openrouter", values);

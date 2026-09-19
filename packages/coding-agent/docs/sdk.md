@@ -44,7 +44,11 @@ session.subscribe((event) => {
   }
 });
 
-await session.prompt("What files are in the current directory?");
+try {
+  await session.prompt("What files are in the current directory?");
+} finally {
+  await session.dispose();
+}
 ```
 
 `ModelRuntime` is the canonical asynchronous provider runtime when an integration wants provider-owned credentials, dynamic catalogs, and native providers in one object:
@@ -90,6 +94,29 @@ bun add @bastani/atomic
 Atomic does not require package install scripts. If you want to disable dependency lifecycle scripts during the Atomic install, you can add `--ignore-scripts` to the install command.
 
 The SDK is included in the main package. No separate SDK package is needed.
+
+### Migrating an existing Node host
+
+Use the installed package's ESM exports, not checkout paths or extension-loader aliases:
+
+```typescript
+import { createAgentSession, type HostInput } from "@bastani/atomic";
+import { workflow } from "@bastani/atomic/workflows";
+import openClaudeDesign from "@bastani/atomic/workflows/builtin/open-claude-design";
+```
+
+For TypeScript Node applications, use `"type": "module"` in `package.json` and `module: "NodeNext"`, `moduleResolution: "NodeNext"`, and `strict: true` in `tsconfig.json`. Declaration checking works with `skipLibCheck: false`; disabling it is not required. No separate workflows install, ambient module declarations, source aliases, CLI process, or terminal is needed.
+
+When upgrading an existing host:
+
+- Remove manual registration of Atomic's shipped builtin extensions. They and their resources are included by default. Use `builtins` to disable packages; use `tools`/`excludedTools` to control tool access. An empty tool allowlist also excludes Intercom.
+- Supply all five `HostInput` methods (`confirm`, `select`, `input`, `editor`, `questionnaire`) through `extensionBindings.humanInput`. Preserve question text and option values, honor each request's abort signal, and return literal `true` only for explicit approval. No adapter is not consent: ordinary dialogs reject with `HumanInputUnavailable`, while required durable workflow gates remain pending. Do not translate cancellation into approval.
+- Treat a headless workflow launch as acceptance, not completion. Inspect its run ID/status. After reconnecting, resume that existing run and bind the new adapter with `session.bindExtensions({ humanInput })`; do not start a second run to answer an outstanding question. Durable resume requires working workflow persistence; use `workflowDependency("doctor")` from `@bastani/atomic/workflows` to troubleshoot it.
+- Always `await session.dispose()` in `finally`, including on failure. Disposal is asynchronous and can reject with `ShutdownFailed` after attempting all cleanup; do not hide that rejection or call `process.exit()` to force a successful shutdown. Each session owns its own work, even when services are shared.
+
+MCP servers and web providers still require their normal configuration and credentials. Importing the SDK does not connect them or take over standard input. Route host diagnostics through `extensionBindings.onDiagnostic`; a missing provider or extractor is an error, not an empty successful result.
+
+If creation reports `BuiltinUnavailable`, reinstall the complete package and its dependencies rather than copying only `dist/index.js` into your application.
 
 ## Pi client
 

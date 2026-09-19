@@ -1,10 +1,10 @@
 import { statSync } from "node:fs";
 import { stat as fsStat } from "node:fs/promises";
+import path, { type PlatformPath } from "node:path";
 import { createInterface } from "node:readline";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
-import path from "path";
 import { type Static, Type } from "typebox";
 import { parenthesizedKeyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { createChildProcessEnvironment } from "../../utils/child-process.ts";
@@ -170,7 +170,7 @@ function normalizeFindTargets(cwd: string, pathsValue: string[] | undefined, cus
 export function relativizeFindResultPath(
 	resultPath: string,
 	searchPath: string,
-	pathModule: path.PlatformPath = path,
+	pathModule: PlatformPath = path,
 ): string {
 	const hadTrailingSeparator =
 		resultPath.endsWith(pathModule.sep) || (pathModule.sep === "\\" && resultPath.endsWith("/"));

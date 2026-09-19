@@ -4,5 +4,5 @@
 import values from "./data/qwen-token-plan-cn.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const QWEN_TOKEN_PLAN_CN_MODELS: ModelCatalog<typeof values, "qwen-token-plan-cn"> =
+export const QWEN_TOKEN_PLAN_CN_MODELS: ModelCatalog<typeof import("./data/qwen-token-plan-cn.json", { with: { type: "json" } }), "qwen-token-plan-cn"> =
 	flattenModelCatalog("qwen-token-plan-cn", values);

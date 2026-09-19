@@ -80,9 +80,11 @@ if (!distBuilt || !nodeExe) {
 }
 
 let tmpRoot: string | undefined;
+let packedRoot: string | undefined;
 
 afterAll(() => {
 	if (tmpRoot) fs.rmSync(tmpRoot, { recursive: true, force: true });
+	if (packedRoot) fs.rmSync(packedRoot, { recursive: true, force: true });
 });
 
 /** Symlink (junction on Windows, so no elevation is needed) a real directory. */
@@ -233,4 +235,123 @@ runTest(
 		}
 	},
 	240_000,
+);
+
+// Packing, registry installation, two strict compiler passes and real Node hosts are structural work.
+const PACKED_NODE_CONSUMER_TIMEOUT_MS = 360_000;
+
+// #3105: no workspace links or loader aliases may participate in this consumer.
+runTest(
+	"packed Node consumer types, assets and builtin parity",
+	() => {
+		assert.ok(nodeExe);
+		packedRoot = fs.mkdtempSync(join(os.tmpdir(), "atomic-packed-consumer-"));
+		const consumer = join(packedRoot, "consumer");
+		fs.mkdirSync(consumer);
+		fs.writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
+		const npmCli = process.env.npm_execpath;
+		assert.ok(npmCli && /npm-cli\.js$/.test(npmCli), "run this integration suite through npm");
+		const execute = (args: string[], cwd: string, name: string) => {
+			const result = spawnSync(nodeExe, args, {
+				cwd,
+				encoding: "utf8",
+				timeout: PACKED_NODE_CONSUMER_TIMEOUT_MS,
+				maxBuffer: 64 * 1024 * 1024,
+				env: {
+					...process.env,
+					HOME: join(consumer, "home"),
+					USERPROFILE: join(consumer, "home"),
+					ATOMIC_CODING_AGENT_DIR: join(consumer, "home", ".atomic", "agent"),
+					DBOS_SYSTEM_DATABASE_URL: undefined,
+					ATOMIC_POSTGRES_RUNTIME_DIR: undefined,
+					ATOMIC_INTERCOM_SESSION_ID: undefined,
+				},
+			});
+			assert.equal(result.status, 0, `${name}: ${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
+			return result;
+		};
+		execute(
+			[npmCli, "pack", "--workspace=@bastani/atomic", "--ignore-scripts", "--pack-destination", packedRoot],
+			repoRoot,
+			"pack atomic",
+		);
+		execute(
+			[
+				npmCli,
+				"pack",
+				"--workspace=@bastani/pi-ai",
+				"--workspace=@bastani/atomic-natives",
+				"--ignore-scripts",
+				"--pack-destination",
+				packedRoot,
+			],
+			repoRoot,
+			"pack dependencies",
+		);
+		const archives = fs
+			.readdirSync(packedRoot)
+			.filter((name) => name.endsWith(".tgz"))
+			.map((name) => join(packedRoot!, name));
+		assert.equal(archives.length, 3);
+		execute(
+			[
+				npmCli,
+				"install",
+				"--ignore-scripts",
+				"--no-audit",
+				"--no-fund",
+				"--save-exact",
+				...archives,
+				"typescript@7.0.2",
+				"@types/node@24.12.4",
+			],
+			consumer,
+			"install packed closure",
+		);
+		const installed = join(consumer, "node_modules", "@bastani");
+		for (const name of ["atomic", "pi-ai", "atomic-natives"]) {
+			assert.ok(fs.realpathSync(join(installed, name)).startsWith(fs.realpathSync(consumer)));
+		}
+		const shrinkwrap = fs.readFileSync(join(installed, "atomic", "npm-shrinkwrap.json"), "utf8");
+		assert.ok(!shrinkwrap.includes(repoRoot));
+		assert.doesNotMatch(shrinkwrap, /"(?:link|resolved)"\s*:\s*(?:true|"(?:file:|\.\.\/|packages\/))/);
+		assert.ok(fs.readdirSync(join(installed, "atomic-natives", "native")).some((name) => name.endsWith(".node")));
+		const fixtures = [
+			"consumer-parity-types.mts",
+			"consumer-parity.mjs",
+			"sdk-host-durable-workflow.ts",
+			"sdk-host-built-node.mjs",
+			"sdk-host-lazy-mcp.mjs",
+			"sdk-host-web-owners.mjs",
+			"sdk-host-web-unavailable.mjs",
+			"sdk-host-intercom-owners.mjs",
+			"sdk-host-mcp-diagnostics.mjs",
+		];
+		for (const name of fixtures) fs.copyFileSync(join(repoRoot, "test", "fixtures", name), join(consumer, name));
+		for (const skipLibCheck of [false, true]) {
+			fs.writeFileSync(
+				join(consumer, "tsconfig.json"),
+				JSON.stringify({
+					compilerOptions: {
+						module: "NodeNext",
+						moduleResolution: "NodeNext",
+						target: "ES2023",
+						strict: true,
+						skipLibCheck,
+						noEmit: true,
+					},
+					include: ["consumer-parity-types.mts"],
+				}),
+			);
+			execute(
+				[join(consumer, "node_modules", "typescript", "bin", "tsc"), "-p", "tsconfig.json"],
+				consumer,
+				`types skipLibCheck=${skipLibCheck}`,
+			);
+		}
+		const runtime = execute([join(consumer, "consumer-parity.mjs")], consumer, "consumer parity");
+		assert.equal(runtime.stderr, "");
+		assert.match(runtime.stdout, /"packedConsumer":true/);
+	},
+	PACKED_NODE_CONSUMER_TIMEOUT_MS,
 );

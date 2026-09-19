@@ -4,5 +4,5 @@
 import values from "./data/fireworks.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const FIREWORKS_MODELS: ModelCatalog<typeof values, "fireworks"> =
+export const FIREWORKS_MODELS: ModelCatalog<typeof import("./data/fireworks.json", { with: { type: "json" } }), "fireworks"> =
 	flattenModelCatalog("fireworks", values);
