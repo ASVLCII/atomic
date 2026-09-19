@@ -410,7 +410,10 @@ impl Actor {
 						let mut store = command.output.lock().unwrap();
 						store.background();
 						if store.unavailable {
-							return Err(io::Error::other("Output spool unavailable"));
+							return Err(io::Error::other(format!(
+								"Output spool unavailable: {}",
+								store.spool_error.as_deref().unwrap_or("write failed")
+							)));
 						}
 					}
 					if let Some(cwd) = &command.intent.cwd {
@@ -807,6 +810,7 @@ struct OutputStore {
 	disk_len: u64,
 	overflow: bool,
 	unavailable: bool,
+	spool_error: Option<String>,
 }
 impl OutputStore {
 	/// The retained prefix and rolling tail have at most one gap. No disk reads
@@ -834,6 +838,7 @@ impl OutputStore {
 			file: None,
 			disk_len: 0,
 			unavailable: false,
+			spool_error: None,
 			overflow: false,
 		}
 	}
@@ -867,9 +872,24 @@ impl OutputStore {
 			return;
 		}
 		self.spilled = true;
-		match OpenOptions::new().read(true).write(true).create_new(true).open(&self.path) {
-			Ok(file) => self.file = Some(file),
-			Err(_) => self.unavailable = true,
+		let base = self.path.clone();
+		let mut suffix = 0u64;
+		loop {
+			match OpenOptions::new().read(true).write(true).create_new(true).open(&self.path) {
+				Ok(file) => {
+					self.file = Some(file);
+					break;
+				},
+				Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+					suffix += 1;
+					self.path = base.with_extension(suffix.to_string());
+				},
+				Err(error) => {
+					self.spool_error = Some(error.to_string());
+					self.unavailable = true;
+					break;
+				},
+			}
 		}
 		let prefix = std::mem::take(&mut self.foreground);
 		self.write_disk(&prefix);
@@ -1040,6 +1060,25 @@ mod tests {
 			parent_task_id: None,
 		}
 	}
+	// #3105: retained output from a recycled PID must not prevent command startup.
+	#[cfg(unix)]
+	#[test]
+	fn command_starts_with_retained_spool_from_previous_process() {
+		let (actor, owner) = command_owner();
+		let reference = Cap { task: Some(0), attempt: 1, ..owner.cap.clone() }.reference();
+		let path = std::env::temp_dir().join(format!(
+			"atomic-command-{}-{}",
+			std::process::id(),
+			reference.task_id
+		));
+		std::fs::write(&path, b"previous process output").unwrap();
+		let result = actor.start_command(&owner, pipe_intent("printf fresh"), "collision".into());
+		actor.shutdown();
+		assert_eq!(std::fs::read(&path).unwrap(), b"previous process output");
+		std::fs::remove_file(path).unwrap();
+		assert!(result.is_ok(), "{result:?}");
+	}
+
 	// #2905: inherited stdout/stderr must not bypass the shared disk budget.
 	#[cfg(unix)]
 	#[test]
