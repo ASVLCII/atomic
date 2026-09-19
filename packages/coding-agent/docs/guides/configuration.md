@@ -5,11 +5,11 @@ description: Write your first settings file and override settings per project.
 
 # Configure Atomic
 
-**Outcome:** A working `settings.json` and, where you need one, a project-scoped override.
-
-**Prerequisites:** [First session](/getting-started/first-session) is complete.
+After your [first session](/getting-started/first-session), save global preferences in `~/.atomic/agent/settings.json`. Use `.atomic/settings.json` for overrides that apply only to the current project.
 
 ## Example
+
+Choose the provider and model you have configured, then add the settings you need:
 
 ```json
 {
@@ -37,9 +37,14 @@ description: Write your first settings file and override settings per project.
 }
 ```
 
-## Project Overrides
+## Project overrides
 
-Project settings (`.atomic/settings.json`) override global settings. Nested objects merge recursively; arrays and scalar values replace global values:
+Project settings override global settings:
+
+- Nested objects merge recursively. You can change one field without repeating its siblings.
+- Arrays and scalar values replace the global value.
+
+This example changes only the compaction token reserve:
 
 ```json
 // ~/.atomic/agent/settings.json (global)

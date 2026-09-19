@@ -6,7 +6,7 @@ description: "Exact contracts: CLI, settings, environment variables, keybindings
 
 # Reference
 
-Reference pages state exact contracts. They use stable command, flag, setting, type, event, method, and tool names as headings, and they do not carry a tutorial narrative. If you want to learn a capability rather than look one up, start at [Guides](/guides) or [Build with Atomic](/build).
+Look up exact commands, settings, types, and tool contracts here. For a walkthrough, start with [Guides](/guides) or [Build with Atomic](/build).
 
 ## Everyday contracts
 
@@ -14,7 +14,8 @@ Reference pages state exact contracts. They use stable command, flag, setting, t
 - [Settings](/settings) — every settings field, with defaults and constraints.
 - [Environment variables](/environment-variables) — Atomic/Pi aliases, provider credentials, and bash session metadata.
 - [Keybindings](/keybindings) — default shortcuts and custom keybinding actions.
-- [Built-in tools](/tools) — the tools Atomic ships, and the [edit tool](/tools/edit) in detail.
+- [Built-in tools](/tools), including [hashline editing](/tools#edit).
+- [MCP Servers](/mcp-servers) for server configuration, tool discovery, and authentication.
 
 ## Domain contracts
 
@@ -34,10 +35,6 @@ Reference pages state exact contracts. They use stable command, flag, setting, t
 - [Package reference](/packages/reference) — filtering, scope, and deduplication.
 - [Provider API reference](/custom-provider/api-reference) — provider config and model definition contracts.
 - [Workflow API reference](/workflows/api-reference) — workflow, stage, and context contracts.
-
-## Reference
-
-- [Session format](/session-format) - JSONL session file format, entry types, and SessionManager API.
 
 ## Platform setup
 
