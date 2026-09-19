@@ -10,8 +10,8 @@ type PauseBoundarySession = AgentSession & {
 describe("paused queue abort failure", () => {
 	const harnesses: Harness[] = [];
 
-	afterEach(() => {
-		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+	afterEach(async () => {
+		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 	});
 
 	test("a failed abort boundary blocks one explicit resume and remains retryable", async () => {
@@ -37,7 +37,8 @@ describe("paused queue abort failure", () => {
 		expect(await harness.session.resumeQueuedMessages()).toBe(true);
 		expect(harness.session.queuedMessagesPaused).toBe(false);
 		// #3105: terminal cleanup reports the deliberately failed event drain; do not leave a rejected close unobserved.
-		await expect(harness.session.dispose()).rejects.toMatchObject({
+		expect(harnesses.pop()).toBe(harness);
+		await expect(harness.cleanup()).rejects.toMatchObject({
 			code: "ShutdownFailed",
 			errors: [expect.objectContaining({ cause: abortError })],
 		});
