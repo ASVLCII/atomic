@@ -20,13 +20,13 @@ import {
 	createAgentSession,
 	createUnstartedAgentSession,
 } from "./sdk.ts";
-import { sessionLifecycleCreation } from "./session-lifecycle-scope.ts";
+import { type SessionLifecycleContext, sessionLifecycleCreation } from "./session-lifecycle-scope.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { endTimingSpan, startTimingSpan } from "./timings.ts";
 
 // Prepared factories belong to the first session; later borrowers still get fresh instances.
-const serviceLifetimes = new WeakMap<AgentSessionServices, { scope: object; claimed: boolean }>();
+const serviceLifetimes = new WeakMap<AgentSessionServices, SessionLifecycleContext>();
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -164,7 +164,8 @@ export async function createAgentSessionServices(
 export async function prepareAgentSessionServices(
 	options: CreateAgentSessionServicesOptions,
 ): Promise<() => Promise<AgentSessionServices>> {
-	const lifetime = { scope: sessionLifecycleCreation.getStore()?.scope ?? {}, claimed: false };
+	const inherited = sessionLifecycleCreation.getStore();
+	const lifetime = { ...inherited, scope: inherited?.scope ?? {}, claimed: false };
 	const complete = await sessionLifecycleCreation.run(lifetime, () => prepareOwnedAgentSessionServices(options));
 	return () =>
 		sessionLifecycleCreation.run(lifetime, async () => {
@@ -275,7 +276,9 @@ function createSessionFromServices(
 	const lifetime = serviceLifetimes.get(options.services);
 	if (lifetime && !lifetime.claimed) {
 		lifetime.claimed = true;
-		return sessionLifecycleCreation.run({ scope: lifetime.scope }, () => createSessionFromServices(options, factory));
+		return sessionLifecycleCreation.run({ ...lifetime, claimed: false }, () =>
+			createSessionFromServices(options, factory),
+		);
 	}
 	return factory({
 		cwd: options.services.cwd,
