@@ -5,8 +5,14 @@ const diagnosticKey = Symbol.for("atomic.builtin-diagnostic.v1");
 type DiagnosticScope = { [diagnosticKey]?: (diagnostic: Omit<HostDiagnostic, "sessionId">) => void };
 
 const contextKey = Symbol.for("atomic.builtin-diagnostic-context.v1");
-type Reporter = (diagnostic: Omit<HostDiagnostic, "sessionId">) => void;
+const ownerKey = Symbol.for("atomic.builtin-owner.v1");
+type Reporter = ((diagnostic: Omit<HostDiagnostic, "sessionId">) => void) & { [ownerKey]?: object };
 const host = globalThis as typeof globalThis & { [contextKey]?: AsyncLocalStorage<Reporter> };
+
+/** Stable SDK invocation owner; absent for standalone helpers. */
+export function getMcpOwner(): object | undefined {
+  return host[contextKey]?.getStore()?.[ownerKey];
+}
 
 /** Redact at the logger boundary: arbitrary messages, contexts and errors are never forwarded. */
 export function reportOwnedMcpLog(level: "debug" | "info" | "warn" | "error"): boolean {

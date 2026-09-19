@@ -12,6 +12,38 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { getAgentPath } from './agent-dir.ts';
+import { getMcpOwner, reportOwnedMcpLog } from './diagnostics.js';
+
+export interface OAuthTransient {
+  oauthState?: string;
+  codeVerifier?: string;
+  serverUrl?: string;
+}
+
+const ownedTransients = new WeakMap<object, Map<string, OAuthTransient>>();
+
+/** SDK-only memory; standalone callers keep their historical disk storage. */
+export function getOwnedOAuthTransients(): Map<string, OAuthTransient> | undefined {
+  const owner = getMcpOwner();
+  if (!owner) return undefined;
+  let entries = ownedTransients.get(owner);
+  if (!entries) {
+    entries = new Map();
+    ownedTransients.set(owner, entries);
+  }
+  return entries;
+}
+
+function updateTransient(serverName: string, values: OAuthTransient): boolean {
+  const entries = getOwnedOAuthTransients();
+  if (!entries) return false;
+  const previous = entries.get(serverName);
+  entries.set(serverName, {
+    ...(values.serverUrl && previous?.serverUrl !== values.serverUrl ? {} : previous),
+    ...values,
+  });
+  return true;
+}
 
 /** OAuth token storage format */
 export interface StoredTokens {
@@ -81,7 +113,7 @@ function readAuthEntry(serverName: string): AuthEntry | undefined {
     const data = readFileSync(filePath, 'utf-8');
     return JSON.parse(data) as AuthEntry;
   } catch (error) {
-    console.error(`Failed to read auth entry for ${serverName}:`, error);
+    if (!reportOwnedMcpLog("error")) console.error(`Failed to read auth entry for ${serverName}:`, error);
     return undefined;
   }
 }
@@ -150,7 +182,7 @@ export function removeAuthEntry(serverName: string): void {
       }
     }
   } catch (error) {
-    console.error(`Failed to remove auth entry for ${serverName}:`, error);
+    if (!reportOwnedMcpLog("error")) console.error(`Failed to remove auth entry for ${serverName}:`, error);
   }
 }
 
@@ -194,6 +226,7 @@ export function updateClientInfo(
  * Update code verifier for a server.
  */
 export function updateCodeVerifier(serverName: string, codeVerifier: string, serverUrl?: string): void {
+  if (updateTransient(serverName, { codeVerifier, serverUrl })) return;
   const entry = getAuthEntry(serverName) ?? {};
   if (serverUrl && entry.serverUrl !== serverUrl) {
     delete entry.tokens;
@@ -208,6 +241,12 @@ export function updateCodeVerifier(serverName: string, codeVerifier: string, ser
  * Clear code verifier for a server.
  */
 export function clearCodeVerifier(serverName: string): void {
+  const entries = getOwnedOAuthTransients();
+  if (entries) {
+    const entry = entries.get(serverName);
+    if (entry) delete entry.codeVerifier;
+    return;
+  }
   const entry = getAuthEntry(serverName);
   if (entry) {
     delete entry.codeVerifier;
@@ -219,6 +258,7 @@ export function clearCodeVerifier(serverName: string): void {
  * Update OAuth state for a server.
  */
 export function updateOAuthState(serverName: string, state: string, serverUrl?: string): void {
+  if (updateTransient(serverName, { oauthState: state, serverUrl })) return;
   const entry = getAuthEntry(serverName) ?? {};
   if (serverUrl && entry.serverUrl !== serverUrl) {
     delete entry.tokens;
@@ -233,6 +273,8 @@ export function updateOAuthState(serverName: string, state: string, serverUrl?: 
  * Get OAuth state for a server.
  */
 export function getOAuthState(serverName: string): string | undefined {
+  const entries = getOwnedOAuthTransients();
+  if (entries) return entries.get(serverName)?.oauthState;
   const entry = getAuthEntry(serverName);
   return entry?.oauthState;
 }
@@ -241,6 +283,12 @@ export function getOAuthState(serverName: string): string | undefined {
  * Clear OAuth state for a server.
  */
 export function clearOAuthState(serverName: string): void {
+  const entries = getOwnedOAuthTransients();
+  if (entries) {
+    const entry = entries.get(serverName);
+    if (entry) delete entry.oauthState;
+    return;
+  }
   const entry = getAuthEntry(serverName);
   if (entry) {
     delete entry.oauthState;
@@ -271,6 +319,7 @@ export function hasStoredTokens(serverName: string): boolean {
  * Clear all credentials for a server.
  */
 export function clearAllCredentials(serverName: string): void {
+  getOwnedOAuthTransients()?.delete(serverName);
   removeAuthEntry(serverName);
 }
 

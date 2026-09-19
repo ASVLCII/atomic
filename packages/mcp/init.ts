@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 import type { ExtensionAPI, ExtensionContext } from "@bastani/atomic";
 import { reportMcpDiagnostic } from "./diagnostics.js";
 import type { McpExtensionState } from "./state.js";
@@ -177,7 +178,7 @@ export async function initializeMcp(
     try {
       await lifecycle.gracefulShutdown();
     } catch (cleanupError) {
-      console.error("MCP: failed to clean resources after initialization failure", cleanupError);
+      if (!reportOwnedMcpLog("error")) console.error("MCP: failed to clean resources after initialization failure", cleanupError);
     }
     throw error;
   }

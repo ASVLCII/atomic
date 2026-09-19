@@ -1,3 +1,4 @@
+import { reportOwnedIntercomDiagnostic } from "./diagnostics.js";
 import type { ExtensionAPI, ExtensionContext } from "@bastani/atomic";
 import type { IntercomClient } from "./broker/client.js";
 import type { IntercomConfig } from "./config.ts";
@@ -62,14 +63,14 @@ export function registerIntercomLifecycle(pi: ExtensionAPI, deps: LifecycleDeps)
       try {
         await activeClient.disconnect();
       } catch (error) {
-        console.error(`Intercom failed to disconnect during ${reason.toLowerCase()}; continuing cleanup:`, error);
+        if (!reportOwnedIntercomDiagnostic()) console.error(`Intercom failed to disconnect during ${reason.toLowerCase()}; continuing cleanup:`, error);
       }
     }
     if (deps.disconnectAuxiliaryClients) {
       try {
         await deps.disconnectAuxiliaryClients();
       } catch (error) {
-        console.error(`Intercom failed to disconnect auxiliary clients during ${reason.toLowerCase()}; continuing cleanup:`, error);
+        if (!reportOwnedIntercomDiagnostic()) console.error(`Intercom failed to disconnect auxiliary clients during ${reason.toLowerCase()}; continuing cleanup:`, error);
       }
     }
     deps.restoreIntercomSessionIdEnv?.();

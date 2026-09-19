@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import { isStaleExtensionContextError, type ExtensionAPI, type ExtensionContext } from "@bastani/atomic";
 import { fetchAllContent } from "./extract.js";
 import { clearCloneCache } from "./github-extract.js";
@@ -115,7 +116,7 @@ export function registerWebSearchFeatures(pi: ExtensionAPI, initConfig: WebSearc
 			.finally(() => { pendingFetches.delete(fetchId); })
 			.catch((error) => {
 				if (!isStaleExtensionContextError(error)) {
-					console.error("Web search background fetch notification failed:", error);
+					if (!reportOwnedWebDiagnostic()) console.error("Web search background fetch notification failed:", error);
 				}
 			});
 		return fetchId;

@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { activityMonitor } from "./activity.js";
 import { searchWithExaMcp, callExaMcp } from "./exa-mcp.js";
 import type { ExtractedContent } from "./extract.js";
 import type { SearchOptions, SearchResponse } from "./perplexity.js";
+import { createOwnerState } from "./owner-state.js";
 
 const EXA_ANSWER_URL = "https://api.exa.ai/answer";
 const EXA_SEARCH_URL = "https://api.exa.ai/search";
@@ -48,25 +50,19 @@ export interface ExaSearchOptions extends SearchOptions {
 	includeContent?: boolean;
 }
 
-let cachedConfig: WebSearchConfig | null = null;
 let warnedMonth: string | null = null;
 
-function loadConfig(): WebSearchConfig {
-	if (cachedConfig) return cachedConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedConfig = {};
-		return cachedConfig;
-	}
+const loadConfig = createOwnerState<WebSearchConfig>(() => {
+	if (!existsSync(CONFIG_PATH)) return {};
 
 	const raw = readFileSync(CONFIG_PATH, "utf-8");
 	try {
-		cachedConfig = JSON.parse(raw) as WebSearchConfig;
-		return cachedConfig;
+		return JSON.parse(raw) as WebSearchConfig;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		throw new Error(`Failed to parse ${CONFIG_PATH}: ${message}`);
 	}
-}
+});
 
 function normalizeApiKey(value: unknown): string | null {
 	if (typeof value !== "string") return null;
@@ -119,7 +115,7 @@ function reserveRequestBudget(): { exhausted: true } | null {
 	const nextCount = usage.count + 1;
 	if (nextCount >= WARNING_THRESHOLD && warnedMonth !== usage.month) {
 		warnedMonth = usage.month;
-		console.error(`Exa usage warning: ${nextCount}/${MONTHLY_LIMIT} monthly requests used.`);
+		if (!reportOwnedWebDiagnostic("warning")) console.error(`Exa usage warning: ${nextCount}/${MONTHLY_LIMIT} monthly requests used.`);
 	}
 
 	writeUsage({ month: usage.month, count: nextCount });

@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import type { ExtensionAPI, ExtensionContext, HandlerFn, MessageRenderer, RegisteredCommand, ToolDefinition } from "@bastani/atomic";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -139,7 +140,7 @@ function getInitialShortcutConfig(): { curate: string; activity: string } {
 				activity: parsed.shortcuts?.activity?.trim() || defaults.activity,
 			};
 		} catch (error) {
-			console.error(`[pi-web-access] Failed to inspect shortcuts in ${configPath}:`, error);
+			if (!reportOwnedWebDiagnostic()) console.error(`[pi-web-access] Failed to inspect shortcuts in ${configPath}:`, error);
 		}
 	}
 	return defaults;
@@ -229,7 +230,7 @@ export default function webAccess(pi: ExtensionAPI) {
 				try {
 					await dispatchHandlers(captured, "session_shutdown", shutdown?.event ?? { type: "session_shutdown", reason: "quit" }, cleanupCtx);
 				} catch (cleanupError) {
-					console.error("[pi-web-access] Failed to clean rejected lazy candidate:", cleanupError);
+					if (!reportOwnedWebDiagnostic()) console.error("[pi-web-access] Failed to clean rejected lazy candidate:", cleanupError);
 				}
 			};
 			try {

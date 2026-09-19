@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - Video and YouTube subprocess extraction now runs in Node-hosted SDK sessions as well as the compiled binary, with bounded output, cancellation and awaited child cleanup ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - SDK sessions sharing a resource loader now retain separate web result stores and pending-fetch/curator state, so closing or restoring one session does not erase another's results or cancel its pending content notification ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- SDK sessions now keep separate provider configuration caches and GitHub clones, so one session's cache cleanup does not delete another session's cloned files ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Operational web diagnostics within SDK-owned work now use the session's diagnostic sink with redacted messages instead of printing credentials, paths or remote errors to console ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

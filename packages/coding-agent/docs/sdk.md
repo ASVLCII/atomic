@@ -174,6 +174,8 @@ Only an actual `true` confirms a primitive approval. Questionnaire readiness kee
 
 `onDiagnostic` receives session-attributed operational diagnostics. Existing errors and tool results remain available without a callback. Third-party extensions can still write directly to the console; the callback does not intercept their output.
 
+Rebinding host callbacks preserves pending MCP OAuth ownership. Authorization state and PKCE verifiers remain in memory for that SDK session; restart authorization after disposing it. Durable MCP tokens and client registration information still use the existing server-name credential files, so separate sessions are not separate credential stores. Web provider configuration caches are session-local, but configuration discovery and environment keys are unchanged; create a new session to pick up changed cached provider settings. GitHub extraction returns the owned clone path to use with file tools rather than requiring callers to predict its directory.
+
 ### Workflow and subagent children
 
 Children use the invoking session's model/auth runtime, settings, agent directory, human-input callbacks and diagnostic sink. A child model or fallback choice does not switch to global credentials. Explicit child `cwd` wins, then a supplied child `sessionManager.getCwd()`, then the invoking session's directory. Relative child working directories resolve from the invoking session, without changing the process working directory.

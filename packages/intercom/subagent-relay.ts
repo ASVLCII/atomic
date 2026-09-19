@@ -1,3 +1,4 @@
+import { reportOwnedIntercomDiagnostic } from "./diagnostics.js";
 import { isStaleExtensionContextError, type ExtensionAPI, type ExtensionContext } from "@bastani/atomic";
 import { randomUUID } from "crypto";
 import type { IntercomClient } from "./broker/client.js";
@@ -117,7 +118,7 @@ export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps)
     try {
       recordSubagentDeliveryError(entryType, to, message, error);
     } catch (recordError) {
-      console.error("Failed to record local subagent relay error:", recordError);
+      if (!reportOwnedIntercomDiagnostic()) console.error("Failed to record local subagent relay error:", recordError);
     }
   }
   function emitResultDelivery(requestId: string | undefined, delivered: boolean, error?: unknown): void {
@@ -195,7 +196,7 @@ export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps)
       try {
         acknowledgeResult(options, parsed.requestId, false, error);
       } catch (ackError) {
-        console.error("Failed to acknowledge local subagent relay error:", ackError);
+        if (!reportOwnedIntercomDiagnostic()) console.error("Failed to acknowledge local subagent relay error:", ackError);
       }
     }
   }
@@ -281,7 +282,7 @@ export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps)
       }
     })().catch((error) => {
       if (!isStaleExtensionContextError(error)) {
-        console.error("Subagent intercom relay failed:", error);
+        if (!reportOwnedIntercomDiagnostic()) console.error("Subagent intercom relay failed:", error);
       }
     });
   }

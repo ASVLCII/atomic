@@ -1,3 +1,4 @@
+import { reportOwnedIntercomDiagnostic } from "./diagnostics.js";
 import { APP_NAME, getEnvValue, type ExtensionAPI, type ExtensionContext, type SessionStartEvent, type ToolDefinition } from "@bastani/atomic";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -166,7 +167,7 @@ function reportDiagnostic(
 	consoleMessage = message,
 ): void {
 	if (route === "console") {
-		console.error(consoleMessage, error);
+		if (!reportOwnedIntercomDiagnostic()) console.error(consoleMessage, error);
 		return;
 	}
 	if (route === "silent") return;

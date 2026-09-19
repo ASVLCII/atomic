@@ -4973,3 +4973,63 @@ test("web results survive sibling initialization and overlapping close", async (
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+// #3105: the actual runner bridge preserves OAuth ownership when host bindings replace reporters.
+test("OAuth transient ownership survives public SDK rebind and sibling close", async () => {
+	const root = mkdtempSync(join(tmpdir(), "sdk-oauth-rebind-"));
+	const sessions: AgentSession[] = [];
+	const { getOAuthState, updateOAuthState } = await import("../../mcp/mcp-auth.js");
+	const { shutdownOAuth } = await import("../../mcp/mcp-auth-flow.js");
+	try {
+		for (let index = 0; index < 2; index++) {
+			const resourceLoader = new DefaultResourceLoader({
+				cwd: root,
+				agentDir: join(root, "agent"),
+				settingsManager: SettingsManager.inMemory(),
+				extensionFactories: [
+					(pi) => {
+						pi.registerTool({
+							name: "oauth_probe",
+							label: "OAuth probe",
+							description: "Exercise builtin OAuth storage",
+							parameters: Type.Object({ value: Type.Optional(Type.String()) }),
+							execute: async (_id, params) => {
+								if (params.value) updateOAuthState("same", params.value, "https://example.invalid/mcp");
+								return { content: [{ type: "text", text: getOAuthState("same") ?? "absent" }], details: {} };
+							},
+						});
+						pi.on("session_shutdown", () => shutdownOAuth());
+					},
+				],
+			});
+			await resourceLoader.reload();
+			const { session } = await createAgentSession({
+				cwd: root,
+				agentDir: join(root, "agent"),
+				resourceLoader,
+				sessionManager: SessionManager.inMemory(root),
+				settingsManager: SettingsManager.inMemory(),
+				model: getModel("anthropic", "claude-sonnet-4-5")!,
+				builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			});
+			sessions.push(session);
+		}
+		const call = (index: number, value?: string) =>
+			sessions[index]!.agent.state.tools.find((tool) => tool.name === "oauth_probe")!.execute(
+				"probe",
+				{ value },
+				new AbortController().signal,
+			);
+		await call(0, "first-private-state");
+		await call(1, "second-private-state");
+		await sessions[0]!.bindExtensions({ onDiagnostic: () => {} });
+		assert.match(JSON.stringify((await call(0)).content), /first-private-state/);
+		assert.match(JSON.stringify((await call(1)).content), /second-private-state/);
+		await Promise.all([sessions[1]!.dispose(), sessions[1]!.dispose()]);
+		assert.match(JSON.stringify((await call(0)).content), /first-private-state/);
+		assert.equal(existsSync(join(root, "agent", "mcp-oauth", "same", "tokens.json")), false);
+	} finally {
+		await Promise.all(sessions.map((session) => session.dispose()));
+		rmSync(root, { recursive: true, force: true });
+	}
+});

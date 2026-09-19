@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { APP_NAME } from "@bastani/atomic";
 import { findReadableConfigPath } from "./config-paths.ts";
+import { createOwnerState } from "./owner-state.js";
 
 const CONFIG_PATH = findReadableConfigPath();
 const ALLOW_BROWSER_COOKIES_ENV = `${APP_NAME.toUpperCase()}_ALLOW_BROWSER_COOKIES`;
@@ -10,20 +11,14 @@ interface GeminiWebConfig {
 	allowBrowserCookies?: boolean;
 }
 
-let cachedConfig: GeminiWebConfig | null = null;
-
 export function normalizeChromeProfile(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const normalized = value.trim();
 	return normalized.length > 0 ? normalized : undefined;
 }
 
-function loadConfig(): GeminiWebConfig {
-	if (cachedConfig) return cachedConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedConfig = {};
-		return cachedConfig;
-	}
+const loadConfig = createOwnerState<GeminiWebConfig>(() => {
+	if (!existsSync(CONFIG_PATH)) return {};
 
 	const rawText = readFileSync(CONFIG_PATH, "utf-8");
 	let raw: { chromeProfile?: unknown; allowBrowserCookies?: unknown };
@@ -34,12 +29,11 @@ function loadConfig(): GeminiWebConfig {
 		throw new Error(`Failed to parse ${CONFIG_PATH}: ${message}`);
 	}
 
-	cachedConfig = {
+	return {
 		chromeProfile: normalizeChromeProfile(raw.chromeProfile),
 		allowBrowserCookies: raw.allowBrowserCookies === true,
 	};
-	return cachedConfig;
-}
+});
 
 export function getChromeProfileFromConfig(): string | undefined {
 	return loadConfig().chromeProfile;

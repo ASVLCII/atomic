@@ -41,6 +41,7 @@ test.each([false, true])("replacement waits for cleanup and final shutdown repor
 		writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ type: "module" }));
 		for (const file of [
 			"index.ts",
+			"diagnostics.ts",
 			"caller-wait.ts",
 			"session-cleanup-barrier.ts",
 			"state-lease.ts",

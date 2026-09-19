@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { findReadableConfigPath } from "./config-paths.ts";
+import { createOwnerState } from "./owner-state.js";
 
 const CONFIG_PATH = findReadableConfigPath();
 
@@ -40,7 +41,7 @@ export interface GitHubCloneConfig {
 	clonePath: string;
 }
 
-let cachedConfig: GitHubCloneConfig | null = null;
+const configState = createOwnerState(() => ({ cachedConfig: null as GitHubCloneConfig | null }));
 
 function normalizeEnabled(value: unknown, fallback: boolean): boolean {
 	return typeof value === "boolean" ? value : fallback;
@@ -58,7 +59,8 @@ function normalizeClonePath(value: unknown, fallback: string): string {
 }
 
 export function loadGitHubConfig(): GitHubCloneConfig {
-	if (cachedConfig) return cachedConfig;
+	const state = configState();
+	if (state.cachedConfig) return state.cachedConfig;
 
 	const defaults: GitHubCloneConfig = {
 		enabled: true,
@@ -68,8 +70,8 @@ export function loadGitHubConfig(): GitHubCloneConfig {
 	};
 
 	if (!existsSync(CONFIG_PATH)) {
-		cachedConfig = defaults;
-		return cachedConfig;
+		state.cachedConfig = defaults;
+		return state.cachedConfig;
 	}
 
 	const rawText = readFileSync(CONFIG_PATH, "utf-8");
@@ -82,13 +84,13 @@ export function loadGitHubConfig(): GitHubCloneConfig {
 	}
 
 	const gc = raw.githubClone ?? {};
-	cachedConfig = {
+	state.cachedConfig = {
 		enabled: normalizeEnabled(gc.enabled, defaults.enabled),
 		maxRepoSizeMB: normalizePositiveNumber(gc.maxRepoSizeMB, defaults.maxRepoSizeMB),
 		cloneTimeoutSeconds: normalizePositiveNumber(gc.cloneTimeoutSeconds, defaults.cloneTimeoutSeconds),
 		clonePath: normalizeClonePath(gc.clonePath, defaults.clonePath),
 	};
-	return cachedConfig;
+	return state.cachedConfig;
 }
 
 const NON_CODE_SEGMENTS = new Set([
@@ -152,5 +154,5 @@ export function parseGitHubUrl(url: string): GitHubUrlInfo | null {
 }
 
 export function resetGitHubConfig(): void {
-	cachedConfig = null;
+	configState().cachedConfig = null;
 }

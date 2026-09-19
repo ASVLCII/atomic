@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 import { isStaleExtensionContextError, type AgentToolUpdateCallback, type ExtensionAPI, type ExtensionContext, type SubagentChildPolicy, type ToolInfo } from "@bastani/atomic";
 import type { McpExtensionState } from "./state.js";
 import type { McpConfig } from "./types.js";
@@ -249,7 +250,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         if (activeSession !== session || session.generation !== lifecycleGeneration) return;
         const message = error instanceof Error ? error.message : String(error);
         if (!message.startsWith(STALE_INITIALIZATION_PREFIX) && !isStaleExtensionContextError(error)) {
-          console.error(
+          if (!reportOwnedMcpLog("error")) console.error(
             `MCP initialization failed for session generation ${session.generation}; a later MCP call will retry:`,
             error,
           );
@@ -296,7 +297,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       }
     } catch (error) {
       if (!isStartCurrent() || isStaleExtensionContextError(error)) return;
-      console.error("MCP: failed to register cached startup tools; enabling MCP proxy fallback", error);
+      if (!reportOwnedMcpLog("error")) console.error("MCP: failed to register cached startup tools; enabling MCP proxy fallback", error);
       registerProxyTool();
     }
 

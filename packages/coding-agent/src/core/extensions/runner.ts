@@ -363,17 +363,17 @@ export class ExtensionRunner {
 		this.humanInputBindingRevision = bindingRevision;
 		this.onDiagnostic = onDiagnostic;
 		// Internal builtin bridge: no new extension API and no interception of console.
-		Reflect.set(
-			lifecycleScopeForOwner(this.runtime),
-			Symbol.for("atomic.builtin-diagnostic.v1"),
-			(diagnostic: Omit<HostDiagnostic, "sessionId">) => {
-				try {
-					this.onDiagnostic?.({ ...diagnostic, sessionId: this.sessionManager.getSessionId() });
-				} catch {
-					// Observers cannot replace the primary service failure.
-				}
-			},
-		);
+		const scope = lifecycleScopeForOwner(this.runtime);
+		const report = (diagnostic: Omit<HostDiagnostic, "sessionId">) => {
+			try {
+				this.onDiagnostic?.({ ...diagnostic, sessionId: this.sessionManager.getSessionId() });
+			} catch {
+				// Observers cannot replace the primary service failure.
+			}
+		};
+		// Rebinding replaces the reporter, not the builtin service owner.
+		Object.defineProperty(report, Symbol.for("atomic.builtin-owner.v1"), { value: scope });
+		Reflect.set(scope, Symbol.for("atomic.builtin-diagnostic.v1"), report);
 		this.refreshHostInput();
 	}
 

@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, rmSync, statSync, readdirSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createOwnerState } from "./owner-state.js";
 import { extname, join, resolve as resolvePath, sep as pathSep } from "node:path";
 import { createChildProcessEnvironment } from "@bastani/atomic";
 import { activityMonitor } from "./activity.js";
@@ -14,7 +16,10 @@ interface CachedClone {
 	clonePromise: Promise<string | null>;
 }
 
-const cloneCache = new Map<string, CachedClone>();
+const cloneState = createOwnerState((owner) => ({
+	cache: new Map<string, CachedClone>(),
+	directory: owner ? randomUUID() : "",
+}));
 
 function cacheKey(owner: string, repo: string, ref?: string): string {
 	return ref ? `${owner}/${repo}@${ref}` : `${owner}/${repo}`;
@@ -377,7 +382,10 @@ export async function extractGitHub(
 
 	if (signal?.aborted) return null;
 
-	const config = loadGitHubConfig();
+	const state = cloneState();
+	const cloneCache = state.cache;
+	const loadedConfig = loadGitHubConfig();
+	const config = { ...loadedConfig, clonePath: join(loadedConfig.clonePath, state.directory) };
 	if (!config.enabled) return null;
 
 	const { owner, repo } = info;
@@ -476,6 +484,7 @@ export async function extractGitHub(
 }
 
 export function clearCloneCache(): void {
+	const cloneCache = cloneState().cache;
 	for (const entry of cloneCache.values()) {
 		try {
 			rmSync(entry.localPath, { recursive: true, force: true });

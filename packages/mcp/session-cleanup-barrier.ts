@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 /**
  * Retain teardown work across MCP lifecycle generations without allowing a
  * non-abortable producer to block every later generation forever.
@@ -34,8 +35,8 @@ export class McpSessionCleanupBarrier {
     const observed = tasks.filter((task): task is CleanupTask => task !== null && task !== undefined);
     const prior = this.settled;
     const next = Promise.all([
-      observeWithin(prior, this.deadlineMs, () => console.error("MCP: prior cleanup exceeded its deadline; continuing with fenced state")),
-      ...observed.map((task) => observeWithin(task, this.deadlineMs, () => console.error("MCP: cleanup task exceeded its deadline; continuing with fenced state"))),
+      observeWithin(prior, this.deadlineMs, () => { if (!reportOwnedMcpLog("error")) console.error("MCP: prior cleanup exceeded its deadline; continuing with fenced state"); }),
+      ...observed.map((task) => observeWithin(task, this.deadlineMs, () => { if (!reportOwnedMcpLog("error")) console.error("MCP: cleanup task exceeded its deadline; continuing with fenced state"); })),
     ]).then(() => undefined);
     this.settled = next;
     return next;

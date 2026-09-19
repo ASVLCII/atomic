@@ -17,6 +17,7 @@ import {
   clearOAuthState,
   getAuthForUrl,
   getOAuthState,
+  getOwnedOAuthTransients,
   hasStoredTokens,
   isTokenExpired,
   updateOAuthState,
@@ -26,6 +27,7 @@ import { McpSessionCleanupBarrier } from "./session-cleanup-barrier.js"
 import type { ServerEntry } from "./types.js"
 import { resolveServerUrl } from "./utils.js"
 import { sanitizeRemoteError } from "./remote-diagnostics.js"
+import { getMcpOwner, reportOwnedMcpLog } from "./diagnostics.js"
 
 export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 
@@ -47,10 +49,26 @@ interface PendingAuthentication {
   transport?: PendingTransport
 }
 
-const pendingTransports = new Map<string, PendingTransport>()
-const pendingAuthentications = new Map<string, PendingAuthentication>()
+function createOAuthLifecycle() {
+  return {
+    pendingTransports: new Map<string, PendingTransport>(),
+    pendingAuthentications: new Map<string, PendingAuthentication>(),
+    oauthCleanupBarrier: new McpSessionCleanupBarrier(),
+  }
+}
+const standaloneLifecycle = createOAuthLifecycle()
+const ownedLifecycles = new WeakMap<object, ReturnType<typeof createOAuthLifecycle>>()
+function oauthLifecycle() {
+  const owner = getMcpOwner()
+  if (!owner) return standaloneLifecycle
+  let lifecycle = ownedLifecycles.get(owner)
+  if (!lifecycle) {
+    lifecycle = createOAuthLifecycle()
+    ownedLifecycles.set(owner, lifecycle)
+  }
+  return lifecycle
+}
 const closingTransports = new WeakMap<StreamableHTTPClientTransport, Promise<void>>()
-const oauthCleanupBarrier = new McpSessionCleanupBarrier()
 
 /** Actionable cancellation surfaced to callers whose session no longer owns OAuth. */
 export class OAuthSessionResetError extends Error {
@@ -99,6 +117,7 @@ function closeTransport(transport: StreamableHTTPClientTransport): Promise<void>
 }
 
 async function retireTransport(serverName: string, pending: PendingTransport): Promise<void> {
+  const { pendingTransports } = oauthLifecycle()
   if (pendingTransports.get(serverName) === pending) pendingTransports.delete(serverName)
   await closeTransport(pending.transport)
 }
@@ -115,6 +134,7 @@ async function startAuthAttempt(
   definition?: ServerEntry,
   owner?: PendingAuthentication,
 ): Promise<StartedAuth> {
+  const { pendingTransports } = oauthLifecycle()
   assertActive(owner)
   serverUrl = resolveServerUrl(serverUrl)
   const config = definition ? extractOAuthConfig(definition) : {}
@@ -206,6 +226,7 @@ async function completePendingTransport(
 
 /** Complete a separately started OAuth flow with its authorization code. */
 export async function completeAuth(serverName: string, authorizationCode: string): Promise<AuthStatus> {
+  const { pendingTransports } = oauthLifecycle()
   const pending = pendingTransports.get(serverName)
   if (!pending) throw new Error(`No pending OAuth flow for server: ${serverName}`)
   return completePendingTransport(serverName, authorizationCode, pending)
@@ -230,7 +251,7 @@ async function performAuthentication(
 
   const callbackPromise = waitForCallback(started.oauthState)
   try {
-    console.log(`MCP Auth: Opening browser for ${serverName}`)
+    if (!reportOwnedMcpLog("info")) console.log(`MCP Auth: Opening browser for ${serverName}`)
     try {
       await open(started.authorizationUrl)
       assertActive(owner)
@@ -268,6 +289,7 @@ export function authenticate(
   serverUrl: string,
   definition?: ServerEntry,
 ): Promise<AuthStatus> {
+  const { pendingAuthentications, oauthCleanupBarrier } = oauthLifecycle()
   const inFlight = pendingAuthentications.get(serverName)
   if (inFlight) return inFlight.result
 
@@ -297,6 +319,8 @@ export function authenticate(
  * and is fenced from later credential/transport ownership by its aborted provider.
  */
 export function resetOAuthLifecycle(reason = "session_reset"): Promise<void> {
+  const { pendingAuthentications, pendingTransports, oauthCleanupBarrier } = oauthLifecycle()
+  getOwnedOAuthTransients()?.clear()
   const owners = Array.from(pendingAuthentications.values())
   pendingAuthentications.clear()
   const lifecycleError = new OAuthSessionResetError(undefined, reason)
@@ -332,21 +356,21 @@ export async function getValidToken(
   if (expired === false) return entry.tokens
 
   if (expired === true && entry.tokens.refreshToken) {
-    console.log(`MCP Auth: Token expired for ${serverName}, attempting refresh`)
+    if (!reportOwnedMcpLog("info")) console.log(`MCP Auth: Token expired for ${serverName}, attempting refresh`)
     try {
       const authProvider = new McpOAuthProvider(serverName, serverUrl, {}, {
         onRedirect: async () => {},
       })
       const clientInfo = await authProvider.clientInformation()
       if (!clientInfo) {
-        console.log(`MCP Auth: No client info for refresh for ${serverName}`)
+        if (!reportOwnedMcpLog("info")) console.log(`MCP Auth: No client info for refresh for ${serverName}`)
         return null
       }
       const result = await runSdkAuth(authProvider, { serverUrl })
       if (result !== "AUTHORIZED") return null
       return getAuthForUrl(serverName, serverUrl)?.tokens ?? null
     } catch (error) {
-      console.error(`MCP Auth: Token refresh failed for ${serverName}`, { error: sanitizeRemoteError(error, serverUrl) })
+      if (!reportOwnedMcpLog("error")) console.error(`MCP Auth: Token refresh failed for ${serverName}`, { error: sanitizeRemoteError(error, serverUrl) })
       return null
     }
   }
@@ -359,13 +383,14 @@ export async function getAuthStatus(serverName: string): Promise<AuthStatus> {
 }
 
 export async function removeAuth(serverName: string): Promise<void> {
+  const { pendingTransports } = oauthLifecycle()
   const oauthState = getOAuthState(serverName)
   if (oauthState) cancelPendingCallback(oauthState)
   const pending = pendingTransports.get(serverName)
   if (pending) await retireTransport(serverName, pending)
   clearAllCredentials(serverName)
   clearOAuthState(serverName)
-  console.log(`MCP Auth: Removed credentials for ${serverName}`)
+  if (!reportOwnedMcpLog("info")) console.log(`MCP Auth: Removed credentials for ${serverName}`)
 }
 
 export function supportsOAuth(definition: ServerEntry): boolean {

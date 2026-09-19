@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import { CONFIG_DIR_NAME, getUserConfigPaths } from "@bastani/atomic";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -79,7 +80,7 @@ export function loadConfigForExtensionInit(): WebSearchConfig {
 		return loadConfig();
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error(`[pi-web-access] ${message}`);
+		if (!reportOwnedWebDiagnostic()) console.error(`[pi-web-access] ${message}`);
 		return {};
 	}
 }

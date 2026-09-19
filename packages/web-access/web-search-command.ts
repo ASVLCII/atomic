@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import type { ExtensionAPI } from "@bastani/atomic";
 import { randomUUID } from "node:crypto";
 import { startCuratorServer, type CuratorServerHandle } from "./curator-server.js";
@@ -146,7 +147,7 @@ export function registerWebSearchCommand(pi: ExtensionAPI, deps: RegisterWebSear
 								saveConfig({ provider: normalized });
 							} catch (err) {
 								const message = err instanceof Error ? err.message : String(err);
-								console.error(`Failed to persist default provider: ${message}`);
+								if (!reportOwnedWebDiagnostic()) console.error(`Failed to persist default provider: ${message}`);
 							}
 						},
 						async onAddSearch(query, queryIndex, provider) {

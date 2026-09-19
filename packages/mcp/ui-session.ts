@@ -16,8 +16,6 @@ import { startUiServer, type UiServerHandle } from "./ui-server.ts";
 import { isGlimpseAvailable, openGlimpseWindow } from "./glimpse-ui.js";
 import { escapeHtmlAttribute } from "./host-html-template.js";
 
-let activeGlimpseWindow: { close(): void } | null = null;
-
 export interface UiSessionRequest {
   serverName: string;
   toolName: string;
@@ -168,10 +166,7 @@ export async function maybeStartUiSession(
       state.uiServer.close("replaced");
       state.uiServer = null;
     }
-    if (activeGlimpseWindow) {
-      activeGlimpseWindow.close();
-      activeGlimpseWindow = null;
-    }
+    let activeGlimpseWindow: { close(): void } | null = null;
 
     const streamMode = request.streamMode;
     const streamId = streamMode ? randomUUID() : undefined;
@@ -326,11 +321,16 @@ export async function maybeStartUiSession(
             if (active) handle.close("glimpse-closed");
           },
         });
+        if (!active || state.uiServer !== handle) {
+          const retiredWindow = activeGlimpseWindow;
+          activeGlimpseWindow = null;
+          retiredWindow.close();
+        }
       } catch (error) {
         log.debug("Glimpse unavailable, using browser", {
           error: error instanceof Error ? error.message : String(error),
         });
-        await openInBrowser(state, handle.url);
+        if (active && state.uiServer === handle) await openInBrowser(state, handle.url);
       }
     } else {
       await openInBrowser(state, handle.url);

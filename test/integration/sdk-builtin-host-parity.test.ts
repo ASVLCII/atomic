@@ -1924,3 +1924,18 @@ test(
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: missing optional providers/extractors must not become empty successful tool results.
+test(
+	"built Node unavailable web dependencies return explicit errors and exit naturally",
+	() => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-web-unavailable.mjs", import.meta.url))],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.equal(result.stderr.toString(), "");
+		assert.equal(result.stdout.toString().trim(), '{"verified":true}');
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);
