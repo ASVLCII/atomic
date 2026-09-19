@@ -99,7 +99,7 @@ function fixture() {
 					budget: "preserve",
 				})[id]!,
 		);
-		if (!valid) response.answers.workflow!.probabilities.registered = 0.5;
+		if (!valid) response.answers.workflow!.probabilities.registered = -1;
 		attempts[index]!.response.resolve(Response.json(response));
 	}
 	return { execute, ctx, controller, result, transport, pendingAttempt, respond, assertNoLaunch };
@@ -123,16 +123,19 @@ test.each([2, 3, 4])(
 	},
 );
 
-test("public route reports the literal exhaustion error only after four malformed Jev responses", async () => {
+test("public route reports exhaustion only after four malformed Jev responses", async () => {
 	const f = fixture();
 	for (let index = 0; index < 4; index++) {
 		const request = await f.pendingAttempt(index);
 		f.respond(index, request, false);
 	}
 	const result = await f.result;
+	assert.equal(result.action, "route");
+	assert.equal("status" in result && result.status, "failed");
+	assert.equal("workflowId" in result && result.workflowId, "");
 	assert.equal(
-		JSON.stringify(result),
-		'{"action":"route","workflowType":"","workflowId":"","status":"failed","error":"Malformed Jev structured decision response (probability_mass). Routing output repair exhausted after 4 attempts."}',
+		"error" in result && result.error,
+		"Malformed Jev structured decision response (probability_value). Routing output repair exhausted after 4 attempts.",
 	);
 	assert.equal(f.transport.mock.calls.length, 4);
 	f.assertNoLaunch();

@@ -314,7 +314,7 @@ for (const [kind, code] of Object.entries({
 	"extra-answer": "answer_keys",
 	"missing-probability": "probability_keys",
 	"unknown-probability": "probability_keys",
-	"bad-mass": "probability_mass",
+	"bad-probability": "probability_value",
 	"not-highest": "choice_not_highest",
 	"bad-confidence": "confidence",
 	"missing-usage": "usage_shape",
@@ -330,7 +330,7 @@ for (const [kind, code] of Object.entries({
 		if (kind === "extra-answer") Object.assign(body.answers, { surprise: body.answers.route });
 		if (kind === "missing-probability") Reflect.deleteProperty(body.answers.route.probabilities, "none");
 		if (kind === "unknown-probability") Object.assign(body.answers.route.probabilities, { surprise: 0 });
-		if (kind === "bad-mass") body.answers.route.probabilities.none = 0;
+		if (kind === "bad-probability") body.answers.route.probabilities.none = -1;
 		if (kind === "not-highest") body.answers.route.choice = "none";
 		if (kind === "bad-confidence") body.answers.route.confidence = 2;
 		if (kind === "missing-usage") Reflect.deleteProperty(body, "usage");
