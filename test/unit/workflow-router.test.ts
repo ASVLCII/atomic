@@ -294,7 +294,9 @@ test("explicit inline preference reaches router and prevents reservation", async
 	const result = await f.call();
 	assert.equal(f.infer.mock.calls.length, 1);
 	assert.equal(result.details.action, "route");
-	assert.equal("workflowType" in result.details && result.details.workflowType, "none");
+	assert.equal("workflowType" in result.details, false);
+	assert.ok("routerDecision" in result.details);
+	assert.equal(result.details.routerDecision?.workflowType, "none");
 	f.noLaunch();
 });
 

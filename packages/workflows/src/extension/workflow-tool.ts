@@ -175,7 +175,6 @@ export function makeExecuteWorkflowTool(
 					if (decision.workflowType === "none")
 						return {
 							action,
-							workflowType: "none",
 							workflowId: "",
 							status: "not_launched",
 							routerDecision: decision,
@@ -186,7 +185,6 @@ export function makeExecuteWorkflowTool(
 					const entry = reservations.register(ctx, selected, decision, routed.assertCurrent);
 					return {
 						action,
-						workflowType: decision.workflowType,
 						workflowId: entry.id,
 						status: "reserved",
 						routerDecision: decision,
@@ -196,7 +194,6 @@ export function makeExecuteWorkflowTool(
 					if (signal?.aborted) throw signal.reason ?? error;
 					return {
 						action,
-						workflowType: "",
 						workflowId: "",
 						status: "failed",
 						error: error instanceof Error ? error.message : String(error),

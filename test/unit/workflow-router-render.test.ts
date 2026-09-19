@@ -87,7 +87,6 @@ for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", 
 		const rendered = renderResult(
 			{
 				action: "route",
-				workflowType: "goal",
 				workflowId: "reserved-id",
 				status: "reserved",
 				routerDecision: { workflowType: "goal", estimatedDuration, maxBudget: {} },
@@ -104,7 +103,6 @@ for (const status of ["reserved", "not_launched", "failed"] as const) {
 	test(`route ${status} boxes the complete structured result`, () => {
 		const result: WorkflowToolResult = {
 			action: "route",
-			workflowType: status === "reserved" ? "goal" : status === "not_launched" ? "none" : "",
 			workflowId: status === "reserved" ? "reserved-id" : "",
 			status,
 			...(status === "failed"
@@ -124,6 +122,7 @@ for (const status of ["reserved", "not_launched", "failed"] as const) {
 				assert.match(rendered, /╭ WORKFLOW ROUTE /);
 				assert.match(rendered, /╰─+╯/);
 				assert.doesNotMatch(rendered, /ROUTER DECISION/);
+				assert.equal(rendered.match(/"workflowType"/g)?.length ?? 0, status === "failed" ? 0 : 1);
 				for (const line of JSON.stringify(result, null, 2).split("\n")) {
 					assert.ok(rendered.includes(` ${line} `), line);
 				}

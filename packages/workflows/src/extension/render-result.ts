@@ -101,7 +101,6 @@ type GetResult = {
 };
 type RouteResult = {
 	action: "route";
-	workflowType: string;
 	workflowId: string;
 	routerDecision?: WorkflowRouterOutput;
 	inputSchema?: import("../shared/types.js").WorkflowDefinition["inputs"];

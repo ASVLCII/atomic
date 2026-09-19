@@ -125,7 +125,8 @@ test.each(["structured", "jev"] as const)(
 		);
 		assert.equal(route.action, "route");
 		if (route.action !== "route") throw new Error("wrong action");
-		assert.equal(route.workflowType, "registered");
+		assert.equal("workflowType" in route, false);
+		assert.equal(route.routerDecision?.workflowType, "registered");
 		assert.equal("estimatedDuration" in route, false);
 		assert.equal(route.routerDecision?.estimatedDuration, "unknown");
 		assert.deepEqual(route.inputSchema, f.definition.inputs);
@@ -483,7 +484,8 @@ test.each(["structured", "jev"] as const)(
 			f.ctx,
 		);
 		assert.equal(result.action, "route");
-		assert.equal(result.workflowType, "none");
+		assert.equal("workflowType" in result, false);
+		assert.equal(result.routerDecision?.workflowType, "none");
 		assert.equal(result.workflowId, "");
 		assert.equal("estimatedDuration" in result, false);
 		assert.equal(result.routerDecision?.estimatedDuration, "unknown");
@@ -564,6 +566,7 @@ test("route inference failure returns no fabricated decision or duration", async
 	assert.equal(result.workflowId, "");
 	assert.match(result.error ?? "", /Structured output provider request failed/);
 	assert.equal("routerDecision" in result, false);
+	assert.equal("workflowType" in result, false);
 	assert.equal("estimatedDuration" in result, false);
 	assert.equal(f.store.runs().length, 0);
 });
