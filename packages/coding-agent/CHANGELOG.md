@@ -90,6 +90,7 @@
 - Workflow resource refreshes started through the extension API now finish before disposal, reload retirement or failed-factory cleanup, preventing late acquisitions from surviving successful shutdown ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Installed Node SDK consumers can now check the complete public declarations with strict NodeNext settings and `skipLibCheck: false`, including model catalogs and the find tool's path interface ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Prepared SDK services no longer reconstruct safe extensions or repeat their startup when project trust completes. Additional sessions borrowing those services keep independent extension lifetimes ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Jev structured decisions no longer reject responses solely because their probabilities do not sum to one.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

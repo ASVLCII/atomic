@@ -77,8 +77,6 @@ function parseResponse(value: unknown, questions: Readonly<Record<string, Struct
 			if (!Object.values(probabilities).every(probability)) throw malformed("probability_value");
 			const choice = answer.choice;
 			const values = Object.values(probabilities) as number[];
-			// Allow floating-point summation noise, not missing mass or a non-highest choice.
-			if (Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) > 1e-6) throw malformed("probability_mass");
 			if (values.some((p) => p > (probabilities[choice] as number))) throw malformed("choice_not_highest");
 			ranked[id] = Object.keys(question.criteria).sort(
 				(a, b) => (probabilities[b] as number) - (probabilities[a] as number),

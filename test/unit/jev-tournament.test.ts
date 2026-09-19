@@ -271,7 +271,6 @@ for (const failure of [
 	"negative",
 	"nonfinite",
 	"winner",
-	"mass",
 	"missing-answer",
 	"extra-answer",
 	"http",
@@ -289,7 +288,6 @@ for (const failure of [
 			if (failure === "negative") answer.probabilities[key] = -1;
 			if (failure === "nonfinite") answer.probabilities[key] = NaN;
 			if (failure === "winner") answer.choice = "absent";
-			if (failure === "mass") answer.probabilities[key] = 0.5;
 			if (failure === "missing-answer") delete response.answers[Object.keys(response.answers)[0]!];
 			if (failure === "extra-answer") response.answers.absent = answer;
 			return failure === "http" ? new Response("private", { status: 422 }) : Response.json(response);

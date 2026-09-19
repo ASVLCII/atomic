@@ -80,12 +80,25 @@ for (const failure of ["transport", "input", "provider"] as const)
 		assert.equal(stream.mock.calls.length, failure === "input" ? 0 : 1);
 	});
 
-for (const kind of ["missing", "mass", "json"] as const)
+// PR #3118: provider probabilities need not sum to one to use the returned choice.
+test.each([0, 0.5, 0.999, 1.001, 1.5, 2])("Jev accepts total probability %s without repair", async (mass) => {
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
+	const response = jevResponse();
+	response.answers.route.probabilities.review = mass / 2;
+	response.answers.route.probabilities.none = mass / 2;
+	const fetch = vi.fn(async () => Response.json(response));
+	vi.stubGlobal("fetch", fetch);
+	const result = await inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() });
+	assert.equal(result.value.route, "review");
+	assert.equal(fetch.mock.calls.length, 1);
+});
+
+for (const kind of ["missing", "probability", "json"] as const)
 	test(`Jev repairs ${kind} output without changing criteria`, async () => {
 		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
 		const bad = jevResponse();
 		if (kind === "missing") Reflect.deleteProperty(bad.answers.route, "probabilities");
-		if (kind === "mass") bad.answers.route.probabilities.none = 0;
+		if (kind === "probability") bad.answers.route.probabilities.none = -1;
 		const fetch = vi
 			.fn()
 			.mockResolvedValueOnce(kind === "json" ? new Response("invalid") : Response.json(bad))
