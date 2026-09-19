@@ -67,13 +67,13 @@ Builtin agents load at the lowest priority. Project agents override user agents,
 
 | Agent | Purpose | Tools | Notes |
 | --- | --- | --- | --- |
-| `codebase-locator` | Locate files, directories, tests, and configs relevant to a topic | read, search, find, ls, bash | Read-only finder. Returns a categorized file map; no analysis. |
-| `codebase-analyzer` | Explain how specific code currently works | read, search, find, ls, bash | Read-only. Traces flow with `file:line` references; does not critique. |
-| `codebase-pattern-finder` | Find similar implementations or conventions | read, search, find, ls, bash | Read-only. Returns code snippets with `file:line` references. |
-| `codebase-research-locator` | Discover prior `research/` and `specs/` docs | read, search, find, ls, bash | Read-only. Sorts by date, tiers by recency, flags supersession. |
-| `codebase-research-analyzer` | Extract decisions and constraints from prior docs | read, search, find, ls, bash | Read-only. Filters aggressively for what still applies today. |
-| `codebase-online-researcher` | Web research with authoritative sources | read, search, find, ls, bash, write, web_search, fetch_content, get_search_content | Has the `playwright-cli` skill. Persists keepers to `research/web/`. |
-| `code-simplifier` | Clean up recently changed code without changing behavior | read, edit, write, search, find, ls, bash | **Writer.** Scopes to recently modified code by default; preserves all observable behavior. |
+| `codebase-locator` | Locate files, directories, tests, and configs relevant to a topic | read, search, find, ls, intercom | Read-only finder. Returns a categorized file map; no analysis. |
+| `codebase-analyzer` | Explain how specific code currently works | read, search, find, ls, todo, intercom | Read-only. Traces flow with `file:line` references; does not critique. |
+| `codebase-pattern-finder` | Find similar implementations or conventions | read, search, find, ls, intercom | Read-only. Returns code snippets with `file:line` references. |
+| `codebase-research-locator` | Discover prior `research/` and `specs/` docs | read, search, find, ls, intercom | Read-only. Sorts by date, tiers by recency, flags supersession. |
+| `codebase-research-analyzer` | Extract decisions and constraints from prior docs | read, search, find, ls, todo, intercom | Read-only. Filters aggressively for what still applies today. |
+| `codebase-online-researcher` | Web research with authoritative sources | read, search, find, ls, bash, web_search, fetch_content, get_search_content, todo, intercom | Has the `playwright-cli` skill. Returns cited findings. |
+| `code-simplifier` | Clean up recently changed code without changing behavior | read, edit, write, search, find, ls, bash, todo, intercom | **Writer.** Scopes to recently modified code by default; preserves all observable behavior. |
 | `debugger` | Reproduce, diagnose, and fix failing behavior | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Can coordinate with the parent; inspect-only mode requires an explicit instruction. |
 | `worker` | Implement normal tasks and approved orchestrator handoffs | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Defaults to forked context; escalates unapproved decisions instead of guessing. |
 
@@ -86,7 +86,7 @@ subagent({ agent: "codebase-analyzer", task: "Trace the auth flow", model: "anth
 
 For persistent tweaks, edit `subagents.agentOverrides` in user or project settings. User overrides apply everywhere. Project overrides apply only in that repo and win over user overrides.
 
-The builtin `debugger` and `worker` agents declare both `intercom` and `contact_supervisor`, so they can send progress or ask the parent for a decision when the bridge is active. Other builtin specialists finish their pass and return without live coordination. Custom agents can coordinate when they declare `intercom` or when the runtime bridge injects `contact_supervisor`; see [Subagent + Intercom Coordination](#subagent--intercom-coordination).
+Every builtin agent declares `intercom` for live coordination; `debugger` and `worker` also declare `contact_supervisor`. Parent tool restrictions and disabled Intercom still apply. Custom agents can coordinate when they declare `intercom` or when the runtime bridge supplies `contact_supervisor`; see [Subagent + Intercom Coordination](#subagent--intercom-coordination).
 
 ## Prompting specialist subagents
 
@@ -258,7 +258,7 @@ subagent({
 })
 ```
 
-If the run already has an active intercom bridge target, needs-attention notifications can also prepare a compact intercom ping for the orchestrator. When a child route is available, the ping tells the orchestrator which agent needs attention and includes the exact `intercom({ action: "send", to: "..." })` target for a nudge. Do not invent a target or ask the child to self-report when no bridge exists. Coordination depends on the resolved agent's tools and an active bridge route: the builtin `debugger` and `worker` declare `intercom` and `contact_supervisor`, while the other builtin specialists rely on the parent checking status.
+If the run already has an active intercom bridge target, needs-attention notifications can also prepare a compact intercom ping for the orchestrator. When a child route is available, the ping tells the orchestrator which agent needs attention and includes the exact `intercom({ action: "send", to: "..." })` target for a nudge. Do not invent a target or ask the child to self-report when no bridge exists. Every builtin specialist declares `intercom`; coordination still depends on the effective tools and an active route.
 
 ## Non-Interactive Execution
 
@@ -287,7 +287,7 @@ subagent({
 
 Atomic subagents work without intercom. When Atomic's bundled intercom companion or upstream `pi-intercom` is installed and enabled, the bridge can give eligible child agents a private coordination tool back to the parent session without connecting either session automatically. If a child may need live coordination, invoke `intercom({ action: "status" })` in the parent before launching it; the child connects when it first invokes `contact_supervisor` or `intercom`.
 
-The builtin `debugger` and `worker` agents declare `intercom` and `contact_supervisor`. With an active bridge route, they can send progress or terminally hand a parent-directed question back to the supervisor. Other builtin specialists finish their pass and return without live coordination; use a custom agent with bridge tools when another role needs that ability.
+All builtin specialists can coordinate through `intercom`. `debugger` and `worker` also declare `contact_supervisor`; use it for supervisor requests when the bridge supplies it. Explicit parent tool allowlists, exclusions, `noTools`, and disabled builtins are never bypassed to restore coordination.
 
 Custom agents that do have the bridge tool can ask the parent for a decision:
 
@@ -408,7 +408,7 @@ If a prompt-template extension is installed, additional user prompt templates ca
 - **Forked runs inherit parent history.** They are branched threads, not fresh filtered contexts. Use fresh context for adversarial review unless the user explicitly asks for forked context.
 - **Delegation is one level deep and not configurable.** A subagent cannot call `subagent`: every launch and `kill` from inside a child is refused. Only `list`, `get`, and `status` stay available to a child.
 - **Attention signals are not lifecycle state.** `needs_attention` means no activity has been observed past the configured threshold. `killed` means the child was terminally stopped by the kill command; it cannot be resumed and is not the same as `failed`.
-- **Builtin coordination varies by agent.** `debugger` and `worker` declare `intercom` and `contact_supervisor`; the other builtin specialists do not. For agents without bridge tools, decide the task up front or use a custom agent when mid-run coordination is required.
+- **Builtin coordination respects caller restrictions.** Every builtin agent declares `intercom`, but a parent that disables it prevents live coordination. Resolve decisions up front when running without coordination tools.
 - **Intercom asks are blocking.** A session can only maintain one pending outbound ask wait state at a time.
 - **Keep conversational authority clear.** Advisory specialists should not silently become second decision-makers.
 
@@ -443,7 +443,7 @@ Give subagents specific tasks rather than vague mandates.
 
 ### Escalate decisions upward
 
-Most builtin specialists return on completion rather than pausing for parent decisions. The builtin `debugger` and `worker` can use `contact_supervisor` when an active bridge route exists, but resolve known scope, product, and architecture questions before launching any writer. If the parent realizes mid-run that the scope is wrong, steer a reachable writer or kill it.
+All builtin specialists can use Intercom when permitted by the parent. Use `contact_supervisor` for parent decisions when the active bridge supplies it. Resolve known scope, product, and architecture questions before launching any writer. If the parent realizes mid-run that the scope is wrong, steer a reachable child or kill it.
 
 ### Intervene only on clear control signals
 

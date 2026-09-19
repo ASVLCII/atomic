@@ -1,5 +1,5 @@
 import type { QuestionnaireResult, QuestionParams } from "@bastani/atomic";
-import { stageUiBroker } from "../shared/stage-ui-broker.js";
+import { currentStageUiBroker, type StageUiBroker } from "../shared/stage-ui-broker.js";
 import type { Store } from "../shared/store.js";
 import type { PendingPrompt } from "../shared/store-types.js";
 import type { PiUISurface } from "./ui-surface.js";
@@ -42,7 +42,11 @@ export interface StageQuestionnaireInput {
  * the runner's validated dialogs. CLI prompts still belong to the attached graph
  * host; background runs must not open dialogs in the main chat.
  */
-export function bindWorkflowHumanInput(store: Store, ctx: WorkflowHumanInputContext): () => void {
+export function bindWorkflowHumanInput(
+	store: Store,
+	ctx: WorkflowHumanInputContext,
+	stageUiBroker: StageUiBroker = currentStageUiBroker(),
+): () => void {
 	const ownerInput = workflowInputBridge(ctx.ui);
 	const requests = new Map<string, { controller: AbortController; ownBinding: boolean }>();
 	const childSubscriptions = new Map<string, () => void>();

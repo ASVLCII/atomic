@@ -152,7 +152,7 @@ export function createWorkflowExtensionRuntimeState(
 	pi.on?.("session_start", (_event, ctx) => {
 		contextCwd = ctx?.cwd ?? ctx?.sessionManager?.getCwd?.();
 		detachHumanInput?.();
-		detachHumanInput = ctx === undefined ? undefined : bindWorkflowHumanInput(store, ctx);
+		detachHumanInput = ctx === undefined ? undefined : bindWorkflowHumanInput(store, ctx, stageUiBroker);
 	});
 	pi.on?.("session_shutdown", () => {
 		detachHumanInput?.();

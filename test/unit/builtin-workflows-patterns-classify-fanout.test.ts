@@ -25,6 +25,21 @@ afterEach(() => {
 });
 
 describe("classify-and-act builtin", () => {
+	// #3111: explicit classifier and category allowlists must retain coordination.
+	test.each(["analysis", "implementation", "research"])("%s stages allow Intercom", async (category) => {
+		const { default: definition } = await import("../../packages/workflows/builtin/classify-and-act.js");
+		const ctx = makeMockCtx(
+			{ prompt: "Inspect the parser", categories: [category], confidence_threshold: 0.8 },
+			{
+				task: (name) =>
+					name === "classifier" ? JSON.stringify({ category, confidence: 1, rationale: "exact" }) : undefined,
+			},
+		);
+		ctx.cwd = tempCwd();
+		await definition.run(ctx);
+		assert.deepEqual(ctx.calls.taskOptions.classifier[0].tools, ["intercom"]);
+		assert.ok(ctx.calls.taskOptions[`action-${category}`][0].tools.includes("intercom"));
+	});
 	test("declares composable typed inputs and outputs", async () => {
 		const { default: definition } = await import("../../packages/workflows/builtin/classify-and-act.js");
 		assertWorkflowDefinition(definition);

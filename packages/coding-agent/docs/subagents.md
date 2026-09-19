@@ -72,6 +72,8 @@ Durable `ctx.tool` callbacks wait for tasks admitted inside their callback befor
 
 ## Supervisor coordination
 
+Every builtin specialist includes `intercom` for live coordination, including read-only researchers and locators. `debugger` and `worker` also declare `contact_supervisor`; prefer it for supervisor requests when available. Explicit parent tool allowlists, exclusions, `noTools`, and disabled Intercom still apply—builtin declarations do not override caller restrictions.
+
 In a parallel run, `intercom.ask`, `contact_supervisor({ reason: "need_decision" })`, and `interview_request` wait only in the requesting child. The supervisor answers with ordinary `intercom({ action: "reply", message: "..." })`; use `pending` and `replyTo` to select the exact question when several asks are pending. The correlated reply returns to the same child execution, with its context and run identity intact. Do not relaunch the requester or its siblings to deliver an answer.
 
 `intercom.send` and `contact_supervisor` progress updates return after delivery without waiting for a reply. An exact-child Intercom handshake can release the parallel call's foreground observations so the supervisor can handle the message. This is not execution cancellation: active siblings keep running, queued siblings start once capacity is available, and worktrees stay owned until their children exit. Background calls use the same communication path without needing to release an observation.
