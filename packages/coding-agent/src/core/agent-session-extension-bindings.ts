@@ -552,8 +552,14 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		}
 		await this.settingsManager.reload();
 		resetApiProviders();
-		await this._resourceLoader.reload();
-		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
+		await factoryAcquisitions.run({ pending: new Map(), replacement: true }, async () => {
+			try {
+				await this._resourceLoader.reload();
+				this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
+			} catch (error) {
+				throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
+			}
+		});
 		if (this._disposed) throw hostInputError("SessionClosed");
 		await options?.beforeSessionStart?.();
 		if (this._disposed) throw hostInputError("SessionClosed");

@@ -2850,3 +2850,273 @@ test.each([1, 2])("disposal drains %i admitted background summaries", async (cou
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: the tool has already executed; closing must retain its result and hook.
+test("closing preserves admitted tool results", async () => {
+	const { createAssistantMessageEventStream } = await import("@bastani/pi-ai/compat");
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-tool-completion-"));
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
+	await modelRuntime.setRuntimeApiKey("anthropic", "fixture", {});
+	let calls = 0;
+	let hooks = 0;
+	modelRuntime.streamSimple = (model) => {
+		const stream = createAssistantMessageEventStream();
+		const tool = ++calls === 1;
+		queueMicrotask(() => {
+			stream.push({
+				type: "done",
+				reason: tool ? "toolUse" : "stop",
+				message: {
+					role: "assistant",
+					content: tool
+						? [{ type: "toolCall", id: "one", name: "fixture_effect", arguments: {} }]
+						: [{ type: "text", text: "done" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 1,
+						output: 1,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 2,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: tool ? "toolUse" : "stop",
+					timestamp: Date.now(),
+				},
+			});
+			stream.end();
+		});
+		return stream;
+	};
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false }, retry: { enabled: false } });
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				pi.on("tool_result", () => {
+					hooks++;
+					return { content: [{ type: "text", text: "  completed\n" }] };
+				});
+			},
+		],
+	});
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		modelRuntime,
+		model: getModel("anthropic", "claude-sonnet-4-5"),
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		customTools: [
+			{
+				name: "fixture_effect",
+				label: "effect",
+				description: "fixture",
+				parameters: { type: "object", properties: {} },
+				execute: async () => {
+					entered.resolve();
+					await release.promise;
+					return { content: [{ type: "text", text: "completed" }], details: { completed: true } };
+				},
+			},
+		],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		session.setActiveToolsByName(["fixture_effect"]);
+		const turn = session.prompt("run fixture");
+		await entered.promise;
+		const closing = session.dispose();
+		release.resolve();
+		await Promise.all([turn, closing]);
+		const result = session.sessionManager
+			.buildSessionContext()
+			.messages.find((message) => message.role === "toolResult");
+		assert.equal(hooks, 1);
+		assert.ok(result?.role === "toolResult");
+		assert.equal(result.isError, false);
+		assert.deepEqual(result.content, [{ type: "text", text: "  completed\n" }]);
+		assert.deepEqual(result.details, { completed: true });
+	} finally {
+		release.resolve();
+		await session.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// #3105: ordinary custom loaders have the same acquisition rollback obligation.
+test.each([false, true])(
+	"nontransactional reload rolls back owned acquisitions, cleanup failure=%s",
+	async (cleanupFailure) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-ordinary-rollback-"));
+		const settingsManager = SettingsManager.inMemory();
+		let fail = false;
+		let next = 0;
+		const active = new Set<number>();
+		class OrdinaryLoader extends DefaultResourceLoader {
+			override supportsTransactionalReload() {
+				return false;
+			}
+		}
+		const resourceLoader = new OrdinaryLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					const id = ++next;
+					active.add(id);
+					pi.on("session_shutdown", () => {
+						active.delete(id);
+						if (id === 3 && cleanupFailure) throw new Error("candidate cleanup failed");
+					});
+				},
+			],
+			extensionsOverride: (base) => {
+				if (fail) throw new Error("discovery failed");
+				return base;
+			},
+		});
+		await resourceLoader.reload();
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			resourceLoader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		});
+		try {
+			assert.deepEqual([...active], [1, 2]);
+			fail = true;
+			await assert.rejects(session.reload(), cleanupFailure ? { code: "ShutdownFailed" } : /discovery failed/);
+			assert.deepEqual([...active], [1], "only caller-owned discovery survives");
+		} finally {
+			await session.dispose().catch((error) => {
+				if (!cleanupFailure) throw error;
+				assert.equal(error.code, "ShutdownFailed");
+			});
+			rmSync(cwd, { recursive: true, force: true });
+		}
+		assert.deepEqual([...active], [1]);
+	},
+);
+
+// #3105: replacement hands off its invoking command, but terminal close still owns it.
+test("command replacement drains peers and retains its continuation until terminal cleanup", async () => {
+	const { createAgentSessionRuntime } = await import("../src/core/agent-session-runtime.ts");
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-command-retirement-"));
+	const settingsManager = SettingsManager.inMemory();
+	const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth"), modelsPath: null });
+	const peerEntered = Promise.withResolvers<void>();
+	const peerRelease = Promise.withResolvers<void>();
+	const commandEntered = Promise.withResolvers<void>();
+	const continuation = Promise.withResolvers<void>();
+	let generations = 0;
+	let resumed = false;
+	let active = 0;
+	const shutdowns: number[] = [];
+	const runtime = await createAgentSessionRuntime(
+		async ({ sessionManager, sessionStartEvent }) => {
+			const id = ++generations;
+			const resourceLoader = new DefaultResourceLoader({
+				cwd,
+				agentDir: cwd,
+				settingsManager,
+				noExtensions: true,
+				extensionFactories: [
+					(pi) => {
+						pi.on("thinking_level_select", async () => {
+							peerEntered.resolve();
+							await peerRelease.promise;
+						});
+						pi.on("session_shutdown", () => {
+							shutdowns.push(id);
+							if (id === 1) active = 0;
+						});
+						pi.registerCommand("replace-me", {
+							description: "fixture",
+							handler: async (_args, ctx) => {
+								commandEntered.resolve();
+								await ctx.newSession();
+								resumed = true;
+								await continuation.promise;
+								active++;
+							},
+						});
+					},
+				],
+			});
+			return {
+				...(await createAgentSession({
+					cwd,
+					agentDir: cwd,
+					sessionManager,
+					sessionStartEvent,
+					settingsManager,
+					modelRuntime,
+					model: getModel("anthropic", "claude-sonnet-4-5"),
+					resourceLoader,
+					builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+				})),
+				services: { cwd, agentDir: cwd, settingsManager, modelRuntime, resourceLoader, diagnostics: [] },
+				diagnostics: [],
+			};
+		},
+		{ cwd, agentDir: cwd, sessionManager: SessionManager.inMemory(cwd) },
+	);
+	const old = runtime.session;
+	await old.bindExtensions({
+		commandContextActions: {
+			waitForIdle: async () => {},
+			newSession: (options) => runtime.newSession(options),
+			fork: (id, options) => runtime.fork(id, options),
+			navigateTree: (id, options) => runtime.session.navigateTree(id, options),
+			switchSession: (file, options) => runtime.switchSession(file, options),
+			reload: () => runtime.session.reload(),
+		},
+	});
+	old.setThinkingLevel("high");
+	await peerEntered.promise;
+	const turn = old.prompt("/replace-me");
+	await commandEntered.promise;
+	try {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(generations, 1, "unrelated admitted work must drain before handoff");
+		peerRelease.resolve();
+		await vi.waitFor(() => assert.equal(resumed, true));
+		assert.equal(generations, 2);
+		assert.deepEqual(shutdowns, [], "old cleanup waits for the continuation");
+		await assert.rejects(old.prompt("late"), { code: "SessionClosed" });
+		let closed = false;
+		const closing = runtime.dispose().then(() => {
+			closed = true;
+		});
+		let oldClosed = false;
+		const oldClosing = old.dispose().then(() => {
+			oldClosed = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(closed, false);
+		assert.equal(oldClosed, false);
+		continuation.resolve();
+		await Promise.all([turn, closing, oldClosing]);
+		assert.equal(active, 0);
+		assert.ok(shutdowns.includes(1));
+	} finally {
+		peerRelease.resolve();
+		continuation.resolve();
+		if (resumed) await runtime.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

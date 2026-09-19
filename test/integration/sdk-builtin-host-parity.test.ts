@@ -1634,3 +1634,29 @@ test.each(["persist", "prepare", "prepare-cleanup", "summary", "summary-supersed
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: command retirement hands off its caller without losing terminal cleanup.
+test.each([
+	"command",
+	"command-cleanup",
+	"command-create-failure",
+	"ordinary",
+	"ordinary-cleanup",
+	"tool",
+	"tool-control",
+])(
+	"built Node retirement and admitted completion (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				fileURLToPath(new URL("../fixtures/sdk-host-retirement-completion.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

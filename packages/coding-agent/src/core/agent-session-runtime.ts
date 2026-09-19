@@ -20,7 +20,7 @@ import type { AuthStatus } from "./provider-composer.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
-import { drainSessionWork, trackSessionWork } from "./session-lifecycle-work.ts";
+import { drainSessionWork, hasCallingSessionWork, trackSessionWork } from "./session-lifecycle-work.ts";
 import { SessionManager } from "./session-manager.ts";
 
 /**
@@ -108,10 +108,36 @@ export class AgentSessionRuntime {
 	private publication: Promise<void> = Promise.resolve();
 	private publicationContext = new AsyncLocalStorage<{ active: boolean }>();
 	private retained = new Set<AgentSession>();
+	private retirementCleanup = new Set<Promise<void>>();
+
+	private retainRetirementCleanup(cleanup: Promise<void>): void {
+		const receipt = cleanup.catch((error) => {
+			this.cleanupFailures.push(error);
+		});
+		this.retirementCleanup.add(receipt);
+		void receipt.then(() => this.retirementCleanup.delete(receipt));
+	}
 
 	private async finalizeRetained(): Promise<void> {
-		if (!this.retained.delete(this.session)) return;
-		await emitSessionShutdownEvent(this.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
+		const session = this.session;
+		if (!this.retained.delete(session)) return;
+		const finalize = async () => {
+			await emitSessionShutdownEvent(session.extensionRunner, { type: "session_shutdown", reason: "quit" });
+		};
+		if (hasCallingSessionWork(session)) {
+			this.retainRetirementCleanup(
+				session.dispose().then(finalize, async (error) => {
+					try {
+						await finalize();
+					} catch (failure) {
+						throw new AggregateError([error, failure], "Retained cleanup failed");
+					}
+					throw error;
+				}),
+			);
+			return;
+		}
+		await finalize();
 	}
 
 	private replace<T>(operation: () => Promise<T>): Promise<T> {
@@ -375,8 +401,11 @@ export class AgentSessionRuntime {
 	}
 
 	private disposeCurrentSession(event: SessionShutdownEvent): Promise<void> {
-		if (event.reason !== "quit") this.retained.add(this.session);
-		return (this.session as unknown as AgentSessionInternalSurface)._close(event, this.beforeSessionInvalidate);
+		const session = this.session;
+		if (event.reason !== "quit") this.retained.add(session);
+		const receipt = (session as unknown as AgentSessionInternalSurface)._close(event, this.beforeSessionInvalidate);
+		if (event.reason !== "quit" && hasCallingSessionWork(session)) this.retainRetirementCleanup(session.dispose());
+		return receipt;
 	}
 
 	/**
@@ -720,6 +749,7 @@ export class AgentSessionRuntime {
 			} catch (error) {
 				this.cleanupFailures.push(error);
 			}
+			while (this.retirementCleanup.size) await Promise.all(this.retirementCleanup);
 			try {
 				await this.finalizeRetained();
 			} catch (error) {

@@ -35,7 +35,12 @@ import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./extensions/stale-context.ts";
 import type { SessionShutdownEvent } from "./extensions/types.ts";
 import type { StageAdmittedCustomMessage } from "./messages.ts";
 import { normalizeMessageContent } from "./messages.ts";
-import { abortSessionWork, drainSessionReload, drainSessionWork } from "./session-lifecycle-work.ts";
+import {
+	abortSessionWork,
+	drainSessionReload,
+	drainSessionWork,
+	hasCallingSessionWork,
+} from "./session-lifecycle-work.ts";
 import { assertSettingsWrites, ownedSettingsManagers } from "./settings-write-ownership.ts";
 
 export function _emit(this: AgentSession, event: AgentSessionEvent): void {
@@ -513,6 +518,7 @@ export function _disconnectFromAgent(this: AgentSession): void {
  */
 
 const sessionClosures = new WeakMap<AgentSession, Promise<void>>();
+const sessionRetirements = new WeakMap<AgentSession, Promise<void>>();
 
 /** Shared terminal boundary for direct SDK disposal and runtime replacement. */
 export function closeAgentSession(
@@ -520,8 +526,16 @@ export function closeAgentSession(
 	event: SessionShutdownEvent = { type: "session_shutdown", reason: "quit" },
 	beforeInvalidate?: () => void,
 ): Promise<void> {
+	const handoff = event.reason !== "quit" && hasCallingSessionWork(session);
 	const existing = sessionClosures.get(session);
-	if (existing) return existing;
+	if (existing) return (handoff && sessionRetirements.get(session)) || existing;
+	let resolveRetired!: () => void;
+	let rejectRetired!: (error: Error) => void;
+	const retirement = new Promise<void>((resolve, reject) => {
+		resolveRetired = resolve;
+		rejectRetired = reject;
+	});
+	const retired = { promise: retirement, resolve: resolveRetired, reject: rejectRetired };
 	session._disposed = true;
 	const closing = Promise.resolve().then(async () => {
 		const errors: Error[] = [];
@@ -540,6 +554,14 @@ export function closeAgentSession(
 		await attempt("reload rollback", () => drainSessionReload(session));
 		await attempt("tasks", () => session.closeSessionTasks());
 		await attempt("summary", () => session.abortSessionSummary());
+		if (handoff) {
+			await attempt("peer work", () => drainSessionWork(session, true));
+			if (errors.length)
+				retired.reject(
+					Object.assign(new AggregateError(errors, "Session retirement failed"), { code: "ShutdownFailed" }),
+				);
+			else retired.resolve();
+		}
 		await attempt("active work", () => drainSessionWork(session));
 		await attempt("extensions", async () => {
 			await emitSessionShutdownEvent(session._extensionRunner, event);
@@ -568,8 +590,12 @@ export function closeAgentSession(
 			throw Object.assign(new AggregateError(errors, "Session shutdown failed"), { code: "ShutdownFailed" });
 	});
 	sessionClosures.set(session, closing);
+	if (handoff) {
+		sessionRetirements.set(session, retired.promise);
+		void closing.catch(() => {});
+	}
 	session._extensionRunner.sealHostInput();
-	return closing;
+	return handoff ? retired.promise : closing;
 }
 
 export function dispose(this: AgentSession): Promise<void> {

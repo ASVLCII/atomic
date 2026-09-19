@@ -286,3 +286,40 @@ RED evidence: `/tmp/3105-f-next-{exact,persist,events,prepare,summary}-red.log`.
 The known native spool observation recurred in the first broad core run and first task selection (`SpawnFailed: Output spool unavailable`). The unchanged isolated shell suite passed 15 tests; unchanged complete reruns passed 618 and 49 tests respectively. Bounded inspection locates failure at native spool `create_new` open but does not establish its OS error or cause. No native fix, retry masking, skipped assertion or universal absence of that intermittent failure is claimed. Logs retain both failures. Temporary resolved F notes were removed while unrelated `ISSUES.md` content remains unchanged.
 
 Evidence remains local macOS arm64 Node26.8.2 with deterministic providers and built exports. G/H, packed strict declaration closure, other platforms/live credentials, and parent-owned exact-head CI/Greptile/conditional merge remain deferred exactly as before. No new out-of-scope feature or refactor was added.
+
+## Third continuation batch from `0753e58b`
+
+This section supersedes the preceding readiness claim. The latest nine findings reduce to three reproduced roots: command-initiated replacement self-drain, nontransactional reload acquisition rollback, and admitted tool-result completion. Scope remains F, with all prior tests and commits preserved.
+
+| Required behavior / transition | Current evidence |
+| --- | --- |
+| Command → retirement → successor without circular wait | Public source test and `sdk-host-retirement-completion.mjs command` hold unrelated thinking work, require generation 1 until peer release, then permit generation 2 and the original command continuation. Old fresh prompt/input admission remains sealed |
+| Retirement is not terminal cleanup | Same source/Node tests suspend the command after replacement returns. Both old-session and runtime disposal remain pending; shutdown runs only after independent continuation release and removes its late acquisition. Direct replacement control still shuts down the old generation before creating the successor |
+| Deferred failures remain explicit; failed replacement still cleans retained ownership | Node `command-cleanup` requires ShutdownFailed from both session and runtime disposal. `command-create-failure` requires creation rejection, allows the command to settle, then completes retained cleanup. No blanket terminal caller exclusion or successful timeout |
+| Ordinary reload failure → rollback, preserving borrowed discovery | Two public source cases and Node `ordinary`/`ordinary-cleanup` require only borrowed resource 1 to survive, with candidate 3 released. Cleanup failure remains ShutdownFailed through reload and final disposal. Existing transactional cases remain green |
+| Admitted tool execution → result hook → persistence during close | Public source and Node `tool`/`tool-control` preserve one result hook, success status, exact `  completed\n` content and `{completed: true}` details. No repeated tool effect; fresh dispatch stays sealed |
+| Prior A–E/F, exact API identity, payload/order/optional fields, sibling and stage ownership | Complete SDK/host/affected selections below retain prior assertions. Actual AgentSession identity and public dispose/setter signatures are unchanged; no wrapper, input normalization or new manager API |
+| RGR and both required parity files | Exact three negative probes failed before runtime edits; tool, ordinary rollback and command source regressions failed before their individual repairs. Four source cases and seven built Node scenarios are persisted in the named parity suites |
+| Build/check, docs, normal hooks, signed clean commit | Normal build/check pass; guide explains command handoff versus final disposal and ordinary reload. Unreleased Fixed entry added, released sections unchanged. Commit/signature/clean status recorded in execution receipt |
+| No publication, other worktree or later-slice implementation | All changes are in feat/3105-sdk-f. G/H, packed consumers/platform/live-provider and parent publication gates remain outside this slice |
+
+The command fix uses the existing admitted-work ancestry and shared close. Its retirement receipt drains peers, but the full close still drains every admitted operation, including the invoking command, before shutdown and persistence. The runtime retains that full receipt even after publishing a successor and aggregates deferred failures. This follows the supervisor's scoped-handoff decision; it does not treat replacement return as completed disposal.
+
+Exact commands and log paths: `/tmp/3105-f-third-commands.txt`. Debugger execution receipt: `/tmp/3105-f-third-execution.md`, writer run `6d36cec7`; prior debugger `35bd94b7` handed off a design question before editing.
+
+- `npm run build`, `npm run check`: exit 0, `/tmp/3105-f-third-{build,check}.log`.
+- Complete SDK/affected coding-agent selection: **72 files, 622 passed**, 14 unchanged credential/platform skips, `/tmp/3105-f-third-core.log`.
+- Complete host parity: **140/140 passed**, `/tmp/3105-f-third-host.log`.
+- Root lifecycle: **48 files, 477 passed**, `/tmp/3105-f-third-unit.log`.
+- Observer/queue selection: **15 files, 121 passed**, one existing platform skip, `/tmp/3105-f-third-queues.log`.
+- Task selection: **8 files, 49 passed**, `/tmp/3105-f-third-tasks-rerun.log`.
+- All five exact probe/control invocations and all seven built Node modes: exit 0, `/tmp/3105-f-third-{exact,node}-green.log`.
+- Supplemental qlty smells/metrics: exit 0, `/tmp/3105-f-third-{qlty,metrics}.log`. Existing large-module warnings remain visible; no config or suppression change.
+
+RED logs are `/tmp/3105-f-third-{exact,tool,ordinary,command}-red.log`. Initial command test setup had no reasoning-capable model and never reached the thinking barrier; adding its explicit fixture model exposed the actual circular-wait assertion. Build caught unsupported Promise.withResolvers in the source target and a boolean-return mismatch; both were corrected without changing the target or API. Final tests use independent release and natural Node exit, not forced termination.
+
+The first task selection again hit the already-disclosed native `SpawnFailed: Output spool unavailable`; the unchanged complete rerun passed. Its source/OS cause remains unattributed and no native fix or stable-absence claim is made. Temporary F debugging notes were removed; unrelated ISSUES.md content is unchanged. Local evidence remains macOS arm64 Node26.8.2 and deterministic providers with built workspace exports, not packed H or remote CI proof.
+
+### Contract amendments received
+
+"make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates. No publication occurred in this child.

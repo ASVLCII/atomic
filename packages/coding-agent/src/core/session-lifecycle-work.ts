@@ -75,6 +75,11 @@ export function abortSessionWork(session: object): void {
 	lifetimes.get(session)!.abort();
 }
 
+export function hasCallingSessionWork(session: object): boolean {
+	const ancestors = currentWork.getStore();
+	return [...(work.get(session) ?? [])].some((item) => ancestors?.has(item));
+}
+
 // A /reload command may be admitted inside a prompt. It drains peers, not its own caller.
 // Terminal disposal never excludes callers: callback settlement remains part of cleanup.
 export async function drainSessionWork(session: object, excludeCallingWork = false): Promise<void> {

@@ -762,9 +762,11 @@ export class ExtensionRunner {
 		);
 	}
 
-	async emitToolResult(event: ToolResultEvent): Promise<ToolResultEventResult | undefined> {
-		return runResourceRegistrationBatch(this.runtime, () =>
-			runToolResultHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+	async emitToolResult(event: ToolResultEvent, admitted = false): Promise<ToolResultEventResult | undefined> {
+		return runResourceRegistrationBatch(
+			this.runtime,
+			() => runToolResultHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+			admitted,
 		);
 	}
 
