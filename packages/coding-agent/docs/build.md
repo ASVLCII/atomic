@@ -5,7 +5,7 @@ description: Extend Atomic with skills, subagents, intercom, workflows, extensio
 
 # Build with Atomic
 
-Build covers everything you add to Atomic: customization mechanisms that change how a session behaves, and programmatic interfaces that embed Atomic in your own software.
+Customize an Atomic session or embed it in your own software. Choose a starting point below.
 
 If you have not run Atomic yet, start at the [Quickstart](/quickstart). If you are looking for an exact contract rather than a way to build something, go to the [Reference index](/reference).
 
@@ -25,25 +25,15 @@ Work down this list and stop at the first mechanism that solves your problem.
 
 - [Custom models](/models) — add model entries for a supported provider API.
 - [Custom providers](/custom-provider) — implement a provider API or OAuth flow Atomic does not ship.
-- [Themes](/themes) — restyle the terminal interface.
+
+## Customization
+
+Use [Themes](/themes) to restyle the terminal with a built-in or custom theme.
 
 ## Embed Atomic in your own software
 
 [Programmatic use](/programmatic) compares JSON mode, RPC, and the SDK, and links each one to its protocol or API reference.
 
-## Customization
-
-- [Extensions](/extensions) - TypeScript modules for tools, commands, events, and custom UI.
-- [Skills](/skills) - Agent Skills for reusable on-demand capabilities.
-- [Subagents](/subagents) - focused child agents for research, analysis, debugging, cleanup, and review compositions.
-- [Workflows](/workflows) - executable engineering loops with tracked stages, artifacts, gates, and resumable runs.
-- [Prompt templates](/prompt-templates) - reusable prompts that expand from slash commands.
-- [Themes](/themes) - built-in and custom terminal themes.
-- [Atomic packages](/packages) - bundle and share extensions, skills, prompts, and themes.
-- [Custom models](/models) - add model entries for supported provider APIs.
-- [Custom providers](/custom-provider) - implement custom APIs and OAuth flows.
-
-## Programmatic usage
 
 - [SDK](/sdk) - embed Atomic in Node.js applications.
 - [RPC mode](/rpc) - integrate over stdin/stdout JSONL.

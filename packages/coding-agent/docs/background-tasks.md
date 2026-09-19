@@ -13,13 +13,23 @@ In main chat and live workflow-stage chat, a compact indicator appears **below t
 Tasks  2 local agents running · 1 queued · /tasks
 ```
 
-It summarizes only active background agents and shells, including queued work, stopping tasks, and tasks needing attention. Completed, failed, and stopped tasks leave the footer immediately; when no background work is active, the indicator disappears. Results and failure details remain in completion cards and `/tasks`, so an old failure cannot keep the live indicator red. Running tasks do not expire merely because they are quiet.
+The indicator counts active agents and shells, including queued, stopping, and attention-needed tasks. Completed, failed, and stopped tasks leave it immediately. It disappears when no background work is active. Quiet tasks do not expire.
 
-Run `/tasks` to open a compact inline picker in the editor slot, like `/workflow connect`, with the conversation still visible above it. Detail, transcript, input, and cancellation-confirmation pages use the full screen. Escape returns to the picker with the selected task preserved, then to chat. The command also appears in workflow-stage slash suggestions, including when skill commands are disabled. Foreground-only commands do not appear. Work that ran in the background stays available after completion or a later foreground wait. Updates never open the list automatically. Closing the inspector does not stop the tasks.
+### Open the task inspector
 
-Main and workflow-stage pickers use the same layout for empty and populated lists. Below the picker, the footer keeps that chat's resolved model and reasoning level, current folder and Git branch, and MCP status, including while its foreground turn streams. Each picker lists only its owner's tasks.
+Run `/tasks` to inspect work without stopping it:
 
-Opening `/tasks` is navigation, not an approval request. It does not mark the agent blocked in Herdr or produce a "Main chat needs input" notice. A genuine main-chat question waiting behind the workflow graph still shows that notice until answered or the graph is hidden or closed. The inspector stays open until you close it, even when its tasks finish; task history is not deleted when the compact indicator disappears.
+- The compact picker opens in the editor slot, with the conversation visible above it. It lists only tasks owned by that chat.
+- Detail, transcript, input, and cancellation-confirmation pages use the full screen.
+- Escape returns to the picker with your selection preserved, then to chat.
+- Completed background work remains available, including after a later foreground wait. Foreground-only commands are excluded.
+- Updates never open or close the inspector automatically. Closing it does not stop tasks.
+
+Results and failures remain in completion cards and `/tasks` after leaving the live indicator. The command appears in workflow-stage slash suggestions even when skill commands are disabled.
+
+Main and workflow-stage pickers share the same layout. Their footers retain the chat's resolved model and reasoning level, current folder and Git branch, and MCP status, including during foreground streaming.
+
+Opening `/tasks` is navigation, not approval. It does not mark the agent blocked in Herdr or produce a "Main chat needs input" notice. A genuine question waiting behind the workflow graph still shows that notice until answered or the graph is hidden or closed.
 
 ## Choose how long to wait
 

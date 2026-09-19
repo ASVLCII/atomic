@@ -297,7 +297,6 @@ const issueNavigationLabels: Record<string, string> = {
 	"/environment-variables": "Environment variables",
 	"/keybindings": "Keybindings",
 	"/tools": "Built-in tools",
-	"/tools/edit": "edit",
 	"/session-format": "Session format",
 	"/providers/reference": "Provider reference",
 	"/models/reference": "Model configuration",
@@ -363,7 +362,6 @@ const issueNavigationOrder: Record<string, readonly string[]> = {
 		"/environment-variables",
 		"/keybindings",
 		"/tools",
-		"/tools/edit",
 		"/session-format",
 		"/providers/reference",
 		"/models/reference",
@@ -406,8 +404,8 @@ const generatedNavigationInsertions: Record<string, readonly string[]> = {
 	"/models": ["/models/model-selection", "/models/pareto-efficiency", "/models/evals"],
 	"/workflows/reliable-design": ["/workflows/verification"],
 	"/tmux": ["/herdr"],
-	// Keep mcp and web-access beside tools/edit in the Reference group.
-	"/tools/edit": ["/mcp", "/web-access"],
+	// The edit reference now lives in tools; integrations follow it.
+	"/tools": ["/mcp-servers", "/web-access"],
 	"/changelog": ["/models/artificial-analysis-index"],
 	"/custom-provider": [
 		"/custom-provider/override",
@@ -625,7 +623,7 @@ describe("docs information architecture (#2847)", () => {
 				.filter((route) => expectedSet.has(route));
 			assert.deepEqual(projection, expected, `${name} routes must follow #2847's proposed order`);
 		}
-		assert.equal(Object.values(issueNavigationOrder).flat().length, 57, "all 57 issue routes have an order");
+		assert.equal(Object.values(issueNavigationOrder).flat().length, 56, "the 56 remaining issue pages have an order");
 	});
 
 	test("every generated page keeps its recorded insertion point", () => {
@@ -643,7 +641,7 @@ describe("docs information architecture (#2847)", () => {
 		assert.equal(
 			expectedGenerated.length,
 			36,
-			"24 migration routes, all six upstream additions, the four reader-path orientation pages, /mcp (#3065), and /sdk/structured-decisions have insertion points",
+			"24 migration routes, all six upstream additions, the four reader-path orientation pages, /mcp-servers (#3065), and /sdk/structured-decisions have insertion points",
 		);
 		assert.deepEqual(generated, expectedGenerated, "no generated page may fall outside the insertion contract");
 
@@ -662,7 +660,10 @@ describe("docs information architecture (#2847)", () => {
 	test("every pre-migration route still resolves", () => {
 		const routes = new Set(diskSlugs.map((slug) => `/${slug}`));
 		for (const route of preMigrationRoutes) {
-			assert.ok(routes.has(route), `${route} existed before #2847 and must keep working`);
+			assert.ok(
+				routes.has(route) || docsJson.redirects?.some((entry) => entry.source === route),
+				`${route} existed before #2847 and must keep working`,
+			);
 		}
 	});
 
@@ -670,7 +671,10 @@ describe("docs information architecture (#2847)", () => {
 		const routes = new Set(diskSlugs.map((slug) => `/${slug}`));
 		routes.add("/"); // the canonical route, served by index.md
 		for (const route of proposedRoutes) {
-			assert.ok(routes.has(route), `#2847 proposes ${route}, which has no page`);
+			assert.ok(
+				routes.has(route) || docsJson.redirects?.some((entry) => entry.source === route),
+				`#2847 proposes ${route}, which has no page`,
+			);
 		}
 	});
 
@@ -714,7 +718,7 @@ describe("docs information architecture (#2847)", () => {
 			const effective = frontmatter.sidebarTitle ?? frontmatter.title ?? derived();
 			if (effective !== expected) wrong.push(`${route}: renders "${effective}", #2847 specifies "${expected}"`);
 		}
-		assert.equal(Object.keys(issueNavigationLabels).length, 57, "all 57 enumerated routes are checked");
+		assert.equal(Object.keys(issueNavigationLabels).length, 56, "the 56 remaining issue page labels are checked");
 		assert.deepEqual(wrong, [], "navigation labels must match the issue's enumerated tree exactly");
 	});
 });
@@ -1046,5 +1050,47 @@ describe("docs references and assets (#2847)", () => {
 			}
 		}
 		assert.equal(checked, 6, "all six relative image references must still be checked");
+	});
+});
+
+describe("human-facing tool documentation", () => {
+	test("edit lives under built-in tools and MCP Servers has an explicit label", () => {
+		assert.ok(!diskSlugs.includes("tools/edit"));
+		assert.ok(!navPages.includes("tools/edit"));
+		assert.ok(!diskSlugs.includes("mcp"));
+		assert.ok(!navPages.includes("mcp"));
+		assert.ok(navPages.includes("mcp-servers"));
+		assert.equal(frontmatterOf("mcp-servers").title, "MCP Servers");
+		for (const anchor of ["edit", "inputs", "worked-examples", "errors", "warnings"]) {
+			assert.ok(anchorResolves("/tools", anchor), `the moved reference must retain ${anchor}`);
+		}
+		const redirects = new Map(docsJson.redirects?.map(({ source, destination }) => [source, destination]));
+		assert.equal(redirects.get("/tools/edit"), "/tools#edit");
+		assert.equal(redirects.get("/mcp"), "/mcp-servers");
+	});
+
+	test("guides omit unsupported resource schemes and upstream branding", () => {
+		for (const slug of diskSlugs) {
+			const text = readFileSync(join(docsDir, pathForSlug(slug)), "utf8");
+			assert.doesNotMatch(text, /oh-my-pi/iu, slug);
+			assert.doesNotMatch(text, /\b(?:artifact|agent|history|issue|pr|rule|mcp|vault):\/\//u, slug);
+			assert.doesNotMatch(text, /\]\(\/(?:tools\/edit|mcp)(?:[)#])/u, slug);
+		}
+	});
+
+	test("supported selectors and ordinary URLs remain documented", () => {
+		const text = readFileSync(join(docsDir, "tools.md"), "utf8");
+		for (const example of [
+			"file.ts:5-16",
+			"file.ts:5+3",
+			"file.ts:5-16,960-973",
+			"https://example.test/page:5-8",
+			"https://mcp.deepwiki.com/mcp",
+			"local://",
+			"skill://",
+			"conflict://1/ours",
+			"raw:notes.txt",
+		])
+			assert.ok(text.includes(example), `retain supported example ${example}`);
 	});
 });

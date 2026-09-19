@@ -21,7 +21,7 @@ import {
 } from "../src/core/tools/hashline-engine/index.ts";
 import { loadNativeSearchBinding } from "../src/core/tools/search-native.ts";
 
-const docs = readTextSync(join(dirname(fileURLToPath(import.meta.url)), "../docs/tools/edit.md"), "utf8");
+const docs = readTextSync(join(dirname(fileURLToPath(import.meta.url)), "../docs/tools.md"), "utf8");
 const normalizedDocs = docs.replace(/\s+/g, " ");
 
 describe("hashline edit reference documentation", () => {

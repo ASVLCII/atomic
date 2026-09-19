@@ -5,9 +5,9 @@ description: "Task guides for everyday work with Atomic: interactive use, sessio
 
 # Guides
 
-Guides answer "how do I do this task with Atomic" once Atomic is installed and authenticated.
+Find a guide for the task you want to do with Atomic.
 
-New to Atomic? Start with the ordered onboarding path in the [Quickstart](/quickstart) instead — it installs Atomic, authenticates a provider, runs a first session, and adds project instructions. Come back here when you want to go deeper on one task.
+New to Atomic? Follow the [Quickstart](/quickstart) to install, authenticate, run a first session, and add project instructions.
 
 Looking to extend or embed Atomic? Go to [Build with Atomic](/build). Looking up an exact flag, setting, event, or type? Go to the [Reference index](/reference).
 
@@ -24,18 +24,9 @@ Looking to extend or embed Atomic? Go to [Build with Atomic](/build). Looking up
 
 For work that continues while you chat, follow [Background tasks](/background-tasks) to launch, inspect, and stop agents or shells. If you use Herdr panes, [Herdr](/herdr) explains Atomic's status indicators and troubleshooting.
 
-## Start here
+## More guides and references
 
-- [Quickstart](/quickstart) - install, authenticate, and run a first session.
-- [Using Atomic](/usage) - interactive mode, slash commands, context files, and CLI reference.
-- [Computer use](/computer-use) - work in desktop apps, browsers, and terminals across macOS, Linux, and Windows.
-- [Providers](/providers) - subscription and API-key setup for built-in providers.
-- [Environment variables](/environment-variables) - Atomic/Pi aliases, provider credentials, and bash session metadata.
-- [Security](/security) - project trust, sandbox boundaries, and vulnerability reporting.
-- [Containerization](/containerization) - sandbox Atomic with OpenShell, Gondolin, or Docker.
-- [Settings](/settings) - global and project settings.
-- [Keybindings](/keybindings) - default shortcuts and custom keybindings.
-- [Sessions](/sessions) - session management, branching, and tree navigation.
-- [Compaction](/compaction) - Verbatim Compaction, context management, and branch summarization.
-- [Background tasks](/background-tasks) - run work in the background, inspect results, and stop owned tasks.
-- [Herdr](/herdr) - report Atomic's working, blocked, and idle states in Herdr panes.
+- [Computer use](/computer-use) covers desktop apps, browsers, and terminals across macOS, Linux, and Windows.
+- [Environment variables](/environment-variables) lists Atomic/Pi aliases, provider credentials, and bash session metadata.
+- [Settings](/settings) lists global and project settings.
+- [Keybindings](/keybindings) lists default shortcuts and custom actions.

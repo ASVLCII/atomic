@@ -1,4 +1,9 @@
-# MCP servers
+---
+title: "MCP Servers"
+description: "Configure MCP servers, discover tools, and authenticate connections."
+---
+
+# MCP Servers
 
 Atomic includes MCP support in both npm and binary installations. No separate extension install is needed. Use `/mcp` to inspect servers or `/mcp setup` to configure them.
 
@@ -35,7 +40,9 @@ Remote `url` values support `${VAR}` and `$env:VAR` environment variable interpo
 { "url": "${MY_SERVICE_URL}/mcp", "auth": "bearer", "bearerTokenEnv": "MY_SERVICE_TOKEN" }
 ```
 
-With `MY_SERVICE_URL=https://example.com`, the endpoint is `https://example.com/mcp`. Unset variables become empty strings. The resolved endpoint must be a non-empty HTTP(S) URL; otherwise Atomic reports a configuration error before connecting. If you see this error, check the variables in Atomic's environment and the URL suffix, then restart Atomic after changing its environment.
+With `MY_SERVICE_URL=https://example.com`, the endpoint is `https://example.com/mcp`. Unset variables become empty strings.
+
+The resolved endpoint must be a non-empty HTTP(S) URL. If Atomic reports a configuration error before connecting, check the variables in its environment and the URL suffix. Restart Atomic after changing its environment.
 
 Atomic reads configuration in this order, with later files overriding earlier settings:
 
@@ -75,11 +82,12 @@ Automatic OAuth is opt-in through `settings.autoAuth`. Browser-based authorizati
 
 - Run `/mcp` to check server status and `/mcp tools` to list available tools.
 - After editing configuration manually, restart Atomic to load it. Use `/mcp reconnect my-server` to reconnect a configured server and refresh its tools.
-- If Atomic cannot open the authorization browser, it displays the exact complete URL for manual login, including all paths, parameters, and any credentials. Treat this URL as sensitive and do not share it. Intentional login instructions are not redacted; transport and RPC error diagnostics remain redacted. Browser-launch failure cancels the pending attempt, so its callback cannot complete authentication; check your default browser and retry `/mcp-auth my-server`.
+- If Atomic cannot open the authorization browser, use the complete URL it displays for manual login. **Treat it as sensitive**: it includes all paths, parameters, and any credentials. Login instructions are not redacted; transport and RPC error diagnostics are.
+  Browser-launch failure cancels the pending attempt, so its callback cannot complete authentication. Check your default browser and retry `/mcp-auth my-server`.
 - If a local server cannot start, check its executable, arguments, working directory, and required environment variables. Server configuration supports `cwd` and `env`.
 - If authorization fails, run `/mcp-auth my-server` again. Check the remote server's URL and authentication requirements.
 - For slow tools, a server's `timeoutMs` controls the inactivity timeout. Progress notifications reset it; it is not a total execution deadline.
 
 ## Local documentation
 
-This guide is available at `docs/mcp.md` under Atomic's installation root in both npm and binary installations. The session's documentation instructions provide the absolute docs directory. Read this guide there rather than looking inside the bundled extension directory.
+This guide is available at `docs/mcp-servers.md` under Atomic's installation root in both npm and binary installations. The session's documentation instructions provide the absolute docs directory. Read this guide there rather than looking inside the bundled extension directory.

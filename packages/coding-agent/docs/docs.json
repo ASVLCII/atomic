@@ -183,8 +183,7 @@
               "environment-variables",
               "keybindings",
               "tools",
-              "tools/edit",
-              "mcp",
+              "mcp-servers",
               "web-access",
               "session-format"
             ]
@@ -257,6 +256,14 @@
     {
       "source": "/tree",
       "destination": "/sessions"
+    },
+    {
+      "source": "/tools/edit",
+      "destination": "/tools#edit"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/mcp-servers"
     }
   ]
 }
