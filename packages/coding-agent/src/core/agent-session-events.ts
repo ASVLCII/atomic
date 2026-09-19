@@ -1,6 +1,7 @@
 import type { AssistantMessage, Message, TextContent } from "@bastani/pi-ai/compat";
 import { cleanupSessionResources } from "@bastani/pi-ai/compat";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import { abortBash } from "./agent-session-bash.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import {
 	isProtectedStreamingCustomMessage,
@@ -10,13 +11,14 @@ import {
 	prepareProtectedStreamingCustomMessagesForDisposal,
 	retryConsumedProtectedStreamingCustomMessages,
 } from "./agent-session-persistent-custom-messages.ts";
+import { abortCurrentGeneration } from "./agent-session-queue-pause.ts";
 import {
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
 	customMessageExcludesContext,
 	isSingleGenericAbortTextContent,
 	replacementAbortContent,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 import { formatCodexProviderError } from "./codex-errors.ts";
 import type {
 	MessageEndEvent,
@@ -28,9 +30,18 @@ import type {
 	TurnEndEvent,
 	TurnStartEvent,
 } from "./extensions/index.js";
+import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./extensions/stale-context.ts";
+import type { SessionShutdownEvent } from "./extensions/types.ts";
 import type { StageAdmittedCustomMessage } from "./messages.ts";
 import { normalizeMessageContent } from "./messages.ts";
+import {
+	abortSessionWork,
+	drainSessionReload,
+	drainSessionWork,
+	hasCallingSessionWork,
+} from "./session-lifecycle-work.ts";
+import { assertSettingsWrites, ownedSettingsManagers } from "./settings-write-ownership.ts";
 
 export function _emit(this: AgentSession, event: AgentSessionEvent): void {
 	for (const l of this._eventListeners) {
@@ -46,6 +57,8 @@ export function _emitQueueUpdate(this: AgentSession): void {
 	});
 }
 
+const consumedQueuedMessageEvents = new WeakSet<object>();
+
 /** Internal handler for agent events - shared by subscribe and reconnect */
 
 export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promise<void> | void {
@@ -55,6 +68,19 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	// _processAgentEvent, slow earlier queued events can delay agent_end processing
 	// and waitForRetry() can miss the in-flight retry.
 	this._createRetryPromiseForAgentEnd(event);
+	// Agent-core has already consumed this message. Reflect admission before an
+	// Escape/abort can restore it from a stale queue while earlier hooks settle.
+	if (event.type === "message_start" && event.message.role === "user") {
+		const text = this._getUserMessageText(event.message);
+		if (text) {
+			const queue = [this._steeringMessages, this._followUpMessages].find((messages) => messages.includes(text));
+			if (queue) {
+				queue.splice(queue.indexOf(text), 1);
+				this._admittedQueuedMessageAwaitingReply = text;
+				consumedQueuedMessageEvents.add(event);
+			}
+		}
+	}
 	const awaitProtectedPersistence =
 		event.type === "message_end" && event.message.role === "custom"
 			? markProtectedStreamingCustomMessageConsumed(this, event.message)
@@ -69,9 +95,19 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	// Keep queue alive if an event handler fails. Agent-core must additionally
 	// await protected persistence and fallback reconciliation before the next
 	// provider request; other listener work stays nonblocking.
-	processing.catch(() => {});
+	processing.catch((error) => {
+		// #3105: callbacks interrupted by terminal disposal remain observable at shutdown.
+		if (this._disposed) {
+			const failures = shutdownEventFailures.get(this) ?? [];
+			failures.push(error instanceof Error ? error : new Error(String(error)));
+			shutdownEventFailures.set(this, failures);
+		}
+	});
 	if (
 		awaitProtectedPersistence ||
+		// #3105: only queued custom input needs this boundary; ordinary turn listeners
+		// must remain nonblocking during fallback settlement.
+		(event.type === "turn_end" && this._pendingCustomMessages.length > 0) ||
 		(event.type === "agent_end" && (this._fallbackModels.length > 0 || this._fallbackOriginModel !== undefined))
 	)
 		return processing.catch(() => {});
@@ -128,35 +164,13 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 		isProtectedStreamingCustomMessage(this, event.message)
 			? event.message
 			: undefined;
-	// When a user message starts, check if it's from either queue and remove it BEFORE emitting
-	// This ensures the UI sees the updated queue state
+	// Public notifications remain serialized behind extension events.
 	if (event.type === "message_start" && event.message.role === "user") {
 		this._overflowRecoveryAttempted = false;
 		this._recoverableLengthRecoveryAttempted = false;
 		this._fallbackAttemptedKeys.clear();
 		this._fallbackBlockedModels.length = 0;
-		const messageText = this._getUserMessageText(event.message);
-		if (messageText) {
-			// Check steering queue first
-			const steeringIndex = this._steeringMessages.indexOf(messageText);
-			if (steeringIndex !== -1) {
-				this._steeringMessages.splice(steeringIndex, 1);
-				// The loop already polled this message out of the agent queue, so the
-				// pause hold can no longer reach it and Escape can no longer restore it
-				// to the editor. Record it so an interrupt that kills its reply before
-				// any output can still schedule that reply (issue #2362).
-				this._admittedQueuedMessageAwaitingReply = messageText;
-				this._emitQueueUpdate();
-			} else {
-				// Check follow-up queue
-				const followUpIndex = this._followUpMessages.indexOf(messageText);
-				if (followUpIndex !== -1) {
-					this._followUpMessages.splice(followUpIndex, 1);
-					this._admittedQueuedMessageAwaitingReply = messageText;
-					this._emitQueueUpdate();
-				}
-			}
-		}
+		if (consumedQueuedMessageEvents.delete(event)) this._emitQueueUpdate();
 	}
 
 	this._applyInterruptAbortMessage(event);
@@ -412,16 +426,16 @@ export function _replaceMessageInPlace(this: AgentSession, target: AgentMessage,
 export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent): Promise<void> {
 	if (event.type === "agent_start") {
 		this._turnIndex = 0;
-		await this._extensionRunner.emit({ type: "agent_start" });
+		await this._extensionRunner.emit({ type: "agent_start" }, undefined, true);
 	} else if (event.type === "agent_end") {
-		await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+		await this._extensionRunner.emit({ type: "agent_end", messages: event.messages }, undefined, true);
 	} else if (event.type === "turn_start") {
 		const extensionEvent: TurnStartEvent = {
 			type: "turn_start",
 			turnIndex: this._turnIndex,
 			timestamp: Date.now(),
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "turn_end") {
 		const extensionEvent: TurnEndEvent = {
 			type: "turn_end",
@@ -429,26 +443,27 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			message: event.message,
 			toolResults: event.toolResults,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 		this._turnIndex++;
 	} else if (event.type === "message_start") {
 		const extensionEvent: MessageStartEvent = {
 			type: "message_start",
 			message: event.message,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "message_update") {
 		const extensionEvent: MessageUpdateEvent = {
 			type: "message_update",
 			assistantMessageEvent: event.assistantMessageEvent,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "message_end") {
 		const extensionEvent: MessageEndEvent = {
 			type: "message_end",
 			message: event.message,
 		};
-		const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
+		// Agent-core already completed this message; closing must drain its hooks and persistence.
+		const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent, true);
 		if (replacement) {
 			this._replaceMessageInPlace(event.message, normalizeMessageContent(replacement));
 		}
@@ -459,7 +474,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			toolName: event.toolName,
 			args: event.args,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "tool_execution_update") {
 		const extensionEvent: ToolExecutionUpdateEvent = {
 			type: "tool_execution_update",
@@ -468,7 +483,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			args: event.args,
 			partialResult: event.partialResult,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "tool_execution_end") {
 		const extensionEvent: ToolExecutionEndEvent = {
 			type: "tool_execution_end",
@@ -477,7 +492,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 			result: event.result,
 			isError: event.isError,
 		};
-		await this._extensionRunner.emit(extensionEvent);
+		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	}
 }
 
@@ -512,32 +527,96 @@ export function _disconnectFromAgent(this: AgentSession): void {
  * Call this when completely done with the session.
  */
 
-export function dispose(this: AgentSession): void {
-	// Terminal and idempotent: callers legitimately dispose more than once (an explicit dispose
-	// followed by a harness teardown), and the steps below are not all safe to repeat.
-	if (this._disposed) return;
-	// Summary work queued before its AbortController exists cannot be reached by
-	// abortSessionSummary(), so disposal is recorded as state that every checkpoint consults.
-	this._disposed = true;
-	void this.closeSessionTasks().catch((error) =>
-		this._extensionRunner.emitError({
-			extensionPath: "<runtime>",
-			event: "task_owner_close",
-			error: error instanceof Error ? error.message : String(error),
-		}),
-	);
-	// A background summary must never keep the process alive past shutdown.
-	this.abortSessionSummary();
-	// Fail closed while protected input remains queued, or flush a consumed
-	// reconciliation before invalidation can discard its recovery state.
-	prepareProtectedStreamingCustomMessagesForDisposal(this);
-	this._extensionRunner.invalidate(STALE_EXTENSION_CONTEXT_MESSAGE);
-	this._disconnectFromAgent();
-	this._eventListeners = [];
-	cleanupSessionResources(this.sessionId);
-	// Releasing the session lease stops protecting a tree that is no longer in use.
-	this._tempStorageLease?.release();
-	this._tempStorageLease = undefined;
+const shutdownEventFailures = new WeakMap<AgentSession, Error[]>();
+const sessionClosures = new WeakMap<AgentSession, Promise<void>>();
+const sessionRetirements = new WeakMap<AgentSession, Promise<void>>();
+
+/** Shared terminal boundary for direct SDK disposal and runtime replacement. */
+export function closeAgentSession(
+	session: AgentSession,
+	event: SessionShutdownEvent = { type: "session_shutdown", reason: "quit" },
+	beforeInvalidate?: () => void,
+): Promise<void> {
+	const handoff = event.reason !== "quit" && hasCallingSessionWork(session);
+	const existing = sessionClosures.get(session);
+	if (existing) return (handoff && sessionRetirements.get(session)) || existing;
+	let resolveRetired!: () => void;
+	let rejectRetired!: (error: Error) => void;
+	const retirement = new Promise<void>((resolve, reject) => {
+		resolveRetired = resolve;
+		rejectRetired = reject;
+	});
+	const retired = { promise: retirement, resolve: resolveRetired, reject: rejectRetired };
+	session._disposed = true;
+	const closing = Promise.resolve().then(async () => {
+		const errors: Error[] = [];
+		const attempt = async (component: string, cleanup: () => void | Promise<void>) => {
+			try {
+				await cleanup();
+			} catch (cause) {
+				if (cause instanceof AggregateError)
+					errors.push(...cause.errors.map((error) => new Error(component, { cause: error })));
+				else errors.push(new Error(component, { cause }));
+			}
+		};
+		await attempt("lifetime", () => abortSessionWork(session));
+		await attempt("shell abort", () => abortBash.call(session));
+		await attempt("abort", () => abortCurrentGeneration.call(session));
+		await attempt("reload rollback", () => drainSessionReload(session));
+		await attempt("tasks", () => session.closeSessionTasks());
+		await attempt("summary", () => session.abortSessionSummary());
+		if (handoff) {
+			await attempt("peer work", () => drainSessionWork(session, true, true));
+			await attempt("retired authority", () => session._extensionRunner.revokeAuthority());
+			if (errors.length)
+				retired.reject(
+					Object.assign(new AggregateError(errors, "Session retirement failed"), { code: "ShutdownFailed" }),
+				);
+			else retired.resolve();
+		}
+		await attempt("active work", () => drainSessionWork(session));
+		await attempt("events", async () => {
+			await session._agentEventQueue.catch(() => {});
+			const failures = shutdownEventFailures.get(session);
+			if (failures?.length) throw new AggregateError(failures, "Session event callbacks failed");
+		});
+		await attempt("extensions", async () => {
+			await emitSessionShutdownEvent(session._extensionRunner, event);
+		});
+		await attempt("messages", () => prepareProtectedStreamingCustomMessagesForDisposal(session));
+		await attempt("shell persistence", () => session._flushPendingBashMessages());
+		await attempt("settings", async () => {
+			await session.settingsManager.flush();
+			assertSettingsWrites(session);
+		});
+		await attempt("session persistence", () => session.sessionManager.flush());
+		if (ownedSettingsManagers.get(session.settingsManager) === session)
+			ownedSettingsManagers.delete(session.settingsManager);
+		await attempt("host subscriptions", () => beforeInvalidate?.());
+		await attempt("generation", () => session._extensionRunner.invalidate(STALE_EXTENSION_CONTEXT_MESSAGE));
+		await attempt("subscriptions", () => {
+			session._disconnectFromAgent();
+			session._eventListeners = [];
+		});
+		await attempt("provider", () => cleanupSessionResources(session.sessionId));
+		await attempt("storage", () => {
+			session._tempStorageLease?.release();
+			session._tempStorageLease = undefined;
+		});
+		if (errors.length)
+			throw Object.assign(new AggregateError(errors, "Session shutdown failed"), { code: "ShutdownFailed" });
+	});
+	sessionClosures.set(session, closing);
+	if (handoff) {
+		sessionRetirements.set(session, retired.promise);
+		void closing.catch(() => {});
+	}
+	session._extensionRunner.sealHostInput();
+	return handoff ? retired.promise : closing;
+}
+
+export function dispose(this: AgentSession): Promise<void> {
+	return closeAgentSession(this);
 }
 
 // =========================================================================
@@ -547,6 +626,9 @@ export function dispose(this: AgentSession): void {
 /** Full agent state */
 
 export const agentSessionEventsMethods = {
+	_close(this: AgentSession, event: SessionShutdownEvent, beforeInvalidate?: () => void) {
+		return closeAgentSession(this, event, beforeInvalidate);
+	},
 	_emit,
 	_emitQueueUpdate,
 	_handleAgentEvent,

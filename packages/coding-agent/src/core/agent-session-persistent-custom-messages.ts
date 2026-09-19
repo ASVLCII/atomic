@@ -1,7 +1,7 @@
 import { resolveWorkflowStageDeliveryTarget } from "./agent-session-delivery-forwarding.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
-import type { DrainedAgentQueues } from "./agent-session-types.ts";
-import { customMessageExcludesContext } from "./agent-session-types.ts";
+import type { DrainedAgentQueues } from "./agent-session-types.js";
+import { customMessageExcludesContext } from "./agent-session-types.js";
 import type { CustomMessage, StageAdmittedCustomMessage } from "./messages.ts";
 
 type ProtectedDelivery = "steer" | "followUp";

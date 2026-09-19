@@ -79,6 +79,19 @@ export async function admitDurableRootRun(args: {
 	}
 }
 
+const pendingControls = new WeakMap<DurableWorkflowBackend, Map<string, Set<Promise<void>>>>();
+
+/** Await controls already acknowledged locally before releasing their backing runtime. */
+export async function settleAdmissionControls(
+	backend: DurableWorkflowBackend,
+	runIds: readonly string[],
+): Promise<void> {
+	const controls = pendingControls.get(backend);
+	const results = await Promise.allSettled(runIds.flatMap((runId) => [...(controls?.get(runId) ?? [])]));
+	const errors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+	if (errors.length > 0) throw new AggregateError(errors, errors.map(String).join("; "));
+}
+
 /** Observe and fence failed durable controls without blocking local acknowledgement. */
 export function backgroundAdmissionControl(
 	backend: DurableWorkflowBackend | undefined,
@@ -86,6 +99,24 @@ export function backgroundAdmissionControl(
 	settlement: Promise<void>,
 	onFailure: (error: unknown, resumable: boolean) => void,
 ): void {
+	if (backend !== undefined) {
+		let controls = pendingControls.get(backend);
+		if (controls === undefined) {
+			controls = new Map();
+			pendingControls.set(backend, controls);
+		}
+		let pending = controls.get(runId);
+		if (pending === undefined) {
+			pending = new Set();
+			controls.set(runId, pending);
+		}
+		pending.add(settlement);
+		const remove = () => {
+			pending.delete(settlement);
+			if (pending.size === 0) controls.delete(runId);
+		};
+		void settlement.then(remove, remove);
+	}
 	void settlement.catch((error: unknown) => {
 		const handle = backend?.getWorkflow(runId);
 		const resumable =

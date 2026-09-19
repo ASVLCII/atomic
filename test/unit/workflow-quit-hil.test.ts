@@ -60,7 +60,9 @@ test.each(["direct", "slash", "tool", "nested-tool", "answer-race"] as const)(
 					},
 					toolController.signal,
 					undefined,
-					{ hasUI: true, ui } as Parameters<typeof execute>[4],
+					{ hasUI: true, ui, sessionManager: { getSessionId: () => "owned-stage" } } as Parameters<
+						typeof execute
+					>[4],
 				);
 				await question.catch(() => {});
 				return undefined;

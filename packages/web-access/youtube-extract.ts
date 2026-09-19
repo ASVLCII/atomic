@@ -7,6 +7,7 @@ import { extractHeadingTitle, type ExtractedContent, type FrameResult, type Vide
 import { formatSeconds, readExecError, isTimeoutError, trimErrorText, mapFfmpegError } from "./utils.js";
 import { findReadableConfigPath } from "./config-paths.ts";
 import { runBunSubprocess } from "./subprocess.ts";
+import { createOwnerState } from "./owner-state.js";
 
 const CONFIG_PATH = findReadableConfigPath();
 
@@ -42,14 +43,8 @@ function normalizeEnabled(value: unknown, fallback: boolean): boolean {
 }
 
 const defaults: YouTubeConfig = { enabled: true, preferredModel: "gemini-3-flash-preview" };
-let cachedConfig: YouTubeConfig | null = null;
-
-function loadYouTubeConfig(): YouTubeConfig {
-	if (cachedConfig) return cachedConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedConfig = { ...defaults };
-		return cachedConfig;
-	}
+const loadYouTubeConfig = createOwnerState<YouTubeConfig>(() => {
+	if (!existsSync(CONFIG_PATH)) return { ...defaults };
 
 	const rawText = readFileSync(CONFIG_PATH, "utf-8");
 	let raw: { youtube?: { enabled?: boolean; preferredModel?: string } };
@@ -61,12 +56,11 @@ function loadYouTubeConfig(): YouTubeConfig {
 	}
 
 	const yt = raw.youtube ?? {};
-	cachedConfig = {
+	return {
 		enabled: normalizeEnabled(yt.enabled, defaults.enabled),
 		preferredModel: normalizePreferredModel(yt.preferredModel, defaults.preferredModel),
 	};
-	return cachedConfig;
-}
+});
 
 export function isYouTubeURL(url: string): { isYouTube: boolean; videoId: string | null } {
 	try {

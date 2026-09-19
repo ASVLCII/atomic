@@ -45,8 +45,8 @@ export async function fetchAllContent(urls, signal) {
 			join(tempDir, "storage.ts"),
 			`
 export const generateId = () => "response-id";
-export const getResult = () => undefined;
-export const storeResult = () => {};
+// #3105: content tools own a result store rather than using module-global functions.
+export const createResultStorage = () => ({ getResult: () => undefined, storeResult: () => {} });
 `,
 		);
 		const moduleUrl = pathToFileURL(join(tempDir, "content-tools.ts")).href;

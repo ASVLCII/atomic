@@ -3,9 +3,11 @@ import type { Api, Model } from "@bastani/pi-ai/compat";
 import { clampThinkingLevel, getSupportedThinkingLevels, modelsAreEqual } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
-import { type ModelCycleResult, type ModelMutationOptions, THINKING_LEVELS } from "./agent-session-types.ts";
+import { type ModelCycleResult, type ModelMutationOptions, THINKING_LEVELS } from "./agent-session-types.js";
 import { formatNoApiKeyFoundMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { assertSessionOpen, trackSessionWork } from "./session-lifecycle-work.ts";
+import { settingsWriteOwner } from "./settings-write-ownership.ts";
 
 export async function _getRequiredRequestAuth(
 	this: AgentSession,
@@ -96,7 +98,7 @@ function addPersistedDefaultToNonEmptyScope(session: AgentSession, model: Model<
 
 	const modelReference = `${model.provider}/${model.id}`;
 	if (enabledModels.some((pattern) => pattern.toLowerCase() === modelReference.toLowerCase())) return;
-	session.settingsManager.setEnabledModels([...enabledModels, modelReference]);
+	settingsWriteOwner.run(session, () => session.settingsManager.setEnabledModels([...enabledModels, modelReference]));
 }
 
 /**
@@ -110,27 +112,32 @@ export async function setModel(
 	model: Model<Api>,
 	options: ModelMutationOptions = {},
 ): Promise<void> {
-	if (!this._modelRuntime.hasConfiguredAuth(model.provider)) {
-		throw new Error(`No API key for ${model.provider}/${model.id}`);
-	}
-	this._clearFallbackModelScope?.();
+	assertSessionOpen(this);
+	return trackSessionWork(this, async () => {
+		if (!this._modelRuntime.hasConfiguredAuth(model.provider)) {
+			throw new Error(`No API key for ${model.provider}/${model.id}`);
+		}
+		this._clearFallbackModelScope?.();
 
-	const previousModel = this.model;
-	const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
-	const nextModel = model;
-	this.agent.state.model = nextModel;
-	this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-	if (options.persist) {
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
-		addPersistedDefaultToNonEmptyScope(this, nextModel);
-	}
+		const previousModel = this.model;
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
+		const nextModel = model;
+		this.agent.state.model = nextModel;
+		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
+		if (options.persist) {
+			settingsWriteOwner.run(this, () =>
+				this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id),
+			);
+			addPersistedDefaultToNonEmptyScope(this, nextModel);
+		}
 
-	// Re-clamp thinking level for new model's capabilities
-	this.setThinkingLevel(thinkingLevel, options);
-	this._refreshBaseSystemPromptFromActiveTools();
+		// Re-clamp thinking level for new model's capabilities
+		this.setThinkingLevel(thinkingLevel, options);
+		this._refreshBaseSystemPromptFromActiveTools();
 
-	this._emitModelChanged(nextModel, previousModel, "set");
-	await this._emitModelSelect(nextModel, previousModel, "set");
+		this._emitModelChanged(nextModel, previousModel, "set");
+		await this._emitModelSelect(nextModel, previousModel, "set");
+	});
 }
 
 /**
@@ -145,10 +152,13 @@ export async function cycleModel(
 	direction: "forward" | "backward" = "forward",
 	options: ModelMutationOptions = {},
 ): Promise<ModelCycleResult | undefined> {
-	if (this._scopedModels.length > 0) {
-		return this._cycleScopedModel(direction, options);
-	}
-	return this._cycleAvailableModel(direction, options);
+	assertSessionOpen(this);
+	return trackSessionWork(this, async () => {
+		if (this._scopedModels.length > 0) {
+			return this._cycleScopedModel(direction, options);
+		}
+		return this._cycleAvailableModel(direction, options);
+	});
 }
 
 export async function _cycleScopedModel(
@@ -176,7 +186,9 @@ export async function _cycleScopedModel(
 	this.agent.state.model = nextModel;
 	this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 	if (options.persist) {
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
+		settingsWriteOwner.run(this, () =>
+			this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id),
+		);
 		addPersistedDefaultToNonEmptyScope(this, nextModel);
 	}
 
@@ -199,6 +211,7 @@ export async function _cycleAvailableModel(
 	options: ModelMutationOptions,
 ): Promise<ModelCycleResult | undefined> {
 	const availableModels = await this._modelRuntime.getAvailableSnapshot();
+	assertSessionOpen(this);
 	if (availableModels.length <= 1) return undefined;
 
 	const currentModel = this.model;
@@ -215,7 +228,9 @@ export async function _cycleAvailableModel(
 	this.agent.state.model = selectedModel;
 	this.sessionManager.appendModelChange(selectedModel.provider, selectedModel.id);
 	if (options.persist) {
-		this.settingsManager.setDefaultModelAndProvider(selectedModel.provider, selectedModel.id);
+		settingsWriteOwner.run(this, () =>
+			this.settingsManager.setDefaultModelAndProvider(selectedModel.provider, selectedModel.id),
+		);
 		addPersistedDefaultToNonEmptyScope(this, selectedModel);
 	}
 
@@ -241,9 +256,11 @@ export async function _cycleAvailableModel(
 
 function persistThinkingLevel(session: AgentSession, level: ThinkingLevel): void {
 	if (session.model) {
-		session.settingsManager.setModelThinkingLevel(session.model.provider, session.model.id, level);
+		settingsWriteOwner.run(session, () =>
+			session.settingsManager.setModelThinkingLevel(session.model!.provider, session.model!.id, level),
+		);
 	}
-	session.settingsManager.setDefaultThinkingLevel(level);
+	settingsWriteOwner.run(session, () => session.settingsManager.setDefaultThinkingLevel(level));
 }
 
 export function setThinkingLevel(this: AgentSession, level: ThinkingLevel, options: ModelMutationOptions = {}): void {

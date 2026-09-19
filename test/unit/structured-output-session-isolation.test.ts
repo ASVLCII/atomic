@@ -74,7 +74,7 @@ describe("structured_output custom-name isolation in AgentSession", () => {
 			assert.equal(session.getToolDefinition("final_decision")?.parameters, gateSchema);
 			assert.equal(session.getToolDefinition("structured_output"), undefined);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	});
 
@@ -85,15 +85,16 @@ describe("structured_output custom-name isolation in AgentSession", () => {
 			tools: ["final_decision"],
 		});
 		try {
-			assert.deepEqual(session.getActiveToolNames(), ["final_decision", "intercom"]);
+			// #3105: an explicit allowlist does not implicitly add Intercom.
+			assert.deepEqual(session.getActiveToolNames(), ["final_decision"]);
 			assert.deepEqual(
 				session.getAllTools().map((tool) => tool.name),
-				["intercom", "final_decision"],
+				["final_decision"],
 			);
 			assert.equal(session.getToolDefinition("final_decision")?.parameters, gateSchema);
 			assert.equal(session.getToolDefinition("structured_output"), undefined);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	});
 
@@ -111,7 +112,7 @@ describe("structured_output custom-name isolation in AgentSession", () => {
 			assert.equal(allNames.includes("structured_output"), false);
 			assert.equal(session.getToolDefinition("structured_output"), undefined);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	});
 
@@ -127,7 +128,7 @@ describe("structured_output custom-name isolation in AgentSession", () => {
 			assert.equal(session.getToolDefinition("structured_output")?.parameters, gateSchema);
 			assert.equal(session.getAllTools().filter((tool) => tool.name === "structured_output").length, 1);
 		} finally {
-			session.dispose();
+			await session.dispose();
 		}
 	});
 });

@@ -28,6 +28,7 @@ import type {
 	ResourceLoaderReloadOptions,
 	ResourceLoaderReloadTransaction,
 } from "./resource-loader-types.ts";
+import { lifecycleScopeForOwner, sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { type PackageSource, SettingsManager } from "./settings-manager.ts";
 import { buildSkillCatalog, type SkillCatalog } from "./skill-catalog.ts";
 import type { Skill } from "./skills.ts";
@@ -93,6 +94,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private lastPromptPaths: string[];
 	private lastThemePaths: string[];
 	private loaded: boolean;
+	private loadOptions?: ResourceLoaderReloadOptions;
 
 	constructor(options: DefaultResourceLoaderOptions) {
 		const inheritanceSnapshot = options.resourceLoaderInheritanceSnapshot;
@@ -296,22 +298,24 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	async loadProjectTrustExtensions(): Promise<LoadExtensionsResult> {
-		return loadProjectTrustExtensions(this);
+		return sessionLifecycleCreation.run({ scope: lifecycleScopeForOwner(this), claimed: true }, () =>
+			loadProjectTrustExtensions(this),
+		);
 	}
 
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
-		return reloadDefaultResourceLoader(this, options);
+		return sessionLifecycleCreation.run({ scope: lifecycleScopeForOwner(this), claimed: true }, async () => {
+			await reloadDefaultResourceLoader(this, options);
+			this.loadOptions = options ? { ...options } : undefined;
+			lifecycleScopeForOwner(this.getExtensions().runtime);
+		});
 	}
-	async prepareReload(
-		settingsManager: SettingsManager,
-		options?: ResourceLoaderReloadOptions,
-	): Promise<ResourceLoaderReloadTransaction> {
-		const eventBusTransaction = createStagedEventBus(this.eventBus);
-		const candidate = new DefaultResourceLoader({
+	private createCandidate(settingsManager: SettingsManager, eventBus: EventBus): DefaultResourceLoader {
+		return new DefaultResourceLoader({
 			cwd: this.cwd,
 			agentDir: this.agentDir,
 			settingsManager,
-			eventBus: eventBusTransaction.bus,
+			eventBus,
 			additionalExtensionPaths: [...this.additionalExtensionPaths],
 			additionalSkillPaths: [...this.additionalSkillPaths],
 			additionalPromptTemplatePaths: [...this.additionalPromptTemplatePaths],
@@ -339,6 +343,30 @@ export class DefaultResourceLoader implements ResourceLoader {
 						: [...this.trustedBorrowedProjectLocalSources],
 			},
 		});
+	}
+
+	/** @internal A borrowed discovery loader is not a session extension generation. */
+	async createSessionLoader(scope: object): Promise<DefaultResourceLoader> {
+		if (sessionLifecycleScopes.get(this) === scope) return this;
+		const candidate = this.createCandidate(this.settingsManager, this.eventBus);
+		sessionLifecycleScopes.set(candidate, scope);
+		await candidate.reload(this.loadOptions);
+		// Retain caller-added assets as well as its discovery configuration.
+		await candidate.extendResources({
+			skillPaths: this.lastSkillPaths.map((path) => ({ path, metadata: this.resourceMetadataByPath.get(path)! })),
+			promptPaths: this.lastPromptPaths.map((path) => ({ path, metadata: this.resourceMetadataByPath.get(path)! })),
+			themePaths: this.lastThemePaths.map((path) => ({ path, metadata: this.resourceMetadataByPath.get(path)! })),
+		});
+		return candidate;
+	}
+
+	async prepareReload(
+		settingsManager: SettingsManager,
+		options?: ResourceLoaderReloadOptions,
+	): Promise<ResourceLoaderReloadTransaction> {
+		const eventBusTransaction = createStagedEventBus(this.eventBus);
+		const candidate = this.createCandidate(settingsManager, eventBusTransaction.bus);
+		sessionLifecycleScopes.set(candidate, lifecycleScopeForOwner(this));
 		await candidate.reload(options);
 		const prepareCommit = () => {
 			const eventBusCommit = eventBusTransaction.prepareCommit();
@@ -357,6 +385,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				},
 			};
 		};
+		// The candidate owns its generation; the borrowed loader remains untouched.
 		return {
 			loader: candidate,
 			activate: (liveSettingsManager) => candidate.replaceSettingsManager(liveSettingsManager),
@@ -412,4 +441,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 		void this.extensionThemeSourceInfos;
 		void this.loaded;
 	}
+}
+
+/** @internal Only unmodified concrete discovery can be recreated without losing caller policy. */
+export function canCloneDefaultResourceDiscovery(loader: ResourceLoader | undefined): loader is DefaultResourceLoader {
+	return (
+		loader instanceof DefaultResourceLoader &&
+		loader.constructor === DefaultResourceLoader &&
+		Object.getOwnPropertyNames(DefaultResourceLoader.prototype).every((name) => !Object.hasOwn(loader, name))
+	);
 }

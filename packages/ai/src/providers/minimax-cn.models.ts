@@ -4,5 +4,5 @@
 import values from "./data/minimax-cn.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const MINIMAX_CN_MODELS: ModelCatalog<typeof values, "minimax-cn"> =
+export const MINIMAX_CN_MODELS: ModelCatalog<typeof import("./data/minimax-cn.json", { with: { type: "json" } }), "minimax-cn"> =
 	flattenModelCatalog("minimax-cn", values);

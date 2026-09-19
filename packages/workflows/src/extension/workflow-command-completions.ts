@@ -1,6 +1,6 @@
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
 import { schemaChoices, schemaDescription, schemaFieldKind } from "../shared/schema-introspection.js";
-import { store } from "../shared/store.js";
+import { type Store, store } from "../shared/store.js";
 import type { PiArgumentCompletion, PiArgumentCompletionResult } from "./public-types.js";
 import type { ExtensionRuntime } from "./runtime.js";
 
@@ -40,8 +40,8 @@ function workflowNameItems(runtime: ExtensionRuntime): PiArgumentCompletion[] {
 	}));
 }
 
-function runIdItems(): PiArgumentCompletion[] {
-	return topLevelWorkflowRuns(store.runs()).map((run) => ({
+function runIdItems(activeStore: Store): PiArgumentCompletion[] {
+	return topLevelWorkflowRuns(activeStore.runs()).map((run) => ({
 		value: `${run.id} `,
 		label: run.id,
 		description: `${run.name} — ${run.status}`,
@@ -59,7 +59,11 @@ export function workflowArgumentCompletionsNeedWorkflowResources(partial: string
 	return true;
 }
 
-export function workflowArgumentCompletions(partial: string, runtime: ExtensionRuntime): PiArgumentCompletionResult {
+export function workflowArgumentCompletions(
+	partial: string,
+	runtime: ExtensionRuntime,
+	activeStore: Store = store,
+): PiArgumentCompletionResult {
 	const parts = partial.trim().split(/\s+/).filter(Boolean);
 	const subcommand = parts[0] ?? "";
 	const workflows = () => workflowNameItems(runtime);
@@ -78,20 +82,20 @@ export function workflowArgumentCompletions(partial: string, runtime: ExtensionR
 	}
 	if (subcommand === "inputs") return completeToken(partial, workflows());
 	if (["status", "connect", "resume", "attach"].includes(subcommand)) {
-		return completeToken(partial, runIdItems());
+		return completeToken(partial, runIdItems(activeStore));
 	}
 	if (subcommand === "pause") {
 		return completeToken(partial, [
 			{ value: "--all ", label: "--all", description: "Pause all in-flight runs" },
 			{ value: "--yes ", label: "--yes", description: "Skip confirmation" },
 			{ value: "-y ", label: "-y", description: "Skip confirmation" },
-			...runIdItems(),
+			...runIdItems(activeStore),
 		]);
 	}
 	if (subcommand === "quit") {
 		return completeToken(partial, [
 			{ value: "--all ", label: "--all", description: "Quit and keep all in-flight runs resumable" },
-			...runIdItems(),
+			...runIdItems(activeStore),
 		]);
 	}
 	if (!subcommand) return completeToken(partial, [...adminCompletions(), ...workflows()]);

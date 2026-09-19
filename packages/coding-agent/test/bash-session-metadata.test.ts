@@ -95,7 +95,7 @@ describe("session-aware bash environment", () => {
 			.trim()
 			.split("\n");
 		expect(refreshed.slice(-2)).toEqual(["low", "low"]);
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("clears inherited session metadata for unsaved sessions instead of leaking stale values", async () => {
@@ -111,7 +111,7 @@ describe("session-aware bash environment", () => {
 				.trim()
 				.split("\n");
 			expect(lines).toEqual(["unset", "unset", model.provider, model.provider]);
-			session.dispose();
+			await session.dispose();
 		} finally {
 			for (const key of stale) {
 				const value = previous[key];
@@ -139,7 +139,7 @@ describe("session-aware bash environment", () => {
 			.trim()
 			.split("\n");
 		expect(lines.slice(0, 4)).toEqual([session.sessionId, session.sessionId, sessionFile, sessionFile]);
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("resolves factory tool metadata at execution time and keeps unrelated caller env", async () => {
@@ -209,14 +209,15 @@ describe("session-aware bash environment", () => {
 			PI_REASONING_LEVEL: "minimal",
 		});
 		expect(hookCaptures[0]).toMatchObject({ ATOMIC_SESSION_ID: session.sessionId, PI_SESSION_ID: session.sessionId });
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("rejects retained tools after their session closes instead of using stale metadata", async () => {
 		const { session } = await createSession({ persisted: false });
 		const bash = session.agent.state.tools.find((tool) => tool.name === "bash")!;
-		session.dispose();
+		const disposal = session.dispose();
 		await expect(bash.execute("closed", { command: "printf stale" })).rejects.toThrow();
+		await disposal;
 	});
 
 	it("keeps concurrent main and workflow-stage snapshots isolated", async () => {
@@ -232,7 +233,7 @@ describe("session-aware bash environment", () => {
 		expect(text(mainResult).trim()).toBe(`${main.session.sessionId}:${main.session.sessionId}`);
 		expect(text(stageResult).trim()).toBe(`${stage.session.sessionId}:${stage.session.sessionId}`);
 		expect(stage.session.sessionId).not.toBe(main.session.sessionId);
-		main.session.dispose();
-		stage.session.dispose();
+		await main.session.dispose();
+		await stage.session.dispose();
 	});
 });

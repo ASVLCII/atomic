@@ -79,6 +79,8 @@ export interface DispatcherOpts {
 	cancellation?: CancellationRegistry;
 	/** Job tracker forwarded to runDetached() for background run management. */
 	jobs?: JobTracker;
+	stageControlRegistry?: import("../runs/foreground/stage-control-registry.js").StageControlRegistry;
+	toolControlRegistry?: import("../engine/run-tool-control-registry.js").ToolControlRegistry;
 	/** Persistence port forwarded to the executor. */
 	persistence?: WorkflowPersistencePort;
 	/** MCP scope-gating port forwarded to the executor. */
@@ -223,6 +225,8 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 					store: opts.store,
 					cancellation: opts.cancellation,
 					jobs: opts.jobs,
+					stageControlRegistry: opts.stageControlRegistry,
+					toolControlRegistry: opts.toolControlRegistry,
 					persistence: opts.persistence,
 					mcp: opts.mcp,
 					config: opts.config,

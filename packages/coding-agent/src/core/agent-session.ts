@@ -35,7 +35,7 @@ import type {
 	AgentSessionEventListener,
 	InterruptQueueHold,
 	ToolDefinitionEntry,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 import type { VerbatimCompactionResult } from "./compaction/index.ts";
 import type {
 	ExtensionCommandContextActions,
@@ -70,7 +70,7 @@ export type {
 	ModelCycleResult,
 	PromptOptions,
 	SessionStats,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 
 class AgentSessionBase {
 	readonly agent: Agent;
@@ -126,7 +126,7 @@ class AgentSessionBase {
 		phase: "queued" | "consumed-unpersisted" | "persistence-failed";
 	}> = [];
 	protected _compactionAbortController: AbortController | undefined = undefined;
-	protected _compactionReason: import("./agent-session-types.ts").CompactionReason | undefined = undefined;
+	protected _compactionReason: import("./agent-session-types.js").CompactionReason | undefined = undefined;
 	protected _manualCompactionPromise: Promise<VerbatimCompactionResult> | undefined = undefined;
 	protected _autoCompactionAbortController: AbortController | undefined = undefined;
 	/** Resolves when the current automatic compaction has settled. */
@@ -157,7 +157,7 @@ class AgentSessionBase {
 	protected _retryAttempt = 0;
 	protected _retryPromise: Promise<void> | undefined = undefined;
 	protected _retryResolve: (() => void) | undefined = undefined;
-	protected _bashAbortControllers = new Map<string | symbol, AbortController>();
+	protected _bashAbortControllers = new Map<string | symbol, Set<AbortController>>();
 	protected _pendingBashMessages: BashExecutionMessage[] = [];
 	protected _extensionRunner!: ExtensionRunner;
 	protected _turnIndex = 0;
@@ -170,10 +170,13 @@ class AgentSessionBase {
 	protected _subagentPolicy?: SubagentChildPolicy;
 	protected _allowedToolNames?: Set<string>;
 	protected _excludedToolNames?: Set<string>;
+	protected _childSessionOptions?: import("./child-session-options.ts").ChildSessionOptionsResolver;
 	protected _baseToolsOverride?: Record<string, AgentTool>;
 	protected _sessionStartEvent: SessionStartEvent;
 	protected _orchestrationContext?: OrchestrationContext;
 	protected _extensionUIContext?: ExtensionUIContext;
+	protected _extensionHumanInput?: import("./extensions/host-input.js").HostInput | null;
+	protected _extensionDiagnosticListener?: (diagnostic: import("./extensions/host-input.js").HostDiagnostic) => void;
 	protected _extensionMode: ExtensionMode = "print";
 	protected _extensionCommandContextActions?: ExtensionCommandContextActions;
 	protected _extensionShutdownHandler?: () => void;
@@ -213,88 +216,117 @@ class AgentSessionBase {
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
+		this._childSessionOptions = config.childSessionOptions;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._orchestrationContext = config.orchestrationContext;
 		this._subagentPolicy = config.subagentPolicy;
-		if (config.subagentPolicy?.executionEnded !== undefined) {
-			// Reuse the stable-key admission/drain primitive, not workflow identity or task ownership.
-			const admission = WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch());
-			this._subagentMessageAdmission = admission;
-			this._subagentPolicy = {
-				...config.subagentPolicy,
-				messageAdmission: {
-					isOpen: () => admission.isOpen(),
-					run: (deliver) =>
-						admission.runMessageDelivery(deliver, () => {
-							throw new Error("Subagent execution is terminal and cannot accept messages");
-						}),
-				},
-			};
-			const ended = config.subagentPolicy.executionEnded;
-			if (ended.aborted) admission.seal();
-			else ended.addEventListener("abort", () => admission.seal(), { once: true });
-		}
-		this._systemPromptTransform = config.systemPromptTransform;
-		const stageContext =
-			config.orchestrationContext?.kind === "workflow-stage" ? config.orchestrationContext : undefined;
-		this._workflowStageAdmission =
-			stageContext?.messageAdmission?.boundary ??
-			(stageContext ? WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch()) : undefined);
-		if (stageContext) {
-			this._workflowStageAdmission?.bindTaskIdentity(
-				this.sessionManager.getSessionId(),
-				stageContext.workflowRunId,
-				stageContext.workflowStageId,
-			);
-		}
-		if (this._workflowStageAdmission && stageContext && stageContext.messageAdmission === undefined) {
-			(
-				stageContext as {
-					messageAdmission?: {
-						boundary: WorkflowStageAdmissionBoundary;
-						extensionState: Map<string, object>;
-						isOpen(): boolean;
-					};
-				}
-			).messageAdmission = {
-				boundary: this._workflowStageAdmission,
-				extensionState: new Map(),
-				isOpen: () => this._workflowStageAdmission?.isOpen() === true,
-			};
-		}
-		// Claim this session's storage before any tool can spill into it, so the
-		// sweeper below never reaps a directory this process is still writing to.
-		// The claim is a lease, released in dispose(): a session that is gone must
-		// stop protecting a tree the startup sweep exists to collect.
+		let removeExecutionEndedListener: (() => void) | undefined;
 		try {
-			const sessionId = this.sessionManager.getSessionId();
-			const sessionDir = this.sessionManager.getSessionDir() || undefined;
-			this._tempStorageLease = acquireProtectedPaths([
-				setActiveSessionTempId(sessionId),
-				// A disk-backed session's results are read back by path, and a replayed
-				// result reuses an old file without touching its mtime, so age alone
-				// cannot keep it alive.
-				...(sessionDir ? [join(sessionDir, TOOL_RESULTS_SUBDIR)] : []),
-			]);
-			// A custom `--session-dir` keeps its tool results directly under that
-			// directory, outside the project-nested roots the default sweep walks,
-			// so it has to be named as its own target.
-			const customSessionDir = this.sessionManager.usesDefaultSessionDir() ? undefined : sessionDir;
-			scheduleSessionTempCleanup(customSessionDir ? { sessionDirs: [customSessionDir] } : {});
-		} catch {
-			// Temp-storage housekeeping must never block session construction.
+			if (config.subagentPolicy?.executionEnded !== undefined) {
+				// Reuse the stable-key admission/drain primitive, not workflow identity or task ownership.
+				const admission = WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch());
+				this._subagentMessageAdmission = admission;
+				this._subagentPolicy = {
+					...config.subagentPolicy,
+					messageAdmission: {
+						isOpen: () => admission.isOpen(),
+						run: (deliver) =>
+							admission.runMessageDelivery(deliver, () => {
+								throw new Error("Subagent execution is terminal and cannot accept messages");
+							}),
+					},
+				};
+				const ended = config.subagentPolicy.executionEnded;
+				if (ended.aborted) admission.seal();
+				else {
+					const seal = () => admission.seal();
+					ended.addEventListener("abort", seal, { once: true });
+					removeExecutionEndedListener = () => ended.removeEventListener("abort", seal);
+				}
+			}
+			this._systemPromptTransform = config.systemPromptTransform;
+			const stageContext =
+				config.orchestrationContext?.kind === "workflow-stage" ? config.orchestrationContext : undefined;
+			this._workflowStageAdmission =
+				stageContext?.messageAdmission?.boundary ??
+				(stageContext ? WorkflowStageAdmissionBoundary.restore(this.sessionManager.getBranch()) : undefined);
+			if (stageContext) {
+				this._workflowStageAdmission?.bindTaskIdentity(
+					this.sessionManager.getSessionId(),
+					stageContext.workflowRunId,
+					stageContext.workflowStageId,
+				);
+			}
+			if (this._workflowStageAdmission && stageContext && stageContext.messageAdmission === undefined) {
+				(
+					stageContext as {
+						messageAdmission?: {
+							boundary: WorkflowStageAdmissionBoundary;
+							extensionState: Map<string, object>;
+							isOpen(): boolean;
+						};
+					}
+				).messageAdmission = {
+					boundary: this._workflowStageAdmission,
+					extensionState: new Map(),
+					isOpen: () => this._workflowStageAdmission?.isOpen() === true,
+				};
+			}
+			// Claim this session's storage before any tool can spill into it, so the
+			// sweeper below never reaps a directory this process is still writing to.
+			// The claim is a lease, released in dispose(): a session that is gone must
+			// stop protecting a tree the startup sweep exists to collect.
+			try {
+				const sessionId = this.sessionManager.getSessionId();
+				const sessionDir = this.sessionManager.getSessionDir() || undefined;
+				this._tempStorageLease = acquireProtectedPaths([
+					setActiveSessionTempId(sessionId),
+					// A disk-backed session's results are read back by path, and a replayed
+					// result reuses an old file without touching its mtime, so age alone
+					// cannot keep it alive.
+					...(sessionDir ? [join(sessionDir, TOOL_RESULTS_SUBDIR)] : []),
+				]);
+				// A custom `--session-dir` keeps its tool results directly under that
+				// directory, outside the project-nested roots the default sweep walks,
+				// so it has to be named as its own target.
+				const customSessionDir = this.sessionManager.usesDefaultSessionDir() ? undefined : sessionDir;
+				scheduleSessionTempCleanup(customSessionDir ? { sessionDirs: [customSessionDir] } : {});
+			} catch {
+				// Temp-storage housekeeping must never block session construction.
+			}
+			const internals = this as unknown as AgentSessionInternalSurface;
+			internals._handleAgentEvent = internals._handleAgentEvent.bind(this);
+			this._unsubscribeAgent = this.agent.subscribe(internals._handleAgentEvent);
+			internals._installAgentToolHooks();
+			internals._installAgentNextTurnRefresh();
+			internals._buildRuntime({
+				activeToolNames: this._initialActiveToolNames,
+				includeAllExtensionTools: true,
+			});
+			if (this._workflowStageAdmission?.hasAgentTaskHost()) internals.getAgentTaskHost();
+		} catch (error) {
+			// No session escapes a failed constructor to release these acquisitions later.
+			const failures: unknown[] = [];
+			for (const release of [
+				() => removeExecutionEndedListener?.(),
+				() => this._unsubscribeAgent?.(),
+				() => this._tempStorageLease?.release(),
+				() => this._extensionRunner?.invalidate("Session construction failed"),
+			]) {
+				try {
+					release();
+				} catch (cause) {
+					failures.push(cause);
+				}
+			}
+			if (this._extensionRunnerRef) this._extensionRunnerRef.current = undefined;
+			if (failures.length)
+				throw Object.assign(new AggregateError([error, ...failures], "Session construction cleanup failed"), {
+					code: "ShutdownFailed",
+				});
+			throw error;
 		}
-		const internals = this as unknown as AgentSessionInternalSurface;
-		internals._handleAgentEvent = internals._handleAgentEvent.bind(this);
-		this._unsubscribeAgent = this.agent.subscribe(internals._handleAgentEvent);
-		internals._installAgentToolHooks();
-		internals._installAgentNextTurnRefresh();
-		internals._buildRuntime({
-			activeToolNames: this._initialActiveToolNames,
-			includeAllExtensionTools: true,
-		});
-		if (this._workflowStageAdmission?.hasAgentTaskHost()) internals.getAgentTaskHost();
 	}
 }
 

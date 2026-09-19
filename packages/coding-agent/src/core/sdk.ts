@@ -1,16 +1,29 @@
-import { join } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { clampThinkingLevel, type Message, type ProviderHeaders, streamSimple } from "@bastani/pi-ai/compat";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "../config.js";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.js";
+import type { AgentSessionInternalSurface } from "./agent-session-methods.ts";
 import { restoreAnthropicReplayThinkingBlocks } from "./anthropic-thinking-guard.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
+import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
+import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
+import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
+import {
+	factoryAcquisitions,
+	factoryRollbackError,
+	rollbackFactoryAcquisitions,
+} from "./extensions/loader-rollback.ts";
 import { getModelFastRoute, streamWithFastRoute, withFastRouteStreamOptions } from "./fast-model-routing.ts";
 import { markLifecycleTiming } from "./lifecycle-timings.ts";
-import { withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
+import {
+	isMandatoryResourceLoader,
+	isolateMandatoryResourceLoader,
+	withMandatoryResourceLoader,
+} from "./mandatory-resource-loader.ts";
 import { convertToLlm, repairOrphanToolResults } from "./messages.ts";
 import { findInitialModel, resolveRestoredModelReference } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.js";
@@ -18,16 +31,19 @@ import { type ModelRuntimeSimpleStreamOptions, mergeHeaders } from "./model-runt
 import { sanitizeOpenAIResponsesPayload } from "./openai-responses-payload-sanitizer.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import { scrubPreCompactionAssistantUsage } from "./provider-context-usage.ts";
-import { DefaultResourceLoader } from "./resource-loader.ts";
+import { canCloneDefaultResourceDiscovery, DefaultResourceLoader } from "./resource-loader.ts";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
+import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { registerStartupRollback, rollbackStartup } from "./session-startup-rollback.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { ownedSettingsManagers } from "./settings-write-ownership.ts";
 import { time } from "./timings.ts";
-import { getDefaultToolNames } from "./tools/index.ts";
+import { allToolNames, getDefaultToolNames } from "./tools/index.ts";
 
 export type { ModelFallbackReason } from "./model-resolver-types.ts";
 export * from "./sdk-exports.ts";
-export type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
+export type { AtomicBuiltin, CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
 
 // Preserve the pre-0.81 fallback for extensions that construct Agent instances
 // or invoke low-level agent loops without supplying streamFn.
@@ -94,9 +110,53 @@ function removeUnownedModelHeaders(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	return createScopedSession(options, false);
+}
+
+/** Internal CLI assembly seam. Not exported from the package entrypoint. */
+export function createUnstartedAgentSession(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
+	return createScopedSession(options, true);
+}
+
+function createScopedSession(
+	options: CreateAgentSessionOptions,
+	deferStart: boolean,
+): Promise<CreateAgentSessionResult> {
+	const inherited = sessionLifecycleCreation.getStore();
+	const context = inherited && !inherited.claimed ? inherited : { scope: {} };
+	return sessionLifecycleCreation.run({ ...context, claimed: true }, async () => {
+		const result = await factoryAcquisitions.run(
+			{ pending: new Map(), replacement: context.replacement },
+			async () => {
+				try {
+					return await constructAgentSession(
+						{ ...options, extensionBindings: options.extensionBindings ?? context.bindings },
+						deferStart,
+					);
+				} catch (error) {
+					throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
+				}
+			},
+		);
+		sessionLifecycleScopes.set(result.session, context.scope);
+		return result;
+	});
+}
+
+async function constructAgentSession(
+	options: CreateAgentSessionOptions,
+	deferStart: boolean,
+): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
+	// The concrete default can rediscover into private storage (including deferred
+	// CLI configuration). Custom discovery stays delegated; composition instantiates
+	// its extensions independently without replacing overridden resource policy.
+	if (canCloneDefaultResourceDiscovery(resourceLoader)) {
+		resourceLoader = await resourceLoader.createSessionLoader(sessionLifecycleCreation.getStore()!.scope);
+	}
+	if (resourceLoader) resourceLoader = await isolateMandatoryResourceLoader(resourceLoader);
 
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
@@ -119,16 +179,35 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	}
 
+	const disableWorkflowExtension =
+		options.orchestrationContext?.kind === "workflow-stage" || options.subagentPolicy !== undefined;
 	if (!resourceLoader) {
 		resourceLoader = new DefaultResourceLoader({
 			cwd,
 			agentDir,
 			settingsManager,
+			builtinPackagePaths: getBuiltinPackagePaths(options.builtins).map((source) =>
+				disableWorkflowExtension && basename(source) === "workflows" ? { source, extensions: [] } : source,
+			),
 		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
 	}
-	resourceLoader = await withMandatoryResourceLoader(resourceLoader, cwd);
+	if (
+		(options.resourceLoader || options.builtins || disableWorkflowExtension) &&
+		(!isMandatoryResourceLoader(resourceLoader) || options.builtins || disableWorkflowExtension)
+	) {
+		resourceLoader = await withBuiltinResourceLoader(
+			resourceLoader,
+			cwd,
+			agentDir,
+			options.builtins,
+			disableWorkflowExtension,
+		);
+	}
+	if (options.builtins?.intercom !== false) {
+		resourceLoader = await withMandatoryResourceLoader(resourceLoader, cwd);
+	}
 
 	// Check if session has existing data to restore
 	const existingSession = sessionManager.buildSessionContext();
@@ -208,12 +287,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// and SDK custom tool (workflow, subagent, intercom, mcp, web_search, ...)
 	// for any user who configures it (upstream 4d9aa837 + companion fix 541045ae).
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
-	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
-	const initialActiveToolNames: string[] = options.tools
-		? [...options.tools]
+	const allowedToolNames =
+		options.noTools === "all" ? [] : options.tools === undefined ? undefined : [...options.tools];
+	const initialActiveToolNames: string[] = allowedToolNames
+		? [...allowedToolNames]
 		: options.noTools
 			? []
 			: [...(configuredDefaultToolNames ?? getDefaultToolNames())];
+	const childBuiltins = { ...options.builtins };
+	const childExcludedTools = [
+		...(options.excludedTools ?? []),
+		...(allowedToolNames === undefined
+			? [...allToolNames].filter((name) => !initialActiveToolNames.includes(name))
+			: []),
+	];
 
 	let agent: Agent;
 
@@ -412,32 +499,98 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
-	const session = new AgentSession({
-		agent,
-		sessionManager,
-		settingsManager,
-		cwd,
-		scopedModels: options.scopedModels,
-		fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
-		isFallbackModelAllowed: options.isFallbackModelAllowed,
-		resourceLoader,
-		customTools: options.customTools,
-		modelRuntime,
-		initialActiveToolNames,
-		allowedToolNames,
-		excludedToolNames: options.excludedTools,
-		extensionRunnerRef,
-		sessionStartEvent: options.sessionStartEvent,
-		orchestrationContext: options.orchestrationContext,
-		subagentPolicy: options.subagentPolicy,
-		systemPromptTransform: options.systemPromptTransform,
+	const providerRollback = modelRuntime.createExtensionProviderTransaction();
+	let session: AgentSession;
+	try {
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settingsManager,
+			cwd,
+			childSessionOptions: (child) =>
+				inheritChildSessionOptions(
+					{
+						cwd,
+						agentDir,
+						modelRuntime,
+						settingsManager,
+						model: session.model,
+						thinkingLevel: session.thinkingLevel,
+						fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
+						isFallbackModelAllowed: options.isFallbackModelAllowed,
+						builtins: childBuiltins,
+						tools: allowedToolNames,
+						noTools: options.noTools,
+						excludedTools: childExcludedTools,
+						customTools: options.customTools,
+						extensionBindings: session.extensionRunner.getChildHostBindings(),
+					},
+					child,
+				),
+			scopedModels: options.scopedModels,
+			fallbackModels: options.fallbackModels ?? settingsManager.getFallbackModels(),
+			isFallbackModelAllowed: options.isFallbackModelAllowed,
+			resourceLoader,
+			customTools: options.customTools,
+			modelRuntime,
+			initialActiveToolNames,
+			allowedToolNames,
+			excludedToolNames: options.excludedTools,
+			extensionRunnerRef,
+			sessionStartEvent: options.sessionStartEvent,
+			orchestrationContext: options.orchestrationContext,
+			subagentPolicy: options.subagentPolicy,
+			systemPromptTransform: options.systemPromptTransform,
+		});
+	} catch (error) {
+		// The constructor releases its own leases/subscriptions; restore borrowed provider state here.
+		const cleanup = await Promise.allSettled([providerRollback.commit(), settingsManager.flush()]);
+		const failures = cleanup.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+		if (failures.length)
+			throw new AggregateError([error, ...failures], "Session construction failed and rollback reported errors");
+		throw error;
+	}
+	// Only the selected factories transfer. Discovery may have acquired omitted factories.
+	const acquisitions = factoryAcquisitions.getStore();
+	const selected = resourceLoader.getExtensions();
+	for (const extension of selected.extensions) acquisitions?.pending?.delete(extension);
+	if (!options.settingsManager) ownedSettingsManagers.set(settingsManager, session);
+	const rollbackReason = sessionLifecycleCreation.getStore()?.replacement ? "new" : "quit";
+	registerStartupRollback(session.extensionRunner, async (error) => {
+		const results = await Promise.allSettled([
+			(session as unknown as AgentSessionInternalSurface)._close({
+				type: "session_shutdown",
+				reason: rollbackReason,
+			}),
+			providerRollback.commit(),
+		]);
+		const cleanupErrors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+		if (cleanupErrors.length)
+			throw new AggregateError([error, ...cleanupErrors], "Extension startup failed and rollback reported errors");
+		throw error;
 	});
-	const extensionsResult = resourceLoader.getExtensions();
-
-	return {
-		session,
-		extensionsResult,
-		modelFallbackMessage,
-		modelFallbackReason,
-	};
+	try {
+		// Omitted factories may share the selected runtime: release their acquisitions,
+		// but leave that runtime and its selected subscriptions owned by the runner.
+		const failures = await rollbackFactoryAcquisitions(new Set([selected.runtime]));
+		if (failures.length)
+			throw Object.assign(new AggregateError(failures, "Unselected extension cleanup failed"), {
+				code: "ShutdownFailed",
+			});
+		const extensionsResult = resourceLoader.getExtensions();
+		for (const failure of extensionsResult.errors) {
+			const builtin = getBuiltinPackageLocations().find(({ packageDir }) => {
+				const path = relative(packageDir, failure.path);
+				return path !== ".." && !path.startsWith(`..${sep}`) && !path.startsWith(sep);
+			});
+			if (builtin)
+				throw Object.assign(new Error(`Builtin unavailable: ${builtin.packageName}: ${failure.error}`), {
+					code: "BuiltinUnavailable",
+				});
+		}
+		if (!deferStart) await session.bindExtensions(options.extensionBindings ?? {});
+		return { session, extensionsResult, modelFallbackMessage, modelFallbackReason };
+	} catch (error) {
+		return rollbackStartup(session.extensionRunner, error instanceof Error ? error : new Error(String(error)));
+	}
 }

@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 /**
  * Retain teardown work across MCP lifecycle generations without allowing a
  * non-abortable producer to block every later generation forever.
@@ -34,10 +35,23 @@ export class McpSessionCleanupBarrier {
     const observed = tasks.filter((task): task is CleanupTask => task !== null && task !== undefined);
     const prior = this.settled;
     const next = Promise.all([
-      observeWithin(prior, this.deadlineMs, () => console.error("MCP: prior cleanup exceeded its deadline; continuing with fenced state")),
-      ...observed.map((task) => observeWithin(task, this.deadlineMs, () => console.error("MCP: cleanup task exceeded its deadline; continuing with fenced state"))),
+      observeWithin(prior, this.deadlineMs, () => { if (!reportOwnedMcpLog("error")) console.error("MCP: prior cleanup exceeded its deadline; continuing with fenced state"); }),
+      ...observed.map((task) => observeWithin(task, this.deadlineMs, () => { if (!reportOwnedMcpLog("error")) console.error("MCP: cleanup task exceeded its deadline; continuing with fenced state"); })),
     ]).then(() => undefined);
     this.settled = next;
     return next;
+  }
+
+  async close(tasks: readonly (CleanupTask | null | undefined)[]): Promise<void> {
+    const pending = [this.settled, ...tasks.filter((task): task is CleanupTask => task != null)];
+    const results = await Promise.allSettled(pending.map((task) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("MCP cleanup did not settle within its deadline")), this.deadlineMs);
+      });
+      return Promise.race([task, deadline]).finally(() => { if (timer) clearTimeout(timer); });
+    }));
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length) throw new AggregateError(failures, "MCP cleanup failed");
   }
 }

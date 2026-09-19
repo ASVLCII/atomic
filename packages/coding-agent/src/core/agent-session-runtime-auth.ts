@@ -1,5 +1,6 @@
 import { ModelsError } from "@bastani/pi-ai";
 import type { AgentSession } from "./agent-session.js";
+import type { AgentSessionInternalSurface } from "./agent-session-methods.ts";
 import { CredentialSynchronizationError } from "./model-runtime.js";
 import {
 	type AtomicOAuthLoginCallbacks,
@@ -7,6 +8,7 @@ import {
 	normalizeOAuthLoginError,
 	OAuthLoginTransactionError,
 } from "./oauth-login.ts";
+import { sessionGenerationClosing, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";
 
 export type { AtomicOAuthLoginCallbacks } from "./oauth-login.ts";
 
@@ -16,6 +18,18 @@ export async function loginRuntimeOAuthProvider(
 	provider: string,
 	callbacks: AtomicOAuthLoginCallbacks,
 ): Promise<void> {
+	const lifetime = sessionLifetime(session);
+	if (
+		(session as unknown as AgentSessionInternalSurface)._disposed ||
+		sessionGenerationClosing.has(session) ||
+		lifetime.aborted
+	)
+		throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
+	const signal = callbacks.signal ? AbortSignal.any([callbacks.signal, lifetime]) : lifetime;
+	return trackSessionWork(session, () => login(session, provider, { ...callbacks, signal }));
+}
+
+async function login(session: AgentSession, provider: string, callbacks: AtomicOAuthLoginCallbacks): Promise<void> {
 	const runtime = session.modelRuntime;
 	try {
 		await runtime.login(provider, "oauth", createAuthInteraction(callbacks));

@@ -197,8 +197,14 @@ fn spawn_inner(
 		store.background();
 		if store.unavailable {
 			return Err(
-				TaskFailure { code: "SpawnFailed".into(), message: "Output spool unavailable".into() }
-					.into(),
+				TaskFailure {
+					code: "SpawnFailed".into(),
+					message: format!(
+						"Output spool unavailable: {}",
+						store.spool_error.as_deref().unwrap_or("write failed")
+					),
+				}
+				.into(),
 			);
 		}
 	}

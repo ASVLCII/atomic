@@ -136,7 +136,8 @@ describe("correlated RPC bash streaming", () => {
 		harness.cleanup();
 	});
 
-	it("keeps direct bash updates and source ownership across a real new-session replacement", async () => {
+	// #3105: replacement drains cancelled shell output into its original session.
+	it("keeps cancelled bash output with its source during real session replacement", async () => {
 		const first = await createHarness();
 		const second = await createHarness();
 		const secondServices = {
@@ -182,12 +183,12 @@ describe("correlated RPC bash streaming", () => {
 		await expect(bash).resolves.toMatchObject({
 			id: "replacement-bash",
 			success: true,
-			data: { output: "beforeafter", cancelled: false },
+			data: { output: "before", cancelled: true },
 		});
 		const updates = output
 			.filter((event) => (event as { type?: string }).type === "bash_execution_update")
 			.map((event) => (event as { id?: string; delta?: string }).delta);
-		expect(updates).toEqual(["before", "after"]);
+		expect(updates).toEqual(["before"]);
 		expect(first.session.messages.filter((message) => message.role === "bashExecution")).toHaveLength(1);
 		expect(second.session.messages.filter((message) => message.role === "bashExecution")).toHaveLength(0);
 

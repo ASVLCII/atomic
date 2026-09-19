@@ -1,4 +1,4 @@
-import type { QuestionData } from "../tool/types.ts";
+import type { QuestionData } from "../tool/types.js";
 import type { WrappingSelectItem } from "../view/components/wrapping-select.ts";
 
 /**

@@ -34,10 +34,10 @@ function safeName(value: string): string {
 function actionTools(category: string): readonly string[] {
   const normalized = category.toLowerCase();
   if (normalized.includes("implement") || normalized.includes("fix") || normalized.includes("code")) {
-    return ["read", "edit", "write", "bash"];
+    return ["read", "edit", "write", "bash", "intercom"];
   }
-  if (normalized.includes("research")) return ["read", "web_search", "fetch_content"];
-  return ["read"];
+  if (normalized.includes("research")) return ["read", "web_search", "fetch_content", "intercom"];
+  return ["read", "intercom"];
 }
 
 /**
@@ -64,7 +64,7 @@ export async function runClassifyAndAct(ctx: WorkflowRunContext<Inputs>): Promis
     prompt: classifierPrompt(ctx.inputs.prompt, ctx.inputs.categories),
     schema: classificationSchema,
     context: "fresh",
-    tools: [],
+    tools: ["intercom"],
   });
   const value = classified.structured;
   const proposedCategory = typeof value === "object" && value !== null && "category" in value

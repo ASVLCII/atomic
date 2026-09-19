@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 import type { DirectToolSpec, McpConfig } from "./types.js";
 import type { MetadataCache } from "./metadata-cache.js";
 import { isServerCacheValid } from "./metadata-cache.js";
@@ -79,11 +80,11 @@ export function resolveDirectTools(
       if (isToolExcluded(tool.name, serverName, prefix, definition.excludeTools)) continue;
       const prefixedName = formatToolName(tool.name, serverName, prefix);
       if (BUILTIN_NAMES.has(prefixedName)) {
-        console.warn(`MCP: skipping direct tool "${prefixedName}" (collides with builtin)`);
+        if (!reportOwnedMcpLog("warn")) console.warn(`MCP: skipping direct tool "${prefixedName}" (collides with builtin)`);
         continue;
       }
       if (seenNames.has(prefixedName)) {
-        console.warn(`MCP: skipping duplicate direct tool "${prefixedName}" from "${serverName}"`);
+        if (!reportOwnedMcpLog("warn")) console.warn(`MCP: skipping duplicate direct tool "${prefixedName}" from "${serverName}"`);
         continue;
       }
       seenNames.add(prefixedName);
@@ -105,11 +106,11 @@ export function resolveDirectTools(
         if (isToolExcluded(baseName, serverName, prefix, definition.excludeTools)) continue;
         const prefixedName = formatToolName(baseName, serverName, prefix);
         if (BUILTIN_NAMES.has(prefixedName)) {
-          console.warn(`MCP: skipping direct resource tool "${prefixedName}" (collides with builtin)`);
+          if (!reportOwnedMcpLog("warn")) console.warn(`MCP: skipping direct resource tool "${prefixedName}" (collides with builtin)`);
           continue;
         }
         if (seenNames.has(prefixedName)) {
-          console.warn(`MCP: skipping duplicate direct resource tool "${prefixedName}" from "${serverName}"`);
+          if (!reportOwnedMcpLog("warn")) console.warn(`MCP: skipping duplicate direct resource tool "${prefixedName}" from "${serverName}"`);
           continue;
         }
         seenNames.add(prefixedName);

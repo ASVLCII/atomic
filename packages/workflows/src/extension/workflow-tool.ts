@@ -1,15 +1,14 @@
 import { getSupportedThinkingLevels } from "@bastani/pi-ai/compat";
-import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { inspectRun } from "../runs/background/status.js";
 import { resolveAndValidateInputs } from "../runs/foreground/executor-inputs.js";
 import { workflowDependency } from "../sdk-surface.js";
 import { workflowBoundarySegments } from "../shared/pending-stage-status.js";
-import { store } from "../shared/store.js";
 import type { WorkflowExecutionPolicy } from "../shared/types.js";
 import type { PiExecuteContext, WorkflowToolArgs } from "./public-types.js";
 import type { WorkflowToolResult } from "./render-result.js";
 import type { ExtensionRuntime } from "./runtime.js";
 import { formatWorkflowResourceLoadWarning } from "./workflow-command-surfaces.js";
+import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import type { WorkflowReloadReport } from "./workflow-reload-report.js";
 import { raceWorkflowRequestAbort } from "./workflow-request-abort.js";
@@ -44,10 +43,11 @@ type DurableInspectionSourceResolution =
 async function resolveDurableInspectionSource(
 	args: WorkflowToolArgs,
 	runtime: ExtensionRuntime,
+	owner: WorkflowOwnerResources,
 ): Promise<DurableInspectionSourceResolution> {
 	const target = args.runId?.trim();
 	if (args.all === true || target === undefined || target.length === 0 || target === "--all") return { kind: "local" };
-	const local = resolveRunId(target);
+	const local = resolveRunId(target, owner.store);
 	if (local.kind !== "not_found") return { kind: "local" };
 	const durable = await runtime.inspectDurableWorkflow(target);
 	if (durable.kind !== "found") return { kind: "error", message: durable.message };
@@ -75,12 +75,14 @@ export function makeExecuteWorkflowTool(
 	runtime: ExtensionRuntime | ((ctx: PiExecuteContext) => ExtensionRuntime),
 	reloadWorkflowResources: () => Promise<WorkflowReloadReport | undefined> | undefined,
 	ensureWorkflowResourcesLoaded: () => Promise<void> | void = () => {},
+	owner: WorkflowOwnerResources = captureWorkflowOwnerResources(),
 ): (
 	args: WorkflowToolArgs,
 	ctx: PiExecuteContext,
 	signal?: AbortSignal,
 	onRunAccepted?: (runId: string) => void,
 ) => Promise<WorkflowToolResult> {
+	const { store, toolControlRegistry } = owner;
 	return async function executeWorkflowTool(
 		args: WorkflowToolArgs,
 		ctx: PiExecuteContext,
@@ -225,7 +227,7 @@ export function makeExecuteWorkflowTool(
 			case "status": {
 				const target = args.runId;
 				if (target !== undefined) {
-					const resolved = resolveRunId(target);
+					const resolved = resolveRunId(target, store);
 					if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 						return { action: "statusDetail", runId: target, error: resolved.message };
 					}
@@ -238,7 +240,7 @@ export function makeExecuteWorkflowTool(
 					if (!isResolvedRunId(resolved)) {
 						return { action: "statusDetail", runId: target, error: `run not found: ${target}` };
 					}
-					const inspected = inspectRun(resolved.runId, { toolControlRegistry });
+					const inspected = inspectRun(resolved.runId, owner);
 					if (!inspected.ok) {
 						return { action: "statusDetail", runId: target, error: `run not found: ${target}` };
 					}
@@ -253,7 +255,7 @@ export function makeExecuteWorkflowTool(
 				const capturedRuns = store.graphSnapshot().runs;
 				const statusByRunId = new Map(capturedRuns.map((run) => [run.id, run.status]));
 				const listing = buildWorkflowStatusListing(
-					topLevelExpandedSnapshots(),
+					topLevelExpandedSnapshots(store),
 					args.statusFilter ?? "all",
 					Date.now(),
 					{
@@ -274,25 +276,32 @@ export function makeExecuteWorkflowTool(
 			case "stages":
 			case "stage":
 			case "transcript": {
-				const resolved = await awaitRequest(resolveDurableInspectionSource(args, getRuntime()));
+				const resolved = await awaitRequest(resolveDurableInspectionSource(args, getRuntime(), owner));
 				if (resolved.kind === "error") return durableInspectionError(action, args.runId ?? "", resolved.message);
-				const source = resolved.kind === "durable" ? resolved.source : undefined;
+				const source = resolved.kind === "durable" ? resolved.source : owner;
 				const canonicalArgs = resolved.kind === "durable" ? { ...args, runId: resolved.runId } : args;
 				if (action === "stages") return workflowStagesResult(canonicalArgs, source);
 				if (action === "stage") return workflowStageResult(canonicalArgs, source);
 				return workflowTranscriptResult(canonicalArgs, source);
 			}
 			case "answer":
-				return awaitRequest(workflowAnswerAction(args));
+				return awaitRequest(workflowAnswerAction(args, owner));
 			case "pause":
-				return awaitRequest(workflowPauseAction(args));
+				return awaitRequest(workflowPauseAction(args, owner));
 			case "reload":
 				return awaitRequest(workflowReloadAction(args, { reloadWorkflowResources }));
 			case "quit":
-				return awaitRequest(workflowQuitAction(args));
+				return awaitRequest(workflowQuitAction(args, owner));
 			case "resume":
 				return awaitRequest(
-					workflowResumeAction(args, { getRuntime, policy, ensureWorkflowResourcesLoaded, signal, onRunAccepted }),
+					workflowResumeAction(args, {
+						getRuntime,
+						policy,
+						ensureWorkflowResourcesLoaded,
+						signal,
+						onRunAccepted,
+						owner,
+					}),
 				);
 			default: {
 				const _exhaustive: never = action;

@@ -1,11 +1,14 @@
 import { type DurabilityWarningSink, getDurableBackend } from "../durable/factory.js";
 import { readWorkflowHeartbeatAnchor, recordWorkflowHeartbeatAnchor } from "../durable/workflow-heartbeat-anchor.js";
-import { cancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { currentToolControlRegistry } from "../engine/run-tool-control-registry.js";
+import { currentCancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { currentJobTracker } from "../runs/background/job-tracker.js";
+import { currentStageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import type { StageAdapters } from "../runs/foreground/stage-runner.js";
 import type { SessionManager } from "../shared/persistence-restore.js";
 import { resolveBuiltinDefinitionSource } from "../shared/possible-stages.js";
-import { stageUiBroker } from "../shared/stage-ui-broker.js";
-import { store } from "../shared/store.js";
+import { currentStageUiBroker } from "../shared/stage-ui-broker.js";
+import { currentWorkflowStore } from "../shared/store-factory.js";
 import { readGraphStoreSnapshot } from "../shared/store-observation.js";
 import type { RunSnapshot } from "../shared/store-types.js";
 import type {
@@ -50,6 +53,7 @@ import {
 	workflowHeartbeatConsumedIdentity,
 	workflowHeartbeatContextInvalidation,
 } from "./workflow-heartbeat-scheduler.js";
+import { bindWorkflowHumanInput } from "./workflow-human-input.js";
 import { workflowModelCatalogFromContext } from "./workflow-model-catalog.js";
 import { makeMcpPort, makePersistencePort } from "./workflow-ports.js";
 import { createWorkflowReloadCoordinator } from "./workflow-reload-coordinator.js";
@@ -130,8 +134,30 @@ export interface WorkflowExtensionRuntimeState {
 export function createWorkflowExtensionRuntimeState(
 	pi: ExtensionAPI,
 	adapters: StageAdapters,
-	resolveCwd: () => string = () => pi.sessionManager?.getCwd?.() ?? process.cwd(),
+	resolveHostCwd?: () => string,
 ): WorkflowExtensionRuntimeState {
+	const store = currentWorkflowStore();
+	const stageUiBroker = currentStageUiBroker();
+	const cancellationRegistry = currentCancellationRegistry();
+	const scopedRunOptions = {
+		store,
+		jobs: currentJobTracker(),
+		stageControlRegistry: currentStageControlRegistry(),
+		toolControlRegistry: currentToolControlRegistry(),
+	};
+	// #3105: discovery follows the SDK session, never the process working directory.
+	let contextCwd: string | undefined;
+	const resolveCwd = (): string => resolveHostCwd?.() ?? contextCwd ?? pi.sessionManager?.getCwd?.() ?? process.cwd();
+	let detachHumanInput: (() => void) | undefined;
+	pi.on?.("session_start", (_event, ctx) => {
+		contextCwd = ctx?.cwd ?? ctx?.sessionManager?.getCwd?.();
+		detachHumanInput?.();
+		detachHumanInput = ctx === undefined ? undefined : bindWorkflowHumanInput(store, ctx, stageUiBroker);
+	});
+	pi.on?.("session_shutdown", () => {
+		detachHumanInput?.();
+		detachHumanInput = undefined;
+	});
 	const persistenceRef = { current: makePersistencePort(pi, WORKFLOW_CONFIG_DEFAULTS.persistRuns) };
 	const mcpPort = makeMcpPort(pi);
 	const runtimeConfigRef: { current: WorkflowRuntimeConfig } = {
@@ -146,6 +172,13 @@ export function createWorkflowExtensionRuntimeState(
 		},
 	};
 	let statusWriterRef: StatusWriter = createStatusWriter(store, runtimeConfigRef.current);
+	pi.on?.("session_shutdown", async () => {
+		try {
+			await statusWriterRef.flush();
+		} finally {
+			statusWriterRef.unsubscribe();
+		}
+	});
 	let lifecycleNotificationsUnsubscribe: (() => void) | null = null;
 	let hilAnswerNotificationsUnsubscribe: (() => void) | null = null;
 	let workflowHeartbeatScheduler: WorkflowHeartbeatScheduler | null = null;
@@ -294,6 +327,7 @@ export function createWorkflowExtensionRuntimeState(
 			cwd: resolveCwd(),
 			adapters,
 			cancellation: cancellationRegistry,
+			...scopedRunOptions,
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
@@ -362,6 +396,7 @@ export function createWorkflowExtensionRuntimeState(
 			cwd: resolveCwd(),
 			adapters,
 			cancellation: cancellationRegistry,
+			...scopedRunOptions,
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
@@ -405,6 +440,7 @@ export function createWorkflowExtensionRuntimeState(
 			cwd: resolveCwd(),
 			adapters,
 			cancellation: cancellationRegistry,
+			...scopedRunOptions,
 			persistence: persistenceRef.current,
 			mcp: mcpPort,
 			config: runtimeConfigRef.current,
@@ -427,7 +463,7 @@ export function createWorkflowExtensionRuntimeState(
 
 	async function ensureWorkflowConfigLoaded(): Promise<void> {
 		const generation = workflowDiscoveryGeneration;
-		const configResult = await loadWorkflowConfig();
+		const configResult = await loadWorkflowConfig({ projectRoot: resolveCwd() });
 		if (!isWorkflowDiscoveryCurrent(generation)) return;
 		applyWorkflowConfig(configResult);
 		rebuildRuntime();
@@ -486,7 +522,7 @@ export function createWorkflowExtensionRuntimeState(
 		if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 			return supersededReloadReport(coalescedRequests);
 		}
-		const configResult = await loadWorkflowConfig();
+		const configResult = await loadWorkflowConfig({ projectRoot: resolveCwd() });
 		if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 			return supersededReloadReport(coalescedRequests, configResult);
 		}
@@ -496,14 +532,14 @@ export function createWorkflowExtensionRuntimeState(
 			const discoveryConfig =
 				hasGlobal || hasProject
 					? toScopedDiscoveryConfig(configResult.globalConfig ?? null, configResult.projectConfig ?? null, {
-							projectRoot: process.cwd(),
+							projectRoot: resolveCwd(),
 						})
 					: undefined;
 			const packageWorkflowPaths = await loadPackageWorkflowPaths();
 			if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 				return supersededReloadReport(coalescedRequests, configResult);
 			}
-			const result = await discoverWorkflows({ config: discoveryConfig, packageWorkflowPaths });
+			const result = await discoverWorkflows({ cwd: resolveCwd(), config: discoveryConfig, packageWorkflowPaths });
 			if (!isWorkflowDiscoveryCurrent(discoveryGeneration)) {
 				return supersededReloadReport(coalescedRequests, configResult, result);
 			}

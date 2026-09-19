@@ -27,6 +27,8 @@ import {
 } from "../../packages/workflows/src/durable/factory.js";
 import { registerWorkflowLifecycleHandlers } from "../../packages/workflows/src/extension/extension-lifecycle.js";
 import type { WorkflowExtensionRuntimeState } from "../../packages/workflows/src/extension/extension-runtime-state.js";
+import { createWorkflowHilAnswerNotificationState } from "../../packages/workflows/src/extension/hil-answer-notifications.js";
+import { createWorkflowLifecycleNotificationState } from "../../packages/workflows/src/extension/lifecycle-notifications.js";
 import type { ExtensionAPI } from "../../packages/workflows/src/extension/public-types.js";
 import { createCancellationRegistry } from "../../packages/workflows/src/runs/background/cancellation-registry.js";
 import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
@@ -92,9 +94,10 @@ function launchEnforcingHarness() {
 type SessionEventHandler = (event: unknown, ctx?: unknown) => Promise<unknown>;
 
 /** Register the real lifecycle handlers and capture `session_shutdown`. */
-function captureSessionShutdownHandler(): SessionEventHandler {
+async function captureSessionShutdownHandler(lifecycleScope: object = {}): Promise<SessionEventHandler> {
 	const handlers = new Map<string, SessionEventHandler>();
 	const pi = {
+		lifecycleScope,
 		on: (type: string, handler: SessionEventHandler) => {
 			handlers.set(type, handler);
 		},
@@ -102,12 +105,20 @@ function captureSessionShutdownHandler(): SessionEventHandler {
 	const runtimeState = {
 		resetWorkflowDiscoveryForSession: () => {},
 		setNotificationsActive: () => {},
+		persistenceRef: { current: undefined },
+		lifecycleNotificationState: createWorkflowLifecycleNotificationState(),
+		hilAnswerNotificationState: createWorkflowHilAnswerNotificationState(),
+		ensureWorkflowConfigLoaded: async () => {},
+		startWorkflowDiscoveryWarmup: () => {},
+		updateHostStageSessionDir: () => {},
 	} as unknown as WorkflowExtensionRuntimeState;
 	registerWorkflowLifecycleHandlers(pi, {
 		runtimeState,
 		storeWidgetRef: { current: null },
 		intercomControlRef: { current: null },
 	});
+	// #3105: discovery no longer acquires an owned durability lease.
+	await handlers.get("session_start")!({ reason: "reload" });
 	const handler = handlers.get("session_shutdown");
 	assert.ok(handler !== undefined, "session_shutdown handler must be registered");
 	return handler;
@@ -134,7 +145,7 @@ describe("issue #1957 — DBOS survives host-session replacement", () => {
 			const { events, durability, isLaunched } = launchEnforcingHarness();
 			setDurableBackend(undefined);
 			resetDbosLifecycleForTests(async () => durability);
-			const sessionShutdown = captureSessionShutdownHandler();
+			const sessionShutdown = await captureSessionShutdownHandler();
 
 			const backend = await initializeDurableBackend();
 			registerDurableRoot(backend, `before-${reason}`);
@@ -158,11 +169,28 @@ describe("issue #1957 — DBOS survives host-session replacement", () => {
 		});
 	}
 
+	// #3105: a retained predecessor and its successor have one owner, not a sibling's lease.
+	test.sequential("closing a sibling preserves the retained owner until its successor quits", async () => {
+		const { events, durability } = launchEnforcingHarness();
+		setDurableBackend(undefined);
+		resetDbosLifecycleForTests(async () => durability);
+		const scope = {};
+		const predecessor = await captureSessionShutdownHandler(scope);
+		const sibling = await captureSessionShutdownHandler();
+		await initializeDurableBackend();
+		await predecessor({ reason: "new" });
+		const successor = await captureSessionShutdownHandler(scope);
+		await sibling({ reason: "quit" });
+		assert.equal(dbosLifecycleState(), "ready");
+		await successor({ reason: "quit" });
+		assert.equal(events.filter((event) => event === "shutdown").length, 1);
+	});
+
 	test.sequential("session_shutdown(quit) flushes and shuts DBOS down exactly once", async () => {
 		const { events, durability, isLaunched } = launchEnforcingHarness();
 		setDurableBackend(undefined);
 		resetDbosLifecycleForTests(async () => durability);
-		const sessionShutdown = captureSessionShutdownHandler();
+		const sessionShutdown = await captureSessionShutdownHandler();
 
 		const backend = await initializeDurableBackend();
 		registerDurableRoot(backend, "quit-run");

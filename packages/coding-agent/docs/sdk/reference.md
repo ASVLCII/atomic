@@ -179,20 +179,24 @@ Specify which tools to expose by name:
 
 - Built-in tool names enabled by default: `read`, `bash`, `kill`, `edit`, `write`, `find`, `search`, `ask_user_question`, `todo`
 - `find` discovers filesystem paths by glob; `search` searches file contents with regex patterns across files, directories, globs, and internal URLs.
-- `tools` is an allowlist: when provided, only the listed built-in, extension, and custom tool names are exposed, plus mandatory ordinary `intercom`.
-- `excludedTools` is a blocklist: matching built-in, extension, and custom tool names are omitted from the final registry and active tool set, except mandatory ordinary `intercom`. If both are provided, `tools` is applied first and `excludedTools` subtracts from it.
-- `noTools: "all"` disables every tool except mandatory ordinary `intercom`
-- `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled, except names listed in `excludedTools`
+- `builtins` selects shipped packages independently of tools: keys are `workflows`, `subagents`, `mcp`, `web-access`, and `intercom`. Omitted, `{}`, and omitted keys enable packages. A `false` value removes that package's extensions and resources, including on reload; `true` enables it.
+- `tools` is an allowlist of coding, extension, and custom tool names. `tools: []` exposes none, including Intercom.
+- `excludedTools` removes matching names from the registry and active selection. Exclusions win over `tools`; unknown names are ignored.
+- `noTools: "all"` exposes no tools, even with a nonempty `tools` allowlist. It does not remove package resources or authorize services.
+- `noTools: "builtin"` suppresses coding-tool defaults when `tools` is omitted, keeping extension/custom tools except exclusions. An explicit `tools` list still wins over this mode.
+- Configured `defaultTools` selects only initial coding tools when `tools` and `noTools` are omitted. It does not disable extension/custom tools.
+
+Workflow and subagent children inherit these restrictions. Child allowlists intersect with the parent selection, including during model fallback. A child cannot restore a parent-disabled package or excluded tool. See [child configuration](/sdk#workflow-and-subagent-children) for model/auth, host callback and working-directory inheritance.
 
 ```typescript
 import { createAgentSession } from "@bastani/atomic";
 
-// Read-only mode. `tools` selects optional tools; ordinary Intercom remains active.
+// Read-only tools; Intercom is not selected.
 const { session } = await createAgentSession({
   tools: ["read", "search", "find", "ls"],
 });
 
-// Pick specific optional tools. Ordinary Intercom remains active even when omitted.
+// Pick specific tools.
 const { session } = await createAgentSession({
   tools: ["read", "bash", "search"],
 });
@@ -205,7 +209,7 @@ const { session } = await createAgentSession({
 // Allowlist first, then subtract exclusions
 const { session } = await createAgentSession({
   tools: ["read", "bash", "ask_user_question"],
-  excludedTools: ["ask_user_question"], // optional tools: read, bash; ordinary Intercom remains active
+  excludedTools: ["ask_user_question"], // active tools: read, bash
 });
 ```
 
@@ -382,9 +386,21 @@ await loader.reload();
 const { session } = await createAgentSession({ resourceLoader: loader });
 ```
 
-`createAgentSession()` preserves resources from a supplied loader but restores Atomic's mandatory bundled Intercom extension after loader overrides, deferred reloads, and same-name extension or `customTools` collisions. The supplied loader still controls every optional extension.
+`createAgentSession()` preserves the resources from a supplied loader and adds Atomic's shipped builtin extensions and resources. Repeated references to a shipped builtin load it once. Your loader's arrays and discovery options are not rewritten. Existing tool selection and collision rules still apply.
+
+Pass `extensionBindings` to `createAgentSession()` to install `uiContext`, `mode`, `commandContextActions`, `shutdownHandler` or `onError` before startup hooks run. Creation awaits startup and resource discovery. A failed startup shuts down the partially created session before rejecting. Rebinding updates the host without replaying `session_start`; reload emits one start for its new generation. Remove manual post-creation startup calls from integrations that only used them to initialize extensions.
 
 Strict reloads (`failOnExtensionErrors: true`) require the loader's transactional `prepareReload()` support so a failed candidate cannot mutate live state before validation. `DefaultResourceLoader` provides that support. Custom loaders without it remain compatible with ordinary reloads, but strict reload fails before calling their mutating `reload()` method.
+
+Use `await session.dispose()` rather than fire-and-forget cleanup. It seals admission immediately and waits for owned work, extension shutdown, persistence and lease release. Concurrent disposal calls return the same promise. Catch `ShutdownFailed` to inspect its component `errors`; a rejected close is not successful cleanup, and the session stays closed. Do not add a manual MCP, Intercom or workflow teardown sequence. Caller-supplied settings, storage and model runtimes remain caller-owned.
+
+`AgentSessionRuntime` uses the same awaited close when replacing sessions and transfers configured host bindings before the replacement starts. Reload invalidates old input requests and extension subscriptions while retaining host configuration. Live durable workflows retain their existing runtime ownership across reload and session replacement; final owner disposal waits for their shutdown. A late answer from an old generation cannot authorize replacement work.
+
+Concurrent replacement factories remain supported. Publication and rebinding retire any displaced successor; failed candidates unwind without terminating a live successor's retained workflows. Factory rollback includes pre-constructor resource/context setup, preserves cleanup causes and leaves borrowed discovery untouched.
+
+Session-attributed settings persistence faults are reported by disposal without draining `SettingsManager.drainErrors()` or blaming an idle borrower. `flush()` retains its normal resolving/error-channel behavior. Repair storage and repeat the write before close to recover. Duplicate `executeBash()` correlation IDs in `options.id` are preserved; `abortBash(id)` cancels all active calls with that exact ID, while disposal cancels all owned calls.
+
+Terminal runtime disposal also drains admitted replacement preflight, factory and startup work; it never publishes a late successor. Session disposal drains admitted compaction work and prevents retired hooks/providers from writing new compaction results. Noncooperative callbacks must settle before disposal can finish. Independent sessions can borrow one `DefaultResourceLoader` and event bus: ownership belongs to each session, not the borrowed discovery object.
 
 Extensions can register tools, subscribe to events, add commands, and more. See [Extensions](/extensions) for the full API.
 

@@ -44,7 +44,11 @@ session.subscribe((event) => {
   }
 });
 
-await session.prompt("What files are in the current directory?");
+try {
+  await session.prompt("What files are in the current directory?");
+} finally {
+  await session.dispose();
+}
 ```
 
 `ModelRuntime` is the canonical asynchronous provider runtime when an integration wants provider-owned credentials, dynamic catalogs, and native providers in one object:
@@ -91,6 +95,29 @@ Atomic does not require package install scripts. If you want to disable dependen
 
 The SDK is included in the main package. No separate SDK package is needed.
 
+### Migrating an existing Node host
+
+Use the installed package's ESM exports, not checkout paths or extension-loader aliases:
+
+```typescript
+import { createAgentSession, type HostInput } from "@bastani/atomic";
+import { workflow } from "@bastani/atomic/workflows";
+import openClaudeDesign from "@bastani/atomic/workflows/builtin/open-claude-design";
+```
+
+For TypeScript Node applications, use `"type": "module"` in `package.json` and `module: "NodeNext"`, `moduleResolution: "NodeNext"`, and `strict: true` in `tsconfig.json`. Declaration checking works with `skipLibCheck: false`; disabling it is not required. No separate workflows install, ambient module declarations, source aliases, CLI process, or terminal is needed.
+
+When upgrading an existing host:
+
+- Remove manual registration of Atomic's shipped builtin extensions. They and their resources are included by default. Use `builtins` to disable packages; use `tools`/`excludedTools` to control tool access. An empty tool allowlist also excludes Intercom.
+- Supply all five `HostInput` methods (`confirm`, `select`, `input`, `editor`, `questionnaire`) through `extensionBindings.humanInput`. Preserve question text and option values, honor each request's abort signal, and return literal `true` only for explicit approval. No adapter is not consent: ordinary dialogs reject with `HumanInputUnavailable`, while required durable workflow gates remain pending. Do not translate cancellation into approval.
+- Treat a headless workflow launch as acceptance, not completion. Inspect its run ID/status. After reconnecting, resume that existing run and bind the new adapter with `session.bindExtensions({ humanInput })`; do not start a second run to answer an outstanding question. Durable resume requires working workflow persistence; use `workflowDependency("doctor")` from `@bastani/atomic/workflows` to troubleshoot it.
+- Always `await session.dispose()` in `finally`, including on failure. Disposal is asynchronous and can reject with `ShutdownFailed` after attempting all cleanup; do not hide that rejection or call `process.exit()` to force a successful shutdown. Each session owns its own work, even when services are shared.
+
+MCP servers and web providers still require their normal configuration and credentials. Importing the SDK does not connect them or take over standard input. Route host diagnostics through `extensionBindings.onDiagnostic`; a missing provider or extractor is an error, not an empty successful result.
+
+If creation reports `BuiltinUnavailable`, reinstall the complete package and its dependencies rather than copying only `dist/index.js` into your application.
+
 ## Pi client
 
 `@bastani/atomic/client` re-exports `@earendil-works/pi-client`. Pi 0.85 replaced the experimental `RemoteSession` lease API with its service-addressed Chord client; use the upstream client and agent service APIs for remote sessions.
@@ -109,7 +136,11 @@ For the current supported integration, start with [createAgentSession()](#create
 
 The main factory function for a single `AgentSession`.
 
-`createAgentSession()` uses a `ResourceLoader` to supply extensions, skills, prompt templates, themes, and context files. If you do not provide one, it uses `DefaultResourceLoader` with normal user, project, and configured-package discovery. The SDK does not add optional bundled workflow, subagent, MCP, or web-access extensions by default. It always adds the lightweight ordinary Intercom extension at the model-session boundary.
+`createAgentSession()` includes Atomic's shipped workflows, subagents, MCP, web access and Intercom, plus their bundled resources. It uses normal user, project and configured-package discovery when no `resourceLoader` is supplied. A custom loader supplies your resources; the factory adds shipped builtins without changing the loader's options. Services still need their existing configuration and credentials.
+
+Use `builtins: { "web-access": false, intercom: false }` to disable specific shipped packages and their resources. Omitted keys remain enabled, including with `builtins: {}`. Tool selection is separate: `tools: []` and `noTools: "all"` expose no tools, including Intercom; `noTools: "all"` also overrides a nonempty allowlist. `excludedTools` wins over selection. Suppression survives reload. See [tool precedence](/sdk/reference#tools) for `defaultTools` and `noTools: "builtin"`.
+
+Creation finishes extension startup before returning. Pass `extensionBindings` when startup hooks need your host bindings. Later `session.bindExtensions(...)` updates those bindings without replaying `session_start`; reload starts a new extension generation. Missing shipped assets reject with an error whose `code` is `BuiltinUnavailable` and whose message names the package. Reinstall the package rather than continuing with a partially available session.
 
 ```typescript
 import { createAgentSession, SessionManager } from "@bastani/atomic";
@@ -126,6 +157,67 @@ const { session } = await createAgentSession({
   sessionManager: SessionManager.inMemory(),
 });
 ```
+
+### Human input without a terminal
+
+Pass `extensionBindings.humanInput` to answer extension dialogs and `ask_user_question` in a Node host. `HostInput` requires all five methods: `confirm`, `select`, `input`, `editor` and `questionnaire`. `QuestionParams` and `QuestionnaireResult` are exported from `@bastani/atomic`; questionnaire answers retain their question indices, answer kinds, selections, previews and notes.
+
+Each callback receives a `HostInputOptions` argument with a runtime-generated `requestId`, the originating `sessionId`, and an `AbortSignal`. Stop presenting the question when the signal aborts. Return an actual boolean from `confirm`, a supplied choice or `undefined` from `select`, and a string or `undefined` from text dialogs. Empty strings, whitespace and choice order are preserved. Malformed replies reject with `InvalidHostInput`; false, cancellation and rejected callbacks never approve an action.
+
+```typescript
+import { createAgentSession, type HostInput } from "@bastani/atomic";
+
+async function attachApplication(humanInput: HostInput) {
+  const { session } = await createAgentSession({
+    extensionBindings: {
+      humanInput,
+      onDiagnostic: ({ level, source, message, sessionId }) => {
+        console.log({ level, source, message, sessionId });
+      },
+    },
+  });
+
+  // Cancel current work and any outstanding ordinary questions.
+  await session.abort();
+  // Withdraw input while keeping the session available for noninteractive work.
+  await session.bindExtensions({ humanInput: null });
+  // Reattach the application's callbacks when it is ready to answer again.
+  await session.bindExtensions({ humanInput });
+  return session;
+}
+```
+
+At creation, omitted `humanInput` means no input unless `uiContext` supplies a dialog bridge. Explicit callbacks take precedence over that bridge. On later binding, omission preserves the adapter; `null` withdraws it and cancels pending ordinary questions. Rebinding does not repeat startup hooks. Abort, reload and disposal invalidate pending replies, including late successful replies from callbacks that ignore cancellation.
+
+Extension authors should check `ctx.hasHumanInput` for questions and `ctx.hasUI` for rendering. Existing `ctx.ui.confirm/select/input/editor` calls use the host adapter. Dialog timeouts cancel requests. Without an adapter, ordinary dialogs reject with `HumanInputUnavailable`; `ask_user_question` retains its compatible `{ answers: [], cancelled: true, error: "no_ui" }` details. `ui.custom` still needs a presentation host and is not part of `HostInput`.
+
+Workflow input uses these same callbacks, including stage questionnaires and nested workflows. Requests include `workflowRunId` and `workflowStageId`; use them with `requestId` to associate your application's question with the correct run. Keep the workflow definition unchanged when switching hosts: author semantic `ctx.ui` calls, not terminal-specific branches.
+
+A durable workflow approval stays pending when input is unavailable, cancelled or invalid. Withdrawing the adapter does not approve it or discard the run. Bind a new adapter to present a live pending request again; it receives a fresh request ID, and late answers to the withdrawn request cannot authorize work. To continue a saved run in another session, keep its definition and durable storage available, bind the new host, and use the existing `/workflow resume <run-id>` command or workflow tool's `resume` action. Rebinding alone does not reopen a saved run. See [workflow operations](/workflows/operations) for inspection, graceful quit and resume.
+
+This also applies when no adapter was bound at creation: normal workflow launch preserves the required gate and returns its run identity. Inspect workflow status, then bind an authorized host or submit a validated answer. Headless CLI launches use the same execution defaults; they skip input pickers and do not wait for terminal completion. Explicit runtime execution restrictions remain enforced.
+
+Only an actual `true` confirms a primitive approval. Questionnaire readiness keeps its existing choices: staying on the stage does not advance it. Missing input never bypasses an approval or exhausted budget; obtain approval before explicitly resuming with a raised budget.
+
+`onDiagnostic` receives session-attributed operational diagnostics. Existing errors and tool results remain available without a callback. Third-party extensions can still write directly to the console; the callback does not intercept their output.
+
+Rebinding host callbacks preserves pending MCP OAuth ownership. Authorization state and PKCE verifiers remain in memory for that SDK session; restart authorization after disposing it. Durable MCP tokens and client registration information still use the existing server-name credential files, so separate sessions are not separate credential stores. Web provider configuration caches are session-local, but configuration discovery and environment keys are unchanged; create a new session to pick up changed cached provider settings. GitHub extraction returns the owned clone path to use with file tools rather than requiring callers to predict its directory.
+
+### Workflow and subagent children
+
+Children use the invoking session's model/auth runtime, settings, agent directory, human-input callbacks and diagnostic sink. A child model or fallback choice does not switch to global credentials. Explicit child `cwd` wins, then a supplied child `sessionManager.getCwd()`, then the invoking session's directory. Relative child working directories resolve from the invoking session, without changing the process working directory.
+
+Omitted or `undefined` child options retain inherited configuration, including individual builtin flags and host bindings. Use `humanInput: null` to withdraw input explicitly; empty arrays and other explicit values keep their normal meanings, subject to the parent's capability ceiling.
+
+Child tool selections can narrow the parent's selection, not expand it. Disabled builtin packages, excluded tools, empty allowlists and `noTools: "all"` remain suppressed in children and fallback attempts. Enable a needed capability on the parent before launching a child. Workflow stages and subagents still exclude recursive workflow tooling; subagents retain the single-level delegation limit.
+
+Callbacks may be shared, but request and diagnostic `sessionId` values identify the originating child. Workflow questions also carry their run/stage identity. Group overrides retain the normal Intercom authorization rules. Disabling or excluding Intercom does not create a substitute supervisor grant. Reopening conversation history does not restore child authority.
+
+An explicit child `extensionBindings.humanInput` overrides the inherited host, including for durable stage questionnaires. Setting it to `null` leaves those questions pending; rebinding the parent cannot answer on that child's behalf. Rebind the child to an authorized adapter to continue. Without a child override, pending stage questions follow parent host withdrawal and reattachment.
+
+You may reuse the same adapter object when explicitly rebinding a child, even after the parent switches hosts. That child selection survives reload. An empty binding object does not select a new host or restore inheritance.
+
+The inherited `isFallbackModelAllowed` predicate also applies when a workflow replaces its stage session to try a fallback. A rejected candidate is not executed. This predicate restricts fallback choices, not an explicitly selected primary model.
 
 ### AgentSession
 
@@ -176,9 +268,57 @@ interface AgentSession {
   abort(): Promise<void>;
 
   // Cleanup
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 ```
+
+Always `await session.dispose()` in `finally`. Disposal immediately refuses new work, cancels and drains owned operations, settles questions, shuts down extensions and releases session leases. Repeated calls await the same outcome. A `ShutdownFailed` error contains component failures in `errors`; cleanup still attempts the remaining components. Caller-supplied managers and model runtimes remain borrowed, and other sessions remain usable. `abort()` cancels current work without destroying the session.
+
+Captured extension APIs also refuse new execution, mutations and registrations as soon as close or reload begins. Already-admitted `pi.exec()` calls remain part of the awaited drain; provide `signal` or `timeout` when invoking subprocesses that might not finish on their own. `abort()` alone does not retire the API. A rejected transactional reload restores the surviving generation's action admission.
+
+Already-admitted `pi.refreshWorkflowResources()` calls also settle before shutdown, reload retirement or factory rollback cleanup. Await refresh to handle provider failures, register cleanup before starting resource acquisition, and let a suspended custom refresh finish independently of disposal. New refresh calls are refused once that owner starts closing.
+
+Disposal also waits for already-admitted initial extension binding, prompt/steering/follow-up/compaction hooks, compaction providers and reload preparation. This includes `new AgentSession(...)` followed by `bindExtensions()`. Ensure your extension and `beforeSessionStart` callbacks settle; a pending callback is not completed cleanup. A callback released after shutdown begins cannot append to a retired queue, start a provider turn, append compaction results or publish a reload candidate. Independent sessions may borrow the same resource loader (including subclasses and forwarding loaders), settings or `eventBus` without sharing workflow ownership. Custom resource policies and raw prompt text remain delegated to the supplied loader.
+
+Asynchronous extension notifications, event-bus handlers, shortcuts and workflow activity observers also finish before their shutdown hooks run. This includes notifications from synchronous methods such as `setThinkingLevel()` and `setSessionName()`; their return types are unchanged. Release suspended callbacks independently rather than waiting for disposal to finish first.
+
+Shutdown and rollback also wait for tracked `pi.exec()` calls launched by cleanup handlers, even if the handler returns first. Prefer awaiting those calls in the handler so you can inspect their results, and give them a timeout or cancellation signal. Do not make a cleanup subprocess wait for disposal itself to finish. Fresh calls through captured APIs remain refused while cleanup drains, including failed or omitted factories.
+
+Call the unsubscribe returned by `pi.events.on()` or a workflow publisher's `dispose()` as soon as you no longer need that handle. Release is idempotent and removes the callback's retained data; you do not need to wait for session disposal. Automatic generation cleanup releases remaining handles and reports release failures.
+
+Closing still delivers queued completion events and persists completed conversation messages in order. Background session-summary requests, including superseded requests that ignored cancellation, must settle before disposal finishes; cancelled summaries cannot write stale results. Failed reload preparation rolls back resources acquired by candidate factories even when discovery rejects before a candidate runner exists. The original generation remains usable after a rejected transaction; cleanup failures remain visible through `ShutdownFailed`.
+
+Already-running tools also retain their completed results, details and `tool_result` hooks during close. Ordinary nontransactional reloads unwind their newly acquired resources on discovery failure while leaving caller-owned discovery resources alone; unlike a rejected transaction, an ordinary reload does not restore the retired generation.
+
+Custom-loader failures do not prevent acquisition rollback when `getExtensions()` itself is unavailable. Keep cleanup independent of rereading discovery results: capture the resources you own when acquiring them. Creation and reload preserve the original failure and report additional cleanup failures rather than replacing it with another getter error.
+
+Reload refuses new questions through retiring dialog functions as soon as it begins. If transactional reload fails, the surviving session can request input again through its current `ctx.ui`, but previously captured dialog functions remain closed. Do not cache dialog functions across reload attempts.
+
+Sharing a `SessionManager` shares persisted conversation identity, not live shell/task ownership: closing one session does not close the other's commands. Custom `extensionsOverride` registrations may be copied and edited without retaining private metadata; callbacks bind to the invoking session, and caller registration edits remain effective. Prefer acquiring resources in `session_start`. If a factory acquires resources earlier, register `session_shutdown` cleanup immediately; failed creation attempts that cleanup even when a later factory fails, without releasing borrowed discovery resources.
+
+Filtering a factory out with `extensionsOverride` does not undo acquisitions it already made. SDK-owned omitted factories receive shutdown cleanup before creation returns, even when the selection is empty; their captured APIs are retired and their subscriptions released independently of selected extensions. The same rule applies during reload, without removing selected extensions' subscriptions. Register cleanup at acquisition time, and handle creation or reload rejection if that cleanup fails.
+
+Failed or omitted factories finish their already-admitted event callbacks before shutdown, including resources acquired after an asynchronous wait. Register cleanup before starting such callbacks, and let them settle independently of creation or reload completion. Once rollback starts, every factory being closed refuses fresh API work, even while another factory's cleanup is suspended. Selected extensions remain usable and their pending callbacks do not block omitted-factory cleanup.
+
+`await runtime.dispose()` also seals replacement admission and drains any pending new-session, resume, fork or import operation, including its factory/startup and candidate cleanup. A successor cannot be published after runtime closure. Release suspended host callbacks independently of disposal rather than waiting for disposal before releasing them.
+
+An extension command may await `ctx.newSession()`, `ctx.fork()` or `ctx.switchSession()` through your runtime-backed host actions. Replacement seals the old session and drains unrelated work before handing control to the successor. The invoking command may then finish, but the old session's shutdown hooks wait for that continuation. Both `await oldSession.dispose()` and `await runtime.dispose()` still await its full cleanup; do not wait for either inside the continuation that they must drain. Deferred cleanup failures remain visible through disposal.
+
+Concurrent command replacements also register their handoff before waiting for publication. They do not block one another's retirement, but final disposal still waits for every command continuation and reports deferred cleanup failures. Reload candidate cleanup covers settings commit, resource activation and resource commit failures as well as preparation/startup failures.
+
+After a reload commits, runtime reconstruction can still fail in a custom loader. The retiring generation's shutdown and invalidation are attempted even then, and the installed candidate remains owned by the session for final disposal. If cleanup also fails, `ShutdownFailed` retains the reconstruction and cleanup causes rather than replacing the original error.
+
+Reload also owns preparation factories that are later re-instantiated, releasing unused discovery acquisitions without closing borrowed resources. Failed candidate startup seals and drains that candidate's callbacks before shutdown. If an extension command awaits `session.reload()`, its old generation stays owned until the command continuation finishes; `await session.dispose()` joins that deferred cleanup and reports failures. Do not await disposal from the continuation it must drain.
+
+Retained cleanup is not retained authority: after self-reload or command-initiated replacement hands off, neither the invoking command nor another holder may use captured old `pi` or `ctx` actions to mutate the successor or obtain a task host. Use capabilities delivered to the new generation. Old shutdown handlers may inspect their cleanup context and release captured resources, subscriptions and publishers, but may not acquire successor resources. Events emitted by retired shutdown handlers are not delivered into the successor.
+
+For replacement initiated outside the retiring session's work, outgoing extension shutdown completes before successor creation. If it fails, no successor is created and retained workflow cleanup is still attempted. The operation rejects with its original failure and any additional cleanup causes; repeated runtime disposal retains the failed outcome.
+
+Overlapping replacement factories may finish out of order. Runtime retirement, publication and host rebinding are coordinated; displaced successors are closed, and a failed candidate cannot shut down a surviving successor's workflows. If every replacement fails, retained workflow cleanup still runs. Creation also rolls back owned extension acquisitions when context transforms or resource setup fail before the session constructor completes; borrowed discovery is not shut down.
+
+Settings writes made through session APIs (for example, `setThinkingLevel(level, { persist: true })`) are attributed to that session. Unrecovered write failures make disposal reject with `ShutdownFailed`, even though the normal `SettingsManager.flush()` resolves and exposes errors through `drainErrors()`. Disposal does not consume that caller-owned error channel or attribute another borrower's writes to an idle sibling. Correct the storage fault and persist again before closing to recover.
+
+Caller-supplied `executeBash()` IDs remain correlation IDs, not unique operation IDs. `abortBash(id)` cancels every active call with that exact ID; disposal cancels every owned call, including duplicates.
 
 `compact()` serializes older context to numbered lines, asks the session model for JSON deleted ranges, validates them, and mechanically reconstructs a durable verbatim transcript string. It appends a `compaction` entry with `details.strategy: "verbatim-lines"`; the recent tail remains ordinary messages. The model never authors replacement context text.
 

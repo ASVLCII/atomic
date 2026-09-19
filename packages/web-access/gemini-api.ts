@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { findReadableConfigPath } from "./config-paths.ts";
+import { createOwnerState } from "./owner-state.js";
 
 export const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const CONFIG_PATH = findReadableConfigPath();
@@ -9,24 +10,17 @@ interface GeminiApiConfig {
 	geminiApiKey?: unknown;
 }
 
-let cachedConfig: GeminiApiConfig | null = null;
-
-function loadConfig(): GeminiApiConfig {
-	if (cachedConfig) return cachedConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedConfig = {};
-		return cachedConfig;
-	}
+const loadConfig = createOwnerState<GeminiApiConfig>(() => {
+	if (!existsSync(CONFIG_PATH)) return {};
 
 	const raw = readFileSync(CONFIG_PATH, "utf-8");
 	try {
-		cachedConfig = JSON.parse(raw) as GeminiApiConfig;
-		return cachedConfig;
+		return JSON.parse(raw) as GeminiApiConfig;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		throw new Error(`Failed to parse ${CONFIG_PATH}: ${message}`);
 	}
-}
+});
 
 function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
 	const timeout = AbortSignal.timeout(timeoutMs);

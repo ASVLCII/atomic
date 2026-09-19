@@ -26,11 +26,14 @@ import type {
 } from "./types.ts";
 export interface ExtensionContextSource {
 	observeWorkflowActivity: ExtensionContext["observeWorkflowActivity"];
+	getChildSessionOptions?: ExtensionContext["getChildSessionOptions"];
 	getExtensionPaths?(): string[];
 	assertActive(): void;
+	assertAction?(): void;
 	getUIContext(): ExtensionUIContext;
 	getMode(): ExtensionMode;
 	hasUI(): boolean;
+	hasHumanInput?(): boolean;
 	getCwd(): string;
 	getSessionManager(): SessionManager;
 	getModelRegistry(): ModelRegistry;
@@ -146,6 +149,11 @@ export async function publishExtensionContextEffect(context: ExtensionContext, e
  */
 export function createExtensionContext(source: ExtensionContextSource, owner: object = source): ExtensionContext {
 	const context: ExtensionContext = {
+		getChildSessionOptions: (options) => {
+			source.assertActive();
+			source.assertAction?.();
+			return source.getChildSessionOptions?.(options) ?? options;
+		},
 		getExtensionPaths: () => {
 			source.assertActive();
 			return source.getExtensionPaths?.() ?? [];
@@ -154,6 +162,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 			? {
 					getAgentTaskHost: () => {
 						source.assertActive();
+						source.assertAction?.();
 						return source.getAgentTaskHost!();
 					},
 				}
@@ -168,7 +177,12 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		observeWorkflowActivity: (observer) => {
 			source.assertActive();
+			source.assertAction?.();
 			return source.observeWorkflowActivity(observer);
+		},
+		get hasHumanInput() {
+			source.assertActive();
+			return source.hasHumanInput?.() ?? source.hasUI();
 		},
 		get hasUI() {
 			source.assertActive();
@@ -228,6 +242,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		abort: () => {
 			source.assertActive();
+			source.assertAction?.();
 			source.abort();
 		},
 		hasPendingMessages: () => {
@@ -236,6 +251,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		shutdown: () => {
 			source.assertActive();
+			source.assertAction?.();
 			source.shutdown();
 		},
 		getContextUsage: () => {
@@ -244,6 +260,7 @@ export function createExtensionContext(source: ExtensionContextSource, owner: ob
 		},
 		compact: (options) => {
 			source.assertActive();
+			source.assertAction?.();
 			source.compact(options);
 		},
 		getRouterModel: () => {
@@ -289,22 +306,27 @@ export function createExtensionCommandContext(
 	};
 	context.newSession = (options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.newSession(options);
 	};
 	context.fork = (entryId, options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.fork(entryId, options);
 	};
 	context.navigateTree = (targetId, options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.navigateTree(targetId, options);
 	};
 	context.switchSession = (sessionPath, options) => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.switchSession(sessionPath, options);
 	};
 	context.reload = () => {
 		source.assertActive();
+		source.assertAction?.();
 		return source.reload();
 	};
 	contextOwners.set(context, owner);

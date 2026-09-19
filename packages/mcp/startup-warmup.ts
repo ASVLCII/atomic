@@ -8,6 +8,8 @@ import { logger } from "./logger.ts";
 import { updateMetadataCache, updateStatusBar } from "./init.js";
 
 export interface McpStartupWarmupOptions {
+	/** Only terminal sessions bootstrap uncached lazy direct tools. */
+	hasUI?: boolean;
 	/** Typed child selection issued during in-process admission. */
 	subagentPolicy?: SubagentChildPolicy;
 	shouldContinue?: () => boolean;
@@ -49,6 +51,7 @@ export function scheduleMcpStartupWarmup(
     if (selection.disabled) return;
 
     const missingCacheServers = getMissingConfiguredDirectToolServers(state.config, loadMetadataCache(), selection.tools)
+      .filter((name) => options.hasUI || ["eager", "keep-alive"].includes(state.config.mcpServers[name]?.lifecycle ?? "lazy"))
       .filter((name) => state.manager.getConnection(name)?.status !== "connected");
     if (missingCacheServers.length === 0) return;
 

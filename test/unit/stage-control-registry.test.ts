@@ -63,6 +63,37 @@ function makeHandle(
 	};
 }
 
+// #3105: host close must await every stage, even after a sibling cleanup fails.
+test("clear awaits all stage disposals and reports partial failures", async () => {
+	const registry = createStageControlRegistry();
+	let finish!: () => void;
+	let finished = false;
+	const pending = new Promise<void>((resolve) => {
+		finish = resolve;
+	});
+	registry.register({
+		...makeHandle("root", "slow"),
+		dispose: async () => {
+			await pending;
+			finished = true;
+		},
+	});
+	registry.register({
+		...makeHandle("root", "failed"),
+		dispose: async () => {
+			throw new Error("stage cleanup failed");
+		},
+	});
+	const closing = registry.clear();
+	assert.ok(closing instanceof Promise);
+	const rejected = assert.rejects(closing, /stage cleanup failed/);
+	assert.equal(finished, false);
+	finish();
+	await rejected;
+	assert.equal(finished, true);
+	assert.equal(registry.has("root"), false);
+});
+
 describe("stageControlRegistry — register/get/forRun/run", () => {
 	test("register makes the handle resolvable by runId + stageId", () => {
 		const r = createStageControlRegistry();
@@ -144,29 +175,16 @@ describe("stageControlRegistry — register/get/forRun/run", () => {
 		assert.equal(r.get("run-1", "stage-a"), undefined);
 	});
 
-	test("clear observes asynchronous dispose failures", async () => {
+	test("clear reports asynchronous dispose failures to its owner", async () => {
 		const r = createStageControlRegistry();
-		const previousWarn = console.warn;
-		let logged = false;
-		console.warn = () => {
-			logged = true;
-		};
-		try {
-			r.register({
-				...makeHandle("run-1", "stage-a"),
-				async dispose() {
-					throw new Error("dispose failed");
-				},
-			});
-
-			assert.doesNotThrow(() => r.clear());
-			await Promise.resolve();
-
-			assert.equal(logged, true);
-			assert.equal(r.get("run-1", "stage-a"), undefined);
-		} finally {
-			console.warn = previousWarn;
-		}
+		r.register({
+			...makeHandle("run-1", "stage-a"),
+			async dispose() {
+				throw new Error("dispose failed");
+			},
+		});
+		await assert.rejects(r.clear(), /dispose failed/);
+		assert.equal(r.get("run-1", "stage-a"), undefined);
 	});
 });
 
@@ -311,6 +329,26 @@ describe("stageControlRegistry — provisional detached leases", () => {
 
 		assert.equal(r.peek("run-1", "a"), undefined);
 		assert.equal(disposes, 1);
+	});
+
+	// #3105: an entry removed by lease release still belongs to the closing registry.
+	test("clear joins disposal already started by a released stage lease", async () => {
+		const r = createStageControlRegistry();
+		const pending = Promise.withResolvers<void>();
+		const lease = r.acquireDetached("root", "stage", () => ({
+			...makeHandle("root", "stage"),
+			dispose: () => pending.promise,
+		}));
+		const release = lease.release();
+		let closed = false;
+		const closing = r.clear().then(() => {
+			closed = true;
+		});
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(closed, false);
+		pending.resolve();
+		await Promise.all([release, closing]);
+		assert.equal(closed, true);
 	});
 
 	test("commit retains a provisionally-created detached handle", async () => {

@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import type { ExtensionAPI } from "@bastani/atomic";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -116,7 +117,7 @@ export async function openCuratorWindow(
 			return;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			console.error(`Failed to open Glimpse curator window: ${message}`);
+			if (!reportOwnedWebDiagnostic()) console.error(`Failed to open Glimpse curator window: ${message}`);
 			setGlimpseWindow(null);
 		}
 	}

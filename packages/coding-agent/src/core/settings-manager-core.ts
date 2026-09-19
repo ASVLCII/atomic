@@ -10,6 +10,7 @@ import type {
 	SettingsScope,
 	SettingsStorage,
 } from "./settings-types.ts";
+import { ownedSettingsManagers, recordSettingsWrite, settingsWriteOwner } from "./settings-write-ownership.ts";
 
 export class SettingsManager {
 	private storage: SettingsStorage;
@@ -366,6 +367,7 @@ export class SettingsManager {
 	}
 
 	private enqueueWrite(scope: SettingsScope, task: () => void): void {
+		const owner = settingsWriteOwner.getStore() ?? ownedSettingsManagers.get(this);
 		this.writeQueue = this.writeQueue
 			.then(() => {
 				if (scope === "project") {
@@ -373,9 +375,11 @@ export class SettingsManager {
 				}
 				task();
 				this.clearModifiedScope(scope);
+				recordSettingsWrite(owner, scope);
 			})
 			.catch((error) => {
 				this.recordError(scope, error);
+				recordSettingsWrite(owner, scope, error);
 			});
 	}
 

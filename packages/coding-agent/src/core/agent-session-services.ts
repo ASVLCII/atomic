@@ -3,6 +3,7 @@ import type { Api, Model } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "../config.js";
 import { resolvePath } from "../utils/paths.ts";
+import { getBuiltinPackagePaths } from "./builtin-packages.ts";
 import type { ProjectTrustContext, SessionStartEvent, ToolDefinition } from "./extensions/index.js";
 import { withMandatoryResourceLoader } from "./mandatory-resource-loader.ts";
 import { ModelRuntime } from "./model-runtime.js";
@@ -13,10 +14,19 @@ import {
 	type ResourceLoaderReloadOptions,
 } from "./resource-loader.ts";
 import { prepareDefaultResourceLoaderReload } from "./resource-loader-reload.ts";
-import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
+import {
+	type CreateAgentSessionOptions,
+	type CreateAgentSessionResult,
+	createAgentSession,
+	createUnstartedAgentSession,
+} from "./sdk.ts";
+import { type SessionLifecycleContext, sessionLifecycleCreation } from "./session-lifecycle-scope.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { endTimingSpan, startTimingSpan } from "./timings.ts";
+
+// Prepared factories belong to the first session; later borrowers still get fresh instances.
+const serviceLifetimes = new WeakMap<AgentSessionServices, SessionLifecycleContext>();
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -66,6 +76,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	excludedTools?: CreateAgentSessionOptions["excludedTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
+	extensionBindings?: CreateAgentSessionOptions["extensionBindings"];
 }
 
 /**
@@ -153,6 +164,20 @@ export async function createAgentSessionServices(
 export async function prepareAgentSessionServices(
 	options: CreateAgentSessionServicesOptions,
 ): Promise<() => Promise<AgentSessionServices>> {
+	const inherited = sessionLifecycleCreation.getStore();
+	const lifetime = { ...inherited, scope: inherited?.scope ?? {}, claimed: false };
+	const complete = await sessionLifecycleCreation.run(lifetime, () => prepareOwnedAgentSessionServices(options));
+	return () =>
+		sessionLifecycleCreation.run(lifetime, async () => {
+			const services = await complete();
+			serviceLifetimes.set(services, lifetime);
+			return services;
+		});
+}
+
+async function prepareOwnedAgentSessionServices(
+	options: CreateAgentSessionServicesOptions,
+): Promise<() => Promise<AgentSessionServices>> {
 	const cwd = resolvePath(options.cwd);
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getAgentDir();
 	const modelRuntimeSpan = startTimingSpan("createAgentSessionServices.modelRuntime");
@@ -169,6 +194,7 @@ export async function prepareAgentSessionServices(
 	const resourceLoaderOptions = options.resourceLoaderOptions ?? {};
 	const defaultResourceLoader = new DefaultResourceLoader({
 		...resourceLoaderOptions,
+		builtinPackagePaths: resourceLoaderOptions.builtinPackagePaths ?? getBuiltinPackagePaths(),
 		cwd,
 		agentDir,
 		settingsManager,
@@ -233,7 +259,28 @@ export async function prepareAgentSessionServices(
 export async function createAgentSessionFromServices(
 	options: CreateAgentSessionFromServicesOptions,
 ): Promise<CreateAgentSessionResult> {
-	return createAgentSession({
+	return createSessionFromServices(options, createAgentSession);
+}
+
+/** Internal CLI assembly only; the UI starts the session after mounting. */
+export function createUnstartedAgentSessionFromServices(
+	options: CreateAgentSessionFromServicesOptions,
+): Promise<CreateAgentSessionResult> {
+	return createSessionFromServices(options, createUnstartedAgentSession);
+}
+
+function createSessionFromServices(
+	options: CreateAgentSessionFromServicesOptions,
+	factory: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>,
+): Promise<CreateAgentSessionResult> {
+	const lifetime = serviceLifetimes.get(options.services);
+	if (lifetime && !lifetime.claimed) {
+		lifetime.claimed = true;
+		return sessionLifecycleCreation.run({ ...lifetime, claimed: false }, () =>
+			createSessionFromServices(options, factory),
+		);
+	}
+	return factory({
 		cwd: options.services.cwd,
 		agentDir: options.services.agentDir,
 		modelRuntime: options.services.modelRuntime,
@@ -250,5 +297,6 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
+		extensionBindings: options.extensionBindings,
 	});
 }

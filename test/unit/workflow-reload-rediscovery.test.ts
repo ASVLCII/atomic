@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, test } from "vitest";
+import { afterEach, describe, test, vi } from "vitest";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { createWorkflowExtensionRuntimeState } from "../../packages/workflows/src/extension/extension-runtime-state.js";
@@ -48,6 +48,18 @@ interface Harness {
 	readonly commands: Map<string, PiCommandOptions>;
 	readonly messages: string[];
 	execute(args: WorkflowToolArgs, ctx?: PiExecuteContext): Promise<WorkflowToolResult>;
+}
+
+// #3105: headless launches acknowledge background ownership, not completion.
+async function expectCompleted(harness: Harness, run: WorkflowToolResult, result: unknown): Promise<void> {
+	assert.equal(run.action, "run");
+	assert.ok("runId" in run);
+	await vi.waitFor(async () => {
+		const status = await harness.execute({ action: "status", runId: run.runId });
+		assert.ok("detail" in status);
+		assert.equal(status.detail.status, "completed");
+		assert.deepEqual(status.detail.result, result);
+	});
 }
 
 function fakeSession(prompt?: (text: string) => Promise<string>): StageSessionRuntime {
@@ -331,9 +343,7 @@ describe("workflow reload rediscovery matrix", () => {
 			workflow: "scope-project-atomic",
 			inputs: { message: "hello" },
 		});
-		assert.equal(run.action, "run");
-		assert.equal(run.status, "completed", JSON.stringify(run));
-		assert.deepEqual(run.result, { value: "declared:scope-project-atomic:hello" });
+		await expectCompleted(harness, run, { value: "declared:scope-project-atomic:hello" });
 	});
 
 	test.sequential("post-start global and configured additions preserve the active registry", async () => {
@@ -388,9 +398,7 @@ describe("workflow reload rediscovery matrix", () => {
 			workflow: "reload-stable",
 			inputs: { message: "still-valid" },
 		});
-		assert.equal(stableRun.action, "run");
-		assert.equal(stableRun.status, "completed", JSON.stringify(stableRun));
-		assert.deepEqual(stableRun.result, { value: "declared:reload-stable:still-valid" });
+		await expectCompleted(harness, stableRun, { value: "declared:reload-stable:still-valid" });
 		const slashMessageStart = harness.messages.length;
 		await harness.commands.get("workflow")?.handler?.("reload", { hasUI: false, ui: { notify: () => undefined } });
 		assert.match(
@@ -424,9 +432,7 @@ describe("workflow reload rediscovery matrix", () => {
 			inputs: { revisedInput: "next" },
 		});
 		assert.equal(editedRun.action, "run");
-		assert.equal(editedRun.status, "completed", JSON.stringify(editedRun));
-		assert.deepEqual(editedRun.result, { revisedValue: "declared:edited:next" });
-
+		await expectCompleted(harness, editedRun, { revisedValue: "declared:edited:next" });
 		const renamedPath = join(dir, "renamed.ts");
 		await rename(changing, renamedPath);
 		await writeWorkflow(renamedPath, { name: "reload-renamed", description: "renamed" });
@@ -524,9 +530,7 @@ describe("workflow reload rediscovery matrix", () => {
 		assert.equal(current.details?.output?.description, "new metadata");
 		releasePrompt("held:old prompt:value");
 		const completed = await running;
-		assert.equal(completed.action, "run");
-		assert.equal(completed.status, "completed", JSON.stringify(completed));
-		assert.deepEqual(completed.result, { value: "held:old prompt:value" });
+		await expectCompleted(harness, completed, { value: "held:old prompt:value" });
 	});
 
 	test.sequential("overlapping reload recovers from an active failure and applies the coalesced trailing pass", async () => {

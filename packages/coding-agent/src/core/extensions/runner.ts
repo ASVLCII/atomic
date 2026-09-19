@@ -10,9 +10,29 @@ import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
+import { lifecycleScopeForOwner, sessionLifecycleScopes } from "../session-lifecycle-scope.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
-import { runResourceRegistrationBatch } from "./loader-runtime.ts";
+import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
+import {
+	assertExtensionAction,
+	bindExtensionWork,
+	drainExtensionWork,
+	extensionWorkOpen,
+	resumeExtensionWork,
+	revokeExtensionAuthority,
+	runExtensionCleanup,
+	sealExtensionWork,
+} from "./extension-work.ts";
+import {
+	copyHostQuestionnaire,
+	type HostDiagnostic,
+	type HostInput,
+	HostInputBridge,
+	hostInputError,
+} from "./host-input.js";
+import { originalRegistrationCallback } from "./loader-bindings.ts";
+import { boundExtensionRuntimes, runResourceRegistrationBatch } from "./loader-runtime.ts";
 import {
 	createExtensionCommandContext,
 	createExtensionContext,
@@ -113,7 +133,28 @@ export async function emitSessionShutdownEvent(
 	event: SessionShutdownEvent,
 ): Promise<boolean> {
 	if (extensionRunner.hasHandlers("session_shutdown")) {
-		await extensionRunner.emit(event);
+		const failures: Error[] = [];
+		const unsubscribe = extensionRunner.onError((failure) => {
+			if (failure.event === "session_shutdown")
+				failures.push(new Error(`${failure.extensionPath}: ${failure.error}`));
+		});
+		try {
+			await extensionRunner.emit(event);
+		} catch (error) {
+			const causes = error instanceof AggregateError ? error.errors : [error];
+			failures.push(...causes.map((cause) => (cause instanceof Error ? cause : new Error(String(cause)))));
+		} finally {
+			unsubscribe();
+		}
+		// Shutdown may start tracked cleanup without returning its promise. Join it
+		// after dispatch leaves its own work frame, including when a handler failed.
+		try {
+			await extensionRunner.drainWork();
+		} catch (error) {
+			failures.push(error instanceof Error ? error : new Error(String(error)));
+		}
+		if (failures.length)
+			throw Object.assign(new AggregateError(failures, "Extension shutdown failed"), { code: "ShutdownFailed" });
 		return true;
 	}
 	return false;
@@ -123,6 +164,15 @@ export class ExtensionRunner {
 	private extensions: Extension[];
 	private runtime: ExtensionRuntime;
 	private uiContext: ExtensionUIContext;
+	private presentationUI?: ExtensionUIContext;
+	private presentationInput?: HostInput;
+	private humanInput?: HostInput | null;
+	private humanInputBindingRevision = 0;
+	private inputBridge = new HostInputBridge(
+		() => this.sessionManager.getSessionId(),
+		() => this.getSignalFn(),
+	);
+	private onDiagnostic?: (diagnostic: HostDiagnostic) => void;
 	private mode: ExtensionMode = "print";
 	private cwd: string;
 	private sessionManager: SessionManager;
@@ -130,8 +180,23 @@ export class ExtensionRunner {
 	private orchestrationContext: OrchestrationContext | undefined;
 	private subagentPolicy: SubagentChildPolicy | undefined;
 	private taskHostBinding: (() => import("../tasks/agent-adapter.js").AgentTaskHost) | undefined;
+	/** @internal Attach dispatch receipts to the owning session before startup. */
+	bindWorkOwner(owner: object): void {
+		bindExtensionWork(this.runtime, owner);
+	}
 	bindTaskHost(binding: () => import("../tasks/agent-adapter.js").AgentTaskHost): void {
 		this.taskHostBinding = binding;
+	}
+	bindChildSessionOptions(
+		resolver: import("../child-session-options.ts").ChildSessionOptionsResolver | undefined,
+	): void {
+		this.runtime.getChildSessionOptions = resolver;
+	}
+	getChildHostBindings(): import("../agent-session-types.js").ExtensionBindings {
+		return {
+			humanInput: this.humanInput === undefined ? this.presentationInput : this.humanInput,
+			onDiagnostic: this.onDiagnostic,
+		};
 	}
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<Api> | undefined = () => undefined;
@@ -157,6 +222,7 @@ export class ExtensionRunner {
 	private shortcutDiagnostics: ResourceDiagnostic[] = [];
 	private commandDiagnostics: ResourceDiagnostic[] = [];
 	private staleMessage: string | undefined;
+	private authorityRevoked = false;
 	private readonly contextOwner = {};
 	private uiPromptBinding = 0;
 	private activeUIPrompt:
@@ -174,6 +240,7 @@ export class ExtensionRunner {
 	) {
 		this.extensions = extensions;
 		this.runtime = runtime;
+		sessionLifecycleScopes.set(this, lifecycleScopeForOwner(runtime));
 		this.runtime.workflowActivityHub.bindDispatcher((event, isCurrent) => this.emit(event, isCurrent));
 		this.uiContext = noOpUIContext;
 		this.cwd = cwd;
@@ -195,6 +262,7 @@ export class ExtensionRunner {
 		this.runtime.sendMessage = actions.sendMessage;
 		this.runtime.sendMessages = actions.sendMessages;
 		this.runtime.sendUserMessage = actions.sendUserMessage;
+		boundExtensionRuntimes.add(this.runtime);
 		this.runtime.appendEntry = actions.appendEntry;
 		this.runtime.setSessionName = actions.setSessionName;
 		this.runtime.getSessionName = actions.getSessionName;
@@ -287,10 +355,97 @@ export class ExtensionRunner {
 		this.reloadHandler = async () => {};
 	}
 
+	setHostBindings(
+		humanInput: HostInput | null | undefined,
+		onDiagnostic?: (diagnostic: HostDiagnostic) => void,
+		bindingRevision = 0,
+	): void {
+		this.humanInput = humanInput;
+		this.humanInputBindingRevision = bindingRevision;
+		this.onDiagnostic = onDiagnostic;
+		// Internal builtin bridge: no new extension API and no interception of console.
+		const scope = lifecycleScopeForOwner(this.runtime);
+		const report = (diagnostic: Omit<HostDiagnostic, "sessionId">) => {
+			try {
+				this.onDiagnostic?.({ ...diagnostic, sessionId: this.sessionManager.getSessionId() });
+			} catch {
+				// Observers cannot replace the primary service failure.
+			}
+		};
+		// Rebinding replaces the reporter, not the builtin service owner.
+		Object.defineProperty(report, Symbol.for("atomic.builtin-owner.v1"), { value: scope });
+		Reflect.set(scope, Symbol.for("atomic.builtin-diagnostic.v1"), report);
+		this.refreshHostInput();
+	}
+
+	cancelHostInput(): void {
+		this.inputBridge.cancel();
+	}
+	/** @internal Join this generation's callbacks without draining its reload caller. */
+	drainWork(): Promise<void> {
+		return drainExtensionWork(this.runtime);
+	}
+
+	/** @internal Seal input admission without invalidating shutdown handlers. */
+	sealHostInput(): void {
+		this.inputBridge.close();
+		sealExtensionWork(this.runtime);
+	}
+
+	/** @internal A rejected transaction retains the live runner, but never revives captured dialogs. */
+	resumeAfterRejectedReload(): void {
+		if (this.staleMessage) return;
+		resumeExtensionWork(this.runtime);
+		this.inputBridge = new HostInputBridge(
+			() => this.sessionManager.getSessionId(),
+			() => this.getSignalFn(),
+		);
+		this.refreshHostInput();
+	}
+
+	private refreshHostInput(): void {
+		const ui = this.presentationUI;
+		this.inputBridge.bind(
+			this.humanInput === undefined ? this.presentationInput : (this.humanInput ?? undefined),
+			this.humanInput,
+			this.humanInputBindingRevision,
+		);
+		const bridged = this.inputBridge.wrap(
+			ui ?? {
+				...noOpUIContext,
+				custom: async () => {
+					throw hostInputError("HumanInputUnavailable");
+				},
+			},
+			this.presentationInput,
+			this.orchestrationContext?.kind === "workflow-stage"
+				? {
+						workflowRunId: this.orchestrationContext.workflowRunId,
+						workflowStageId: this.orchestrationContext.workflowStageId,
+					}
+				: {},
+		);
+		this.uiContext = this.wrapUIPromptContext(bridged, this.uiPromptBinding);
+		copyHostQuestionnaire(bridged, this.uiContext);
+	}
+
 	setUIContext(uiContext?: ExtensionUIContext, mode: ExtensionMode = "print"): void {
-		this.endActiveUIPrompt();
-		const binding = ++this.uiPromptBinding;
-		this.uiContext = uiContext ? this.wrapUIPromptContext(uiContext, binding) : noOpUIContext;
+		if (uiContext !== this.presentationUI) {
+			this.endActiveUIPrompt();
+			++this.uiPromptBinding;
+			this.presentationUI = uiContext;
+			const ui = uiContext;
+			this.presentationInput = ui
+				? {
+						confirm: (title, message, options) => ui.confirm(title, message, options),
+						select: (title, choices, options) => ui.select(title, choices, options),
+						input: (title, placeholder, options) => ui.input(title, placeholder, options),
+						editor: (title, initial, options) => ui.editor(title, initial, options),
+						questionnaire: (params, options) => presentQuestionnaire(ui, params, options.signal),
+					}
+				: undefined;
+			this.refreshHostInput();
+		}
 		this.mode = mode;
 	}
 
@@ -412,7 +567,7 @@ export class ExtensionRunner {
 	}
 
 	hasUI(): boolean {
-		return this.uiContext !== noOpUIContext;
+		return this.presentationUI !== undefined;
 	}
 
 	getExtensionPaths(): string[] {
@@ -451,6 +606,15 @@ export class ExtensionRunner {
 	getShortcuts(resolvedKeybindings: KeybindingsConfig): Map<KeyId, ExtensionShortcut> {
 		const resolution = resolveExtensionShortcuts(this.extensions, resolvedKeybindings, this.hasUI());
 		this.shortcutDiagnostics = resolution.diagnostics;
+		for (const [key, shortcut] of resolution.shortcuts) {
+			resolution.shortcuts.set(key, {
+				...shortcut,
+				handler: (context) => {
+					if (!extensionWorkOpen(this.runtime)) return Promise.reject(hostInputError("SessionClosed"));
+					return runResourceRegistrationBatch(this.runtime, async () => shortcut.handler(context));
+				},
+			});
+		}
 		return resolution.shortcuts;
 	}
 
@@ -458,7 +622,13 @@ export class ExtensionRunner {
 		return this.shortcutDiagnostics;
 	}
 
+	revokeAuthority(): void {
+		this.authorityRevoked = true;
+		revokeExtensionAuthority(this.runtime);
+	}
+
 	invalidate(message = STALE_EXTENSION_CONTEXT_MESSAGE): void {
+		this.sealHostInput();
 		if (!this.staleMessage) {
 			this.staleMessage = message;
 			this.runtime.invalidate(message);
@@ -466,6 +636,7 @@ export class ExtensionRunner {
 	}
 
 	private assertActive(): void {
+		if (this.authorityRevoked) this.runtime.assertActive();
 		if (this.staleMessage) {
 			throw new Error(this.staleMessage);
 		}
@@ -477,6 +648,12 @@ export class ExtensionRunner {
 	}
 
 	emitError(error: ExtensionError): void {
+		this.onDiagnostic?.({
+			level: "error",
+			source: error.extensionPath,
+			message: `Extension ${error.event} failed`,
+			sessionId: this.sessionManager.getSessionId(),
+		});
 		for (const listener of this.errorListeners) {
 			listener(error);
 		}
@@ -495,7 +672,14 @@ export class ExtensionRunner {
 	}
 
 	getEntryRenderer(customType: string): EntryRenderer | undefined {
-		return findEntryRenderer(this.extensions, customType);
+		const renderer = findEntryRenderer(this.extensions, customType);
+		return renderer ? originalRegistrationCallback(renderer) : undefined;
+	}
+
+	/** Invoke the session-owned registration without changing discovery identity. */
+	renderEntry(customType: string, ...args: Parameters<EntryRenderer>): ReturnType<EntryRenderer> {
+		this.assertActive();
+		return findEntryRenderer(this.extensions, customType)?.(...args);
 	}
 
 	getRegisteredCommands(): ResolvedCommand[] {
@@ -508,7 +692,13 @@ export class ExtensionRunner {
 	}
 
 	getCommand(name: string): ResolvedCommand | undefined {
-		return resolveRegisteredCommands(this.extensions).find((command) => command.invocationName === name);
+		const command = resolveRegisteredCommands(this.extensions).find((entry) => entry.invocationName === name);
+		if (!command) return undefined;
+		return {
+			...command,
+			handler: (args, context) =>
+				runResourceRegistrationBatch(this.runtime, async () => command.handler(args, context)),
+		};
 	}
 
 	/**
@@ -530,12 +720,15 @@ export class ExtensionRunner {
 	private createContextSource(): ExtensionCommandContextSource {
 		return {
 			assertActive: () => this.assertActive(),
+			assertAction: () => assertExtensionAction(this.runtime),
+			getChildSessionOptions: (options) => this.runtime.getChildSessionOptions?.(options) ?? options,
 			getExtensionPaths: () => this.getExtensionPaths(),
 			observeWorkflowActivity: (observer) => this.runtime.workflowActivityHub.observeWorkflowActivity(observer),
 			...(this.taskHostBinding ? { getAgentTaskHost: this.taskHostBinding } : {}),
 			getUIContext: () => this.uiContext,
 			getMode: () => this.mode,
 			hasUI: () => this.hasUI(),
+			hasHumanInput: () => this.inputBridge.available,
 			getCwd: () => this.cwd,
 			getSessionManager: () => this.sessionManager,
 			getModelRegistry: () => this.modelRegistry,
@@ -584,21 +777,54 @@ export class ExtensionRunner {
 	async emit<TEvent extends RunnerEmitEvent>(
 		event: TEvent,
 		isCurrent?: () => boolean,
+		admitted = false,
 	): Promise<RunnerEmitResult<TEvent>> {
-		return runResourceRegistrationBatch(this.runtime, () =>
-			runGenericHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error), isCurrent),
+		if (!admitted && event.type !== "session_shutdown" && !extensionWorkOpen(this.runtime))
+			return undefined as RunnerEmitResult<TEvent>;
+		const observerFailures: Error[] = [];
+		const dispatch = () =>
+			runGenericHandlers(
+				this.extensions,
+				this.createContext(),
+				event,
+				(error) => {
+					try {
+						this.emitError(error);
+					} catch (cause) {
+						if (event.type !== "session_shutdown") throw cause;
+						observerFailures.push(
+							new Error(`${error.extensionPath}: ${error.error}`),
+							new Error("Shutdown observer failed", { cause }),
+						);
+					}
+				},
+				isCurrent,
+			);
+		const result = await runResourceRegistrationBatch(
+			this.runtime,
+			() => (event.type === "session_shutdown" ? runExtensionCleanup(this.runtime, dispatch) : dispatch()),
+			admitted || event.type === "session_shutdown",
+		);
+		if (observerFailures.length)
+			throw Object.assign(new AggregateError(observerFailures, "Shutdown observers failed"), {
+				code: "ShutdownFailed",
+			});
+		return result;
+	}
+
+	async emitMessageEnd(event: MessageEndEvent, admitted = false): Promise<AgentMessage | undefined> {
+		return runResourceRegistrationBatch(
+			this.runtime,
+			() => runMessageEndHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+			admitted,
 		);
 	}
 
-	async emitMessageEnd(event: MessageEndEvent): Promise<AgentMessage | undefined> {
-		return runResourceRegistrationBatch(this.runtime, () =>
-			runMessageEndHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
-		);
-	}
-
-	async emitToolResult(event: ToolResultEvent): Promise<ToolResultEventResult | undefined> {
-		return runResourceRegistrationBatch(this.runtime, () =>
-			runToolResultHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+	async emitToolResult(event: ToolResultEvent, admitted = false): Promise<ToolResultEventResult | undefined> {
+		return runResourceRegistrationBatch(
+			this.runtime,
+			() => runToolResultHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+			admitted,
 		);
 	}
 

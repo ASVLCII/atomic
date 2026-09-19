@@ -7,10 +7,11 @@ import type {
 	PiKeybindings,
 	PiTheme,
 } from "../extension/wiring.js";
+import type { StageQuestionnaireInput } from "../extension/workflow-human-input.js";
 import { createSessionScopedSingleton } from "./session-scoped-singleton.js";
 import type { StageInputAnswer, StagePromptAdapter } from "./stage-prompt.js";
 import type { StagePromptAnswerSource, Store } from "./store.js";
-import { store as defaultStore } from "./store.js";
+import { currentWorkflowStore } from "./store-factory.js";
 import type { StageInputRequest } from "./store-types.js";
 
 export interface StageCustomUiRequest<T = unknown> {
@@ -20,6 +21,8 @@ export interface StageCustomUiRequest<T = unknown> {
 	readonly factory: PiCustomOverlayFactory<T>;
 	readonly options?: PiCustomOverlayOptions;
 	readonly createdAt: number;
+	readonly sessionId?: string;
+	readonly humanInput?: StageQuestionnaireInput;
 	resolve(value: T): void;
 	reject(reason: unknown): void;
 }
@@ -65,7 +68,7 @@ export class StageUiBroker {
 	private readonly resolvedPromptIds = new Map<string, string>();
 	private readonly resolvedListeners = new Set<StagePromptResolvedListener>();
 
-	constructor(store: Store = defaultStore) {
+	constructor(store: Store = currentWorkflowStore()) {
 		this.store = store;
 	}
 
@@ -123,6 +126,21 @@ export class StageUiBroker {
 		return undefined;
 	}
 
+	/** Runner-owned human hosts need the original questionnaire and live identity. */
+	peekStageQuestionnaire(runId: string, stageId: string) {
+		const hostKey = key(runId, stageId);
+		const adapter = this.adapters.get(hostKey);
+		const request = this.pending.get(hostKey);
+		if (!adapter?.questionnaireParams || !request) return undefined;
+		return {
+			requestId: request.id,
+			params: adapter.questionnaireParams,
+			prompt: adapter.prompt,
+			sessionId: request.sessionId,
+			humanInput: request.humanInput,
+		};
+	}
+
 	/**
 	 * Headlessly answer a stage's pending brokered prompt. Resolves the awaiting
 	 * `ctx.ui.custom` promise with the adapter-built result. Returns `false` when
@@ -172,6 +190,7 @@ export class StageUiBroker {
 	}
 
 	private showHostOrReject(host: StageCustomUiHost, request: StageCustomUiRequest): void {
+		if (request.humanInput?.usesOwnBinding()) return;
 		try {
 			host.showCustomUi(request);
 		} catch (error) {
@@ -207,6 +226,8 @@ export class StageUiBroker {
 		factory: PiCustomOverlayFactory<T>,
 		options?: PiCustomOverlayOptions,
 		signal?: AbortSignal,
+		sessionId?: string,
+		humanInput?: StageQuestionnaireInput,
 	): Promise<T> {
 		// Session pause aborts the tool, not the stage (which remains resumable).
 		// Either owner must be able to dismiss its outstanding custom UI request.
@@ -228,6 +249,8 @@ export class StageUiBroker {
 				stageId,
 				factory,
 				...(options !== undefined ? { options } : {}),
+				...(sessionId === undefined ? {} : { sessionId }),
+				...(humanInput === undefined ? {} : { humanInput }),
 				createdAt: Date.now(),
 				resolve,
 				reject,
@@ -307,6 +330,7 @@ export async function mountStageCustomUi(
 		theme,
 		keybindings,
 		(result: unknown) => {
+			if (request.humanInput?.usesOwnBinding()) return;
 			if (canResolve?.() === false) return;
 			broker.resolve(request, result);
 			onDone?.();
@@ -342,4 +366,8 @@ export function adoptStageUiBroker(scope: object, preserveCurrentWhenTargetExist
 	return singleton.adopt(scope, {
 		preserveCurrentWhenTargetExists: preserveCurrentWhenTargetExists ? () => true : undefined,
 	});
+}
+
+export function currentStageUiBroker(): StageUiBroker {
+	return singleton.current();
 }

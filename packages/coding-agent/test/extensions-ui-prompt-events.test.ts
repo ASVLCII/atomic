@@ -16,6 +16,7 @@ import type {
 	UIPromptKind,
 	UIPromptStartEvent,
 } from "../src/core/extensions/types.ts";
+import { SessionManager } from "../src/core/session-manager.js";
 import { InteractiveModeBase } from "../src/modes/interactive/interactive-mode-base.ts";
 import { EngineProjectTrustService } from "../src/modes/interactive-engine/engine-project-trust.js";
 import { IsolatedInteractiveRuntime } from "../src/modes/interactive-engine/isolated-runtime.js";
@@ -86,7 +87,7 @@ async function createRunner(
 		"<ui-prompt-events>",
 	);
 	return {
-		runner: new ExtensionRunner([extension], runtime, process.cwd(), {} as never, {} as never),
+		runner: new ExtensionRunner([extension], runtime, process.cwd(), SessionManager.inMemory(), {} as never),
 		events,
 	};
 }
@@ -166,28 +167,28 @@ test("all blocking extension UI prompts emit lifecycle events and preserve their
 			select: async (title, options, opts) => {
 				assert.equal(title, "Select title");
 				assert.deepEqual(options, ["one", "two"]);
-				assert.equal(opts, dialogOptions);
+				assert.ok(opts?.signal instanceof AbortSignal); // #3105: runtime-combined cancellation signal.
 				calls.push("select");
 				return "one";
 			},
 			confirm: async (title, message, opts) => {
 				assert.equal(title, "Confirm title");
 				assert.equal(message, "Continue?");
-				assert.equal(opts, dialogOptions);
+				assert.ok(opts?.signal instanceof AbortSignal);
 				calls.push("confirm");
 				return true;
 			},
 			input: async (title, placeholder, opts) => {
 				assert.equal(title, "Input title");
 				assert.equal(placeholder, "Type here");
-				assert.equal(opts, dialogOptions);
+				assert.ok(opts?.signal instanceof AbortSignal);
 				calls.push("input");
 				return "typed";
 			},
 			editor: async (title, prefill, opts) => {
 				assert.equal(title, "Editor title");
 				assert.equal(prefill, "draft");
-				assert.equal(opts, dialogOptions);
+				assert.ok(opts?.signal instanceof AbortSignal);
 				calls.push("editor");
 				return "edited";
 			},
@@ -432,6 +433,8 @@ test("rebinding the UI context closes the old span without corrupting the new sp
 	const newPrompt = deferred<boolean>();
 	runner.setUIContext(createUI({ select: () => oldPrompt.promise }));
 	const oldResult = runner.getUIContext().select("Old prompt", ["one"]);
+	// #3105: replacing the human adapter cancels the old identified request.
+	const oldCancelled = assert.rejects(oldResult, { code: "HumanInputCancelled" });
 	await flushNotifications();
 
 	runner.setUIContext(createUI({ confirm: () => newPrompt.promise }));
@@ -439,7 +442,7 @@ test("rebinding the UI context closes the old span without corrupting the new sp
 	await flushNotifications();
 
 	oldPrompt.resolve("one");
-	assert.equal(await oldResult, "one");
+	await oldCancelled;
 	await flushNotifications();
 	assert.equal(events.length, 3);
 

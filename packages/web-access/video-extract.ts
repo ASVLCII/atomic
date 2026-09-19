@@ -1,6 +1,9 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
+import { createOwnerState } from "./owner-state.js";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve, extname, basename, join, dirname } from "node:path";
+import { resolve, extname, basename, join, dirname, isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { activityMonitor } from "./activity.js";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
 import { queryGeminiApiWithVideo, getApiKey, API_BASE } from "./gemini-api.js";
@@ -71,14 +74,8 @@ const VIDEO_CONFIG_DEFAULTS: VideoConfig = {
 	maxSizeMB: 50,
 };
 
-let cachedVideoConfig: VideoConfig | null = null;
-
-function loadVideoConfig(): VideoConfig {
-	if (cachedVideoConfig) return cachedVideoConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedVideoConfig = { ...VIDEO_CONFIG_DEFAULTS };
-		return cachedVideoConfig;
-	}
+const loadVideoConfig = createOwnerState<VideoConfig>(() => {
+	if (!existsSync(CONFIG_PATH)) return { ...VIDEO_CONFIG_DEFAULTS };
 
 	const rawText = readFileSync(CONFIG_PATH, "utf-8");
 	let raw: { video?: { enabled?: boolean; preferredModel?: string; maxSizeMB?: number } };
@@ -90,25 +87,24 @@ function loadVideoConfig(): VideoConfig {
 	}
 
 	const v = raw.video ?? {};
-	cachedVideoConfig = {
+	return {
 		enabled: normalizeEnabled(v.enabled, VIDEO_CONFIG_DEFAULTS.enabled),
 		preferredModel: normalizePreferredModel(v.preferredModel, VIDEO_CONFIG_DEFAULTS.preferredModel),
 		maxSizeMB: normalizeMaxSizeMB(v.maxSizeMB, VIDEO_CONFIG_DEFAULTS.maxSizeMB),
 	};
-	return cachedVideoConfig;
-}
+});
 
 export function isVideoFile(input: string): VideoFileInfo | null {
 	const config = loadVideoConfig();
 	if (!config.enabled) return null;
 
-	const isFilePath = input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input.startsWith("file://");
+	const isFilePath = isAbsolute(input) || input.startsWith("./") || input.startsWith("../") || input.startsWith(".\\") || input.startsWith("..\\") || input.startsWith("file://");
 	if (!isFilePath) return null;
 
 	let filePath = input;
 	if (input.startsWith("file://")) {
 		try {
-			filePath = decodeURIComponent(new URL(input).pathname);
+			filePath = fileURLToPath(input);
 		} catch {
 			return null;
 		}
@@ -366,7 +362,7 @@ async function pollFileState(
 function deleteGeminiFile(fileName: string, apiKey: string): void {
 	fetch(`${API_BASE}/${fileName}?key=${apiKey}`, { method: "DELETE" }).catch((err) => {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error(`Failed to delete Gemini file ${fileName}: ${message}`);
+		if (!reportOwnedWebDiagnostic()) console.error(`Failed to delete Gemini file ${fileName}: ${message}`);
 	});
 }
 

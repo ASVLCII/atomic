@@ -226,6 +226,8 @@ export async function runSingleInProcess(
 	const parent: ParentContext = {
 		path: options.runId,
 		depth: options.parentDepth ?? 0,
+		getChildSessionOptions: options.getChildSessionOptions,
+		resourceLoaderInheritanceSnapshot: options.resourceLoaderInheritanceSnapshot,
 		...(options.intercomGroup ? { intercomGroup: options.intercomGroup } : {}),
 		...(options.workflowStageSubagentGuard === undefined
 			? {}

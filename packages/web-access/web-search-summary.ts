@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import { getModel, type Model } from "@bastani/pi-ai/compat";
 import type { ProviderHeaders } from "@bastani/pi-ai";
 import type { QueryResultData } from "./storage.js";
@@ -119,7 +120,7 @@ export async function loadSummaryModelChoices(
 		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error(`Failed to load summary models: ${message}`);
+		if (!reportOwnedWebDiagnostic()) console.error(`Failed to load summary models: ${message}`);
 	}
 
 	const currentModelValue = summaryContext.model

@@ -607,7 +607,7 @@ Pick and document one policy before the run:
 
 Use `block` for risky public contracts, data changes, security behavior, releases, or publication. `warn` is a practical default when a boundary review can replace live steering. Never degrade silently from `block` to `warn` or from guarded execution to `off`.
 
-Ordinary `intercom` is mandatory in every workflow model stage. `noTools: "all"`, restrictive `tools` allowlists, and `excludedTools` continue to restrict every other tool but cannot remove Intercom, so live steering remains available.
+Ordinary `intercom` is enabled by default but respects `tools`, `excludedTools`, and `noTools: "all"`. Include `intercom` in restricted stage allowlists when live peer coordination is required; do not assume a suppressed tool remains available.
 
 ### Lifecycle, topology, and context rules
 

@@ -3,7 +3,7 @@ import { CONFIG_DIR_NAME } from "@bastani/atomic";
 import { appendFileSync } from "node:fs";
 import { getActiveGoogleEmail, isGeminiWebAvailable } from "./gemini-web.js";
 import { isBrowserCookieAccessAllowed } from "./gemini-web-config.ts";
-import { deleteResult, getAllResults } from "./storage.js";
+import { createResultStorage } from "./storage.js";
 import { loadConfigForExtensionInit, resolveWorkflow, saveConfig, type WebSearchWorkflow } from "./web-search-config.js";
 
 if (process.env.ATOMIC_TEST_LAZY_IMPORT_SENTINEL_FILE) {
@@ -16,8 +16,10 @@ if (process.env.ATOMIC_TEST_LAZY_IMPORT_SENTINEL === "1") {
 import { registerWebSearchFeatures } from "./web-search-features.js";
 
 export default function (pi: ExtensionAPI) {
+	const storage = createResultStorage();
+	const { deleteResult, getAllResults } = storage;
 	const initConfig = loadConfigForExtensionInit();
-	registerWebSearchFeatures(pi, initConfig);
+	registerWebSearchFeatures(pi, initConfig, storage);
 	pi.registerCommand("curator", {
 		description: "Toggle or configure the search curator workflow",
 		handler: async (args, ctx) => {

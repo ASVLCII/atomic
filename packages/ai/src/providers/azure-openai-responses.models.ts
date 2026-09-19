@@ -4,5 +4,5 @@
 import values from "./data/azure-openai-responses.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const AZURE_OPENAI_RESPONSES_MODELS: ModelCatalog<typeof values, "azure-openai-responses"> =
+export const AZURE_OPENAI_RESPONSES_MODELS: ModelCatalog<typeof import("./data/azure-openai-responses.json", { with: { type: "json" } }), "azure-openai-responses"> =
 	flattenModelCatalog("azure-openai-responses", values);

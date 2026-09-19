@@ -15,6 +15,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js"
 import {
   getAuthForUrl,
+  getOwnedOAuthTransients,
   updateTokens,
   updateClientInfo,
   updateCodeVerifier,
@@ -72,6 +73,13 @@ export interface McpOAuthCallbacks {
  * Implements the OAuthClientProvider interface from the MCP SDK.
  */
 export class McpOAuthProvider implements OAuthClientProvider {
+  private readonly transients = getOwnedOAuthTransients()
+
+  private transientEntry() {
+    if (!this.transients) return getAuthForUrl(this.serverName, this.serverUrl)
+    const entry = this.transients.get(this.serverName)
+    return entry?.serverUrl === this.serverUrl ? entry : undefined
+  }
   constructor(
     private serverName: string,
     private serverUrl: string,
@@ -223,7 +231,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
       throw new Error("redirectToAuthorization is not used for client_credentials flow")
     }
     // No saved oauthState means we're on the post-refresh authorize fallback.
-    const entry = await getAuthForUrl(this.serverName, this.serverUrl)
+    const entry = this.transientEntry()
     this.ensureActive()
     if (!entry?.oauthState) {
       throw new UnauthorizedError(
@@ -240,6 +248,10 @@ export class McpOAuthProvider implements OAuthClientProvider {
    */
   async saveCodeVerifier(codeVerifier: string): Promise<void> {
     this.ensureActive()
+    if (this.transients) {
+      this.transients.set(this.serverName, { ...this.transientEntry(), codeVerifier, serverUrl: this.serverUrl })
+      return
+    }
     updateCodeVerifier(this.serverName, codeVerifier, this.serverUrl)
   }
 
@@ -252,7 +264,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (this.usesClientCredentials) {
       throw new Error("codeVerifier is not used for client_credentials flow")
     }
-    const entry = await getAuthForUrl(this.serverName, this.serverUrl)
+    const entry = this.transientEntry()
     this.ensureActive()
     if (!entry?.codeVerifier) {
       throw new Error(`No code verifier saved for MCP server: ${this.serverName}`)
@@ -265,6 +277,10 @@ export class McpOAuthProvider implements OAuthClientProvider {
    */
   async saveState(state: string): Promise<void> {
     this.ensureActive()
+    if (this.transients) {
+      this.transients.set(this.serverName, { ...this.transientEntry(), oauthState: state, serverUrl: this.serverUrl })
+      return
+    }
     updateOAuthState(this.serverName, state, this.serverUrl)
   }
 
@@ -277,7 +293,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (this.usesClientCredentials) {
       throw new Error("state is not used for client_credentials flow")
     }
-    const entry = await getAuthForUrl(this.serverName, this.serverUrl)
+    const entry = this.transientEntry()
     this.ensureActive()
     if (!entry?.oauthState) {
       throw new UnauthorizedError(
@@ -295,6 +311,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
     this.ensureActive()
     switch (type) {
       case "all":
+        this.transients?.delete(this.serverName)
         clearAllCredentials(this.serverName)
         break
       case "client":

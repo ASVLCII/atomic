@@ -8,7 +8,7 @@ import {
 	type TuiInputListener,
 	TuiMainScreen,
 } from "@earendil-works/pi-tui";
-import { stripOverlayActiveRowMarker } from "../../core/extensions/ui-types.ts";
+import { stripOverlayActiveRowMarker } from "../../core/extensions/ui-types.js";
 import { isLifecycleTimingEnabled, markLifecycleTiming } from "../../core/lifecycle-timings.ts";
 import { copyToClipboard } from "../../utils/clipboard.ts";
 import { openBrowser } from "../../utils/open-browser.ts";

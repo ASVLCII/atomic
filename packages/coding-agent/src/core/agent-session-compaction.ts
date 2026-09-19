@@ -27,7 +27,9 @@ import type {
 	SessionCompactEvent,
 	SessionCompactFailedEvent,
 } from "./extensions/index.js";
+import { assertSessionOpen as assertCompactionOpen, trackSessionWork } from "./session-lifecycle-work.ts";
 import type { CompactionEntry } from "./session-manager.ts";
+import { settingsWriteOwner } from "./settings-write-ownership.ts";
 import { createSummarizationRetryCallbacks } from "./summarization-retry.ts";
 
 function frozenCollectionMutation(): never {
@@ -88,6 +90,7 @@ export async function _applyVerbatimCompaction(
 	this: AgentSession,
 	options: VerbatimCompactionApplyOptions,
 ): Promise<VerbatimCompactionResult | undefined> {
+	assertCompactionOpen(this);
 	if (!this.model) throw new Error(formatNoModelSelectedMessage());
 	const model = this.model;
 	const pathEntries = this.sessionManager.getBranch();
@@ -156,6 +159,8 @@ export async function _applyVerbatimCompaction(
 			branchEntries: pathEntries,
 			signal: options.abortController.signal,
 		} satisfies SessionBeforeCompactEvent)) as SessionBeforeCompactResult | undefined;
+		assertCompactionOpen(this);
+		if (options.abortController.signal.aborted) throw new Error("Compaction cancelled");
 		if (hookResult?.cancel) throw new Error("Compaction cancelled");
 		if (hookResult?.compactedText !== undefined) {
 			if (hookResult.compactedText.trim().length === 0) throw new Error("No compacted text provided by extension");
@@ -198,6 +203,7 @@ export async function _applyVerbatimCompaction(
 			keptTail: run.keptTail,
 		};
 	}
+	assertCompactionOpen(this);
 	if (options.abortController.signal.aborted) throw new Error("Compaction cancelled");
 
 	// A fresh rung that had to drop the protected tail persists no tail boundary.
@@ -348,6 +354,11 @@ export function compact(
 	this: AgentSession,
 	options: Partial<VerbatimCompactionParameters> = {},
 ): Promise<VerbatimCompactionResult> {
+	try {
+		assertCompactionOpen(this);
+	} catch (error) {
+		return Promise.reject(error);
+	}
 	const inFlight = this._manualCompactionPromise;
 	if (inFlight) return inFlight;
 
@@ -374,8 +385,8 @@ export function compact(
 	let flight!: Promise<VerbatimCompactionResult>;
 	// Start the owned run in a microtask so both single-flight fields are
 	// published before any joiner can observe a partially claimed compaction.
-	flight = Promise.resolve()
-		.then(async () => {
+	flight = trackSessionWork(this, () =>
+		Promise.resolve().then(async () => {
 			try {
 				if (automaticCompletion !== undefined) await automaticCompletion;
 				await abortBoundary;
@@ -385,12 +396,13 @@ export function compact(
 				await emitManualCompactionFailure.call(this, controller, error, false);
 				throw error;
 			}
+			assertCompactionOpen(this);
 			return runOwnedManualCompaction.call(this, controller, options);
-		})
-		.finally(() => {
-			clearOwnedManualCompactionState.call(this, controller);
-			if (this._manualCompactionPromise === flight) this._manualCompactionPromise = undefined;
-		});
+		}),
+	).finally(() => {
+		clearOwnedManualCompactionState.call(this, controller);
+		if (this._manualCompactionPromise === flight) this._manualCompactionPromise = undefined;
+	});
 	this._manualCompactionPromise = flight;
 	return flight;
 }
@@ -403,7 +415,7 @@ export function abortBranchSummary(this: AgentSession): void {
 	this._branchSummaryAbortController?.abort();
 }
 export function setAutoCompactionEnabled(this: AgentSession, enabled: boolean): void {
-	this.settingsManager.setCompactionEnabled(enabled);
+	settingsWriteOwner.run(this, () => this.settingsManager.setCompactionEnabled(enabled));
 }
 
 export const agentSessionCompactionMethods = {

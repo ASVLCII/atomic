@@ -1,14 +1,32 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Provider } from "@bastani/pi-ai";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "../event-bus.js";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
+import { lifecycleScopeForOwner } from "../session-lifecycle-scope.ts";
+import { drainSessionWork, hasCallingSessionWork, trackSessionWork } from "../session-lifecycle-work.ts";
+import {
+	assertExtensionAction,
+	extensionWorkOpen,
+	isRetiredExtensionCleanup,
+	trackExtensionWork,
+} from "./extension-work.ts";
+import { hostInputError } from "./host-input.js";
+import {
+	captureRegistrationInvocation as captureInvocation,
+	invocationExtension,
+	invocationRuntime,
+	resolveInvocationRuntime,
+} from "./loader-bindings.ts";
 import {
 	emptyWorkflowResourceProvider,
 	normalizeWorkflowResourceProvider,
 	type ResourceLoaderInheritanceSnapshotProvider,
 	type WorkflowResourceProviderInput,
 } from "./loader-resources.ts";
+import { boundExtensionRuntimes } from "./loader-runtime.ts";
+import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
 import type {
 	EntryRenderer,
 	Extension,
@@ -24,6 +42,54 @@ import type {
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
+const apiLifetime = Symbol.for("atomic.extension-api-lifetime.v1");
+type ExtensionWithLifetime = Extension & {
+	[apiLifetime]?: { retired: boolean; releases: Set<() => void>; cleanup?: AsyncLocalStorage<{ active: boolean }> };
+};
+
+/** Factory receipts must not include selected siblings sharing the runtime. */
+export async function drainExtensionAPIWork(extension: Extension): Promise<void> {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (lifetime) await drainSessionWork(lifetime);
+}
+
+export function sealExtensionAPI(extension: Extension): boolean {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (lifetime?.retired) return false;
+	if (lifetime) lifetime.cleanup ??= new AsyncLocalStorage<{ active: boolean }>();
+	return true;
+}
+
+/** Seal one unadopted factory without sealing its selected siblings' runtime. */
+export async function runExtensionAPICleanup(extension: Extension, operation: () => Promise<void>): Promise<void> {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (!lifetime) return operation();
+	lifetime.cleanup ??= new AsyncLocalStorage<{ active: boolean }>();
+	const scope = { active: true };
+	try {
+		await lifetime.cleanup.run(scope, operation);
+	} finally {
+		scope.active = false;
+	}
+}
+
+/** Retire one factory without invalidating a runtime shared with selected factories. */
+export function retireExtensionAPI(extension: Extension): void {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (!lifetime || lifetime.retired) return;
+	lifetime.retired = true;
+	const failures: unknown[] = [];
+	for (const release of lifetime.releases) {
+		try {
+			release();
+		} catch (error) {
+			failures.push(error);
+		}
+	}
+	lifetime.releases.clear();
+	if (failures.length) throw new AggregateError(failures, "Extension subscription retirement failed");
+}
+
 /**
  * Create the ExtensionAPI for an extension.
  * Registration methods write to the extension object.
@@ -37,6 +103,11 @@ export function createExtensionAPI(
 	workflowResourceProvider: WorkflowResourceProviderInput = emptyWorkflowResourceProvider,
 	resourceLoaderInheritanceSnapshotProvider?: ResourceLoaderInheritanceSnapshotProvider,
 ): { api: ExtensionAPI; commit: () => void; discard: () => void } {
+	const originalRuntime = runtime;
+	(extension as ExtensionWithLifetime)[apiLifetime] = { retired: false, releases: new Set() };
+	const captureRegistrationInvocation = <T>(value: T): T => captureInvocation(value, originalRuntime);
+	runtime = invocationRuntime(runtime);
+	extension = invocationExtension(extension);
 	const workflowResources = normalizeWorkflowResourceProvider(workflowResourceProvider);
 	const pendingRuntimeChanges: Array<{ apply: () => void; rollback: () => void }> = [];
 	const loadingUnsubscribers: Array<() => void> = [];
@@ -44,43 +115,82 @@ export function createExtensionAPI(
 	const initialFlagOwners = new Map(runtime.flagOwners);
 	const initialFlagOwnerOrigins = new Map(runtime.flagOwnerOrigins);
 	let state: "loading" | "active" | "failed" = "loading";
-	const assertActive = () => {
+	const assertActive = (inspection = false) => {
+		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+		if (lifetime?.retired) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
+		if (lifetime?.cleanup && !lifetime.cleanup.getStore()?.active && !hasCallingSessionWork(lifetime))
+			throw hostInputError("SessionClosed");
 		if (state === "failed")
 			throw new Error(`Extension "${extension.path}" failed to load and its API is no longer active.`);
 		runtime.assertActive();
+		if (!inspection) assertExtensionAction(resolveInvocationRuntime(originalRuntime));
+	};
+	const trackAPIWork = <T>(operation: () => Promise<T>): Promise<T> => {
+		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime]!;
+		return trackExtensionWork(resolveInvocationRuntime(originalRuntime), () => trackSessionWork(lifetime, operation));
 	};
 	const applyRuntimeChange = (change: { apply: () => void; rollback: () => void }) => {
 		if (state === "loading") pendingRuntimeChanges.push(change);
 		else if (state === "active") change.apply();
 		else assertActive();
 	};
+	// Both ownership ledgers must forget a completed release, including on throw.
+	// Clearing the capture also makes a retained public unsubscribe handle harmless.
+	const trackRelease = (cleanup: () => void): (() => void) => {
+		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+		let pending: (() => void) | undefined = cleanup;
+		const release = runtime.trackEventBusSubscription(() => {
+			const callback = pending;
+			pending = undefined;
+			lifetime?.releases.delete(release);
+			callback?.();
+		});
+		lifetime?.releases.add(release);
+		if (state === "loading") loadingUnsubscribers.push(release);
+		return release;
+	};
 	// Successive load generations of one session each build a new facade over
 	// the same shared bus; mapping the facade back to that bus lets
 	// session-scoped state re-bind across module re-evaluation.
 	const events: EventBus = {
 		emit(channel, data) {
+			if (isRetiredExtensionCleanup(resolveInvocationRuntime(originalRuntime))) return;
 			assertActive();
 			eventBus.emit(channel, data);
 		},
 		on(channel, handler) {
+			const ownerRuntime = resolveInvocationRuntime(originalRuntime);
+			const ownerLifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+			const deliver = captureRegistrationInvocation(handler);
 			assertActive();
-			const unsubscribe = runtime.trackEventBusSubscription(eventBus.on(channel, handler));
-			if (state === "loading") loadingUnsubscribers.push(unsubscribe);
+			const unsubscribe = trackRelease(
+				eventBus.on(channel, (data) => {
+					if (ownerLifetime?.retired || ownerLifetime?.cleanup || !extensionWorkOpen(ownerRuntime)) return;
+					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime))
+						return trackExtensionWork(ownerRuntime, () =>
+							trackSessionWork(ownerLifetime!, async () => deliver(data)),
+						);
+				}),
+			);
 			return unsubscribe;
 		},
 	};
 	registerCanonicalEventBus(events, canonicalEventBusFor(eventBus));
+	// Capture explicit creation/reload lineage before invocation leaves its construction scope.
+	lifecycleScopeForOwner(originalRuntime);
 	const api = {
+		get lifecycleScope() {
+			return lifecycleScopeForOwner(resolveInvocationRuntime(originalRuntime));
+		},
 		registerWorkflowActivityPublisher() {
 			assertActive();
 			const publisher = runtime.workflowActivityHub.registerWorkflowActivityPublisher();
-			if (state === "loading") loadingUnsubscribers.push(() => publisher.dispose());
-			return publisher;
+			return { ...publisher, dispose: trackRelease(() => publisher.dispose()) };
 		},
 		on(event: string, handler: HandlerFn): void {
 			assertActive();
 			const list = extension.handlers.get(event) ?? [];
-			list.push(handler);
+			list.push(captureRegistrationInvocation(handler));
 			extension.handlers.set(event, list);
 		},
 
@@ -92,7 +202,7 @@ export function createExtensionAPI(
 					`Tool "${tool.name}" registered by extension "${extension.path}" must define an object parameter schema.`,
 				);
 			}
-			const registration = { definition: tool, sourceInfo: extension.sourceInfo };
+			const registration = { definition: captureRegistrationInvocation(tool), sourceInfo: extension.sourceInfo };
 			if (runtime.stageToolRegistration?.(extension, tool.name, registration)) return;
 			extension.tools.set(tool.name, registration);
 			if (runtime.refreshToolsAfterRegistration) runtime.refreshToolsAfterRegistration();
@@ -102,7 +212,7 @@ export function createExtensionAPI(
 		registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void {
 			assertActive();
 			if (runtime.canRegisterResource?.(extension, "command", name) === false) return;
-			const registration = { name, sourceInfo: extension.sourceInfo, ...options };
+			const registration = { name, sourceInfo: extension.sourceInfo, ...captureRegistrationInvocation(options) };
 			if (runtime.stageCommandRegistration?.(extension, name, registration)) return;
 			extension.commands.set(name, registration);
 		},
@@ -118,7 +228,7 @@ export function createExtensionAPI(
 		): void {
 			assertActive();
 			if (runtime.canRegisterResource?.(extension, "shortcut", shortcut) === false) return;
-			const registration = { shortcut, extensionPath: extension.path, ...options };
+			const registration = { shortcut, extensionPath: extension.path, ...captureRegistrationInvocation(options) };
 			if (runtime.stageShortcutRegistration?.(extension, shortcut, registration)) return;
 			extension.shortcuts.set(shortcut, registration);
 		},
@@ -165,40 +275,46 @@ export function createExtensionAPI(
 
 		registerMessageRenderer<T>(customType: string, renderer: MessageRenderer<T>): void {
 			assertActive();
-			extension.messageRenderers.set(customType, renderer as MessageRenderer);
+			extension.messageRenderers.set(customType, captureRegistrationInvocation(renderer) as MessageRenderer);
 		},
 
 		registerMarkdownTransformer(transformer: MarkdownTransformer): void {
 			assertActive();
-			extension.markdownTransformer = transformer;
+			extension.markdownTransformer = captureRegistrationInvocation(transformer);
 		},
 
 		registerEntryRenderer<T>(customType: string, renderer: EntryRenderer<T>): void {
 			assertActive();
-			extension.entryRenderers.set(customType, renderer as EntryRenderer);
+			extension.entryRenderers.set(customType, captureRegistrationInvocation(renderer) as EntryRenderer);
 		},
 
 		getFlag(name: string): boolean | string | undefined {
-			assertActive();
+			assertActive(true);
 			const pendingDefault = runtime.getPendingFlagDefault?.(extension.path, name);
 			if (!extension.flags.has(name) && pendingDefault === undefined) return undefined;
 			return runtime.flagValues.get(name) ?? pendingDefault;
 		},
 
 		getWorkflowResources() {
-			assertActive();
+			assertActive(true);
 			return [...workflowResources.get()];
 		},
 
 		async refreshWorkflowResources() {
 			assertActive();
-			const refreshed = await workflowResources.refresh?.();
-			return [...(refreshed ?? workflowResources.get())];
+			return trackAPIWork(async () => {
+				const refreshed = await workflowResources.refresh?.();
+				return [...(refreshed ?? workflowResources.get())];
+			});
 		},
 
 		getResourceLoaderInheritanceSnapshot() {
-			assertActive();
+			assertActive(true);
 			return resourceLoaderInheritanceSnapshotProvider?.() ?? {};
+		},
+		getChildSessionOptions(options) {
+			assertActive();
+			return runtime.getChildSessionOptions?.(options) ?? options;
 		},
 
 		sendMessage(message, options): void | Promise<void> {
@@ -227,7 +343,7 @@ export function createExtensionAPI(
 		},
 
 		getSessionName(): string | undefined {
-			assertActive();
+			assertActive(true);
 			return runtime.getSessionName();
 		},
 
@@ -238,16 +354,16 @@ export function createExtensionAPI(
 
 		exec(command: string, args: string[], options?: ExecOptions) {
 			assertActive();
-			return execCommand(command, args, options?.cwd ?? cwd, options);
+			return trackAPIWork(() => execCommand(command, args, options?.cwd ?? cwd, options));
 		},
 
 		getActiveTools(): string[] {
-			assertActive();
+			assertActive(true);
 			return runtime.getActiveToolsAfterRegistration?.(extension) ?? runtime.getActiveTools();
 		},
 
 		getAllTools() {
-			assertActive();
+			assertActive(true);
 			return runtime.getAllToolsAfterRegistration?.(extension) ?? runtime.getAllTools();
 		},
 
@@ -257,7 +373,7 @@ export function createExtensionAPI(
 		},
 
 		getCommands() {
-			assertActive();
+			assertActive(true);
 			return runtime.getCommandsAfterRegistration?.(extension) ?? runtime.getCommands();
 		},
 
@@ -267,7 +383,7 @@ export function createExtensionAPI(
 		},
 
 		getThinkingLevel() {
-			assertActive();
+			assertActive(true);
 			return runtime.getThinkingLevel();
 		},
 
@@ -346,12 +462,20 @@ export function createExtensionAPI(
 		discard: () => {
 			if (state !== "loading") return;
 			state = "failed";
-			for (const unsubscribe of loadingUnsubscribers) unsubscribe();
+			const failures: unknown[] = [];
+			for (const unsubscribe of loadingUnsubscribers) {
+				try {
+					unsubscribe();
+				} catch (error) {
+					failures.push(error);
+				}
+			}
 			pendingRuntimeChanges.length = 0;
 			loadingUnsubscribers.length = 0;
 			runtime.flagValues = initialFlagValues;
 			runtime.flagOwners = initialFlagOwners;
 			runtime.flagOwnerOrigins = initialFlagOwnerOrigins;
+			if (failures.length) throw new AggregateError(failures, "Extension subscription rollback failed");
 		},
 	};
 }

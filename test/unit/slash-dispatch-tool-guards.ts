@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
 import type {
 	ExtensionAPI,
@@ -16,7 +16,6 @@ import {
 	createRegistry,
 	installSlashDispatchTestHooks,
 	join,
-	LIFECYCLE_NOTICE_CUSTOM_TYPE,
 	makeExecuteWorkflowTool,
 	makeRegisteredWorkflowToolWithResource,
 	mkdtemp,
@@ -107,7 +106,7 @@ describe("tool run-control actions", () => {
 		}
 	});
 
-	test.sequential("registered workflow tool suppresses lifecycle notices while awaiting a headless run", async () => {
+	test.sequential("registered workflow tool returns a headless accepted run with inspectable completion", async () => {
 		const resource = await makeRegisteredWorkflowToolWithResource(
 			"tool-headless-lifecycle.ts",
 			`import { workflow } from "@bastani/workflows";
@@ -145,13 +144,18 @@ export default workflow({
 
 			assert.equal(result.details.action, "run");
 			const run = result.details as Extract<WorkflowToolResult, { action: "run" }>;
-			assert.equal(run.status, "completed", run.error);
-			assert.deepEqual(run.result, { ok: true, source: "tool" });
-			assert.equal(
-				resource.sent.some((message) => message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE),
-				false,
-				"headless tool completion should not emit a lifecycle steer notice before returning",
-			);
+			assert.equal(run.status, "running");
+			await vi.waitFor(async () => {
+				const status = await resource.tool.execute(
+					"status",
+					{ action: "status", runId: run.runId },
+					undefined,
+					undefined,
+					{ ...workflowRouterContext("tool-headless-lifecycle"), hasUI: false },
+				);
+				assert.equal(status.details.detail.status, "completed");
+				assert.deepEqual(status.details.detail.result, { ok: true, source: "tool" });
+			});
 		} finally {
 			await resource.cleanup();
 		}

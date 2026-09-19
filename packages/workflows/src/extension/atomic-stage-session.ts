@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import type {
+	AtomicBuiltin,
 	CreateAgentSessionOptions,
 	DefaultResourceLoaderInheritanceSnapshot,
 	PackageSource,
@@ -22,7 +23,7 @@ interface PiSdkSessionManager {
 
 export interface PiCodingAgentSdk {
 	getAgentDir(): string;
-	getBuiltinPackagePaths?: () => string[];
+	getBuiltinPackagePaths?: (builtins?: CreateAgentSessionOptions["builtins"]) => string[];
 	SettingsManager: {
 		create(cwd?: string, agentDir?: string, options?: { projectTrusted?: boolean }): PiSdkSettingsManager;
 	};
@@ -110,14 +111,14 @@ export async function prepareAtomicStageSessionOptions(
 	const inheritedBuiltinPackagePaths = inheritanceSnapshot?.builtinPackagePaths;
 	const builtinPackagePaths =
 		inheritedBuiltinPackagePaths === undefined
-			? (sdk.getBuiltinPackagePaths?.() ?? [])
+			? (sdk.getBuiltinPackagePaths?.(atomicOptions?.builtins) ?? [])
 			: [...inheritedBuiltinPackagePaths];
 	const resourceLoader = new sdk.DefaultResourceLoader({
 		cwd,
 		agentDir,
 		settingsManager,
 		resourceLoaderInheritanceSnapshot: inheritanceSnapshot,
-		builtinPackagePaths: stageBuiltinPackagePaths(builtinPackagePaths),
+		builtinPackagePaths: stageBuiltinPackagePaths(builtinPackagePaths, atomicOptions?.builtins),
 	});
 	await reloadWorkflowStageResources(resourceLoader, prepareOptions);
 	prepareOptions.signal?.throwIfAborted();
@@ -153,16 +154,21 @@ function disablePackageExtensions(source: PackageSource): PackageSource {
 	return { ...source, extensions: [] };
 }
 
-function stageBuiltinPackagePaths(paths: readonly PackageSource[]): PackageSource[] {
+function stageBuiltinPackagePaths(
+	paths: readonly PackageSource[],
+	builtins?: CreateAgentSessionOptions["builtins"],
+): PackageSource[] {
 	// Workflow stages are child AgentSessions owned by the workflow extension.
 	// Loading the workflows extension again inside that child session replays its
 	// `session_start` lifecycle and clears/kills the parent workflow store. Keep
 	// the workflows package itself so its bundled skills/prompts/resources remain
 	// available, but disable only its extension entry for stage sessions.
-	return paths.map((path) => {
-		const cloned = clonePackageSource(path);
-		return basename(packageSourcePath(cloned)) === "workflows" ? disablePackageExtensions(cloned) : cloned;
-	});
+	return paths
+		.filter((path) => builtins?.[basename(packageSourcePath(path)) as AtomicBuiltin] !== false)
+		.map((path) => {
+			const cloned = clonePackageSource(path);
+			return basename(packageSourcePath(cloned)) === "workflows" ? disablePackageExtensions(cloned) : cloned;
+		});
 }
 
 let workflowStageResourceReloadQueue: Promise<void> = Promise.resolve();

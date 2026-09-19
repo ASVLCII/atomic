@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 import { isStaleExtensionContextError, type AgentToolUpdateCallback, type ExtensionAPI, type ExtensionContext, type SubagentChildPolicy, type ToolInfo } from "@bastani/atomic";
 import type { McpExtensionState } from "./state.js";
 import type { McpConfig } from "./types.js";
@@ -43,6 +44,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
   let activeSession: ActiveMcpSession | null = null;
   let stateOwner: ActiveMcpSession | null = null;
   const cleanupBarrier = new McpSessionCleanupBarrier();
+  const unpublishedCleanupFailures: unknown[] = [];
 
   async function registerDirectToolsFromConfig(
     config: McpConfig,
@@ -114,10 +116,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
     } catch (error) {
       failures.push(error);
     }
-    for (const error of failures.slice(1)) {
-      console.error("MCP: additional state shutdown failure", error);
-    }
-    if (failures.length > 0) throw failures[0];
+    if (failures.length > 0) throw new AggregateError(failures, "MCP state shutdown failed");
   }
 
   async function cleanupSessionResources(currentState: McpExtensionState | null, reason: string, label: string): Promise<void> {
@@ -125,9 +124,8 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       shutdownState(currentState, reason),
       shutdownOAuthFlow(reason),
     ]);
-    for (const result of results) {
-      if (result.status === "rejected") console.error(label, result.reason);
-    }
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, label);
   }
 
   const earlyConfigPath = getConfigPathFromArgv();
@@ -198,6 +196,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       updateStatusBar(initializedState);
       let cancelWarmup: (() => void) | null = null;
       const warmup = scheduleMcpStartupWarmup(initializedState, {
+        hasUI: session.ctx.hasUI,
         subagentPolicy: session.ctx.subagentPolicy,
         shouldContinue: () => isCurrentSession(session) && state === initializedState,
         onDirectToolsChanged: async () => {
@@ -220,7 +219,9 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         try {
           await shutdownState(candidate, "failed_initialization");
         } catch (cleanupError) {
-          console.error("MCP: failed to clean unpublished initialization state", cleanupError);
+          const failure = new AggregateError([error, cleanupError], "MCP initialization and candidate cleanup failed");
+          unpublishedCleanupFailures.push(failure);
+          throw failure;
         }
       }
       throw error;
@@ -250,7 +251,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         if (activeSession !== session || session.generation !== lifecycleGeneration) return;
         const message = error instanceof Error ? error.message : String(error);
         if (!message.startsWith(STALE_INITIALIZATION_PREFIX) && !isStaleExtensionContextError(error)) {
-          console.error(
+          if (!reportOwnedMcpLog("error")) console.error(
             `MCP initialization failed for session generation ${session.generation}; a later MCP call will retry:`,
             error,
           );
@@ -297,13 +298,19 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       }
     } catch (error) {
       if (!isStartCurrent() || isStaleExtensionContextError(error)) return;
-      console.error("MCP: failed to register cached startup tools; enabling MCP proxy fallback", error);
+      if (!reportOwnedMcpLog("error")) console.error("MCP: failed to register cached startup tools; enabling MCP proxy fallback", error);
       registerProxyTool();
     }
 
     if (!isStartCurrent()) return;
     activeSession = { generation, ctx, cleanup };
-    void ensureMcpInitialized().catch(() => undefined);
+    // SDK discovery must not warm uncached lazy servers. Explicit startup
+    // lifecycles and terminal discovery retain their configured behavior.
+    if (ctx.hasUI || Object.values(renderConfig?.mcpServers ?? {}).some(
+      (server) => server.lifecycle === "eager" || server.lifecycle === "keep-alive",
+    )) {
+      void ensureMcpInitialized().catch(() => undefined);
+    }
   });
 
   pi.on("session_shutdown", async () => {
@@ -323,7 +330,15 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       "session_shutdown",
       "MCP: session shutdown cleanup failed",
     );
-    await cleanupBarrier.retain([retiredInitialization, stateCleanup]);
+    const failures: unknown[] = [];
+    try {
+      await cleanupBarrier.close([retiredInitialization?.catch(() => undefined), stateCleanup]);
+    } catch (error) {
+      if (!unpublishedCleanupFailures.length) throw error;
+      failures.push(error);
+    }
+    failures.push(...unpublishedCleanupFailures);
+    if (failures.length) throw new AggregateError(failures, "MCP session cleanup failed");
   });
 
   registerMcpCommands(pi, earlyConfigPath, async () => {

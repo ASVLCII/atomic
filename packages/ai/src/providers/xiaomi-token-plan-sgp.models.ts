@@ -4,5 +4,5 @@
 import values from "./data/xiaomi-token-plan-sgp.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const XIAOMI_TOKEN_PLAN_SGP_MODELS: ModelCatalog<typeof values, "xiaomi-token-plan-sgp"> =
+export const XIAOMI_TOKEN_PLAN_SGP_MODELS: ModelCatalog<typeof import("./data/xiaomi-token-plan-sgp.json", { with: { type: "json" } }), "xiaomi-token-plan-sgp"> =
 	flattenModelCatalog("xiaomi-token-plan-sgp", values);

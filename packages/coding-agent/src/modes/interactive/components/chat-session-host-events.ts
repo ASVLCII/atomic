@@ -1,5 +1,5 @@
 import type { AgentSession, AgentSessionEvent } from "../../../core/agent-session.js";
-import type { CompactionReason } from "../../../core/agent-session-types.ts";
+import type { CompactionReason } from "../../../core/agent-session-types.js";
 import {
 	type CompactionRung,
 	VERBATIM_COMPACTION_PROMPT_VERSION,
@@ -29,7 +29,7 @@ import {
 } from "./chat-session-host-utils.ts";
 import type { ChatTranscriptEntryLike } from "./chat-transcript.js";
 
-export type { CompactionReason } from "../../../core/agent-session-types.ts";
+export type { CompactionReason } from "../../../core/agent-session-types.js";
 
 export function compactionStatusMessage(reason: CompactionReason): string {
 	switch (reason) {

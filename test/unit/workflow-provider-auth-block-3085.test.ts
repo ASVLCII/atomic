@@ -104,7 +104,7 @@ function requestedProvider(model: unknown): string {
 }
 
 test("fabricated provider exhaustion becomes blocked, durably discoverable, and resumes without replaying prefix", async () => {
-	const cleanup: Array<() => void> = [];
+	const cleanup: Array<() => void | Promise<void>> = [];
 	try {
 		const dir = mkdtempSync(join(tmpdir(), "atomic-3085-wf-"));
 		cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -196,6 +196,8 @@ test("fabricated provider exhaustion becomes blocked, durably discoverable, and 
 						const { session } = await createAgentSession({
 							cwd: sessionDir,
 							agentDir: sessionDir,
+							// #3105: this provider-only stage fixture has no extension resources.
+							builtins: { workflows: false, subagents: false, intercom: false, mcp: false, "web-access": false },
 							modelRuntime,
 							model: modelRuntime.getModel(requestedProvider(options.model), "m")!,
 							fallbackModels: options.fallbackModels,
@@ -317,6 +319,6 @@ test("fabricated provider exhaustion becomes blocked, durably discoverable, and 
 		assert.equal(blocks().length, 1);
 	} finally {
 		vi.useRealTimers();
-		for (const dispose of cleanup.splice(0).reverse()) dispose();
+		for (const dispose of cleanup.splice(0).reverse()) await dispose();
 	}
 });

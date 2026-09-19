@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import { execFile } from "node:child_process";
 import { createChildProcessEnvironment } from "@bastani/atomic";
 import type { ExtractedContent } from "./extract.js";
@@ -24,7 +25,7 @@ export async function checkGhAvailable(): Promise<boolean> {
 export function showGhHint(): void {
 	if (!ghHintShown) {
 		ghHintShown = true;
-		console.error("[pi-web-access] Install `gh` CLI for better GitHub repo access including private repos.");
+		if (!reportOwnedWebDiagnostic("warning")) console.error("[pi-web-access] Install `gh` CLI for better GitHub repo access including private repos.");
 	}
 }
 

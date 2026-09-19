@@ -3,14 +3,12 @@ import { DbosNotReadyError } from "../durable/dbos-lifecycle.js";
 import { getDurableBackend } from "../durable/factory.js";
 import { isWorkflowRunResumable } from "../durable/resume-eligibility.js";
 import type { ResumableWorkflowEntry } from "../durable/types.js";
-import { toolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { hasPendingDurableResumeTransition } from "../runs/background/durable-resume-transition.js";
 import { quitAllRuns, quitRun } from "../runs/background/quit.js";
 import { pauseAllRuns, pauseRun, resumeRun } from "../runs/background/status.js";
 import { workflowHasPausedStages, workflowHasPausedState } from "../runs/background/workflow-lifecycle-aggregate.js";
 import { isRunIdPrefix } from "../shared/run-id.js";
 import { topLevelWorkflowRuns } from "../shared/run-visibility.js";
-import { store } from "../shared/store.js";
 import { workflowRunResumeCandidate } from "../shared/workflow-artifacts.js";
 import { deriveGraphTheme } from "../tui/graph-theme.js";
 import { renderSessionList } from "../tui/session-list.js";
@@ -28,6 +26,7 @@ import {
 	stageScopedDurableResumeMessage,
 	type WorkflowRunControlDeps,
 } from "./workflow-durable-resume-command.js";
+import { captureWorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { workflowPolicyFromContext } from "./workflow-policy.js";
 import {
 	collectResumePickerLiveRuns,
@@ -46,6 +45,14 @@ export async function handleRunControlCommand(
 	reporter: WorkflowCommandReporter,
 	deps: WorkflowRunControlDeps,
 ): Promise<boolean> {
+	const owner = deps.owner ?? captureWorkflowOwnerResources();
+	deps = { ...deps, owner };
+	const { store, toolControlRegistry } = owner;
+	const shadowDeps = {
+		jobs: owner.jobs,
+		stageControls: owner.stageControlRegistry,
+		toolControls: toolControlRegistry,
+	};
 	const policy = workflowPolicyFromContext(ctx);
 	const print = (msg: string): void => reporter.info(msg);
 	const fail = (msg: string): void => reporter.error(msg);
@@ -89,7 +96,7 @@ export async function handleRunControlCommand(
 			}
 			return true;
 		}
-		const resolved = resolveRunId(target);
+		const resolved = resolveRunId(target, store);
 		if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 			fail(resolved.message);
 			return true;
@@ -134,7 +141,7 @@ export async function handleRunControlCommand(
 					return true;
 				}
 			}
-			const results = action === "quit" ? await quitAllRuns({ actor: "user" }) : await pauseAllRuns();
+			const results = action === "quit" ? await quitAllRuns({ ...owner, actor: "user" }) : await pauseAllRuns(owner);
 			const successes = results.filter((result) => result.ok);
 			const changed = successes.length;
 			const failures = results.filter((result) => !result.ok);
@@ -162,7 +169,7 @@ export async function handleRunControlCommand(
 			}
 			return true;
 		}
-		const resolved = resolveRunId(target!);
+		const resolved = resolveRunId(target!, store);
 		if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 			fail(resolved.message);
 			return true;
@@ -178,7 +185,7 @@ export async function handleRunControlCommand(
 				return true;
 			}
 			try {
-				const result = await quitRun(resolved.runId, { actor: "user" });
+				const result = await quitRun(resolved.runId, { ...owner, actor: "user" });
 				if (result.ok)
 					print(result.message ?? `Run ${result.runId} quit and can be resumed with /workflow resume.`);
 				else if (result.reason === "already_ended") print(`Run ${result.runId} already ended.`);
@@ -201,7 +208,7 @@ export async function handleRunControlCommand(
 			}
 		}
 		try {
-			const result = await pauseRun(resolved.runId);
+			const result = await pauseRun(resolved.runId, owner);
 			if (result.ok) print(result.message ?? `Run ${result.runId} paused and can be resumed.`);
 			else
 				fail(
@@ -241,7 +248,7 @@ export async function handleRunControlCommand(
 				// first frame; durable/completed rows hydrate asynchronously and merge in.
 				// The RPC prompt carrying this slash command no longer times out while the
 				// picker awaits (long-lived command classification in RpcClient).
-				const initial = collectResumePickerLiveRuns(store);
+				const initial = collectResumePickerLiveRuns(store, shadowDeps);
 				const runtime = deps.runtimeForContext(ctx);
 				const hydrate = async (): Promise<ResumePickerCatalogRows> => {
 					await ensureWorkflowResourcesVisible();
@@ -251,8 +258,8 @@ export async function handleRunControlCommand(
 				let picked: Awaited<ReturnType<typeof openWorkflowResumeSelector>>;
 				try {
 					picked = await openWorkflowResumeSelector(ctx.ui, initial.liveRuns, hydrate, {
-						deleteWorkflow: deleteWorkflowResumeEntry,
-						...resumePickerLiveUpdateOptions(store, runtime),
+						deleteWorkflow: (workflowId) => deleteWorkflowResumeEntry(workflowId, store),
+						...resumePickerLiveUpdateOptions(store, runtime, shadowDeps),
 					});
 				} catch (error) {
 					// No fallback: a host without the session-picker capability fails
@@ -269,7 +276,7 @@ export async function handleRunControlCommand(
 					});
 				}
 				if (picked.result.kind === "live") {
-					const resolved = resolveRunId(picked.result.runId);
+					const resolved = resolveRunId(picked.result.runId, store);
 					if (!isResolvedRunId(resolved)) {
 						fail(`Run not found: ${picked.result.runId}`);
 						return true;
@@ -293,7 +300,7 @@ export async function handleRunControlCommand(
 						continuation.ok ? print(continuation.message) : fail(continuation.message);
 					} else {
 						try {
-							const result = await resumeRun(resolved.runId, { actor: "user" });
+							const result = await resumeRun(resolved.runId, { ...owner, actor: "user" });
 							if (result.ok && !isPaused && result.mode === "snapshot" && run?.exitReason === "quit") {
 								return await handleDurableResume(resolved.runId, ctx, reporter, deps);
 							}
@@ -336,7 +343,7 @@ export async function handleRunControlCommand(
 				fail(`Failed to resolve workflow resume target: ${error instanceof Error ? error.message : String(error)}`);
 				return true;
 			}
-			const localResolution = resolveRunId(target);
+			const localResolution = resolveRunId(target, store);
 			const localBeforePreparation = isResolvedRunId(localResolution)
 				? store.runs().find((run) => run.id === localResolution.runId)
 				: undefined;
@@ -344,7 +351,7 @@ export async function handleRunControlCommand(
 			const shadow =
 				localBeforePreparation === undefined
 					? "not_shadow"
-					: classifyDurableResumeShadow(localBeforePreparation, store, { backend });
+					: classifyDurableResumeShadow(localBeforePreparation, store, { ...shadowDeps, backend });
 			if (shadow === "ineligible") {
 				fail(
 					"Workflow " +
@@ -415,7 +422,9 @@ export async function handleRunControlCommand(
 					return true;
 				}
 				const loadableRuns = topLevelWorkflowRuns(store.runs()).filter(
-					(run) => backend.isWorkflowLoadable(run.id) && !reconcileDurableResumeShadow(run, store, { backend }),
+					(run) =>
+						backend.isWorkflowLoadable(run.id) &&
+						!reconcileDurableResumeShadow(run, store, { ...shadowDeps, backend }),
 				);
 				const combined = resolveWorkflowResumeTarget(target, loadableRuns, durable, completed);
 				if (combined.kind === "malformed" || combined.kind === "ambiguous") {
@@ -439,7 +448,7 @@ export async function handleRunControlCommand(
 				}
 			}
 		} else {
-			const resolved = resolveRunId(target);
+			const resolved = resolveRunId(target, store);
 			if (resolved.kind === "malformed" || resolved.kind === "ambiguous") {
 				fail(resolved.message);
 				return true;
@@ -451,7 +460,7 @@ export async function handleRunControlCommand(
 			runId = resolved.runId;
 		}
 		if (action === "attach") {
-			const resolvedStage = resolveStageTarget(runId, stageTarget);
+			const resolvedStage = resolveStageTarget(runId, stageTarget, store);
 			if (!resolvedStage.ok) {
 				fail(resolvedStage.message);
 				return true;
@@ -467,7 +476,7 @@ export async function handleRunControlCommand(
 			);
 			return true;
 		}
-		const resolvedStage = resolveStageTarget(runId, stageTarget);
+		const resolvedStage = resolveStageTarget(runId, stageTarget, store);
 		if (!resolvedStage.ok) {
 			fail(resolvedStage.message);
 			return true;
@@ -520,7 +529,7 @@ export async function handleRunControlCommand(
 		}
 		let result: Awaited<ReturnType<typeof resumeRun>>;
 		try {
-			result = await resumeRun(stageRunId, { stageId, message, actor: "user" });
+			result = await resumeRun(stageRunId, { ...owner, stageId, message, actor: "user" });
 		} catch (error) {
 			fail(`Failed to resume run ${stageRunId}: ${error instanceof Error ? error.message : String(error)}`);
 			return true;

@@ -1,5 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import type { QuestionData } from "../../../tool/types.ts";
+import type { QuestionData } from "../../../tool/types.js";
 import type { WrappingSelectItem } from "../wrapping-select.ts";
 import { BORDER_HORIZONTAL_OVERHEAD, BORDER_INNER_PADDING_HORIZONTAL } from "./preview-box-renderer.ts";
 

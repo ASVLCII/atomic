@@ -4,5 +4,5 @@
 import values from "./data/openai.json" with { type: "json" };
 import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";
 
-export const OPENAI_MODELS: ModelCatalog<typeof values, "openai"> =
+export const OPENAI_MODELS: ModelCatalog<typeof import("./data/openai.json", { with: { type: "json" } }), "openai"> =
 	flattenModelCatalog("openai", values);

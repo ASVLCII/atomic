@@ -1,5 +1,5 @@
 import { type Component, CURSOR_MARKER, type OverlayMargin, type SizeValue } from "@earendil-works/pi-tui";
-import { type ExtensionCustomComponent, OVERLAY_ACTIVE_ROW_MARKER } from "../../../core/extensions/ui-types.ts";
+import { type ExtensionCustomComponent, OVERLAY_ACTIVE_ROW_MARKER } from "../../../core/extensions/ui-types.js";
 import { theme } from "../theme/theme.js";
 
 /**

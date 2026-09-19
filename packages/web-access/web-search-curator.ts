@@ -1,3 +1,4 @@
+import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import type { ExtensionAPI } from "@bastani/atomic";
 import { randomUUID } from "node:crypto";
 import { startCuratorServer, type CuratorServerHandle } from "./curator-server.js";
@@ -126,7 +127,7 @@ export async function openCuratorBrowser(
 						saveConfig({ provider: normalized });
 					} catch (err) {
 						const message = err instanceof Error ? err.message : String(err);
-						console.error(`Failed to persist default provider: ${message}`);
+						if (!reportOwnedWebDiagnostic()) console.error(`Failed to persist default provider: ${message}`);
 					}
 				},
 				async onAddSearch(query, queryIndex, provider) {
@@ -206,7 +207,7 @@ export async function openCuratorBrowser(
 		);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error(`Failed to open curator UI: ${message}`);
+		if (!reportOwnedWebDiagnostic()) console.error(`Failed to open curator UI: ${message}`);
 		if (deps.state.pendingCurate === pc || (handle && deps.state.activeCurator === handle)) {
 			deps.closeCurator();
 		}

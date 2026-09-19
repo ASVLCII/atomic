@@ -247,6 +247,8 @@ export interface StageExecutionMeta {
 	onStartupPhase?: (phase: import("./stage-startup.js").StageStartupPhase) => void;
 	/** Creation-generation cancellation, separate from the session's lifetime signal. */
 	startupSignal?: AbortSignal;
+	/** Controller-selected fallback, not an explicitly authored primary model. */
+	isFallbackAttempt?: boolean;
 }
 
 export interface CompleteStageOpts extends WorkflowModelFallbackFields {

@@ -9,7 +9,7 @@ import type { SkillCatalog } from "../skill-catalog.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type { WorkflowStageAdmissionBoundary } from "../workflow-stage-admission.ts";
 import type { SendMessageOptions, SendMessagesOptions } from "./message-types.ts";
-import type { ExtensionUIContext } from "./ui-types.ts";
+import type { ExtensionUIContext } from "./ui-types.js";
 import type { WorkflowActivityObserver, WorkflowActivitySubscription } from "./workflow-events.js";
 
 export interface ContextUsage {
@@ -178,6 +178,8 @@ export interface ExtensionContext {
 	getExtensionPaths?(): string[];
 	/** Internal actual-session binding; never populated from model arguments. */
 	getAgentTaskHost?(): import("../tasks/agent-adapter.js").AgentTaskHost;
+	/** Internal owner-bound defaults and capability ceiling for builtin child adapters. */
+	getChildSessionOptions?: import("../child-session-options.ts").ChildSessionOptionsResolver;
 	/** Session-scoped orchestration policy for child runtimes such as workflow stages. */
 	readonly orchestrationContext?: OrchestrationContext;
 	/** Typed capability policy for an in-process subagent child, when this session is one. */
@@ -188,6 +190,8 @@ export interface ExtensionContext {
 	mode: ExtensionMode;
 	/** Whether dialog-capable UI is available (true in TUI and RPC modes) */
 	hasUI: boolean;
+	/** Whether a semantic human-input adapter is available, independently of rendering. */
+	hasHumanInput: boolean;
 	/** Current working directory */
 	cwd: string;
 	/** Session manager (read-only) */

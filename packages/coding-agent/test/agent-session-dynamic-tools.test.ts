@@ -96,9 +96,11 @@ describe("AgentSession dynamic tool registration", () => {
 			resourceLoader,
 		});
 
-		expect(session.getAllTools().map((tool) => tool.name)).not.toContain("dynamic_tool");
+		// #3105: factory startup is eager; later binding must not register a second tool.
+		expect(session.getAllTools().filter((tool) => tool.name === "dynamic_tool")).toHaveLength(1);
 
 		await session.bindExtensions({});
+		expect(session.getAllTools().filter((tool) => tool.name === "dynamic_tool")).toHaveLength(1);
 
 		const allTools = session.getAllTools();
 		const dynamicTool = allTools.find((tool) => tool.name === "dynamic_tool");

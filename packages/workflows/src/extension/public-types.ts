@@ -83,10 +83,12 @@ export interface PiModelContext {
 }
 
 export interface PiCommandContext extends PiModelContext {
+	readonly cwd?: string;
 	ui: {
 		notify: (message: string, type?: "info" | "warning" | "error") => void;
 	} & PiUISurface;
 	hasUI?: boolean;
+	hasHumanInput?: boolean;
 }
 
 export interface PiFlagNamedOpts {
@@ -152,6 +154,8 @@ type StageLateMessageRouter = NonNullable<
 >;
 
 export interface ExtensionAPI {
+	/** @internal Stable ownership identity across host generation replacement. */
+	readonly lifecycleScope?: object;
 	registerWorkflowActivityPublisher?: () => WorkflowActivityPublisher;
 	/** Present only when this extension instance belongs to an admitted in-process subagent child. */
 	readonly subagentPolicy?: CreateAgentSessionOptions["subagentPolicy"];
@@ -164,6 +168,7 @@ export interface ExtensionAPI {
 	getWorkflowResources?: () => readonly WorkflowResourceInfo[];
 	refreshWorkflowResources?: () => Promise<readonly WorkflowResourceInfo[]>;
 	getResourceLoaderInheritanceSnapshot?: () => DefaultResourceLoaderInheritanceSnapshot | undefined;
+	getChildSessionOptions?: (options: CreateAgentSessionOptions) => CreateAgentSessionOptions;
 	registerShortcut?: (
 		key: string,
 		opts: {

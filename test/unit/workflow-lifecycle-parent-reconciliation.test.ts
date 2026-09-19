@@ -22,9 +22,9 @@ describe("workflow lifecycle parent reconciliation", () => {
 	const tempDirs: string[] = [];
 	const unsubscriptions: Array<() => void> = [];
 
-	afterEach(() => {
+	afterEach(async () => {
 		while (unsubscriptions.length > 0) unsubscriptions.pop()?.();
-		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 		while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
 	});
 
@@ -324,10 +324,7 @@ describe("workflow lifecycle parent reconciliation", () => {
 		);
 		let terminalized = false;
 		let disposeScheduled = false;
-		let resolveDisposed!: () => void;
-		const disposed = new Promise<void>((resolve) => {
-			resolveDisposed = resolve;
-		});
+		const disposed = Promise.withResolvers<void>();
 		unsubscriptions.push(
 			harness.session.subscribe((event) => {
 				if (!terminalized && event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
@@ -343,8 +340,8 @@ describe("workflow lifecycle parent reconciliation", () => {
 				) {
 					disposeScheduled = true;
 					queueMicrotask(() => {
-						harness.session.dispose();
-						resolveDisposed();
+						// #3105: observe the final persistence flush, not merely the call to dispose.
+						void harness.session.dispose().then(disposed.resolve, disposed.reject);
 					});
 					throw new Error("listener failure before session replacement");
 				}
@@ -355,11 +352,23 @@ describe("workflow lifecycle parent reconciliation", () => {
 			fauxAssistantMessage("dispose-retry failed and was reconciled."),
 		]);
 
-		await assert.rejects(
-			harness.session.prompt("Wait for dispose-retry."),
-			/listener failure before session replacement/,
-		);
-		await disposed;
+		// #3105: terminal disposal owns callback failure reporting while still flushing persistence.
+		const rejectedDisposal = assert.rejects(disposed.promise, (error) => {
+			assert.ok(error instanceof AggregateError);
+			assert.equal("code" in error && error.code, "ShutdownFailed");
+			assert.ok(
+				error.errors.some(
+					(component: Error) =>
+						component.cause instanceof Error &&
+						component.cause.message === "listener failure before session replacement",
+				),
+			);
+			return true;
+		});
+		await harness.session.prompt("Wait for dispose-retry.");
+		await rejectedDisposal;
+		assert.equal(harnesses.pop(), harness);
+		await assert.rejects(harness.cleanup(), { code: "ShutdownFailed" });
 
 		assert.equal(disposeScheduled, true);
 		assert.equal(hiddenPersistenceAttempts, 3, "disposal must make a final persistence attempt before state is lost");

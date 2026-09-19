@@ -43,7 +43,7 @@ export {
 export type * from "./tool-types.ts";
 
 export { defineTool } from "./tool-types.ts";
-export type * from "./ui-types.ts";
+export type * from "./ui-types.js";
 
 /**
  * The read-only model scope an extension reads as `ctx.scopedModels`.

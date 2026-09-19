@@ -242,6 +242,7 @@ export async function runParallelPath(
 			agents,
 			...(data.parallelAgentConfigs ? { agentConfigs } : {}),
 			ctx,
+			resourceLoaderInheritanceSnapshot: deps.pi.getResourceLoaderInheritanceSnapshot?.(),
 			intercomEvents: deps.pi.events,
 			signal,
 			runId,

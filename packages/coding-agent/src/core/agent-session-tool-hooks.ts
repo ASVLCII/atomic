@@ -38,15 +38,18 @@ export function _installAgentToolHooks(this: AgentSession): void {
 	this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
 		const runner = this._extensionRunner;
 		const hookResult = runner.hasHandlers("tool_result")
-			? await runner.emitToolResult({
-					type: "tool_result",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					input: args as Record<string, unknown>,
-					content: result.content,
-					details: result.details,
-					isError,
-				})
+			? await runner.emitToolResult(
+					{
+						type: "tool_result",
+						toolName: toolCall.name,
+						toolCallId: toolCall.id,
+						input: args as Record<string, unknown>,
+						content: result.content,
+						details: result.details,
+						isError,
+					},
+					true,
+				)
 			: undefined;
 
 		const hookContent = hookResult?.content ?? result.content;

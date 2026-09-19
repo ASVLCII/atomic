@@ -439,7 +439,7 @@ async function inspectTasksDuringPause(failureBeforeSettlement?: Error): Promise
 		abort.abort();
 		await running;
 		registry.clear();
-		harness.cleanup();
+		await harness.cleanup();
 	}
 }
 
@@ -580,7 +580,7 @@ test("editable postmortem skill invocation appends to its own retained session w
 		assert.equal(fixture.userTexts().length, 1);
 	} finally {
 		registry.clear();
-		restored?.cleanup();
+		await restored?.cleanup();
 		await fixture.cleanup();
 	}
 });
@@ -686,7 +686,7 @@ test("concurrent lazy discovery across stage panes attaches once and keeps the r
 		release.resolve();
 		checkpoint.mockRestore();
 		registry.clear();
-		restored?.cleanup();
+		await restored?.cleanup();
 		await fixture.cleanup();
 	}
 });
@@ -767,7 +767,7 @@ test("lazy stage skill discovery failures are contained, diagnosed and retryable
 	} finally {
 		release.resolve();
 		registry.clear();
-		restored?.cleanup();
+		await restored?.cleanup();
 		await fixture.cleanup();
 	}
 });

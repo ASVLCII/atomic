@@ -1,5 +1,5 @@
 import { ROW_INTENT_META } from "../state/row-intent.ts";
-import type { QuestionAnswer } from "./types.ts";
+import type { QuestionAnswer } from "./types.js";
 
 /**
  * Continuation message used in the LLM-facing envelope. Two-sentence form —

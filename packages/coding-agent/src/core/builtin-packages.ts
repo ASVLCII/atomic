@@ -4,6 +4,7 @@ import { getPackageDir } from "../config.js";
 import { moduleDirFromMetaUrl } from "../utils/split-launcher.ts";
 import { stripBom } from "../utils/text.ts";
 import { type BuiltinPackageDirName, requiredEntriesForBuiltin } from "./builtin-install-layout.ts";
+import type { AtomicBuiltin } from "./sdk-types.ts";
 
 interface BuiltinPackageDescriptor {
 	readonly packageName: string;
@@ -110,16 +111,42 @@ function getBuiltinPackageCandidateContext(): BuiltinPackageCandidateContext {
 }
 
 /** Atomic-owned builtin package roots paired with their verified descriptors. */
-export function getBuiltinPackageLocations(): BuiltinPackageLocation[] {
+export function getBuiltinPackageLocations(
+	required = false,
+	builtins?: Partial<Record<AtomicBuiltin, boolean>>,
+): BuiltinPackageLocation[] {
 	const context = getBuiltinPackageCandidateContext();
 	return BUILTIN_PACKAGES.flatMap((descriptor) => {
+		if (builtins?.[descriptor.distDirName] === false) return [];
 		const packageDir = firstExistingPackageDir(
 			[...descriptor.sourceCandidates(context), ...distCandidates(context, descriptor)],
 			descriptor,
 		);
+		if (!packageDir && required) {
+			throw Object.assign(new Error(`Builtin unavailable: ${descriptor.packageName}`), {
+				code: "BuiltinUnavailable",
+			});
+		}
 		return packageDir
 			? [{ packageName: descriptor.packageName, distDirName: descriptor.distDirName, packageDir }]
 			: [];
+	});
+}
+
+/** Every verified shipped root, including alternate source/dist locations in a built checkout. */
+export function getAllBuiltinPackageLocations(): BuiltinPackageLocation[] {
+	const context = getBuiltinPackageCandidateContext();
+	return BUILTIN_PACKAGES.flatMap((descriptor) => {
+		const candidates = new Set(
+			[...descriptor.sourceCandidates(context), ...distCandidates(context, descriptor)].map((path) => resolve(path)),
+		);
+		return [...candidates]
+			.filter((path) => isPackageDir(path, descriptor))
+			.map((packageDir) => ({
+				packageName: descriptor.packageName,
+				distDirName: descriptor.distDirName,
+				packageDir,
+			}));
 	});
 }
 
@@ -135,8 +162,8 @@ export function getBuiltinPackageLocations(): BuiltinPackageLocation[] {
  * Bun binary layout:
  *   process executable dir -> builtin/<package>
  */
-export function getBuiltinPackagePaths(): string[] {
-	return getBuiltinPackageLocations().map(({ packageDir }) => packageDir);
+export function getBuiltinPackagePaths(builtins?: Partial<Record<AtomicBuiltin, boolean>>): string[] {
+	return getBuiltinPackageLocations(true, builtins).map(({ packageDir }) => packageDir);
 }
 
 /** Built-in package roots whose extensions Atomic must load in every model session. */

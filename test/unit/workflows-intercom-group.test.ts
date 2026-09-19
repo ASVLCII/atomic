@@ -38,14 +38,17 @@ test("resolveStageGroup namespaces explicit and automatic workflow subgroups und
 	assert.notEqual(a, b, "each single-stage true mints its own invocation-owned subgroup");
 });
 
-test("workflow tool restrictions never remove Intercom access", () => {
+// #3105: explicit suppression no longer has a mandatory Intercom exception.
+test("workflow tool restrictions remove Intercom access without widening explicit selections", () => {
 	assert.equal(stageHasIntercomAccess(undefined), true);
 	assert.equal(stageHasIntercomAccess({} as StageOptions), true);
-	assert.equal(stageHasIntercomAccess({ noTools: "all" } as StageOptions), true);
+	assert.equal(stageHasIntercomAccess({ noTools: "all" } as StageOptions), false);
 	assert.equal(stageHasIntercomAccess({ noTools: "builtin" } as StageOptions), true);
-	assert.equal(stageHasIntercomAccess({ tools: ["bash", "read"] } as StageOptions), true);
+	assert.equal(stageHasIntercomAccess({ tools: ["bash", "read"] } as StageOptions), false);
 	assert.equal(stageHasIntercomAccess({ tools: ["bash", "intercom"] } as StageOptions), true);
-	assert.equal(stageHasIntercomAccess({ excludedTools: ["intercom"] } as StageOptions), true);
+	assert.equal(stageHasIntercomAccess({ excludedTools: ["intercom"] } as StageOptions), false);
+	assert.equal(stageHasIntercomAccess({ tools: [] } as StageOptions), false);
+	assert.equal(stageHasIntercomAccess({ builtins: { intercom: false } } as StageOptions), false);
 });
 
 // Regression coverage for #2784.

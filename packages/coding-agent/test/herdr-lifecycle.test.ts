@@ -308,6 +308,8 @@ test("SDK successor reuses the loaded reporter after owning shutdown and continu
 				model: fauxModel,
 				noTools: "all",
 				sessionStartEvent: { type: "session_start", reason: index === 0 ? "startup" : "new" },
+				// #3105: the reporter needs presentation capability during factory startup.
+				extensionBindings: { mode: "tui", uiContext: { ...noOpUIContext } },
 			});
 			try {
 				await session.bindExtensions({ mode: "tui", uiContext: { ...noOpUIContext } });
@@ -318,7 +320,7 @@ test("SDK successor reuses the loaded reporter after owning shutdown and continu
 				]);
 			} finally {
 				await session.extensionRunner.emit({ type: "session_shutdown", reason: index === 0 ? "new" : "quit" });
-				session.dispose();
+				await session.dispose();
 			}
 		}
 		assert.equal(faux.state.callCount, 2, "two successful deterministic prompts, without network or retries");

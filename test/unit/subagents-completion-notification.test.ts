@@ -6,6 +6,7 @@ import {
 	createExtensionRuntime,
 	loadExtensionFromFactory,
 } from "../../packages/coding-agent/src/core/extensions/loader.js";
+import { boundExtensionRuntimes } from "../../packages/coding-agent/src/core/extensions/loader-runtime.js";
 import { deliverLocalCompletionNotification } from "../../packages/subagents/src/runs/foreground/completion-notification.js";
 import registerSubagentNotify from "../../packages/subagents/src/runs/foreground/notify.js";
 
@@ -27,6 +28,8 @@ async function loadNotifyRegistration(
 		extensionPath,
 	);
 	assert.equal(registrations.length, 1);
+	// #3105: model a bound host, not a discovery-only factory whose events stay inactive.
+	boundExtensionRuntimes.add(runtime);
 	return { runtime, ...registrations[0]! };
 }
 

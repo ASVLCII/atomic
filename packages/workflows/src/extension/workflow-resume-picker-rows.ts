@@ -19,7 +19,7 @@ import { workflowRunResumeCandidate } from "../shared/workflow-artifacts.js";
 import type { WorkflowResumeRefresh } from "../tui/workflow-resume-selector.js";
 import type { ExtensionRuntime } from "./runtime.js";
 import { prepareWorkflowResumeCatalog } from "./workflow-durable-resume-command.js";
-import { classifyDurableResumeShadow } from "./workflow-resume-shadow.js";
+import { classifyDurableResumeShadow, type DurableResumeShadowDeps } from "./workflow-resume-shadow.js";
 
 export interface ResumePickerLiveSource {
 	readonly liveRuns: readonly RunSnapshot[];
@@ -38,12 +38,12 @@ function isResumableLiveRun(run: RunSnapshot): boolean {
 	return isWorkflowRunResumable(workflowRunResumeCandidate(run));
 }
 
-export function collectResumePickerLiveRuns(runStore: Store): ResumePickerLiveSource {
+export function collectResumePickerLiveRuns(runStore: Store, deps?: DurableResumeShadowDeps): ResumePickerLiveSource {
 	// `eligible` rows are re-listed from the durable catalog, and `ineligible`
 	// rows have no durable checkpoint or pending prompt progress, so the resume
 	// path would refuse them. Only `not_shadow` runs can actually be resumed here.
 	const runs = topLevelWorkflowRuns(runStore.runs());
-	const shadowClassification = new Map(runs.map((run) => [run.id, classifyDurableResumeShadow(run, runStore)]));
+	const shadowClassification = new Map(runs.map((run) => [run.id, classifyDurableResumeShadow(run, runStore, deps)]));
 	const isOfferable = (run: RunSnapshot): boolean => shadowClassification.get(run.id) === "not_shadow";
 	const resumableById = new Map(runs.map((run) => [run.id, isResumableLiveRun(run)]));
 	const liveRuns = runs.filter((run) => isOfferable(run) && resumableById.get(run.id) === true);
@@ -76,11 +76,12 @@ export interface ResumePickerLiveUpdateOptions {
 export function resumePickerLiveUpdateOptions(
 	runStore: Store,
 	runtime: ExtensionRuntime,
+	deps?: DurableResumeShadowDeps,
 ): ResumePickerLiveUpdateOptions {
 	return {
 		watch: (onChange) => subscribeStoreInvalidation(runStore, onChange),
 		refresh: async () => {
-			const current = collectResumePickerLiveRuns(runStore);
+			const current = collectResumePickerLiveRuns(runStore, deps);
 			const catalog = await prepareWorkflowResumeCatalog(runtime, current.suppressedLiveIds);
 			return {
 				liveRuns: current.liveRuns,

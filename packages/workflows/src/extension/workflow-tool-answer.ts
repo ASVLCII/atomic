@@ -9,13 +9,12 @@ import {
 	primitivePromptAnswerRejection,
 } from "../shared/prompt-answer.js";
 import { coerceStageInputAnswer, hasStageInputAnswerContent, type StageInputAnswer } from "../shared/stage-prompt.js";
-import { stageUiBroker } from "../shared/stage-ui-broker.js";
-import { store } from "../shared/store.js";
 import { isTerminalRunStatus } from "../shared/store-internal.js";
 import { readGraphStoreSnapshot } from "../shared/store-observation.js";
 import { reciprocalWorkflowRootRunId } from "../shared/workflow-run-ownership.js";
 import type { WorkflowToolArgs } from "./public-types.js";
 import type { WorkflowToolResult } from "./render-result.js";
+import { captureWorkflowOwnerResources, type WorkflowOwnerResources } from "./workflow-owner-resources.js";
 import { resolveToolRunTarget, resolveToolStageTarget, type ToolStageTarget } from "./workflow-targets.js";
 
 type WorkflowAnswerToolResult = Extract<WorkflowToolResult, { action: "answer" }>;
@@ -72,7 +71,7 @@ function brokerAnswerFromArgs(args: WorkflowToolArgs): StageInputAnswer {
 	return text !== undefined ? { text } : {};
 }
 
-function answerablePromptIds(stage: ExpandedWorkflowStage): string[] {
+function answerablePromptIds(stage: ExpandedWorkflowStage, { stageUiBroker }: WorkflowOwnerResources): string[] {
 	const target = stage.workflowGraphTarget;
 	const ids: string[] = [];
 	const brokered = stageUiBroker.peekStagePrompt(target.runId, target.stageId);
@@ -83,9 +82,13 @@ function answerablePromptIds(stage: ExpandedWorkflowStage): string[] {
 	return ids;
 }
 
-function inferPromptStageTarget(runId: string, promptId: string | undefined): ToolStageTarget {
-	const pending = expandWorkflowGraph(readGraphStoreSnapshot(store), runId).stages.filter((stage) => {
-		const ids = answerablePromptIds(stage);
+function inferPromptStageTarget(
+	runId: string,
+	promptId: string | undefined,
+	owner: WorkflowOwnerResources,
+): ToolStageTarget {
+	const pending = expandWorkflowGraph(readGraphStoreSnapshot(owner.store), runId).stages.filter((stage) => {
+		const ids = answerablePromptIds(stage, owner);
 		return promptId === undefined ? ids.length > 0 : ids.includes(promptId);
 	});
 	const only = pending[0];
@@ -106,8 +109,12 @@ function inferPromptStageTarget(runId: string, promptId: string | undefined): To
 /**
  * Answer a pending workflow prompt without providing a stage-message path.
  */
-export async function workflowAnswerAction(args: WorkflowToolArgs): Promise<WorkflowAnswerToolResult> {
-	const target = resolveToolRunTarget(args, "No active run with a pending prompt.");
+export async function workflowAnswerAction(
+	args: WorkflowToolArgs,
+	owner = captureWorkflowOwnerResources(),
+): Promise<WorkflowAnswerToolResult> {
+	const { store, stageUiBroker } = owner;
+	const target = resolveToolRunTarget(args, "No active run with a pending prompt.", store);
 	if (target.kind === "all") return answerResult("--all", "", "noop", "Answer requires a single run.");
 	if (target.kind === "malformed" || target.kind === "not_found") {
 		return answerResult(target.target, "", "noop", target.message);
@@ -119,9 +126,11 @@ export async function workflowAnswerAction(args: WorkflowToolArgs): Promise<Work
 	if (rootRun !== undefined && isTerminalRunStatus(rootRun.status)) {
 		return terminalAnswerResult(rootRun.id, args.stageId?.trim() ?? "", rootRun.status);
 	}
-	const requested = resolveToolStageTarget(target.runId, args.stageId);
+	const requested = resolveToolStageTarget(target.runId, args.stageId, store);
 	const stage =
-		requested.ok && requested.stageId === undefined ? inferPromptStageTarget(target.runId, args.promptId) : requested;
+		requested.ok && requested.stageId === undefined
+			? inferPromptStageTarget(target.runId, args.promptId, owner)
+			: requested;
 	if (!stage.ok || stage.stageId === undefined) {
 		return answerResult(target.runId, "", "noop", stage.ok ? "Stage id or name is required." : stage.message);
 	}

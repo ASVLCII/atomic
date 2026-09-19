@@ -1,4 +1,4 @@
-import type { QuestionData } from "../../tool/types.ts";
+import type { QuestionData } from "../../tool/types.js";
 import type { PreviewPaneProps } from "../../view/components/preview/preview-pane.ts";
 import type { WrappingSelectItem } from "../../view/components/wrapping-select.ts";
 import type { ActiveView, StatefulView } from "../../view/stateful-view.ts";

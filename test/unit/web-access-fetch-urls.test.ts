@@ -41,8 +41,7 @@ vi.mock("../../packages/web-access/extract.js", () => ({ fetchAllContent }));
 vi.mock("../../packages/web-access/code-search.js", () => ({ executeCodeSearch: vi.fn() }));
 vi.mock("../../packages/web-access/storage.js", () => ({
 	generateId: () => "fetch-test",
-	getResult: vi.fn(),
-	storeResult: vi.fn(),
+	createResultStorage: () => ({ getResult: vi.fn(), storeResult: vi.fn() }),
 }));
 
 // Keep excluded legacy web-access sources out of the root typecheck, while testing the real modules.

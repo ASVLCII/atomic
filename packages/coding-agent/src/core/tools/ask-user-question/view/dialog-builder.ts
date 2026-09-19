@@ -2,7 +2,7 @@ import { type Component, Container, type Input, Spacer } from "@earendil-works/p
 import { DynamicBorder } from "../../../../modes/interactive/components/index.ts";
 import type { Theme } from "../../../../modes/interactive/theme/theme.js";
 import type { QuestionnaireState } from "../state/state.ts";
-import type { QuestionData } from "../tool/types.ts";
+import type { QuestionData } from "../tool/types.js";
 import { BodyResidualSpacer } from "./body-residual-spacer.ts";
 import type { ChatRowView } from "./components/chat-row-view.ts";
 import type { PreviewPaneProps } from "./components/preview/preview-pane.ts";

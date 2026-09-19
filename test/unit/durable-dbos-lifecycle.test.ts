@@ -6,6 +6,7 @@ import {
 	type DbosSdkHandle,
 } from "../../packages/workflows/src/durable/dbos-backend.js";
 import {
+	acquireDbosLease,
 	DbosDurabilityError,
 	dbosLifecycleState,
 	getReadyDbosBackend,
@@ -51,6 +52,60 @@ function configured(
 afterEach(() => resetDbosLifecycleForTests());
 
 describe("mandatory DBOS lifecycle", () => {
+	// #3105: independently owned hosts share DBOS without sharing disposal.
+	test.sequential("leases preserve siblings and a fresh owner can relaunch registered durability", async () => {
+		const events: string[] = [];
+		let configurations = 0;
+		resetDbosLifecycleForTests(async () => {
+			configurations++;
+			return configured(events);
+		});
+		const first = acquireDbosLease();
+		const sibling = acquireDbosLease();
+		await getReadyDbosBackend();
+		await first();
+		assert.equal(dbosLifecycleState(), "ready");
+		await sibling();
+		assert.equal(dbosLifecycleState(), "shut_down");
+		await sibling();
+		const next = acquireDbosLease();
+		await getReadyDbosBackend();
+		assert.equal(configurations, 1);
+		assert.deepEqual(events, ["launch", "shutdown", "launch"]);
+		await next();
+		assert.deepEqual(events, ["launch", "shutdown", "launch", "shutdown"]);
+	});
+
+	// #3105: acquiring while the last close is flushing cannot expose a stopping executor.
+	test.sequential("a new lease waits for in-progress shutdown before relaunch", async () => {
+		const events: string[] = [];
+		let finish!: () => void;
+		const pending = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		resetDbosLifecycleForTests(async () =>
+			configured(events, undefined, async () => {
+				await pending;
+				events.push("shutdown");
+			}),
+		);
+		const release = acquireDbosLease();
+		await getReadyDbosBackend();
+		const closing = release();
+		const next = acquireDbosLease();
+		let ready = false;
+		const launching = getReadyDbosBackend().then(() => {
+			ready = true;
+		});
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(ready, false);
+		finish();
+		await closing;
+		await launching;
+		assert.deepEqual(events, ["launch", "shutdown", "launch"]);
+		await next();
+	});
+
 	test.sequential("configures and launches exactly once for concurrent callers", async () => {
 		const events: string[] = [];
 		let configurationCalls = 0;
@@ -168,7 +223,7 @@ describe("mandatory DBOS lifecycle", () => {
 		assert.equal(dbosLifecycleState(), "failed");
 	});
 
-	test.sequential("shutdown after a launch failure cleans the local provider without SDK shutdown", async () => {
+	test.sequential("shutdown after a launch failure cleans partial SDK and local resources", async () => {
 		const events: string[] = [];
 		let localShutdowns = 0;
 		resetDbosLifecycleForTests(
@@ -184,7 +239,7 @@ describe("mandatory DBOS lifecycle", () => {
 
 		await assert.rejects(getReadyDbosBackend(), DbosDurabilityError);
 		await shutdownDbos();
-		assert.equal(events.filter((event) => event === "shutdown").length, 0);
+		assert.equal(events.filter((event) => event === "shutdown").length, 1);
 		assert.equal(localShutdowns, 1);
 		assert.equal(dbosLifecycleState(), "failed");
 	});

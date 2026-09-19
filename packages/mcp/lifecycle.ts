@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 import type { ServerDefinition } from "./types.js";
 import type { McpServerManager } from "./server-manager.ts";
 import { logger } from "./logger.ts";
@@ -63,7 +64,7 @@ export class McpLifecycleManager {
           // Notify extension to update metadata
           this.onReconnect?.(name);
         } catch (error) {
-          console.error(`MCP: Failed to reconnect to ${name}:`, error);
+          if (!reportOwnedMcpLog("error")) console.error(`MCP: Failed to reconnect to ${name}:`, error);
         }
       }
     }

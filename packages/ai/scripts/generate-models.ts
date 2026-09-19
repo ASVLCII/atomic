@@ -2512,10 +2512,9 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
-		// Match Atomic's kimi.com endpoint after models.dev split the regional coding plans.
-		const kimiCoding = data["kimi-code-plan-cn"] ?? data["kimi-for-coding"];
-		if (kimiCoding?.models) {
-			const kimiModels = kimiCoding.models as Record<string, ModelsDevModel>;
+		// The .com coding plan was renamed in models.dev; retain our existing provider and transport.
+		const kimiModels = data["kimi-code-plan-cn"]?.models ?? data["kimi-for-coding"]?.models;
+		if (kimiModels) {
 			const hasCanonicalModel = Object.prototype.hasOwnProperty.call(kimiModels, "kimi-for-coding");
 
 			const kimiAliases = new Set(["k2p5", "k2p6", "k2p7"]);
@@ -3396,7 +3395,9 @@ async function generateModels() {
 					let output = generatedHeader;
 					output += `import values from "./data/${providerId}.json" with { type: "json" };\n`;
 					output += `import { flattenModelCatalog, type ModelCatalog } from "../model-catalog.ts";\n\n`;
-					output += `export const ${catalogConstName(providerId)}: ModelCatalog<typeof values, ${JSON.stringify(providerId)}> =\n`;
+					// Keep the JSON attribute in the public type query: declaration emit can drop
+					// attributes from value imports retained only for `typeof values` (#3105).
+					output += `export const ${catalogConstName(providerId)}: ModelCatalog<typeof import("./data/${providerId}.json", { with: { type: "json" } }), ${JSON.stringify(providerId)}> =\n`;
 					output += `\tflattenModelCatalog(${JSON.stringify(providerId)}, values);\n`;
 					const filename = `${providerId}.models.ts`;
 					generatedShardFiles.add(filename);

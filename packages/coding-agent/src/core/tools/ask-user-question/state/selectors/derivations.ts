@@ -1,4 +1,4 @@
-import type { QuestionAnswer, QuestionData } from "../../tool/types.ts";
+import type { QuestionAnswer, QuestionData } from "../../tool/types.js";
 import type { WrappingSelectItem } from "../../view/components/wrapping-select.ts";
 import { ROW_INTENT_META } from "../row-intent.ts";
 

@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import type { Readable } from "node:stream";
 import { createChildProcessEnvironment } from "@bastani/atomic";
 
 export interface BunSubprocessOptions {
@@ -28,75 +30,85 @@ export class AsyncSubprocessError extends Error {
 	}
 }
 
-async function readBounded(
-	stream: ReadableStream<Uint8Array>,
-	maxBytes: number,
-	onOverflow: () => void,
-): Promise<Buffer> {
-	const reader = stream.getReader();
-	const chunks: Uint8Array[] = [];
+async function readBounded(stream: Readable, maxBytes: number, onOverflow: (error: AsyncSubprocessError) => void): Promise<Buffer> {
+	const chunks: Buffer[] = [];
 	let bytes = 0;
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			bytes += value.byteLength;
-			if (bytes > maxBytes) {
-				onOverflow();
-				throw new AsyncSubprocessError(`Subprocess output exceeded ${maxBytes} bytes`, { code: "ENOBUFS", killed: true });
-			}
-			chunks.push(value);
+	for await (const chunk of stream) {
+		const value = chunk as Buffer;
+		bytes += value.byteLength;
+		if (bytes > maxBytes) {
+			const error = new AsyncSubprocessError(`Subprocess output exceeded ${maxBytes} bytes`, { code: "ENOBUFS", killed: true });
+			onOverflow(error);
+			throw error;
 		}
-	} finally {
-		reader.releaseLock();
+		chunks.push(value);
 	}
-	return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), bytes);
+	return Buffer.concat(chunks, bytes);
 }
 
+/** Node's child-process adapter also runs in the compiled Bun host. */
 export async function runBunSubprocess(
 	command: string,
 	args: readonly string[],
 	options: BunSubprocessOptions,
 ): Promise<BunSubprocessResult> {
-	let proc: ReturnType<typeof Bun.spawn>;
-	try {
-		proc = Bun.spawn([command, ...args], {
-			cwd: options.cwd,
-			env: createChildProcessEnvironment(options.env),
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-	} catch (error) {
-		const failure = error instanceof Error ? error : new Error(String(error));
-		throw new AsyncSubprocessError(failure.message, { code: (failure as Error & { code?: string }).code });
+	if (options.signal?.aborted) {
+		throw new AsyncSubprocessError(`${command} aborted`, { code: "ABORT_ERR", killed: true });
 	}
-	let timedOut = false;
-	let aborted = false;
-	const terminate = (): void => {
-		try { proc.kill("SIGTERM"); } catch {}
-		void Promise.race([proc.exited, Bun.sleep(500)]).then(() => {
-			if (proc.exitCode === null) try { proc.kill("SIGKILL"); } catch {}
+	let primaryError: AsyncSubprocessError | undefined;
+	let escalation: ReturnType<typeof setTimeout> | undefined;
+	const proc = spawn(command, args, {
+		cwd: options.cwd,
+		env: createChildProcessEnvironment(options.env),
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const exited = new Promise<number>((resolve, reject) => {
+		proc.once("error", (error: NodeJS.ErrnoException) => {
+			reject(new AsyncSubprocessError(error.message, { code: error.code }));
 		});
+		proc.once("exit", (code) => resolve(code ?? -1));
+	});
+	const terminate = (): void => {
+		if (escalation) return;
+		proc.kill("SIGTERM");
+		escalation = setTimeout(() => {
+			proc.kill("SIGKILL");
+			// Descendants can keep inherited descriptors open after the direct
+			// child exits. Bound that drain independently from child reaping.
+			proc.stdout.destroy();
+			proc.stderr.destroy();
+		}, 500);
 	};
-	const onAbort = (): void => { aborted = true; terminate(); };
+	const fail = (error: AsyncSubprocessError): void => {
+		primaryError ??= error;
+		terminate();
+	};
+	const onAbort = (): void => fail(new AsyncSubprocessError(`${command} aborted`, { code: "ABORT_ERR", killed: true }));
 	options.signal?.addEventListener("abort", onAbort, { once: true });
-	const timeout = setTimeout(() => { timedOut = true; terminate(); }, options.timeoutMs);
+	const timeout = setTimeout(() => fail(new AsyncSubprocessError(`${command} timed out`, { code: "ETIMEDOUT", killed: true })), options.timeoutMs);
+	const output = [
+		readBounded(proc.stdout, options.maxStdoutBytes, fail),
+		readBounded(proc.stderr, options.maxStderrBytes ?? 256 * 1024, fail),
+	] as const;
 	try {
-		const stdoutPromise = readBounded(proc.stdout as ReadableStream<Uint8Array>, options.maxStdoutBytes, terminate);
-		const stderrPromise = readBounded(proc.stderr as ReadableStream<Uint8Array>, options.maxStderrBytes ?? 256 * 1024, terminate);
-		const [exitCode, stdout, stderrBuffer] = await Promise.all([proc.exited, stdoutPromise, stderrPromise]);
+		const [exitCode, stdout, stderrBuffer] = await Promise.all([exited, ...output]);
 		const stderr = stderrBuffer.toString("utf8");
-		if (timedOut) throw new AsyncSubprocessError(`${command} timed out`, { code: "ETIMEDOUT", stderr, killed: true });
-		if (aborted) throw new AsyncSubprocessError(`${command} aborted`, { code: "ABORT_ERR", stderr, killed: true });
+		if (primaryError) {
+			primaryError = new AsyncSubprocessError(primaryError.message, { code: primaryError.code, stderr, killed: true });
+			throw primaryError;
+		}
 		if (exitCode !== 0) throw new AsyncSubprocessError(`${command} exited with code ${exitCode}`, { code: String(exitCode), stderr });
 		return { exitCode, stdout, stderr };
 	} catch (error) {
+		const failure = primaryError ?? (error instanceof AsyncSubprocessError ? error :
+			new AsyncSubprocessError(error instanceof Error ? error.message : String(error), { killed: true }));
+		clearTimeout(timeout);
 		terminate();
-		if (error instanceof AsyncSubprocessError) throw error;
-		throw new AsyncSubprocessError(error instanceof Error ? error.message : String(error), { killed: true });
+		await Promise.allSettled([exited, ...output]);
+		throw failure;
 	} finally {
 		clearTimeout(timeout);
+		clearTimeout(escalation);
 		options.signal?.removeEventListener("abort", onAbort);
 	}
 }

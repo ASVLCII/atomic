@@ -4,7 +4,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolveWorkflowStageDeliveryTarget } from "./agent-session-delivery-forwarding.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
-import type { PromptOptions } from "./agent-session-types.ts";
+import type { PromptOptions } from "./agent-session-types.js";
 import {
 	formatNoApiKeyFoundMessage,
 	formatNoModelSelectedMessage,
@@ -12,6 +12,12 @@ import {
 } from "./auth-guidance.ts";
 import { runCallback } from "./callback-activity.ts";
 import { expandPromptTemplate } from "./prompt-templates.ts";
+import {
+	assertSessionOpen,
+	sessionGenerationClosing,
+	sessionLifetime,
+	trackSessionWork,
+} from "./session-lifecycle-work.ts";
 import { getSkillCatalog } from "./skill-catalog.ts";
 
 type UserMessageDeliveryAction = "prompt" | "steer" | "followUp" | "handled";
@@ -35,11 +41,21 @@ export async function tryExecuteSessionSlashCommand(
 }
 
 export async function prompt(this: AgentSession, text: string, options?: PromptOptions): Promise<void> {
+	if (this._disposed || sessionGenerationClosing.has(this))
+		throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
+	const owner = resolveWorkflowStageDeliveryTarget(this);
+	if (owner !== this) return owner.prompt(text, options);
+	return trackSessionWork(this, () => admittedPrompt.call(this, text, options));
+}
+
+async function admittedPrompt(this: AgentSession, text: string, options?: PromptOptions): Promise<void> {
 	this._activePromptCount += 1;
 	try {
 		await promptInternal.call(this, text, options);
 		const boundary = this._subagentMessageAdmission ?? this._workflowStageAdmission;
 		if (
+			!this._disposed &&
+			!sessionGenerationClosing.has(this) &&
 			this._activePromptCount === 1 &&
 			!this.isStreaming &&
 			!this._queuedMessagesPaused &&
@@ -57,6 +73,11 @@ export async function prompt(this: AgentSession, text: string, options?: PromptO
 }
 
 async function promptInternal(this: AgentSession, text: string, options?: PromptOptions): Promise<void> {
+	const lifetime = sessionLifetime(this);
+	const assertCurrent = () => {
+		if (this._disposed || lifetime.aborted || sessionGenerationClosing.has(this))
+			throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
+	};
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner.prompt(text, options);
 	const expandPromptTemplates = options?.expandPromptTemplates ?? true;
@@ -75,6 +96,7 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 			preflightResult?.(true);
 			return;
 		}
+		assertCurrent();
 		// Real user input is on its way in, so a summary describing the previous turn is about
 		// to be stale; stop paying for it. Deliberately after the authorization boundary and
 		// the slash-command path, both of which must observe an untouched session. The
@@ -102,6 +124,7 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 				options?.source ?? "interactive",
 				this.isStreaming ? options?.streamingBehavior : undefined,
 			);
+			assertCurrent();
 			if (inputResult.action === "handled") {
 				workflowDelivery?.delivered?.("handled");
 				preflightResult?.(true);
@@ -140,6 +163,7 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 		// Close the completed fallback lifecycle before validating credentials for
 		// the next idle prompt. The selected fallback remains the session model.
 		if (typeof this._settleFallbackModelScope === "function") await this._settleFallbackModelScope();
+		assertCurrent();
 		// Flush context-only messages deferred until the previous turn's tool results were appended.
 		this._flushPendingBashMessages();
 		this._flushPendingCustomMessages();
@@ -181,6 +205,7 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 		const lastAssistant = this._findLastAssistantMessage();
 		if (lastAssistant) {
 			await this._checkCompaction(lastAssistant, false);
+			assertCurrent();
 		}
 
 		// Build messages array (custom message if any, then user message)
@@ -210,6 +235,7 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 			this._baseSystemPrompt,
 			this._baseSystemPromptOptions,
 		);
+		assertCurrent();
 		// Add all custom messages from extensions
 		if (result?.messages) {
 			for (const msg of result.messages) {
@@ -238,6 +264,7 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 	}
 
 	preflightResult?.(true);
+	assertCurrent();
 	const turn = this._runAgentPrompt(messages, workflowDelivery?.promptStarted);
 	workflowDelivery?.delivered?.("prompt");
 	await turn;
@@ -248,6 +275,7 @@ export async function _runAgentPrompt(
 	messages: AgentMessage | AgentMessage[],
 	promptStarted?: () => void,
 ): Promise<void> {
+	const lifetime = sessionLifetime(this);
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) {
 		if (owner._queuedMessagesPaused) {
@@ -272,6 +300,8 @@ export async function _runAgentPrompt(
 			for (const message of items) this._queueAgentMessage(message, "steer");
 			return;
 		}
+		if (this._disposed || lifetime.aborted || sessionGenerationClosing.has(this))
+			throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 		const turn = this.agent.prompt(messages);
 		if (this.isStreaming) promptStarted?.();
 		await turn;
@@ -491,6 +521,20 @@ async function queueUserInput(
 	behavior: "steer" | "followUp",
 	source: NonNullable<PromptOptions["source"]>,
 ): Promise<void> {
+	assertSessionOpen(session);
+	const owner = resolveWorkflowStageDeliveryTarget(session);
+	if (owner !== session) return queueUserInput(owner, text, images, behavior, source);
+	return trackSessionWork(session, () => admittedQueueUserInput(session, text, images, behavior, source));
+}
+
+async function admittedQueueUserInput(
+	session: AgentSession,
+	text: string,
+	images: ImageContent[] | undefined,
+	behavior: "steer" | "followUp",
+	source: NonNullable<PromptOptions["source"]>,
+): Promise<void> {
+	const lifetime = sessionLifetime(session);
 	if (text.startsWith("/")) session._throwIfExtensionCommand(text);
 	if (session._extensionRunner?.hasHandlers("input")) {
 		const result = await session._extensionRunner.emitInput(
@@ -499,6 +543,8 @@ async function queueUserInput(
 			source,
 			session.isStreaming ? behavior : undefined,
 		);
+		assertSessionOpen(session);
+		if (lifetime.aborted) throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 		if (result.action === "handled") return;
 		if (result.action === "transform") {
 			text = result.text;

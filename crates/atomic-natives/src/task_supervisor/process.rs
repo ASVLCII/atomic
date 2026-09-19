@@ -410,7 +410,10 @@ impl Actor {
 						let mut store = command.output.lock().unwrap();
 						store.background();
 						if store.unavailable {
-							return Err(io::Error::other("Output spool unavailable"));
+							return Err(io::Error::other(format!(
+								"Output spool unavailable: {}",
+								store.spool_error.as_deref().unwrap_or("write failed")
+							)));
 						}
 					}
 					if let Some(cwd) = &command.intent.cwd {
@@ -792,6 +795,31 @@ pub struct OutputPage {
 	pub next_offset: Option<String>,
 }
 
+// Collision recovery must not block startup indefinitely, even with hostile candidates.
+const SPOOL_CREATE_ATTEMPTS: u32 = 32;
+
+fn spool_candidate_at(base: &std::path::Path, timestamp: u128) -> io::Result<PathBuf> {
+	let mut random = [0u8; 16];
+	getrandom::fill(&mut random)
+		.map_err(|error| io::Error::other(format!("spool randomness unavailable: {error}")))?;
+	Ok(base.with_extension(format!("{timestamp}-{:032x}", u128::from_be_bytes(random))))
+}
+
+fn spool_candidate(base: &std::path::Path, _attempt: u32) -> io::Result<PathBuf> {
+	let timestamp = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_err(|error| io::Error::other(format!("spool timestamp unavailable: {error}")))?
+		.as_nanos();
+	spool_candidate_at(base, timestamp)
+}
+
+#[cfg(test)]
+type SpoolCandidate = fn(&std::path::Path, u32) -> io::Result<PathBuf>;
+#[cfg(test)]
+thread_local! {
+	static TEST_SPOOL_CANDIDATE: std::cell::Cell<SpoolCandidate> = const { std::cell::Cell::new(spool_candidate) };
+}
+
 /// Raw bytes retain original offsets; consumers carry incomplete UTF-8 while decoding.
 struct OutputStore {
 	path: PathBuf,
@@ -807,6 +835,9 @@ struct OutputStore {
 	disk_len: u64,
 	overflow: bool,
 	unavailable: bool,
+	spool_error: Option<String>,
+	#[cfg(test)]
+	candidate: SpoolCandidate,
 }
 impl OutputStore {
 	/// The retained prefix and rolling tail have at most one gap. No disk reads
@@ -834,7 +865,10 @@ impl OutputStore {
 			file: None,
 			disk_len: 0,
 			unavailable: false,
+			spool_error: None,
 			overflow: false,
+			#[cfg(test)]
+			candidate: TEST_SPOOL_CANDIDATE.get(),
 		}
 	}
 	fn append(&mut self, bytes: &[u8]) {
@@ -867,9 +901,30 @@ impl OutputStore {
 			return;
 		}
 		self.spilled = true;
-		match OpenOptions::new().read(true).write(true).create_new(true).open(&self.path) {
-			Ok(file) => self.file = Some(file),
-			Err(_) => self.unavailable = true,
+		let base = self.path.clone();
+		for attempt in 0..SPOOL_CREATE_ATTEMPTS {
+			#[cfg(test)]
+			let candidate = self.candidate;
+			#[cfg(not(test))]
+			let candidate = spool_candidate;
+			let allocation = candidate(&base, attempt).and_then(|path| {
+				self.path = path;
+				OpenOptions::new().read(true).write(true).create_new(true).open(&self.path)
+			});
+			match allocation {
+				Ok(file) => {
+					self.file = Some(file);
+					break;
+				},
+				Err(error)
+					if error.kind() == io::ErrorKind::AlreadyExists
+						&& attempt + 1 < SPOOL_CREATE_ATTEMPTS => {},
+				Err(error) => {
+					self.spool_error = Some(error.to_string());
+					self.unavailable = true;
+					break;
+				},
+			}
 		}
 		let prefix = std::mem::take(&mut self.foreground);
 		self.write_disk(&prefix);
@@ -1019,6 +1074,57 @@ impl Utf8Carry {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	struct SpoolCandidateGuard(SpoolCandidate);
+	impl SpoolCandidateGuard {
+		fn new(candidate: SpoolCandidate) -> Self {
+			Self(TEST_SPOOL_CANDIDATE.replace(candidate))
+		}
+	}
+	impl Drop for SpoolCandidateGuard {
+		fn drop(&mut self) {
+			TEST_SPOOL_CANDIDATE.set(self.0);
+		}
+	}
+	fn sequential_candidate(base: &std::path::Path, attempt: u32) -> io::Result<PathBuf> {
+		Ok(if attempt == 0 { base.to_path_buf() } else { base.with_extension(attempt.to_string()) })
+	}
+	#[cfg(unix)]
+	#[test]
+	fn command_spool_entropy_failure_refuses_before_execution() {
+		let _candidates = SpoolCandidateGuard::new(|_, attempt| {
+			assert_eq!(attempt, 0, "entropy failures must not retry");
+			Err(io::Error::other("spool randomness unavailable: injected entropy failure"))
+		});
+		let (actor, owner) = command_owner();
+		let marker = std::env::temp_dir().join(format!(
+			"atomic-entropy-{}-{}",
+			std::process::id(),
+			Cap { task: Some(0), attempt: 1, ..owner.cap.clone() }.reference().task_id
+		));
+		assert!(!marker.exists());
+		let result = actor.start_command(
+			&owner,
+			pipe_intent(&format!("printf executed > '{}'", marker.display())),
+			"entropy".into(),
+		);
+		actor.shutdown();
+		assert_eq!(result.err().map(|error| error.code), Some("SpawnFailed".into()));
+		let state = actor.state.lock().unwrap();
+		let task = &state.owners[0].tasks[0];
+		assert!(
+			matches!(&task.record.execution, Execution::Settled { result: TaskResult::Failed { code, .. } } if code == &JsString::from("SpawnFailed"))
+		);
+		assert!(matches!(task.record.cleanup, Cleanup::Reaped {}));
+		let mut store = task.command.as_ref().unwrap().output.lock().unwrap();
+		assert_eq!(
+			store.spool_error.as_deref(),
+			Some("spool randomness unavailable: injected entropy failure")
+		);
+		store.candidate = |_, _| panic!("failed allocation retried");
+		store.background();
+		store.append(b"later");
+		assert!(!marker.exists(), "entropy failure executed command");
+	}
 	fn command_owner() -> (Arc<Actor>, OwnerLease) {
 		let actor = Actor::new();
 		let scope = OwnerScope::Session { session_id: "pipe-test".into() };
@@ -1040,6 +1146,144 @@ mod tests {
 			parent_task_id: None,
 		}
 	}
+	#[test]
+	fn spool_names_are_distinct_with_frozen_time() {
+		let base = std::env::temp_dir().join("atomic-command-frozen");
+		let first = spool_candidate_at(&base, 123456789).unwrap();
+		let second = spool_candidate_at(&base, 123456789).unwrap();
+		assert_ne!(first, second);
+		for path in [first, second] {
+			let name = path.file_name().unwrap().to_str().unwrap();
+			assert!(name.starts_with("atomic-command-frozen.123456789-"));
+			let suffix = name.rsplit('-').next().unwrap();
+			assert_eq!(suffix.len(), 32);
+			assert!(suffix.bytes().all(|byte| byte.is_ascii_hexdigit()));
+		}
+	}
+	// #3105: retained output from a recycled PID must not prevent command startup.
+	#[cfg(unix)]
+	#[test]
+	fn command_starts_with_retained_spool_from_previous_process() {
+		let (actor, owner) = command_owner();
+		let reference = Cap { task: Some(0), attempt: 1, ..owner.cap.clone() }.reference();
+		let path = std::env::temp_dir().join(format!(
+			"atomic-command-{}-{}",
+			std::process::id(),
+			reference.task_id
+		));
+		let retained: Vec<_> = (0..SPOOL_CREATE_ATTEMPTS)
+			.map(|attempt| sequential_candidate(&path, attempt).unwrap())
+			.collect();
+		for path in &retained {
+			std::fs::write(path, b"previous process output").unwrap();
+		}
+		let result = actor.start_command(&owner, pipe_intent("printf fresh"), "collision".into());
+		let command = actor.state.lock().unwrap().owners[0].tasks[0].command.clone().unwrap();
+		assert!(command.join_until(Instant::now() + PROCESS_SHUTDOWN_GRACE));
+		actor.shutdown();
+		for path in retained {
+			assert_eq!(std::fs::read(&path).unwrap(), b"previous process output");
+			std::fs::remove_file(path).unwrap();
+		}
+		assert!(result.is_ok(), "{result:?}");
+		let allocated = command.output.lock().unwrap().path.clone();
+		assert_ne!(allocated, path);
+		assert_eq!(std::fs::read(&allocated).unwrap(), b"fresh");
+		std::fs::remove_file(allocated).unwrap();
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn command_spool_collision_uses_final_permitted_candidate() {
+		let _candidates = SpoolCandidateGuard::new(sequential_candidate);
+		let (actor, owner) = command_owner();
+		let reference = Cap { task: Some(0), attempt: 1, ..owner.cap.clone() }.reference();
+		let base = std::env::temp_dir().join(format!(
+			"atomic-command-{}-{}",
+			std::process::id(),
+			reference.task_id
+		));
+		let candidates: Vec<_> = (0..SPOOL_CREATE_ATTEMPTS - 1)
+			.map(
+				|suffix| {
+					if suffix == 0 { base.clone() } else { base.with_extension(suffix.to_string()) }
+				},
+			)
+			.collect();
+		for path in &candidates {
+			std::fs::write(path, b"retained output").unwrap();
+		}
+		let final_path = base.with_extension((SPOOL_CREATE_ATTEMPTS - 1).to_string());
+		assert!(!final_path.exists());
+		let result = actor.start_command(&owner, pipe_intent("printf fresh"), "boundary".into());
+		let command = actor.state.lock().unwrap().owners[0].tasks[0].command.clone().unwrap();
+		assert!(command.join_until(Instant::now() + PROCESS_SHUTDOWN_GRACE));
+		actor.shutdown();
+		for path in &candidates {
+			assert_eq!(std::fs::read(path).unwrap(), b"retained output");
+			std::fs::remove_file(path).unwrap();
+		}
+		assert!(result.is_ok(), "{result:?}");
+		assert_eq!(std::fs::read(&final_path).unwrap(), b"fresh");
+		std::fs::remove_file(final_path).unwrap();
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn command_spool_collision_exhaustion_refuses_before_execution() {
+		let _candidates = SpoolCandidateGuard::new(sequential_candidate);
+		let (actor, owner) = command_owner();
+		let reference = Cap { task: Some(0), attempt: 1, ..owner.cap.clone() }.reference();
+		let base = std::env::temp_dir().join(format!(
+			"atomic-command-{}-{}",
+			std::process::id(),
+			reference.task_id
+		));
+		let candidates: Vec<_> = (0..SPOOL_CREATE_ATTEMPTS)
+			.map(
+				|suffix| {
+					if suffix == 0 { base.clone() } else { base.with_extension(suffix.to_string()) }
+				},
+			)
+			.collect();
+		for path in &candidates {
+			std::fs::write(path, b"retained output").unwrap();
+		}
+		let next = base.with_extension(SPOOL_CREATE_ATTEMPTS.to_string());
+		let side_effect = base.with_extension("executed");
+		assert!(!next.exists());
+		assert!(!side_effect.exists());
+		let result = actor.start_command(
+			&owner,
+			pipe_intent(&format!("printf executed > '{}'", side_effect.display())),
+			"exhaustion".into(),
+		);
+		actor.shutdown();
+		let state = actor.state.lock().unwrap();
+		let task = &state.owners[0].tasks[0];
+		let refused = matches!(&task.record.execution,
+			Execution::Settled { result: TaskResult::Failed { code, .. } } if code == &JsString::from("SpawnFailed"));
+		let reaped = matches!(task.record.cleanup, Cleanup::Reaped {});
+		let mut store = task.command.as_ref().unwrap().output.lock().unwrap();
+		for path in &candidates {
+			assert_eq!(std::fs::read(path).unwrap(), b"retained output");
+			std::fs::remove_file(path).unwrap();
+		}
+		// Even after the occupied names become free, exhaustion is terminal.
+		store.background();
+		store.append(b"later");
+		let retried = candidates.iter().any(|path| path.exists());
+		let exceeded = next.exists();
+		let executed = side_effect.exists();
+		let _ = std::fs::remove_file(next);
+		let _ = std::fs::remove_file(side_effect);
+		assert_eq!(result.err().map(|error| error.code), Some("SpawnFailed".into()));
+		assert!(refused && reaped, "spawn refusal must settle and reap");
+		assert!(!executed, "exhausted spool allocation executed the command");
+		assert!(!exceeded, "allocation exceeded the candidate budget");
+		assert!(!retried, "exhausted allocation retried after names became free");
+	}
+
 	// #2905: inherited stdout/stderr must not bypass the shared disk budget.
 	#[cfg(unix)]
 	#[test]
@@ -1374,6 +1618,7 @@ mod tests {
 			std::env::temp_dir().join(format!("atomic-output-metadata-{}", std::process::id()));
 		let mut store = OutputStore::new(path.clone(), 4, 6, 5);
 		store.append(b"abcdefghijkl");
+		let path = store.path.clone();
 		assert_eq!(store.omitted_ranges(), store.page(0, 12).omitted_ranges);
 		store.byte_count = TASK_DISK_BYTES + 100;
 		store.disk_len = TASK_DISK_BYTES;
@@ -1389,6 +1634,7 @@ mod tests {
 		let path = std::env::temp_dir().join(format!("atomic-output-{}", std::process::id()));
 		let mut store = OutputStore::new(path.clone(), 4, 6, 5);
 		store.append(b"abcdef");
+		let path = store.path.clone();
 		store.append(b"ghijkl");
 		let page = store.page(0, 12);
 		assert_eq!(
@@ -1415,6 +1661,7 @@ mod tests {
 		let path = std::env::temp_dir().join(format!("atomic-page-cap-{}", std::process::id()));
 		let mut store = OutputStore::new(path.clone(), 4, 8, TASK_DISK_BYTES);
 		store.append(&vec![b'x'; COMMAND_LIVE_BYTES + 1]);
+		let path = store.path.clone();
 		let page = store.page(0, u32::MAX as u64);
 		assert_eq!(page.requested, OutputOffsets::new(0, COMMAND_LIVE_BYTES as u64));
 		assert_eq!(page.next_offset, Some(COMMAND_LIVE_BYTES.to_string()));
@@ -1437,7 +1684,9 @@ mod tests {
 		assert_eq!(store.page(2, 3).chunks[0].bytes.as_ref(), b"cde");
 		assert_eq!(store.page(2, 3).next_offset.as_deref(), Some("5"));
 		store.background();
+		let path = store.path.clone();
 		store.background();
+		assert_eq!(store.path, path);
 		assert_eq!(std::fs::read(&path).unwrap(), b"abcdefg");
 		assert!(store.foreground.is_empty());
 		assert_eq!(store.page(1, 2).chunks[0].bytes.as_ref(), b"bc");
@@ -1474,6 +1723,7 @@ mod tests {
 		let mut store = OutputStore::new(path.clone(), 8, 2, 2);
 		let mut decoder = Utf8Carry::default();
 		store.append(b"a\xe2");
+		let path = store.path.clone();
 		assert_eq!(decoder.decode(b"a\xe2", false), "a");
 		store.append(b"\x82");
 		assert_eq!(decoder.decode(b"\x82", false), "");
@@ -1502,6 +1752,7 @@ mod tests {
 		let mut store = OutputStore::new(path.clone(), 4, 8, 5);
 		store.append(b"abcde");
 		store.background();
+		let path = store.path.clone();
 		assert!(!store.overflow);
 		store.append(b"f");
 		assert!(store.overflow);

@@ -157,6 +157,7 @@ export interface AgentSessionConfig {
 	resourceLoader: ResourceLoader;
 	customTools?: ToolDefinition[];
 	modelRuntime: ModelRuntime;
+	childSessionOptions?: import("./child-session-options.ts").ChildSessionOptionsResolver;
 	initialActiveToolNames?: string[];
 	allowedToolNames?: string[];
 	excludedToolNames?: string[];
@@ -169,6 +170,8 @@ export interface AgentSessionConfig {
 }
 
 export interface ExtensionBindings {
+	humanInput?: import("./extensions/host-input.js").HostInput | null;
+	onDiagnostic?: (diagnostic: import("./extensions/host-input.js").HostDiagnostic) => void;
 	uiContext?: ExtensionUIContext;
 	mode?: ExtensionMode;
 	commandContextActions?: ExtensionCommandContextActions;

@@ -6,6 +6,7 @@ import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
 import { isPerplexityAvailable, searchWithPerplexity, type SearchResult, type SearchResponse, type SearchOptions } from "./perplexity.js";
 import { hasExaApiKey, isExaAvailable, searchWithExa } from "./exa.js";
 import { findReadableConfigPath } from "./config-paths.ts";
+import { createOwnerState } from "./owner-state.js";
 
 export type SearchProvider = "auto" | "perplexity" | "gemini" | "exa";
 export type ResolvedSearchProvider = Exclude<SearchProvider, "auto">;
@@ -16,14 +17,8 @@ export interface AttributedSearchResponse extends SearchResponse {
 
 const CONFIG_PATH = findReadableConfigPath();
 
-let cachedSearchConfig: { searchProvider: SearchProvider; searchModel?: string } | null = null;
-
-function getSearchConfig(): { searchProvider: SearchProvider; searchModel?: string } {
-	if (cachedSearchConfig) return cachedSearchConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedSearchConfig = { searchProvider: "auto", searchModel: undefined };
-		return cachedSearchConfig;
-	}
+const getSearchConfig = createOwnerState<{ searchProvider: SearchProvider; searchModel?: string }>(() => {
+	if (!existsSync(CONFIG_PATH)) return { searchProvider: "auto" };
 
 	const rawText = readFileSync(CONFIG_PATH, "utf-8");
 	let raw: {
@@ -42,12 +37,11 @@ function getSearchConfig(): { searchProvider: SearchProvider; searchModel?: stri
 		throw new Error(`Failed to parse ${CONFIG_PATH}: ${message}`);
 	}
 
-	cachedSearchConfig = {
+	return {
 		searchProvider: normalizeSearchProvider(raw.searchProvider ?? raw.provider),
 		searchModel: normalizeSearchModel(raw.searchModel),
 	};
-	return cachedSearchConfig;
-}
+});
 
 function normalizeSearchModel(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;

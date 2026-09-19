@@ -1,3 +1,4 @@
+import { reportOwnedMcpLog } from "./diagnostics.js";
 // config.ts - Config loading with import support
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -246,7 +247,7 @@ function expandImports(config: McpConfig, cwd = process.cwd()): McpConfig {
       }
     } catch (error) {
       if (error instanceof McpTimeoutConfigError) throw error;
-      console.warn(`Failed to import MCP config from ${importKind}:`, error);
+      if (!reportOwnedMcpLog("warn")) console.warn(`Failed to import MCP config from ${importKind}:`, error);
     }
   }
   return {
@@ -279,7 +280,7 @@ function readValidatedConfig(path: string, label: string): McpConfig | null {
     return validateMcpConfig(JSON.parse(readFileSync(path, "utf-8")));
   } catch (error) {
     if (error instanceof McpTimeoutConfigError) throw error;
-    console.warn(`Failed to load ${label}:`, error);
+    if (!reportOwnedMcpLog("warn")) console.warn(`Failed to load ${label}:`, error);
     return null;
   }
 }

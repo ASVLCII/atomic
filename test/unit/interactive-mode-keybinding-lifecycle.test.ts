@@ -20,6 +20,7 @@ import {
 import type { AgentSessionReloadOptions } from "../../packages/coding-agent/src/core/agent-session-types.ts";
 import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.ts";
 import type { ExtensionFactory } from "../../packages/coding-agent/src/core/extensions/types.ts";
+import { KeybindingsManager } from "../../packages/coding-agent/src/core/keybindings.ts";
 import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.ts";
 import { SessionManager } from "../../packages/coding-agent/src/core/session-manager.ts";
 import { keyText } from "../../packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts";
@@ -65,6 +66,8 @@ function writeTerminalSettings(agentDir: string, settings: Record<string, boolea
 }
 
 async function createMode(agentDir: string, extensionFactory?: ExtensionFactory): Promise<InteractiveMode> {
+	// #3105: startup completes in the SDK factory, before the mode can bind UI.
+	setKeybindings(KeybindingsManager.create(agentDir));
 	const cwd = mkdtempSync(join(tmpdir(), "atomic-local-mode-cwd-"));
 	const faux = registerFauxProvider();
 	const authStorage = AuthStorage.inMemory({ [faux.getModel().provider]: { type: "api_key", key: "faux-key" } });
@@ -88,8 +91,8 @@ async function createMode(agentDir: string, extensionFactory?: ExtensionFactory)
 		});
 		assert.equal(
 			services.resourceLoader.getExtensions().extensions.length,
-			extensionFactory ? 2 : 1,
-			"service creation must load mandatory Intercom and explicit factories without optional built-ins",
+			extensionFactory ? 6 : 5,
+			"#3105: service creation loads all five shipped builtins and explicit factories",
 		);
 		return {
 			...(await createAgentSessionFromServices({

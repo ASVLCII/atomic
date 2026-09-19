@@ -398,11 +398,11 @@ describe("interactive deferred startup first prompt readiness", () => {
 			settingsManager,
 			extensionFactories: [
 				(pi) => {
-					const state = sessionScopedExtensionState(pi.events, "staged-reload", () => ({ loads: 0 }));
-					if (initialState === undefined) initialState = state;
-					else reloadedState = state;
+					const state = sessionScopedExtensionState(pi.lifecycleScope!, "staged-reload", () => ({ loads: 0 }));
 					state.loads += 1;
 					pi.on("session_start", () => {
+						if (initialState === undefined) initialState = state;
+						else reloadedState = state;
 						observedLoads = state.loads;
 					});
 				},

@@ -381,7 +381,8 @@ describe("in-process child session resources", () => {
 	);
 
 	test(
-		"dropping optional bundled package roots still retains mandatory Intercom",
+		// #3105: loader omission is not explicit package suppression under default composition.
+		"default composition supplies enabled builtins even when the loader omits bundled roots",
 		async () => {
 			const { cwd, agentDir } = sessionCwd("atomic-inprocess-child-nobundled-cwd-");
 			const { session } = await createChildSession({ cwd, agentDir, withoutBundledPackages: true });
@@ -390,11 +391,16 @@ describe("in-process child session resources", () => {
 				for (const bundled of ["subagent", "web_search", "fetch_content"]) {
 					assert.equal(
 						toolNames.includes(bundled),
-						false,
-						`expected the loader to omit optional '${bundled}', got: ${toolNames.join(", ")}`,
+						true,
+						`expected default composition to supply '${bundled}', got: ${toolNames.join(", ")}`,
 					);
 				}
-				assert.equal(toolNames.includes("intercom"), true, "mandatory Intercom must survive empty bundled roots");
+				assert.equal(toolNames.includes("intercom"), true);
+				assert.equal(
+					toolNames.includes("workflow"),
+					false,
+					"child defaults cannot restore recursive workflow tooling",
+				);
 			} finally {
 				session.dispose();
 			}

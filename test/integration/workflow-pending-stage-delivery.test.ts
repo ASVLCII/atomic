@@ -2215,25 +2215,26 @@ test("materialized ctx.tool IDs and names never become speculative future-agent 
 	}
 });
 
-test("the production owner route preserves pending delivery through tool restrictions", async () => {
+// #3105: pending delivery cannot bypass an explicit Intercom restriction.
+test("the production owner route respects pending delivery tool restrictions", async () => {
 	const scenarios = [
 		{
 			name: "no-tools",
 			runId: "23bb9cf2-354e-475a-8c6f-a4c42306bb03",
 			options: { noTools: "all" },
-			acceptsPending: true,
+			acceptsPending: false,
 		},
 		{
 			name: "read-only",
 			runId: "d10852aa-3f68-46f8-baa7-f7bad2b50b9d",
 			options: { tools: ["read"] },
-			acceptsPending: true,
+			acceptsPending: false,
 		},
 		{
 			name: "excluded-intercom",
 			runId: "3a601bed-fafa-43a7-a68e-587df2c0174a",
 			options: { excludedTools: ["intercom"] },
-			acceptsPending: true,
+			acceptsPending: false,
 		},
 		{
 			name: "explicit-isolated-group",

@@ -93,6 +93,8 @@ export interface ParentAskHandoffRequest {
 // ============================================================================
 
 export interface RunSyncOptions {
+	getChildSessionOptions?: import("@bastani/atomic").ExtensionContext["getChildSessionOptions"];
+	resourceLoaderInheritanceSnapshot?: import("@bastani/atomic").DefaultResourceLoaderInheritanceSnapshot;
 	cwd?: string;
 	signal?: AbortSignal;
 	interruptSignal?: AbortSignal;

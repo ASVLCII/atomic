@@ -6,13 +6,29 @@ import { test } from "vitest";
 import { runBunSubprocess } from "../../packages/web-access/subprocess.ts";
 import { extractVideoFrame, getLocalVideoDuration } from "../../packages/web-access/video-extract.ts";
 import { getYouTubeStreamInfo } from "../../packages/web-access/youtube-extract.ts";
-import { bunExecutable, installBunGlobal, spawnSyncCollect } from "../helpers/runtime.js";
+import { inheritedPipes } from "../fixtures/web-subprocess-inherited-pipes.js";
+import { bunExecutable, spawnSyncCollect } from "../helpers/runtime.js";
 
-// packages/web-access/subprocess.ts is shipped Bun-binary code that calls
-// Bun.spawn/Bun.sleep unguarded, and this suite imports it in-process. See
-// installBunGlobal for why the primitives are supplied rather than the file
-// re-executed under Bun.
-installBunGlobal();
+// #3111: descendants may retain both pipes after the direct child is killed.
+test.each(["abort", "timeout", "overflow"] as const)("Node bounds inherited-pipe cleanup after %s", inheritedPipes);
+
+test("Bun host bounds inherited-pipe cleanup and preserves primary errors", () => {
+	const result = spawnSyncCollect([bunExecutable(), "test/fixtures/web-subprocess-inherited-pipes.ts", "run"], {
+		timeout: 20_000,
+	});
+	assert.equal(result.exitCode, 0, result.stderr.toString());
+	assert.match(result.stdout.toString(), /inherited-pipes-ok/);
+});
+
+// #3105: exercise the shipped adapter under Node, without a synthetic Bun global.
+test("Node subprocess adapter executes without Bun and preserves binary output", async () => {
+	assert.equal(typeof globalThis.Bun, "undefined");
+	const result = await runBunSubprocess(process.execPath, ["-e", "process.stdout.write(Buffer.from([0,255,1]))"], {
+		timeoutMs: 1000,
+		maxStdoutBytes: 1024,
+	});
+	assert.deepEqual([...result.stdout], [0, 255, 1]);
+});
 
 // Fake CLI tools for the command-path test are plain /bin/sh scripts, not Bun
 // scripts. The first exec of a freshly written bun-shebang script stalls for

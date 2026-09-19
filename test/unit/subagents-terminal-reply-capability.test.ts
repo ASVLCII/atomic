@@ -63,6 +63,8 @@ for (const outcome of ["completed", "failed", "interrupted", "cancelled"] as con
 					disposed = true;
 				},
 			};
+			// #3105: the SDK factory completes startup before returning the session.
+			await session.extensionRunner.emit();
 			return { session } as unknown as Awaited<ReturnType<typeof createAgentSession>>;
 		});
 		try {

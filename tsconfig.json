@@ -19,6 +19,9 @@
         "verbatimModuleSyntax": true,
         "paths": {
             "@bastani/atomic": ["./packages/coding-agent/src/index.ts"],
+            "@bastani/atomic/workflows": ["./packages/workflows/src/authoring.ts"],
+            "@bastani/atomic/workflows/builtin": ["./packages/workflows/builtin/index.ts"],
+            "@bastani/atomic/workflows/builtin/*": ["./packages/workflows/builtin/*"],
             "@bastani/workflows": ["./packages/workflows/src/index.ts"],
             "@bastani/workflows/builtin": ["./packages/workflows/builtin/index.ts"],
             "@bastani/workflows/builtin/*": ["./packages/workflows/builtin/*"],

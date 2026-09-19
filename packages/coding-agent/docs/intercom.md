@@ -130,7 +130,7 @@ Working subagents and live workflow stages treat `send` and `ask` as a priority 
 
 A busy non-interactive recipient that is neither an admitted subagent nor a workflow stage can still refuse a message without interrupting its task. A successful `send` receipt acknowledges transport delivery, not acceptance by the recipient's model. The refusal carries the original reply thread: a waiting `ask` returns an error; otherwise the sender sees **Intercom delivery failed** feedback with a `Sent:` timestamp. That feedback bypasses the ordinary idle queue and does not trigger a standalone agent turn. During an active turn, protected delivery makes it visible and reconciles it at a protocol-safe boundary. Its wording describes the refused send, not the recipient's later activity.
 
-Atomic treats ordinary `intercom` as a mandatory runtime tool in main chat and every workflow model stage. Tool allowlists, exclusions, `noTools`, optional-extension restrictions, and reloads cannot unload or deactivate it. Restrictions on every other tool are unchanged, and `contact_supervisor` remains subagent-only. Tool registration is lightweight; broker connection and heavy initialization remain lazy until an Intercom surface is used.
+Atomic enables ordinary `intercom` by default, but it respects tool allowlists, exclusions and `noTools: "all"`. Include `"intercom"` in an explicit allowlist when needed. SDK hosts can disable the entire package with `builtins: { intercom: false }`; reload does not restore it. `contact_supervisor` remains subagent-only. Registration is lightweight; broker connection and heavy initialization remain lazy until an Intercom surface is used.
 
 ## How Connection Works
 

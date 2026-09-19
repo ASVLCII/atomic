@@ -308,7 +308,8 @@ describe("RPC bash ownership across session replacement", () => {
 		}
 	});
 
-	it("does not append a late result to the shared target manager after an actual unpersisted clone", async () => {
+	// #3105: replacement aborts and drains old generation shell work before cloning.
+	it("settles the source shell before replacing an unpersisted shared manager", async () => {
 		const gate = createBashGate("shared-manager");
 		try {
 			const source = await createHarness({ sessionManager: SessionManager.inMemory(gate.cwd) });
@@ -364,7 +365,7 @@ describe("RPC bash ownership across session replacement", () => {
 				gate.release(marker);
 			}
 
-			await expect(execution).resolves.toMatchObject({ success: true, data: { output: "sourceresult" } });
+			await expect(execution).resolves.toMatchObject({ success: true, data: { output: "source", cancelled: true } });
 			expect(source.session.messages.filter((message) => message.role === "bashExecution")).toHaveLength(2);
 			expect(target?.session.messages.filter((message) => message.role === "bashExecution")).toHaveLength(1);
 			expect(

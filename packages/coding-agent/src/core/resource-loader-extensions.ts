@@ -120,6 +120,7 @@ export async function loadExtensionFactories(
 			if (descriptor?.bundled) extension.sourceInfo.configurationOrigin = "bundled";
 			extensions.push(extension);
 		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ShutdownFailed") throw error;
 			const message = error instanceof Error ? error.message : "failed to load extension";
 			errors.push({ path: extensionPath, error: message });
 		}

@@ -212,7 +212,9 @@ describe("subagent skill resolution", () => {
 		}
 		assert.doesNotMatch(debuggerRow, /browser/);
 		assert.match(guidance, /`tdd`, `playwright-cli`, and `tmux` skills/);
-		assert.match(guidance, /debugger` and `worker` agents declare both `intercom` and `contact_supervisor`/);
+		assert.match(guidance, /Every builtin agent declares `intercom` for live coordination/);
+		assert.match(guidance, /`debugger` and `worker` also declare `contact_supervisor`/);
+		assert.match(guidance, /Parent tool restrictions and disabled Intercom still apply/);
 		assert.doesNotMatch(guidance, /None of the builtin specialists carry the `intercom` tool/);
 		assert.doesNotMatch(guidance, /Builtin specialists do not have `intercom`/);
 	});

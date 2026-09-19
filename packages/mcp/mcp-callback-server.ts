@@ -13,6 +13,7 @@ import {
   setOAuthCallbackPort,
 } from "./mcp-oauth-provider.js"
 import { logger } from "./logger.ts"
+import { getMcpOwner } from "./diagnostics.js"
 
 // HTML templates for callback responses
 const HTML_SUCCESS = `<!DOCTYPE html>
@@ -58,6 +59,7 @@ export const renderCallbackErrorHtml = () => `<!DOCTYPE html>
 
 /** Pending authorization request */
 interface PendingAuth {
+  owner: object
   resolve: (code: string) => void
   reject: (error: Error) => void
   timeout: ReturnType<typeof setTimeout>
@@ -67,6 +69,9 @@ interface PendingAuth {
 let server: Server | undefined
 let serverTransition: Promise<void> = Promise.resolve()
 const pendingAuths = new Map<string, PendingAuth>()
+const standaloneOwner = {}
+const serverOwners = new Set<object>()
+const callbackOwner = (): object => getMcpOwner() ?? standaloneOwner
 
 /** Timeout for callback completion (5 minutes) */
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000
@@ -148,7 +153,11 @@ export function handleRequest(req: IncomingMessage, res: ServerResponse): void {
  * If strictPort is false, scans forward for an available local port.
  */
 export function ensureCallbackServer(options: EnsureCallbackServerOptions = {}): Promise<void> {
-  return enqueueServerTransition(() => ensureCallbackServerNow(options))
+  const owner = callbackOwner()
+  return enqueueServerTransition(async () => {
+    await ensureCallbackServerNow(options)
+    serverOwners.add(owner)
+  })
 }
 
 function enqueueServerTransition<T>(operation: () => Promise<T>): Promise<T> {
@@ -191,7 +200,7 @@ async function ensureCallbackServerNow(options: EnsureCallbackServerOptions): Pr
 
   if (server) {
     if (!strictPort || getOAuthCallbackPort() === configuredPort) return
-    if (pendingAuths.size > 0) {
+    if (pendingAuths.size > 0 || [...serverOwners].some((owner) => owner !== callbackOwner())) {
       throw new Error(
         `OAuth callback server is running on port ${getOAuthCallbackPort()}, but strict callback port ${configuredPort} is required and cannot be switched while authorizations are pending`,
       )
@@ -236,6 +245,7 @@ async function ensureCallbackServerNow(options: EnsureCallbackServerOptions): Pr
  * Returns a promise that resolves with the authorization code.
  */
 export function waitForCallback(oauthState: string): Promise<string> {
+  const owner = callbackOwner()
   const promise = new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(() => {
       if (pendingAuths.has(oauthState)) {
@@ -244,7 +254,7 @@ export function waitForCallback(oauthState: string): Promise<string> {
       }
     }, CALLBACK_TIMEOUT_MS)
 
-    pendingAuths.set(oauthState, { resolve, reject, timeout })
+    pendingAuths.set(oauthState, { resolve, reject, timeout, owner })
   })
   void promise.catch(() => undefined)
   return promise
@@ -266,13 +276,14 @@ export function cancelPendingCallback(
   oauthState: string,
   error = new Error("Authorization cancelled"),
 ): void {
-  rejectPendingCallback(oauthState, error)
+  if (pendingAuths.get(oauthState)?.owner === callbackOwner()) rejectPendingCallback(oauthState, error)
 }
 
 /** Reject and remove every callback waiter before lifecycle cleanup settles. */
 export function cancelAllPendingCallbacks(error: Error): void {
-  for (const oauthState of Array.from(pendingAuths.keys())) {
-    rejectPendingCallback(oauthState, error)
+  const owner = callbackOwner()
+  for (const [oauthState, pending] of pendingAuths) {
+    if (pending.owner === owner) rejectPendingCallback(oauthState, error)
   }
 }
 
@@ -286,6 +297,8 @@ export function stopCallbackServer(
   return enqueueServerTransition(async () => {
     // A producer can register its waiter while an earlier startup is publishing.
     cancelAllPendingCallbacks(error)
+    serverOwners.delete(callbackOwner())
+    if (serverOwners.size > 0) return
     await stopPublishedServer()
     setOAuthCallbackPort(getConfiguredOAuthCallbackPort())
   })

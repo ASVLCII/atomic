@@ -50,7 +50,8 @@ This is a test skill.
 		expect(session.resourceLoader.getSkills().skills.some((s) => s.name === "test-skill")).toBe(true);
 	});
 
-	it("should have empty skills when resource loader returns none (--no-skills)", async () => {
+	// #3105: custom discovery does not suppress shipped builtin skills.
+	it("adds builtin skills without changing an empty caller loader", async () => {
 		const resourceLoader: ResourceLoader = {
 			getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
 			getSkills: () => ({ skills: [], diagnostics: [] }),
@@ -70,7 +71,9 @@ This is a test skill.
 			resourceLoader,
 		});
 
-		expect(session.resourceLoader.getSkills().skills).toEqual([]);
+		expect(resourceLoader.getSkills().skills).toEqual([]);
+		expect(session.resourceLoader.getSkills().skills.length).toBeGreaterThan(0);
+		expect(session.resourceLoader.getSkills().skills.some((skill) => skill.name === "test-skill")).toBe(false);
 		expect(session.resourceLoader.getSkills().diagnostics).toEqual([]);
 	});
 
@@ -103,7 +106,11 @@ This is a test skill.
 			resourceLoader,
 		});
 
-		expect(session.resourceLoader.getSkills().skills).toEqual([customSkill]);
+		expect(resourceLoader.getSkills().skills).toEqual([customSkill]);
+		expect(session.resourceLoader.getSkills().skills[0]).toBe(customSkill);
+		expect(
+			session.resourceLoader.getSkills().skills.some((skill) => skill.sourceInfo.configurationOrigin === "bundled"),
+		).toBe(true);
 		expect(session.resourceLoader.getSkills().diagnostics).toEqual([]);
 	});
 });

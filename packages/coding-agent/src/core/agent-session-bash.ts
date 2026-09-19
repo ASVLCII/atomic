@@ -3,12 +3,19 @@ import type { AgentSessionInternalSurface as AgentSession } from "./agent-sessio
 import type { BashResult } from "./bash-executor.ts";
 import { executeBashWithOperations } from "./bash-executor.ts";
 import type { BashExecutionMessage } from "./messages.ts";
+import { sessionGenerationClosing, trackSessionWork } from "./session-lifecycle-work.ts";
 import { type BashOperations, type BashOutputChannel, createLocalBashOperations } from "./tools/bash.js";
 import { applyBashSessionEnvironment, snapshotBashSessionEnvironment } from "./tools/bash-session-environment.ts";
 import { createLocalPowerShellOperations } from "./tools/powershell.ts";
 import { resolveSessionTempDirPath } from "./tools/session-temp-dir.ts";
 
-export async function executeBash(
+export function executeBash(this: AgentSession, ...args: Parameters<typeof executeBashOperation>): Promise<BashResult> {
+	if (this._disposed || sessionGenerationClosing.has(this))
+		return Promise.reject(Object.assign(new Error("Session is closed"), { code: "SessionClosed" }));
+	return trackSessionWork(this, () => executeBashOperation.call(this, ...args));
+}
+
+async function executeBashOperation(
 	this: AgentSession,
 	command: string,
 	onChunk?: (chunk: string, channel: BashOutputChannel) => void,
@@ -23,7 +30,9 @@ export async function executeBash(
 ): Promise<BashResult> {
 	const requestKey = options?.id ?? Symbol("bash-request");
 	const abortController = new AbortController();
-	this._bashAbortControllers.set(requestKey, abortController);
+	const controllers = this._bashAbortControllers.get(requestKey) ?? new Set<AbortController>();
+	controllers.add(abortController);
+	this._bashAbortControllers.set(requestKey, controllers);
 	// Apply command prefix if configured (e.g., "shopt -s expand_aliases" for alias support)
 	const prefix = this.settingsManager.getShellCommandPrefix();
 	const shellPath = this.settingsManager.getShellPath();
@@ -56,7 +65,8 @@ export async function executeBash(
 		if (options?.recordResult !== false) this.recordBashResult(command, result, options);
 		return result;
 	} finally {
-		if (this._bashAbortControllers.get(requestKey) === abortController) this._bashAbortControllers.delete(requestKey);
+		controllers.delete(abortController);
+		if (controllers.size === 0) this._bashAbortControllers.delete(requestKey);
 	}
 }
 
@@ -100,12 +110,14 @@ export function recordBashResult(
 /** Cancel one correlated bash request, or all active requests for legacy callers. */
 export function abortBash(this: AgentSession, id?: string): void {
 	if (id !== undefined) {
-		this._bashAbortControllers.get(id)?.abort();
+		for (const controller of [...(this._bashAbortControllers.get(id) ?? [])]) controller.abort();
 		return;
 	}
 	// Snapshot first: aborting settles owners, and a listener that removes its own
 	// entry must not shorten the cancellation sweep.
-	for (const controller of [...this._bashAbortControllers.values()]) controller.abort();
+	for (const controllers of [...this._bashAbortControllers.values()]) {
+		for (const controller of [...controllers]) controller.abort();
+	}
 }
 
 /** Whether a bash command is currently running */

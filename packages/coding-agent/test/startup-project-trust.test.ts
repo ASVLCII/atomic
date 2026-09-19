@@ -168,8 +168,60 @@ for (const decision of ["approve", "deny", "cancel", "error", "override", "no-ui
 			assert.equal(starts, 1);
 			assert.equal(shutdowns, 0);
 		} finally {
-			session.dispose();
+			await session.dispose();
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
 }
+
+// #3105: the first service session adopts prepared factories; borrowers retain independent lifetimes.
+test("prepared services start once and isolate a second borrowing session", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-startup-borrow-"));
+	let factories = 0;
+	const starts: number[] = [];
+	const shutdowns: number[] = [];
+	try {
+		const complete = await prepareAgentSessionServices({
+			cwd: root,
+			agentDir: join(root, "agent"),
+			resourceLoaderOptions: {
+				builtinPackagePaths: [],
+				extensionFactories: [
+					(pi) => {
+						const owner = ++factories;
+						pi.on("session_start", () => {
+							starts.push(owner);
+						});
+						pi.on("session_shutdown", () => {
+							shutdowns.push(owner);
+						});
+					},
+				],
+			},
+		});
+		const services = await complete();
+		const first = await createAgentSessionFromServices({ services, sessionManager: SessionManager.inMemory(root) });
+		try {
+			assert.equal(factories, 1);
+			assert.deepEqual(starts, [1]);
+			const second = await createAgentSessionFromServices({
+				services,
+				sessionManager: SessionManager.inMemory(root),
+			});
+			try {
+				assert.equal(factories, 2);
+				assert.deepEqual(starts, [1, 2]);
+				await first.session.dispose();
+				assert.deepEqual(shutdowns, [1]);
+				assert.equal(second.session.extensionRunner.createContext().cwd, root);
+			} finally {
+				await second.session.dispose();
+			}
+			assert.deepEqual(shutdowns, [1, 2]);
+		} finally {
+			await first.session.dispose();
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

@@ -12,14 +12,16 @@
 
 import { type DurabilityWarningSink, getDurableBackend, initializeDurableBackend } from "../durable/factory.js";
 import { resolveToolResumeFrontier } from "../durable/tool-resume-frontier.js";
-import type { CancellationRegistry } from "../runs/background/cancellation-registry.js";
-import type { JobTracker } from "../runs/background/job-tracker.js";
+import { currentToolControlRegistry, type ToolControlRegistry } from "../engine/run-tool-control-registry.js";
+import { type CancellationRegistry, currentCancellationRegistry } from "../runs/background/cancellation-registry.js";
+import { currentJobTracker, type JobTracker } from "../runs/background/job-tracker.js";
 import type { DetachedRunOpts } from "../runs/background/runner.js";
 import { launchDetachedUntilStartup, workflowStartupFailureMessage } from "../runs/background/startup-admission.js";
 import { type RunOpts, resolveAndValidateInputs } from "../runs/foreground/executor.js";
+import { currentStageControlRegistry, type StageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import type { StageAdapters } from "../runs/foreground/stage-runner.js";
 import type { Store } from "../shared/store.js";
-import { store as defaultStore } from "../shared/store.js";
+import { currentWorkflowStore } from "../shared/store-factory.js";
 import type { RunSnapshot, WorkflowActor } from "../shared/store-types.js";
 import type {
 	WorkflowBudget,
@@ -69,6 +71,8 @@ export interface ExtensionRuntimeOpts {
 	store?: Store;
 	/** Cancellation registry forwarded to the executor. */
 	cancellation?: CancellationRegistry;
+	stageControlRegistry?: StageControlRegistry;
+	toolControlRegistry?: ToolControlRegistry;
 	/** Persistence port forwarded to the executor. */
 	persistence?: WorkflowPersistencePort;
 	/** MCP scope-gating port forwarded to the executor. */
@@ -172,13 +176,15 @@ export interface RuntimeDispatchOptions {
 export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): ExtensionRuntime {
 	const registry = opts.registry ?? createRegistry(opts.definitions ?? []);
 	const adapters = opts.adapters;
-	const activeStore = opts.store ?? defaultStore;
-	const cancellation = opts.cancellation;
+	const activeStore = opts.store ?? currentWorkflowStore();
+	const cancellation = opts.cancellation ?? currentCancellationRegistry();
+	const stageControlRegistry = opts.stageControlRegistry ?? currentStageControlRegistry();
+	const toolControlRegistry = opts.toolControlRegistry ?? currentToolControlRegistry();
 	const persistence = opts.persistence;
 	const mcp = opts.mcp;
 	const config = opts.config;
 	const models = opts.models;
-	const jobs = opts.jobs;
+	const jobs = opts.jobs ?? currentJobTracker();
 	const durabilityWarningSink = opts.durabilityWarningSink;
 	const runtimeCwd = opts.cwd ?? process.cwd();
 	const resolveDefaultStageSessionDir = opts.resolveDefaultStageSessionDir;
@@ -198,6 +204,8 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 			adapters,
 			store: activeStore,
 			cancellation,
+			stageControlRegistry,
+			toolControlRegistry,
 			persistence,
 			mcp,
 			config,
@@ -496,6 +504,8 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				adapters,
 				store: activeStore,
 				cancellation,
+				stageControlRegistry,
+				toolControlRegistry,
 				jobs,
 				persistence,
 				mcp,

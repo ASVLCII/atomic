@@ -65,7 +65,8 @@ describe("regression #2835: tool allowlists filter extension tools", () => {
 		return session;
 	}
 
-	it("allows only explicitly listed tools plus mandatory Intercom", async () => {
+	// #3105: shipped Intercom follows the same allowlist as other tools.
+	it("allows only explicitly listed tools", async () => {
 		const session = await createSession(["read", "dynamic_tool"]);
 
 		expect(
@@ -73,23 +74,23 @@ describe("regression #2835: tool allowlists filter extension tools", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["dynamic_tool", "intercom", "read"]);
-		expect(session.getActiveToolNames().sort()).toEqual(["dynamic_tool", "intercom", "read"]);
+		).toEqual(["dynamic_tool", "read"]);
+		expect(session.getActiveToolNames().sort()).toEqual(["dynamic_tool", "read"]);
 		expect(session.systemPrompt).toContain("- read: Read a path selector.");
 		expect(session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
-		expect(session.systemPrompt).toContain("- intercom:");
+		expect(session.systemPrompt).not.toContain("- intercom:");
 		expect(session.systemPrompt).not.toContain("- bash:");
 		expect(session.systemPrompt).not.toContain("- edit:");
-		session.dispose();
+		await session.dispose();
 	});
 
-	it("keeps only mandatory Intercom when the allowlist is empty", async () => {
+	it("exposes no tools when the allowlist is empty", async () => {
 		const session = await createSession([]);
 
-		expect(session.getAllTools().map((tool) => tool.name)).toEqual(["intercom"]);
-		expect(session.getActiveToolNames()).toEqual(["intercom"]);
-		expect(session.systemPrompt).toContain("- intercom:");
+		expect(session.getAllTools().map((tool) => tool.name)).toEqual([]);
+		expect(session.getActiveToolNames()).toEqual([]);
+		expect(session.systemPrompt).not.toContain("- intercom:");
 		expect(session.systemPrompt).not.toContain("dynamic_tool");
-		session.dispose();
+		await session.dispose();
 	});
 });

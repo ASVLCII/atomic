@@ -20,8 +20,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
-import type { BuildSystemPromptOptions } from "../src/core/system-prompt.ts";
-import { createTestResourceLoader } from "./utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
 // Mock stream that mimics AssistantMessageEventStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -115,7 +114,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		delete (globalThis as typeof globalThis & { testExtensionApi?: unknown }).testExtensionApi;
 		delete (globalThis as typeof globalThis & { testCommandRuns?: unknown }).testCommandRuns;
 		if (session) {
-			session.dispose();
+			await session.dispose();
 		}
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
@@ -313,55 +312,29 @@ describe("AgentSession concurrent prompt guard", () => {
 			allowModelNetwork: false,
 		});
 
+		const snapshots: string[][] = [];
+		// #3105: exercise the real runner, including awaited lifecycle cleanup.
+		const extensionsResult = await createTestExtensionsResult([
+			(pi) => {
+				pi.on("tool_call", () => {
+					snapshots.push(
+						sessionManager
+							.getEntries()
+							.filter((entry) => entry.type === "message")
+							.map((entry) => entry.message.role),
+					);
+				});
+			},
+		]);
 		session = new AgentSession({
 			agent,
 			sessionManager,
 			settingsManager,
 			cwd: tempDir,
 			modelRuntime,
-			resourceLoader: createTestResourceLoader(),
+			resourceLoader: createTestResourceLoader({ extensionsResult }),
 			baseToolsOverride: { dummy: tool },
 		});
-
-		const snapshots: string[][] = [];
-		const sessionWithRunner = session as unknown as {
-			_extensionRunner?: {
-				hasHandlers: (eventType: string) => boolean;
-				emit: (event: { type: string; message?: { role?: string } }) => Promise<void>;
-				emitMessageEnd: (event: { type: string; message?: { role?: string } }) => Promise<undefined>;
-				emitToolCall: (event: { type: string; toolCallId: string }) => Promise<undefined>;
-				emitInput: (
-					text: string,
-					images: unknown,
-					source: "interactive" | "rpc" | "extension",
-					streamingBehavior?: "steer" | "followUp",
-				) => Promise<{ action: "continue" }>;
-				emitBeforeAgentStart: (
-					prompt: string,
-					images: unknown,
-					systemPrompt: string,
-					systemPromptOptions: BuildSystemPromptOptions,
-				) => Promise<undefined>;
-				invalidate: (message?: string) => void;
-			};
-		};
-		sessionWithRunner._extensionRunner = {
-			hasHandlers: (eventType) => eventType === "tool_call",
-			emit: async () => {},
-			emitMessageEnd: async () => undefined,
-			emitToolCall: async () => {
-				snapshots.push(
-					sessionManager
-						.getEntries()
-						.filter((entry) => entry.type === "message")
-						.map((entry) => entry.message.role),
-				);
-				return undefined;
-			},
-			emitInput: async () => ({ action: "continue" }),
-			emitBeforeAgentStart: async () => undefined,
-			invalidate: () => {},
-		};
 
 		await session.prompt("hi");
 		await session.agent.waitForIdle();

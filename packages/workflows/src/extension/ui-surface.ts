@@ -324,7 +324,7 @@ export interface PiUISurface {
 	/** Show a selector and return the user's choice. Returns undefined when user dismisses. */
 	select?: (title: string, options: string[], opts?: PiUIDialogOptions) => Promise<string | undefined>;
 	/** Show a multi-line editor. Returns undefined when user dismisses. */
-	editor?: (title: string, prefill?: string) => Promise<string | undefined>;
+	editor?: (title: string, prefill?: string, opts?: PiUIDialogOptions) => Promise<string | undefined>;
 	notify?: (message: string, type?: "info" | "warning" | "error") => void;
 	onTerminalInput?: (handler: unknown) => () => void;
 	setStatus?: (key: string, text: string | undefined) => void;

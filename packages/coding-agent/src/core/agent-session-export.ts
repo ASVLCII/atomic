@@ -5,7 +5,7 @@ import type { AssistantMessage } from "@bastani/pi-ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.js";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
-import type { SessionStats } from "./agent-session-types.ts";
+import type { SessionStats } from "./agent-session-types.js";
 import { calculateContextTokens, estimateContextTokens } from "./compaction/index.ts";
 import type { ToolHtmlRenderer } from "./export-html/index.ts";
 import type { ContextUsage, ReplacedSessionContext } from "./extensions/index.js";

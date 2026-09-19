@@ -109,6 +109,8 @@ export async function quitRunWithAction(
 				stageControlRegistry?: StageControlRegistry;
 				toolControlRegistry?: ToolControlRegistry;
 				jobs?: JobTracker;
+				/** Host teardown waits for persistence rather than acknowledging in the background. */
+				awaitSettlement?: boolean;
 				/** Who requested this quit. Omitted for internal callers. */
 				actor?: WorkflowActor;
 		  }
@@ -244,7 +246,7 @@ export async function quitRunWithAction(
 		publish(resumable);
 		return durableTransition;
 	};
-	if (admissionControl) {
+	if (admissionControl && opts?.awaitSettlement !== true) {
 		publish(resumable);
 		backgroundAdmissionControl(
 			discoverDurableQuitBackend(runId),
@@ -469,6 +471,7 @@ export async function quitAllRuns(opts?: {
 	stageControlRegistry?: StageControlRegistry;
 	toolControlRegistry?: ToolControlRegistry;
 	jobs?: JobTracker;
+	awaitSettlement?: boolean;
 	/** Who requested these quits. Omitted for internal callers. */
 	actor?: WorkflowActor;
 }): Promise<QuitAllRunResult[]> {
@@ -480,6 +483,7 @@ export async function quitAllRuns(opts?: {
 			stageControlRegistry: opts?.stageControlRegistry,
 			toolControlRegistry: opts?.toolControlRegistry,
 			jobs: opts?.jobs,
+			awaitSettlement: opts?.awaitSettlement,
 			...(opts?.actor === undefined ? {} : { actor: opts.actor }),
 		}),
 	);

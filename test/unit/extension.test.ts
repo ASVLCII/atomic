@@ -484,7 +484,9 @@ test("session_shutdown quit settles rejected and late pause acknowledgements bef
 
 	assert.equal(settledBeforeLateAcknowledgement, false);
 	assert.equal(controlsPresentBeforeLateAcknowledgement, true);
-	assert.equal(shutdownFailure, undefined);
+	// #3105: failed cleanup remains observable after all controls are settled.
+	assert.ok(shutdownFailure instanceof AggregateError);
+	assert.match(String(shutdownFailure), /shutdown pause rejected/);
 
 	const run = store.runs().find((candidate) => candidate.id === "quit-run");
 	assert.equal(run?.endedAt, undefined);
@@ -495,7 +497,7 @@ test("session_shutdown quit settles rejected and late pause acknowledgements bef
 	assert.equal(disposed, 2);
 });
 
-test("session_start removes ask_user_question but keeps workflow in non-interactive sessions", async () => {
+test("session_start does not infer tool restrictions from missing presentation UI", async () => {
 	const { handlers, setCalls } = captureHandlersWithActiveTools([
 		"read",
 		"bash",
@@ -508,7 +510,8 @@ test("session_start removes ask_user_question but keeps workflow in non-interact
 
 	await sessionStart?.({ reason: "startup" }, { hasUI: false });
 
-	assert.deepEqual(setCalls, [["read", "bash", "workflow", "todo"]]);
+	// #3105: human-input capability is separate from terminal presentation.
+	assert.deepEqual(setCalls, []);
 });
 
 test("session_start leaves active tools unchanged when a UI is available", async () => {

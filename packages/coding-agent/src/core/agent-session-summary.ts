@@ -7,6 +7,7 @@
 
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { generateSessionSummary } from "./compaction/index.ts";
+import { sessionGenerationClosing, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";
 import { getLastConversationMessageId, getLatestSessionSummary } from "./session-manager-entries.ts";
 
 /** Sessions shorter than this are already legible from their first message. */
@@ -20,7 +21,13 @@ export type SessionSummaryRun = {
 	readonly done: Promise<void>;
 };
 
-export async function _maybeGenerateSessionSummary(this: AgentSession): Promise<void> {
+export function _maybeGenerateSessionSummary(this: AgentSession): Promise<void> {
+	if (this._disposed || sessionGenerationClosing.has(this)) return Promise.resolve();
+	// Keep every launch, including superseded providers, owned until actual settlement.
+	return trackSessionWork(this, () => generateOwnedSessionSummary.call(this));
+}
+
+async function generateOwnedSessionSummary(this: AgentSession): Promise<void> {
 	// Held rather than read from the session in `finally`, so an early return can never clear a
 	// controller or run belonging to a different launch.
 	let controller: AbortController | undefined;
@@ -87,7 +94,7 @@ export async function _maybeGenerateSessionSummary(this: AgentSession): Promise<
 		this._sessionSummaryAbortController?.abort();
 		controller = new AbortController();
 		this._sessionSummaryAbortController = controller;
-		const signal = controller.signal;
+		const signal = AbortSignal.any([controller.signal, sessionLifetime(this)]);
 
 		// Publish this run before the first await that another launch can overlap. From here on
 		// ownership of the slot, not the token, is what licenses a write: a joiner bumps the token

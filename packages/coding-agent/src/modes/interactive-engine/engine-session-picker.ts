@@ -2,7 +2,7 @@ import type {
 	HostSessionPickerHandle,
 	HostSessionPickerRequest,
 	HostSessionPickerRow,
-} from "../../core/extensions/ui-types.ts";
+} from "../../core/extensions/ui-types.js";
 import {
 	type InteractiveEngineMessage,
 	parseInteractiveEngineCommand,

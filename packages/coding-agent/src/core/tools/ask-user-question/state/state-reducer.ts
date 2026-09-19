@@ -1,4 +1,4 @@
-import type { QuestionAnswer, QuestionData, QuestionnaireResult } from "../tool/types.ts";
+import type { QuestionAnswer, QuestionData, QuestionnaireResult } from "../tool/types.js";
 import type { WrappingSelectItem } from "../view/components/wrapping-select.ts";
 import { readInlineCaret, resolveInlineDraftValue, withInlineDraft } from "./inline-input.ts";
 import type { QuestionnaireAction } from "./key-router.ts";

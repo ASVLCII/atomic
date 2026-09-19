@@ -125,3 +125,7 @@ export function adoptJobTracker(scope: object, preserveCurrentWhenTargetExists =
 		preserveCurrentWhenTargetExists: preserveCurrentWhenTargetExists ? () => true : undefined,
 	});
 }
+
+export function currentJobTracker(): JobTracker {
+	return singleton.current();
+}

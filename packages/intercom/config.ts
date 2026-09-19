@@ -1,3 +1,4 @@
+import { reportOwnedIntercomDiagnostic } from "./diagnostics.js";
 import { existsSync, readFileSync } from "fs";
 import { getAgentConfigPaths } from "@bastani/atomic";
 import { DEFAULT_MAX_PENDING_REPLY_WAITS } from "./reply-waiter.ts";
@@ -118,7 +119,7 @@ export function loadConfig(): IntercomConfig {
 
     return config;
   } catch (error) {
-    console.error(`Failed to load intercom config at ${CONFIG_PATH}:`, error);
+    if (!reportOwnedIntercomDiagnostic()) console.error(`Failed to load intercom config at ${CONFIG_PATH}:`, error);
     return { ...defaults };
   }
 }

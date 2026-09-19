@@ -198,14 +198,14 @@ export interface StageControlRegistry {
 	 * Used on session boundaries to release retained direct chat handles and
 	 * their subscriptions when the host store is cleared.
 	 */
-	clear(): void;
+	clear(): Promise<void>;
 	/**
 	 * Drop only handles detached from run-level control (`controlsDependencies`
 	 * false), disposing them through the background-dispose path. Live executor
 	 * handles that still own workflow execution stay registered. Emptied run
 	 * maps are pruned.
 	 */
-	clearDetached(): void;
+	clearDetached(): Promise<void>;
 }
 
 /**
@@ -222,6 +222,7 @@ export function createStageControlRegistry(): StageControlRegistry {
 	};
 
 	const _byRun = new Map<string, Map<string, RegistryEntry>>();
+	const pendingDisposals = new Set<Promise<void>>();
 
 	function ensureRun(runId: string): Map<string, RegistryEntry> {
 		let runMap = _byRun.get(runId);
@@ -245,7 +246,21 @@ export function createStageControlRegistry(): StageControlRegistry {
 		} catch (error) {
 			entry.disposal = Promise.reject(error);
 		}
+		const disposal = entry.disposal;
+		pendingDisposals.add(disposal);
+		void disposal.then(
+			() => pendingDisposals.delete(disposal),
+			() => {},
+		);
 		return entry.disposal;
+	}
+
+	async function disposeEntries(entries: RegistryEntry[]): Promise<void> {
+		const disposals = new Set([...entries.map(disposeEntry), ...pendingDisposals]);
+		const results = await Promise.allSettled(disposals);
+		for (const disposal of disposals) pendingDisposals.delete(disposal);
+		const errors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+		if (errors.length > 0) throw new AggregateError(errors, errors.map(String).join("; "));
 	}
 
 	function disposeEntryInBackground(entry: RegistryEntry, message: string): void {
@@ -431,22 +446,22 @@ export function createStageControlRegistry(): StageControlRegistry {
 		run(runId: string): WorkflowRunControlHandle {
 			return makeRunHandle(runId);
 		},
-		clear(): void {
+		async clear(): Promise<void> {
 			const entries = [..._byRun.values()].flatMap((runMap) => [...runMap.values()]);
 			_byRun.clear();
-			for (const entry of entries) {
-				disposeEntryInBackground(entry, "atomic-workflows: stage handle dispose failed");
-			}
+			await disposeEntries(entries);
 		},
-		clearDetached(): void {
+		async clearDetached(): Promise<void> {
+			const entries: RegistryEntry[] = [];
 			for (const [runId, runMap] of [..._byRun]) {
 				for (const [stageId, entry] of [...runMap]) {
 					if (entry.controlsDependencies) continue;
 					runMap.delete(stageId);
-					disposeEntryInBackground(entry, "atomic-workflows: detached stage handle dispose failed");
+					entries.push(entry);
 				}
 				if (runMap.size === 0) _byRun.delete(runId);
 			}
+			await disposeEntries(entries);
 		},
 	};
 }
@@ -468,4 +483,8 @@ export function adoptStageControlRegistry(
 	return singleton.adopt(scope, {
 		preserveCurrentWhenTargetExists: preserveCurrentWhenTargetExists ? () => true : undefined,
 	});
+}
+
+export function currentStageControlRegistry(): StageControlRegistry {
+	return singleton.current();
 }

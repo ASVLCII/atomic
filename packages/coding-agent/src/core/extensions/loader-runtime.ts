@@ -1,3 +1,5 @@
+import { extensionWorkOpen, trackExtensionWork } from "./extension-work.ts";
+import { hostInputError } from "./host-input.js";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
 import type {
 	Extension,
@@ -9,14 +11,24 @@ import type {
 } from "./types.ts";
 import { WorkflowActivityHub } from "./workflow-activity-hub.js";
 
-export async function runResourceRegistrationBatch<T>(runtime: ExtensionRuntime, run: () => Promise<T>): Promise<T> {
-	if (!runtime.beginResourceRegistrationBatch || !runtime.endResourceRegistrationBatch) return run();
-	runtime.beginResourceRegistrationBatch();
-	try {
-		return await run();
-	} finally {
-		runtime.endResourceRegistrationBatch();
-	}
+/** Prepared generations do not own session event delivery until bound by a runner. */
+export const boundExtensionRuntimes = new WeakSet<ExtensionRuntime>();
+
+export async function runResourceRegistrationBatch<T>(
+	runtime: ExtensionRuntime,
+	run: () => Promise<T>,
+	completion = false,
+): Promise<T> {
+	if (!completion && !extensionWorkOpen(runtime)) throw hostInputError("SessionClosed");
+	return trackExtensionWork(runtime, async () => {
+		if (!runtime.beginResourceRegistrationBatch || !runtime.endResourceRegistrationBatch) return run();
+		runtime.beginResourceRegistrationBatch();
+		try {
+			return await run();
+		} finally {
+			runtime.endResourceRegistrationBatch();
+		}
+	});
 }
 
 function registrationKey(extension: Extension, name: string): string {
@@ -46,8 +58,10 @@ export function createExtensionRuntime(): ExtensionRuntime {
 	};
 
 	const runtime: ExtensionRuntime = {
-		workflowActivityHub: new WorkflowActivityHub(),
 		sendMessage: notInitialized,
+		workflowActivityHub: new WorkflowActivityHub((operation) =>
+			extensionWorkOpen(runtime) ? trackExtensionWork(runtime, operation) : Promise.resolve(),
+		),
 		sendMessages: notInitialized,
 		sendUserMessage: notInitialized,
 		appendEntry: notInitialized,
@@ -218,9 +232,24 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		invalidate: (message) => {
 			if (state.staleMessage) return;
 			state.staleMessage = message ?? STALE_EXTENSION_CONTEXT_MESSAGE;
-			runtime.workflowActivityHub.dispose();
-			for (const unsubscribe of eventBusUnsubscribers) unsubscribe();
+			const failures: unknown[] = [];
+			try {
+				runtime.workflowActivityHub.dispose();
+			} catch (error) {
+				failures.push(error);
+			}
+			for (const unsubscribe of eventBusUnsubscribers) {
+				try {
+					unsubscribe();
+				} catch (error) {
+					failures.push(error);
+				}
+			}
 			eventBusUnsubscribers.clear();
+			if (failures.length)
+				throw Object.assign(new AggregateError(failures, "Extension resource release failed"), {
+					code: "ShutdownFailed",
+				});
 		},
 		trackEventBusSubscription: (unsubscribe) => {
 			let active = true;

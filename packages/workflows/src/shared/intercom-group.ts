@@ -47,9 +47,14 @@ export function workflowInvocationOwnsGroup(workflowGroup: string | undefined, c
 	return group === owner || group.startsWith(`${owner}/`);
 }
 
-/** Every workflow model stage has ordinary Intercom access. */
-export function stageHasIntercomAccess(_stageOptions?: StageOptions): boolean {
-	return true;
+/** Availability follows explicit package and tool suppression, not ambient broker state. */
+export function stageHasIntercomAccess(stageOptions?: StageOptions): boolean {
+	return (
+		stageOptions?.builtins?.intercom !== false &&
+		stageOptions?.noTools !== "all" &&
+		!stageOptions?.excludedTools?.includes("intercom") &&
+		(stageOptions?.tools === undefined || stageOptions.tools.includes("intercom"))
+	);
 }
 
 /** Whether a stage can present the workflow owner's durable pending/live route. */

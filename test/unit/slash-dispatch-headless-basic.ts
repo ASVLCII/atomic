@@ -178,8 +178,10 @@ export default workflow({
 		}
 	});
 
-	test.sequential("workflowPolicyFromContext derives non-interactive policy from hasUI false", () => {
-		assert.equal(workflowPolicyFromContext({ hasUI: false }).mode, "non_interactive");
+	test.sequential("workflowPolicyFromContext separates headless presentation from execution permission", () => {
+		assert.equal(workflowPolicyFromContext({ hasUI: false }).mode, "interactive");
+		assert.equal(workflowPolicyFromContext({ hasUI: false }).allowHumanInput, true);
+		assert.equal(workflowPolicyFromContext({ hasUI: false }).awaitTerminalRun, false);
 		assert.equal(workflowPolicyFromContext({ hasUI: false }).allowInputPicker, false);
 		assert.equal(workflowPolicyFromContext({ hasUI: true }).mode, "interactive");
 		assert.equal(workflowPolicyFromContext({}).mode, "interactive");

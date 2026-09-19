@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Headless launches return an accepted run identity for status inspection, without input pickers. Required durable gates remain pending until an authorized host or answer arrives, including when no host was initially bound. Explicit runtime execution policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+
 ### Added
 
 - Added `workflowDependency()`, `/workflow dependency` and the workflow tool's `dependency` action for bounded database inspection and registered managed-cluster recovery, with actual port, verified identity, runtime versions, consumers, retained latest failure and safe guidance. External database endpoints receive query-only checks ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
@@ -15,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added mandatory bounded routing before model-tool workflow launches, using explicit task state and the full current workflow catalog. Results show validated workflow/budget decisions as formatted JSON; `none` directs the caller to continue inline without launching, and changed registry approvals fail before admission. Routing context containing known configured credentials is rejected before either provider receives it. User `/workflow` commands and authored composition bypass the gate ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
 - Added prompt-based workflow-stage `model: "auto"` selection for stages, chains, and parallel tasks, with hard model constraints, shared router settings, and retained selection metadata across fallback and resume.
 - Model-tool `run` now dispatches the router-selected workflow without a caller-selected name, reports `estimatedDuration`, and returns the selected input contract without launching when values are missing or invalid. Routing considers conversational intent and whether a workflow is warranted.
+- Workflow input and durable approvals can use SDK human-input callbacks without terminal rendering, including nested stage questionnaires with original previews, selections and notes. Pending approvals survive host withdrawal and can be re-presented or resumed under another host without accepting stale answers ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ### Fixed
 
@@ -44,6 +49,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Jev launch routing now supports catalogs above 255 choices through bounded tournaments, retaining `none` in the final comparison and preserving exact user budgets. Partial batch results never authorize a launch ([#3089](https://github.com/bastani-inc/atomic/issues/3089)).
 - Fixed workflow routing with strict-schema providers such as Codex when budget limits are omitted or partially supplied, preserving exact limits and zero values without introducing null fields.
 - Workflow selection and automatic stage-model selection allow an initial attempt plus up to three repairs for malformed or schema-invalid answers, within the original decision deadline. Authentication/provider errors, cancellation and stale catalogs remain terminal; repairs never duplicate admission.
+- Workflow startup no longer removes the default `ask_user_question` tool in headless sessions. Without a UI, execution still returns the existing `no_ui` refusal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- SDK workflow discovery and project configuration now follow the session's working directory rather than the process working directory ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Stage sessions inherit SDK configuration, callbacks and capability restrictions before startup. Questionnaires retain the originating child identity and stay pending through host withdrawal; tool suppression also removes Intercom group access without restoring recursive workflow tooling ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Awaited SDK disposal now drains the owning host's workflow stages and persistence before releasing its runtime resources. Closing or reloading one host no longer clears a sibling host's runs, including separate loaders sharing a caller-supplied event bus; bus sharing does not transfer lifecycle ownership. Borrowed durability backends remain caller-owned ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Borrowed resource discovery no longer acquires a durability lease before session startup. Final cleanup releases the last started owner's lease even when outgoing session retirement fails ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Builtin classifier and category-action stages now retain Intercom coordination without overriding caller-disabled tools or packages.
+- Overlapping SDK workflow owners now answer and withdraw questionnaires through their own session's broker rather than a sibling's.
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

@@ -90,6 +90,8 @@ export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContex
  * ExtensionAPI passed to extension factory functions.
  */
 export interface ExtensionAPI {
+	/** @internal Owning runtime identity, retained across generation replacement. */
+	lifecycleScope?: object;
 	registerWorkflowActivityPublisher(): WorkflowActivityPublisher;
 	on(event: "workflow_lifecycle", handler: ExtensionHandler<WorkflowLifecycleEvent>): void;
 	on(event: "workflow_activity_changed", handler: ExtensionHandler<WorkflowActivityChangedEvent>): void;
@@ -196,6 +198,8 @@ export interface ExtensionAPI {
 	 * Return the resource-loader options that child Atomic sessions should inherit without sharing this loader instance.
 	 */
 	getResourceLoaderInheritanceSnapshot?: () => DefaultResourceLoaderInheritanceSnapshot;
+	/** Internal owner-bound defaults and capability ceiling for builtin child adapters. */
+	getChildSessionOptions?: import("../child-session-options.ts").ChildSessionOptionsResolver;
 
 	// =========================================================================
 	// Message Rendering

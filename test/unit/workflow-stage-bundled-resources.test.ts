@@ -396,7 +396,8 @@ describe("workflow stage bundled resources", () => {
 		}
 	});
 
-	test("keeps explicit workflow stage tool allowlists authoritative except for mandatory Intercom", async () => {
+	// #3105: Intercom no longer bypasses explicit tool suppression.
+	test("keeps explicit workflow stage tool allowlists authoritative including Intercom", async () => {
 		const cwd = tempDir("atomic-workflow-stage-explicit-tools-cwd-");
 		const agentDir = join(cwd, "agent");
 		mkdirSync(agentDir, { recursive: true });
@@ -409,9 +410,9 @@ describe("workflow stage bundled resources", () => {
 		try {
 			assert.deepEqual(
 				session.getAllTools().map((tool) => tool.name),
-				["read", "intercom"],
+				["read"],
 			);
-			assert.deepEqual(session.getActiveToolNames(), ["read", "intercom"]);
+			assert.deepEqual(session.getActiveToolNames(), ["read"]);
 		} finally {
 			session.dispose();
 		}
@@ -437,7 +438,8 @@ describe("workflow stage bundled resources", () => {
 		}
 	});
 
-	test("honors noTools all except for mandatory Intercom", async () => {
+	// #3105: noTools all activates no tools, without a mandatory exception.
+	test("honors noTools all including Intercom", async () => {
 		const cwd = tempDir("iw-");
 		const agentDir = join(cwd, "agent");
 		mkdirSync(agentDir, { recursive: true });
@@ -450,30 +452,20 @@ describe("workflow stage bundled resources", () => {
 		try {
 			assert.deepEqual(
 				session.getAllTools().map((tool) => tool.name),
-				["intercom"],
+				[],
 			);
-			assert.deepEqual(session.getActiveToolNames(), ["intercom"]);
-			const toolInfo = session.getAllTools()[0];
-			assert.equal(toolInfo?.sourceInfo.configurationOrigin, "bundled");
-			assert.equal(session.getToolDefinition("intercom")?.label, "Intercom");
+			assert.deepEqual(session.getActiveToolNames(), []);
+			assert.equal(session.getToolDefinition("intercom"), undefined);
 			assert.equal(session.getToolDefinition("contact_supervisor"), undefined);
 			await session.bindExtensions({});
-			const result = await session
-				.getToolDefinition("intercom")!
-				.execute(
-					"workflow-status",
-					{ action: "status" } as never,
-					undefined,
-					undefined,
-					session.extensionRunner.createContext(),
-				);
-			assert.match((result.content[0] as { text: string }).text, /Intercom Status:[\s\S]*Groups: workflow-test:/);
+			assert.deepEqual(session.getActiveToolNames(), []);
 		} finally {
 			session.dispose();
 		}
 	});
 
-	test("keeps allowlisted subagent and mandatory Intercom in workflow stages launched by subagents", async () => {
+	// #3105: the parent-selected subagent tool does not implicitly select Intercom.
+	test("keeps only allowlisted subagent in workflow stages launched by subagents", async () => {
 		const snapshot = snapshotEnv();
 		const cwd = tempDir("atomic-workflow-stage-subagent-tool-cwd-");
 		const agentDir = join(cwd, "agent");
@@ -487,9 +479,9 @@ describe("workflow stage bundled resources", () => {
 			try {
 				assert.deepEqual(
 					session.getAllTools().map((tool) => tool.name),
-					["subagent", "intercom"],
+					["subagent"],
 				);
-				assert.deepEqual(session.getActiveToolNames(), ["subagent", "intercom"]);
+				assert.deepEqual(session.getActiveToolNames(), ["subagent"]);
 			} finally {
 				session.dispose();
 			}
@@ -590,8 +582,9 @@ describe("workflow stage bundled resources", () => {
 					const activeToolNames = session.getActiveToolNames();
 					assert.ok(allToolNames.includes("package_tool_alpha"), `registered tools: ${allToolNames.join(", ")}`);
 					assert.ok(allToolNames.includes("package_tool_beta"), `registered tools: ${allToolNames.join(", ")}`);
-					assert.ok(allToolNames.includes("intercom"), `registered tools: ${allToolNames.join(", ")}`);
-					assert.deepEqual(activeToolNames.sort(), ["intercom", "package_tool_alpha", "package_tool_beta"]);
+					// #3105: custom-tool allowlists exclude unselected Intercom too.
+					assert.equal(allToolNames.includes("intercom"), false);
+					assert.deepEqual(activeToolNames.sort(), ["package_tool_alpha", "package_tool_beta"]);
 				} finally {
 					session.dispose();
 				}

@@ -94,7 +94,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(sessionDir).toBe(expectedSessionDir);
 		expect(sessionFile?.startsWith(`${expectedSessionDir}${sep}`)).toBe(true);
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("keeps an explicit sessionManager override", async () => {
@@ -112,7 +112,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager).toBe(sessionManager);
 		expect(session.sessionManager.isPersisted()).toBe(false);
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("derives cwd from an explicit sessionManager when cwd is omitted", async () => {
@@ -146,7 +146,7 @@ describe("createAgentSession session manager defaults", () => {
 
 		expect(output.trim()).toBe("session-cwd-marker");
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("exposes current session state to the built-in bash tool", async () => {
@@ -182,7 +182,7 @@ describe("createAgentSession session manager defaults", () => {
 			session.thinkingLevel,
 		]);
 
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("enables ask_user_question and todo by default", async () => {
@@ -193,7 +193,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.getActiveToolNames()).toEqual(
 			expect.arrayContaining(["read", "bash", "edit", "write", "ask_user_question", "todo"]),
 		);
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("restores an absent model id for a registered OpenAI-compatible provider", async () => {
@@ -212,7 +212,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.model?.id).toBe(restoredModelId);
 		expect(modelFallbackMessage).toBeUndefined();
 		expect(modelFallbackReason).toBeUndefined();
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("does not synthesize an exact unauthenticated model during SDK session restoration", async () => {
@@ -232,7 +232,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.model).not.toEqual(locked);
 		expect(modelFallbackMessage).toContain("test-locked/locked-model");
 		expect(modelFallbackReason).toBe("session-restore");
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("propagates a generic warning for an unusable complete saved default without switching providers", async () => {
@@ -256,7 +256,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(modelFallbackReason).toBe("configured-provider-unsupported");
 		expect(settingsManager.getDefaultProvider()).toBe("unsupported-provider");
 		expect(settingsManager.getDefaultModel()).toBe("unsupported-model");
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("keeps normal automatic selection for an unknown model on a supported provider", async () => {
@@ -275,7 +275,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.model?.id).not.toBe("unknown-saved-model");
 		expect(modelFallbackMessage).toBeUndefined();
 		expect(modelFallbackReason).toBeUndefined();
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("keeps normal automatic selection when a supported exact default lacks auth", async () => {
@@ -294,7 +294,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.model?.provider).not.toBe("test-locked");
 		expect(modelFallbackMessage).toBeUndefined();
 		expect(modelFallbackReason).toBeUndefined();
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("gives an unsupported saved provider precedence over failed persisted-session restoration", async () => {
@@ -316,7 +316,7 @@ describe("createAgentSession session manager defaults", () => {
 			"Configured default model is unavailable or unsupported. Update defaultProvider/defaultModel or use /model.",
 		);
 		expect(modelFallbackReason).toBe("configured-provider-unsupported");
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("preserves restoration guidance with supported unknown and unauthenticated saved defaults", async () => {
@@ -336,7 +336,7 @@ describe("createAgentSession session manager defaults", () => {
 			expect(modelFallbackMessage).toContain("Could not restore model absent-session-provider/absent-session-model");
 			expect(modelFallbackMessage).toContain(`Using ${session.model?.provider}/${session.model?.id}`);
 			expect(modelFallbackReason).toBe("session-restore");
-			session.dispose();
+			await session.dispose();
 		}
 	});
 
@@ -353,7 +353,7 @@ describe("createAgentSession session manager defaults", () => {
 
 		expect(modelFallbackMessage).toContain("No models available");
 		expect(modelFallbackReason).toBe("no-models-available");
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("marks workflow-stage sessions internal with their orchestration identity", async () => {
@@ -381,7 +381,7 @@ describe("createAgentSession session manager defaults", () => {
 			stageId: "stage-7",
 			stageName: "build",
 		});
-		session.dispose();
+		await session.dispose();
 	});
 
 	it("reports session-restore fallback reason and selected replacement model", async () => {
@@ -416,6 +416,6 @@ describe("createAgentSession session manager defaults", () => {
 		expect(modelFallbackMessage).toBe(
 			`Could not restore model absent-session-provider/absent-session-model. Using ${replacement!.provider}/${replacement!.id}`,
 		);
-		session.dispose();
+		await session.dispose();
 	});
 });

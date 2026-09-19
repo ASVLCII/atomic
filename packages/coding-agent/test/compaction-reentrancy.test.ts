@@ -240,6 +240,11 @@ describe("manual compaction re-entrancy", () => {
 		]);
 		expect(harness.session.isCompacting).toBe(false);
 		expect(gate.calls).toEqual([]);
+		// #3105: the injected queue failure remains observable during awaited shutdown.
+		await expect(harness.session.dispose()).rejects.toMatchObject({
+			code: "ShutdownFailed",
+			errors: expect.arrayContaining([expect.objectContaining({ message: "abort", cause: failure })]),
+		});
 	});
 
 	it("keeps a failed abort drain handled while an automatic compaction settles", async () => {

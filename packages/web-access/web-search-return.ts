@@ -6,7 +6,7 @@ import {
 	formatSearchSummary,
 	hasFullInlineCoverage,
 } from "./web-search-formatting.js";
-import { generateId, storeResult, type QueryResultData, type StoredSearchData } from "./storage.js";
+import { createResultStorage, generateId, type ResultStorage, type QueryResultData, type StoredSearchData } from "./storage.js";
 import type { SummaryMeta } from "./summary-review.js";
 import type { CuratorWorkflow } from "./web-search-config.js";
 
@@ -32,20 +32,22 @@ export type SearchReturnBuilder = (opts: SearchReturnOptions) => SearchReturnPay
 
 interface BuildSearchReturnDeps {
 	pi: ExtensionAPI;
+	storage?: ResultStorage;
 	startBackgroundFetch(urls: string[]): string | null;
 }
 
-function storeAndPublishSearch(pi: ExtensionAPI, results: QueryResultData[]): string {
+function storeAndPublishSearch(pi: ExtensionAPI, results: QueryResultData[], storage: ResultStorage): string {
 	const id = generateId();
 	const data: StoredSearchData = {
 		id, type: "search", timestamp: Date.now(), queries: results,
 	};
-	storeResult(id, data);
+	storage.storeResult(id, data);
 	pi.appendEntry("web-search-results", data);
 	return id;
 }
 
 export function buildSearchReturn(opts: SearchReturnOptions, deps: BuildSearchReturnDeps): SearchReturnPayload {
+	const storage = deps.storage ?? createResultStorage();
 	const sc = opts.results.filter(r => !r.error).length;
 	const tr = opts.results.reduce((sum, r) => sum + r.results.length, 0);
 	const allFailed = opts.results.length > 0 && sc === 0;
@@ -81,7 +83,7 @@ export function buildSearchReturn(opts: SearchReturnOptions, deps: BuildSearchRe
 			timestamp: Date.now(),
 			urls: opts.inlineContent,
 		};
-		storeResult(fetchId, data);
+		storage.storeResult(fetchId, data);
 		deps.pi.appendEntry("web-search-results", data);
 		if (!hasApprovedSummary) {
 			output += `---\nFull content for ${opts.inlineContent.length} sources available [${fetchId}].`;
@@ -93,7 +95,7 @@ export function buildSearchReturn(opts: SearchReturnOptions, deps: BuildSearchRe
 		}
 	}
 
-	const searchId = storeAndPublishSearch(deps.pi, opts.results);
+	const searchId = storeAndPublishSearch(deps.pi, opts.results, storage);
 	const isBackgroundFetch = fetchId !== null && !hasInlineReady;
 
 	return {

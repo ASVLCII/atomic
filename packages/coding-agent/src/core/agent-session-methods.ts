@@ -22,7 +22,7 @@ import type {
 	PromptOptions,
 	SessionStats,
 	ToolDefinitionEntry,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 import type { BashResult } from "./bash-executor.ts";
 import type {
 	CompactionUrgency,
@@ -117,7 +117,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	readonly systemPrompt: string;
 	readonly retryAttempt: number;
 	readonly isCompacting: boolean;
-	readonly compactionReason?: import("./agent-session-types.ts").CompactionReason;
+	readonly compactionReason?: import("./agent-session-types.js").CompactionReason;
 	readonly messages: AgentMessage[];
 	readonly steeringMode: "all" | "one-at-a-time";
 	readonly followUpMode: "all" | "one-at-a-time";
@@ -155,7 +155,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	_emitExtensionEvent(event: AgentEvent): Promise<void>;
 	subscribe(listener: AgentSessionEventListener): () => void;
 	_disconnectFromAgent(): void;
-	dispose(): void;
+	dispose(): Promise<void>;
 	getAgentTaskHost(): import("./tasks/agent-adapter.js").AgentTaskHost;
 	closeSessionTasks(): Promise<void>;
 	/** Internal workflow pause: cancel owned execution without closing message admission. */
@@ -474,7 +474,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_manualCompactionPromise: Promise<VerbatimCompactionResult> | undefined;
 	_autoCompactionAbortController: AbortController | undefined;
 	_autoCompactionCompletion: Promise<void> | undefined;
-	_compactionReason: import("./agent-session-types.ts").CompactionReason | undefined;
+	_compactionReason: import("./agent-session-types.js").CompactionReason | undefined;
 	_overflowRecoveryAttempted: boolean;
 	_recoverableLengthRecoveryAttempted: boolean;
 	_contextOverflowUnresolved: boolean;
@@ -484,7 +484,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_retryAttempt: number;
 	_retryPromise: Promise<void> | undefined;
 	_retryResolve: (() => void) | undefined;
-	_bashAbortControllers: Map<string | symbol, AbortController>;
+	_bashAbortControllers: Map<string | symbol, Set<AbortController>>;
 	_pendingBashMessages: BashExecutionMessage[];
 	_extensionRunner: ExtensionRunner;
 	_turnIndex: number;
@@ -496,14 +496,18 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_initialActiveToolNames?: string[];
 	_allowedToolNames?: Set<string>;
 	_excludedToolNames?: Set<string>;
+	_childSessionOptions?: import("./child-session-options.ts").ChildSessionOptionsResolver;
 	_baseToolsOverride?: Record<string, AgentTool>;
 	_sessionStartEvent: SessionStartEvent;
 	_orchestrationContext?: OrchestrationContext;
 	_subagentPolicy?: import("./extensions/index.js").SubagentChildPolicy;
 	_subagentMessageAdmission?: import("./workflow-stage-admission.ts").WorkflowStageAdmissionBoundary;
 	_extensionUIContext?: ExtensionUIContext;
+	_extensionHumanInput?: import("./extensions/host-input.js").HostInput | null;
+	_extensionDiagnosticListener?: (diagnostic: import("./extensions/host-input.js").HostDiagnostic) => void;
 	_extensionMode: ExtensionMode;
 	_disposed: boolean;
+	_close(event: import("./extensions/types.ts").SessionShutdownEvent, beforeInvalidate?: () => void): Promise<void>;
 	_sessionSummaryAbortController: AbortController | undefined;
 	_sessionSummaryToken: number;
 	_sessionSummaryRun: import("./agent-session-summary.ts").SessionSummaryRun | undefined;

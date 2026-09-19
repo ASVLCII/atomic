@@ -84,6 +84,8 @@ Atomic's category is broader and more explicit: it is the loop engine for engine
 
 Atomic bundles nine workflows: six reusable control-flow patterns, two autonomous implementation loops, and one end-to-end design workflow. They are available in every session. Use `/workflow list` to confirm the current set and `/workflow inputs <name>` to inspect a contract before launch.
 
+All builtin workflows allow Intercom coordination, including stages with narrow tool lists such as the classifier and category actions. Parent tool allowlists, exclusions, `noTools`, and disabled builtins still apply; enabling a workflow does not restore caller-disabled Intercom.
+
 | Workflow | What it does | When to use |
 |---|---|---|
 | `classify-and-act` | Structured classifier → deterministic category action; low confidence can fall back to human selection. | Route mixed requests to isolated category-specific work. |

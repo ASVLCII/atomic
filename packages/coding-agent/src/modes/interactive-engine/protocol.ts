@@ -4,7 +4,7 @@ import type {
 	HostSessionPickerRow,
 	WidgetScrollRequest,
 	WidgetScrollState,
-} from "../../core/extensions/ui-types.ts";
+} from "../../core/extensions/ui-types.js";
 import type { KeyId } from "../../core/keybindings.ts";
 
 /**
