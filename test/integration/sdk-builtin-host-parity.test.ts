@@ -16,6 +16,7 @@ import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/bac
 import { run } from "../../packages/workflows/src/engine/run.js";
 import { workflowPolicyFromContext } from "../../packages/workflows/src/extension/workflow-policy.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
+import { withoutSqliteExperimentalWarning } from "../fixtures/sdk-host-fixture-support.mjs";
 import { RealPostgresHome, reserveListener } from "../helpers/real-postgres.js";
 import { spawnSyncCollect } from "../helpers/runtime.js";
 import { attachedCliPresentation, forwardCliDialogs } from "./fixtures/sdk-host-cli.js";
@@ -1919,7 +1920,7 @@ test(
 			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
 		);
 		assert.equal(result.exitCode, 0, result.stderr.toString());
-		assert.equal(result.stderr.toString(), "");
+		assert.equal(withoutSqliteExperimentalWarning(result.stderr.toString()), "");
 		assert.equal(result.stdout.toString().trim(), '{"verified":true}');
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,

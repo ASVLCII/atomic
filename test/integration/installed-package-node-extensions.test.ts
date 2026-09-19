@@ -319,6 +319,7 @@ runTest(
 		const fixtures = [
 			"consumer-parity-types.mts",
 			"consumer-parity.mjs",
+			"sdk-host-fixture-support.mjs",
 			"sdk-host-durable-workflow.ts",
 			"sdk-host-built-node.mjs",
 			"sdk-host-lazy-mcp.mjs",

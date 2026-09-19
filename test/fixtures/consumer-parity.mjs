@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { ReadStream } from "node:tty";
 import { fileURLToPath } from "node:url";
 
+import { awaitFixtureBrokerExit, withoutSqliteExperimentalWarning } from "./sdk-host-fixture-support.mjs";
 assert.equal(process.versions.bun, undefined);
 assert.ok(!process.stdin.isTTY && !process.stdout.isTTY);
 const installedRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), "node_modules"));
@@ -505,7 +506,7 @@ export default workflow({ name: "children", description: "children", inputs: {},
 				env: { ...process.env },
 			});
 			assert.equal(result.status, 0, `${file} ${args}: ${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
-			assert.equal(result.stderr, "", `${file}: unsolicited diagnostics`);
+			assert.equal(withoutSqliteExperimentalWarning(result.stderr), "", `${file}: unsolicited diagnostics`);
 			return result.stdout;
 		};
 		for (const reply of ["true", "false", "cancel", "missing", "stale", "invalid", "duplicate"])
@@ -535,16 +536,7 @@ export default workflow({ name: "children", description: "children", inputs: {},
 			run(`./${file}`);
 	}
 } finally {
-	const brokerPid = join(root, "agent", "intercom", "broker.pid");
-	if (existsSync(brokerPid)) {
-		const pid = Number(readFileSync(brokerPid, "utf8").trim());
-		assert.ok(Number.isInteger(pid) && pid > 0);
-		try {
-			process.kill(pid, "SIGTERM");
-		} catch (error) {
-			if (error.code !== "ESRCH") throw error;
-		}
-	}
+	await awaitFixtureBrokerExit(join(root, "agent"));
 	if (!mode) {
 		// Sessions release leases, not the shared service. This fixture owns its disposable cluster.
 		const { workflowDependency } = await import("@bastani/atomic/workflows");

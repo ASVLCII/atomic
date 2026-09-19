@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { awaitFixtureBrokerExit } from "./sdk-host-fixture-support.mjs";
 
 // #3105: the fixture owns the isolated broker; sessions own only their socket leases.
 const root = mkdtempSync(join(tmpdir(), "sdk-intercom-owners-"));
@@ -53,13 +53,6 @@ try {
 	console.log(JSON.stringify({ verified: true }));
 } finally {
 	await Promise.all(sessions.map(session => session.dispose()));
-	// Only the fixture, after all lease assertions, terminates its isolated broker.
-	if (existsSync(pidPath)) {
-		const pid = Number(readFileSync(pidPath, "utf8").trim());
-		if (Number.isInteger(pid) && pid > 0) {
-			try { process.kill(pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
-			for (let attempt = 0; attempt < 100 && existsSync(pidPath); attempt++) await delay(20);
-		}
-	}
+	await awaitFixtureBrokerExit(agentDir);
 	rmSync(root, { recursive: true, force: true });
 }

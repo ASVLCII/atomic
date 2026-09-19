@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -542,57 +542,72 @@ test.each(["preferred", "dist"])(
 	"disabled builtins stay absent with %s custom discovery and reload",
 	async (layout) => {
 		const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-disabled-"));
-		const settingsManager = SettingsManager.inMemory();
-		const loader = new DefaultResourceLoader({
-			cwd,
-			agentDir: join(cwd, "agent"),
-			settingsManager,
-			builtinPackagePaths:
-				layout === "preferred"
-					? getBuiltinPackagePaths()
-					: [join(config.getPackageDir(), "dist", "builtin", "subagents")],
-			noContextFiles: true,
-		});
-		await loader.reload();
-		const original = [...loader.getExtensions().extensions];
-		assert.ok(original.length > 0, "the supplied shipped extension must actually be loaded");
-		const originalArray = loader.getExtensions().extensions;
-		const originalSkills = loader.getSkills().skills;
-		const builtins = Object.freeze({
-			workflows: false,
-			subagents: false,
-			mcp: false,
-			"web-access": false,
-			intercom: false,
-		});
+		// #3111: package tests run without an Atomic build. Own the alternate
+		// layout instead of depending on a developer's existing dist/builtin.
+		const packageDir = config.getPackageDir();
+		const fixture = layout === "dist" ? mkdtempSync(join(packageDir, ".sdk-layout-")) : undefined;
+		const packageDirSpy = fixture ? vi.spyOn(config, "getPackageDir").mockReturnValue(fixture) : undefined;
 		try {
-			const { session } = await createAgentSession({
+			if (fixture) {
+				cpSync(join(packageDir, "..", "subagents"), join(fixture, "dist", "builtin", "subagents"), {
+					recursive: true,
+				});
+			}
+			const settingsManager = SettingsManager.inMemory();
+			const loader = new DefaultResourceLoader({
 				cwd,
 				agentDir: join(cwd, "agent"),
 				settingsManager,
-				sessionManager: SessionManager.inMemory(cwd),
-				resourceLoader: loader,
-				builtins,
+				builtinPackagePaths:
+					layout === "preferred"
+						? getBuiltinPackagePaths()
+						: [join(config.getPackageDir(), "dist", "builtin", "subagents")],
+				noContextFiles: true,
+			});
+			await loader.reload();
+			const original = [...loader.getExtensions().extensions];
+			assert.ok(original.length > 0, "the supplied shipped extension must actually be loaded");
+			const originalArray = loader.getExtensions().extensions;
+			const originalSkills = loader.getSkills().skills;
+			const builtins = Object.freeze({
+				workflows: false,
+				subagents: false,
+				mcp: false,
+				"web-access": false,
+				intercom: false,
 			});
 			try {
-				for (let generation = 0; generation < 2; generation++) {
-					assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
-					assert.equal(session.resourceLoader.getSkills().skills.length, 0);
-					assert.equal(session.resourceLoader.getPrompts().prompts.length, 0);
-					assert.ok(session.getActiveToolNames().includes("read"));
-					assert.ok(!session.getActiveToolNames().includes("intercom"));
-					if (generation === 0) {
-						assert.deepEqual(loader.getExtensions().extensions, original);
-						assert.equal(loader.getExtensions().extensions, originalArray);
-						assert.equal(loader.getSkills().skills, originalSkills);
-						await session.reload();
+				const { session } = await createAgentSession({
+					cwd,
+					agentDir: join(cwd, "agent"),
+					settingsManager,
+					sessionManager: SessionManager.inMemory(cwd),
+					resourceLoader: loader,
+					builtins,
+				});
+				try {
+					for (let generation = 0; generation < 2; generation++) {
+						assert.equal(session.resourceLoader.getExtensions().extensions.length, 0);
+						assert.equal(session.resourceLoader.getSkills().skills.length, 0);
+						assert.equal(session.resourceLoader.getPrompts().prompts.length, 0);
+						assert.ok(session.getActiveToolNames().includes("read"));
+						assert.ok(!session.getActiveToolNames().includes("intercom"));
+						if (generation === 0) {
+							assert.deepEqual(loader.getExtensions().extensions, original);
+							assert.equal(loader.getExtensions().extensions, originalArray);
+							assert.equal(loader.getSkills().skills, originalSkills);
+							await session.reload();
+						}
 					}
+				} finally {
+					await session.dispose();
 				}
 			} finally {
-				await session.dispose();
+				rmSync(cwd, { recursive: true, force: true });
 			}
 		} finally {
-			rmSync(cwd, { recursive: true, force: true });
+			packageDirSpy?.mockRestore();
+			if (fixture) rmSync(fixture, { recursive: true, force: true });
 		}
 	},
 );
