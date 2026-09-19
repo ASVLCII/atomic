@@ -25,7 +25,8 @@ describe("/workflow resume — durable regression coverage", () => {
 	});
 	afterEach(() => setDurableBackend(undefined));
 
-	test("durable resume forwards non-interactive command policy", async () => {
+	// #3105: missing presentation UI must not invent an execution restriction.
+	test("durable resume does not infer non-interactive policy from missing UI", async () => {
 		let capturedPolicy: WorkflowExecutionPolicy | undefined;
 		const workflowId = testRunId("durable-policy-run");
 		const runtime = {
@@ -63,7 +64,7 @@ describe("/workflow resume — durable regression coverage", () => {
 			},
 		);
 
-		assert.equal(capturedPolicy?.mode, "non_interactive");
+		assert.equal(capturedPolicy?.mode, "interactive");
 		assert.equal(
 			messages.some((message) => message.includes("missing")),
 			true,
