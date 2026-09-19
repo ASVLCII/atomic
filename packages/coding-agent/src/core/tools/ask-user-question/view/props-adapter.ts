@@ -3,7 +3,7 @@ import type { BindingContext, PerTabBindingContext } from "../state/selectors/co
 import { selectActivePreviewPaneIndex } from "../state/selectors/derivations.ts";
 import { selectActiveView } from "../state/selectors/focus.ts";
 import type { QuestionnaireState } from "../state/state.ts";
-import type { QuestionData } from "../tool/types.ts";
+import type { QuestionData } from "../tool/types.js";
 import type { BoundGlobalBinding, BoundPerTabBinding } from "./component-binding.ts";
 import type { WrappingSelectItem } from "./components/wrapping-select.ts";
 import type { TabComponents } from "./tab-components.ts";

@@ -3,7 +3,7 @@ import type {
 	HostSessionPickerHandle,
 	HostSessionPickerRequest,
 	HostSessionPickerRow,
-} from "../../../core/extensions/ui-types.ts";
+} from "../../../core/extensions/ui-types.js";
 import type { SessionInfo } from "../../../core/session-manager.ts";
 import { SessionSelectorComponent } from "./session-selector.ts";
 

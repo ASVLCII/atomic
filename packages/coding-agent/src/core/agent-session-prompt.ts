@@ -4,7 +4,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolveWorkflowStageDeliveryTarget } from "./agent-session-delivery-forwarding.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
-import type { PromptOptions } from "./agent-session-types.ts";
+import type { PromptOptions } from "./agent-session-types.js";
 import {
 	formatNoApiKeyFoundMessage,
 	formatNoModelSelectedMessage,

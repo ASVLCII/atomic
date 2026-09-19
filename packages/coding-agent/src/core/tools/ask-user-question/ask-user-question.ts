@@ -15,7 +15,7 @@ import {
 	type QuestionnaireResult,
 	type QuestionParams,
 	QuestionParamsSchema,
-} from "./tool/types.ts";
+} from "./tool/types.js";
 import { validateQuestionnaire } from "./tool/validate-questionnaire.ts";
 import type { WrappingSelectItem } from "./view/components/wrapping-select.ts";
 

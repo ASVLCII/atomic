@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ExtensionBindings } from "./agent-session-types.ts";
+import type { ExtensionBindings } from "./agent-session-types.js";
 
 /** Internal factory context; never inherited by independently admitted child sessions. */
 export interface SessionLifecycleContext {

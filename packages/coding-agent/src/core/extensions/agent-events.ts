@@ -3,7 +3,7 @@ import type { Api, AssistantMessageEvent, ImageContent, Model, ToolResultMessage
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type { ExtensionMode } from "./context-types.ts";
-import type { ExtensionUIContext } from "./ui-types.ts";
+import type { ExtensionUIContext } from "./ui-types.js";
 
 // ============================================================================
 // Agent Events

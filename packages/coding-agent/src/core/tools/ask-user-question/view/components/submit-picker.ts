@@ -1,6 +1,6 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "../../../../../modes/interactive/theme/theme.js";
-import { OVERLAY_ACTIVE_ROW_MARKER } from "../../../../extensions/ui-types.ts";
+import { OVERLAY_ACTIVE_ROW_MARKER } from "../../../../extensions/ui-types.js";
 import type { StatefulView } from "../stateful-view.ts";
 
 const ACTIVE_POINTER = "❯ ";

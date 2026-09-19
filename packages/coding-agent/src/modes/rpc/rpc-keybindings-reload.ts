@@ -1,4 +1,4 @@
-import type { AgentSessionReloadOptions } from "../../core/agent-session-types.ts";
+import type { AgentSessionReloadOptions } from "../../core/agent-session-types.js";
 import type { KeybindingsConfig, KeybindingsManager } from "../../core/keybindings.ts";
 import type {
 	EngineExtensionShortcut,

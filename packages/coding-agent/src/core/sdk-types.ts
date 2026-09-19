@@ -1,7 +1,7 @@
 import type { Api, Model } from "@bastani/pi-ai/compat";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession } from "./agent-session.js";
-import type { ExtensionBindings } from "./agent-session-types.ts";
+import type { ExtensionBindings } from "./agent-session-types.js";
 import type {
 	LoadExtensionsResult,
 	OrchestrationContext,

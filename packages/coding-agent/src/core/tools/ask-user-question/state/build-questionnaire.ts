@@ -1,6 +1,6 @@
 import { Input } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, type Theme } from "../../../../modes/interactive/theme/theme.js";
-import type { QuestionData } from "../tool/types.ts";
+import type { QuestionData } from "../tool/types.js";
 import {
 	type BoundGlobalBinding,
 	type BoundPerTabBinding,

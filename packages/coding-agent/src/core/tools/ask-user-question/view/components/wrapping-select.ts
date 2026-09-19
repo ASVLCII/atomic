@@ -1,6 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { OVERLAY_ACTIVE_ROW_MARKER } from "../../../../extensions/ui-types.ts";
+import { OVERLAY_ACTIVE_ROW_MARKER } from "../../../../extensions/ui-types.js";
 import { ROW_INTENT_META } from "../../state/row-intent.ts";
 
 /**

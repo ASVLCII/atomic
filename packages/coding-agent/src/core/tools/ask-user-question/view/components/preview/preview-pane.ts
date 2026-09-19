@@ -1,5 +1,5 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { QuestionData } from "../../../tool/types.ts";
+import type { QuestionData } from "../../../tool/types.js";
 import type { StatefulView } from "../../stateful-view.ts";
 import type { OptionListView } from "../option-list-view.ts";
 import type { PreviewBlockRenderer } from "./preview-block-renderer.ts";

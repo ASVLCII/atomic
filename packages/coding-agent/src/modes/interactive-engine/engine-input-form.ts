@@ -1,4 +1,4 @@
-import type { HostInputFormRequest } from "../../core/extensions/ui-types.ts";
+import type { HostInputFormRequest } from "../../core/extensions/ui-types.js";
 import {
 	type InteractiveEngineMessage,
 	parseInteractiveEngineCommand,

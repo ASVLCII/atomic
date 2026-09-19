@@ -3,7 +3,7 @@ import type { Api, Model } from "@bastani/pi-ai/compat";
 import { clampThinkingLevel, getSupportedThinkingLevels, modelsAreEqual } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
-import { type ModelCycleResult, type ModelMutationOptions, THINKING_LEVELS } from "./agent-session-types.ts";
+import { type ModelCycleResult, type ModelMutationOptions, THINKING_LEVELS } from "./agent-session-types.js";
 import { formatNoApiKeyFoundMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { assertSessionOpen, trackSessionWork } from "./session-lifecycle-work.ts";

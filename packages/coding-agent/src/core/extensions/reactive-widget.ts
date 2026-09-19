@@ -1,5 +1,5 @@
 import type { ExtensionWidgetOptions } from "./types.ts";
-import type { WidgetScrollRequest, WidgetScrollState } from "./ui-types.ts";
+import type { WidgetScrollRequest, WidgetScrollState } from "./ui-types.js";
 
 export interface ReactiveWidgetComponent {
 	render(width: number): string[];

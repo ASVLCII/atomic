@@ -5,7 +5,7 @@ import {
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { transferProtectedStreamingCustomMessages } from "./agent-session-persistent-custom-messages.ts";
 import { composePauseAbortBoundaries } from "./agent-session-queue-pause.ts";
-import { priorityHoldCounts } from "./agent-session-types.ts";
+import { priorityHoldCounts } from "./agent-session-types.js";
 
 /** Atomically retire one stage session and prepend all of its delivery ownership to the replacement. */
 export function transferWorkflowStageDeliveriesTo(this: AgentSession, target: object): void {

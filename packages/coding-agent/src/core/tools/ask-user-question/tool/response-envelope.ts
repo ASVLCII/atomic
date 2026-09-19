@@ -1,5 +1,5 @@
 import { chatAnswerIntent, formatAnswerScalar } from "./format-answer.ts";
-import type { QuestionAnswer, QuestionnaireResult, QuestionParams } from "./types.ts";
+import type { QuestionAnswer, QuestionnaireResult, QuestionParams } from "./types.js";
 
 export const DECLINE_MESSAGE = "User declined to answer questions";
 export const ENVELOPE_PREFIX = "User has answered your questions:";

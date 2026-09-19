@@ -18,7 +18,7 @@ import {
 	type InterruptQueueHold,
 	normalizeInterruptAbortMessage,
 	priorityHoldCounts,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 import type { SendMessageOptions, SendMessagesOptions } from "./extensions/index.js";
 import type { CustomMessage, StageAdmittedCustomMessage } from "./messages.ts";
 import { assertSessionOpen, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";

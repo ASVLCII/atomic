@@ -22,7 +22,7 @@ import type {
 	PromptOptions,
 	SessionStats,
 	ToolDefinitionEntry,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 import type { BashResult } from "./bash-executor.ts";
 import type {
 	CompactionUrgency,
@@ -117,7 +117,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	readonly systemPrompt: string;
 	readonly retryAttempt: number;
 	readonly isCompacting: boolean;
-	readonly compactionReason?: import("./agent-session-types.ts").CompactionReason;
+	readonly compactionReason?: import("./agent-session-types.js").CompactionReason;
 	readonly messages: AgentMessage[];
 	readonly steeringMode: "all" | "one-at-a-time";
 	readonly followUpMode: "all" | "one-at-a-time";
@@ -474,7 +474,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_manualCompactionPromise: Promise<VerbatimCompactionResult> | undefined;
 	_autoCompactionAbortController: AbortController | undefined;
 	_autoCompactionCompletion: Promise<void> | undefined;
-	_compactionReason: import("./agent-session-types.ts").CompactionReason | undefined;
+	_compactionReason: import("./agent-session-types.js").CompactionReason | undefined;
 	_overflowRecoveryAttempted: boolean;
 	_recoverableLengthRecoveryAttempted: boolean;
 	_contextOverflowUnresolved: boolean;

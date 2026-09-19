@@ -9,7 +9,7 @@ import type { SkillCatalog } from "../skill-catalog.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type { WorkflowStageAdmissionBoundary } from "../workflow-stage-admission.ts";
 import type { SendMessageOptions, SendMessagesOptions } from "./message-types.ts";
-import type { ExtensionUIContext } from "./ui-types.ts";
+import type { ExtensionUIContext } from "./ui-types.js";
 import type { WorkflowActivityObserver, WorkflowActivitySubscription } from "./workflow-events.js";
 
 export interface ContextUsage {

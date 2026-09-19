@@ -191,7 +191,7 @@ export class ExtensionRunner {
 	): void {
 		this.runtime.getChildSessionOptions = resolver;
 	}
-	getChildHostBindings(): import("../agent-session-types.ts").ExtensionBindings {
+	getChildHostBindings(): import("../agent-session-types.js").ExtensionBindings {
 		return {
 			humanInput: this.humanInput === undefined ? this.presentationInput : this.humanInput,
 			onDiagnostic: this.onDiagnostic,

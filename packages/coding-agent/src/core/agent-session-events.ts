@@ -18,7 +18,7 @@ import {
 	customMessageExcludesContext,
 	isSingleGenericAbortTextContent,
 	replacementAbortContent,
-} from "./agent-session-types.ts";
+} from "./agent-session-types.js";
 import { formatCodexProviderError } from "./codex-errors.ts";
 import type {
 	MessageEndEvent,

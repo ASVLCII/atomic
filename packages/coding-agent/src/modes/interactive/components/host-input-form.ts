@@ -10,7 +10,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { HostInputFormField, HostInputFormRequest } from "../../../core/extensions/ui-types.ts";
+import type { HostInputFormField, HostInputFormRequest } from "../../../core/extensions/ui-types.js";
 import type { KeybindingsManager } from "../../../core/keybindings.ts";
 import type { Theme } from "../theme/theme.js";
 import { getEditorTheme } from "../theme/theme.js";
