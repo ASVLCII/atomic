@@ -19,7 +19,7 @@ Rows below define the frozen verification boundaries. Current evidence and outst
 | D9 | Nested/top-level duration match for inline and missing inputs | tool tests |
 | D10 | Presentation at 15min, 1hr, 1hr15min, 23hr45min, 1d, >1d, unknown | render tests |
 | D11 | Reject old values, off-grid/out-of-range/malformed; no aliases/parsing/translations | negative validation tests; repository search |
-| D12 | Update prompts, affected consumers, README, guides and shipped changelogs | search and docs diff |
+| D12 | Update prompts, affected consumers, README, guides and shipped changelogs | per-location caller inventory, full-file guidance scan and docs diff; final guidance repair below |
 | R1 | Exactly route assessment then run execution; no dispatch alias or selection-ID continuation API | public schema/admission tests |
 | R2 | Route example uses task, attributed conversation and source/content documents, no workflow-specific inputs | literal issue example test |
 | R3 | Named result has exact workflowType, code-owned unique workflowId, estimatedDuration, actual inputSchema/defaults | tool entrypoint test |
@@ -40,7 +40,7 @@ Rows below define the frozen verification boundaries. Current evidence and outst
 | R18 | Define cleanup/invalidation/stale errors; never reroute/remap registry changes | invalidation tests and docs |
 | R19 | Direct user /workflow needs no reservation; ctx.workflow internal child composition preserved | command/internal tests |
 | R20 | Provider/routing/launch failures remain errors, not none/success | failure/cancellation tests |
-| R21 | Schemas/descriptions/callers/examples/tests use route-then-run; remove abandoned designs | repository search |
+| R21 | Schemas/descriptions/callers/examples/tests use route-then-run; remove abandoned designs | per-location route/registered-run contract plus obsolete-admission scan; final guidance repair below |
 | S1 | task is actual current request; conversation carries roles/text and preserves decisions/unresolved questions | both-provider payload test |
 | S2 | Documents carry excerpts or labeled faithful summaries with source metadata; preserve uncertainty | both-provider payload test |
 | S3 | Facts/constraints useful and separate from question instructions; no predetermined verdict | payload/question tests |
@@ -49,8 +49,8 @@ Rows below define the frozen verification boundaries. Current evidence and outst
 | S6 | Existing credential/privacy filtering applies; bounded relevant excerpts, not transcript dumps | privacy regressions and docs |
 | S7 | No quoted-document promotion into user authorization | provider instructions and preference tests |
 | S8 | Update schema descriptions/prompts/docs/examples with content requirement | docs/search |
-| P1 | Replace duplicated caller selection heuristics with issue's concise route-then-run contract | guidance inventory/search |
-| P2 | Remove defaults/triggers/pre-routing architecture/model rituals; retain safety/lifecycle/authoring | guidance diff |
+| P1 | Replace duplicated caller selection heuristics with issue's concise route-then-run contract | four caller-entry contracts and eleven full-document scans; final guidance repair below |
+| P2 | Remove defaults/triggers/pre-routing architecture/model rituals; retain safety/lifecycle/authoring | guidance inventory plus retained authoring, budget, verification and lifecycle suites; final guidance repair below |
 | P3 | Router owns complexity/interaction judgments; simple autonomous work need not workflow; discussion not authorization; approval gates distinct | representative state tests |
 | P4 | Named concise JSON facts, runtime contracts, unknowns, no unrelated history/secrets | payload tests |
 | P5 | Focused contrasting questions; independent useful judgments batched and combined in code, no dependent parallel answers | provider payload tests |
@@ -157,6 +157,28 @@ These runs supersede the affected pre-repair unit/lifecycle/integration/build/ch
 Validation failures were diagnosed, not waived: the new own-bulk fixture initially checked before both executors reached its barrier (`/tmp/3106-repair-affected.log`, 458 passed/1 failed); it now awaits both actual executors and still requires “Paused 2 run(s).” A draft quit/restart fixture incorrectly awaited termination of a deliberately paused live executor; the durable-recovery fixture instead uses a real recoverable checkpoint interruption. Two integration empty-session status tests inherited another test's owned snapshots (`/tmp/3106-repair-integration.log`); their setup now clears that shared fixture store, retaining their original assertions and the new foreign-owner rejection tests. Full integrations then exposed an unchanged, out-of-scope `subagents-zero-process` process-probe failure (`6481:(node)`, `/tmp/3106-repair-integration-full.log`); its focused command `npx vitest run --project integration test/integration/subagents-zero-process.test.ts` passed (`/tmp/3106-zero-process-focused.log`) and the bounded full rerun passed without subagent edits. The transient process-probe cause is unproven, not claimed fixed. No tests were suppressed, serialized, or granted larger timeouts.
 
 Root generated `progress.md` was removed; isolated progress remains under `subagent-artifacts/progress/ownership-repair/progress.md`. Resolved in-scope issues are removed before staging. Follow-up signing/hook outcome and commit identity are recorded in the handoff; independent parent reverification remains required.
+
+### Final consolidated guidance repair, 2026-09-19
+
+**Correction to prior readiness:** the earlier P1/P2/D12/R21 and clean-break guidance claims were incorrect. The latest consolidated review of `bb6d0f09e` found obsolete workflow-default mandates in the package README, first-session guide and playbook, and run-as-router instructions in reliable-design. All reviewers reported `stop=false`. The historical passing tests and narrow obsolete-field search above did not prove the requested clean break. The old guidance test even required `Default to a workflow` somewhere in concatenated documentation, allowing an updated section to mask an obsolete caller elsewhere.
+
+Read the full issue and its literal amendment, all four consolidated findings, and the complete affected guides. `git log -2 -p -- packages/workflows/README.md packages/coding-agent/docs/getting-started/first-session.md docs/workflow-playbook.md packages/coding-agent/docs/workflows/reliable-design.md` recorded the partial previous migration in `/tmp/3106-guidance-history.log`. Replaced the obsolete mandates in place with the issue's short content-bearing route → registered-run contract. Removed the reliable-design inline/workflow ladder, complexity thresholds, ten-call trigger and scoring rubric rather than retaining them under an authoring disclaimer. Kept definition design, coverage matrices, DAG, model assignment, verification, safety and lifecycle guidance. Nearby contradictions were corrected: README name-plus-inputs admission and fresh-ID resume prose; reliable-design run-budget prose; first-session's unconditional prelaunch confirmation claim. No runtime or compatibility path changed, and no new changelog entry was added for this guidance/evidence delta.
+
+The deterministic inventory independently checks the contract in each of the four caller-entry sections and scans all eleven documentation paths (now including first-session) for policy-pattern contradictions. Positive section contracts prevent an appended instruction elsewhere from satisfying the test. Pattern checks cover defaults, tiny-chat restrictions, structural/loop triggers, numeric selection thresholds, run-as-router state and name-plus-input admission, rather than only the exact reported sentences. Same-ID resume and the existing authoring/safety suites remain required. These are deterministic documentation checks, not proof that every possible paraphrase or live-model interpretation is covered.
+
+| Exact command | Outcome | Log |
+|---|---|---|
+| `npx vitest run --project unit test/unit/execution-routing-guidance.test.ts` before guide edits | Red: 10 failed, 46 passed; failures cover every reported caller, surrounding heuristic omissions and README resume identity | `/tmp/3106-guidance-red.log` |
+| `npx vitest run --project unit test/unit/execution-routing-guidance.test.ts test/unit/workflow-runtime-guidance.test.ts test/unit/workflow-stage-guidance-docs.test.ts test/unit/workflow-authoring-folder-disclosure.test.ts` after initial repair | 68 passed, 1 failed: budget paragraph lost the existing explicit-field preservation phrase; restored that valid wording without weakening its assertion | `/tmp/3106-guidance-green.log` |
+| Same four-file command after correction | Green: 4 files, 69 tests passed | `/tmp/3106-guidance-green-final.log` |
+| `npm run check` | Exit 0: Biome, both typecheck passes and shrinkwrap passed | `/tmp/3106-guidance-check.log` |
+| `npm run build` | Exit 0: native build, coding-agent assets, bundled extensions/SDK built | `/tmp/3106-guidance-build.log` |
+| `qlty smells --include-tests test/unit/execution-routing-guidance.test.ts` | Exit 0; one high-total-complexity finding, 193 versus baseline 180; no duplication finding | `/tmp/3106-guidance-qlty-tests.log` |
+| `git show HEAD:test/unit/execution-routing-guidance.test.ts > /tmp/3106-guidance-baseline.ts`; `cp /tmp/3106-guidance-baseline.ts .atomic-test-fixtures/3106-guidance-baseline.ts`; `qlty smells --include-tests --no-snippets .atomic-test-fixtures/3106-guidance-baseline.ts`; `rm .atomic-test-fixtures/3106-guidance-baseline.ts` | Baseline analysis exit 0, existing high-total-complexity 180; temporary fixture removed | `/tmp/3106-guidance-qlty-baseline-local.log` |
+| `npx --no-install prek validate-config prek.toml` | All configs valid | terminal output |
+| `git diff --check` | Passed | terminal output |
+
+Qlty config was preserved. The first `qlty smells test/unit/execution-routing-guidance.test.ts` excluded tests and analyzed zero files (`/tmp/3106-guidance-qlty.log`), so it is not quality coverage. The baseline attempt outside the repository (`qlty smells --include-tests --no-snippets /tmp/3106-guidance-baseline.ts`) exited 99 with a path-prefix error (`/tmp/3106-guidance-qlty-baseline.log`); the local temporary-fixture command above supplied the actual baseline. The aggregate complexity warning comes from this existing large assertion suite plus the per-location inventory; no production complexity changed. Biome initially requested test formatting; corrected before the passing authoritative check. Optional plugin lint was not run because this repo uses Biome as its authoritative checker. Full runtime suites were not gratuitously repeated for this docs/test-only delta; their earlier outcomes remain historical, not rerun claims. Parent independent verification is still required before readiness is asserted. Signed commit and enabled-hook results are recorded in the repair handoff.
 
 ## Deferred work
 

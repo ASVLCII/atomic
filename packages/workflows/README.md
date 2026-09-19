@@ -5,7 +5,9 @@
   An open-source Atomic workflow extension: install it, author workflows in TypeScript, run them from chat.
 </p>
 
-Default to workflows for non-trivial work and requests with inherent structure plus a verifiable objective; reserve direct chat for tiny deterministic low-risk work. Workflow-first is not builtin-only or monolithic: Atomic can author custom TypeScript `workflow({...})` definitions inline, import reusable project/package workflows or builtins from `@bastani/atomic/workflows/builtin`, and nest them with `ctx.workflow(...)`. Imported children may nest further workflows within `maxDepth`, so compose proven research, implementation, design, verification, and approval graphs rather than copying them. Custom parents can also use runtime classification, dynamic fan-out and synthesis, adversarial verification, candidate tournaments, HIL gates, and bounded convergence.
+Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
+
+Atomic can author custom TypeScript `workflow({...})` definitions inline, import reusable project/package workflows or builtins from `@bastani/atomic/workflows/builtin`, and nest them with `ctx.workflow(...)`. Imported children may nest further workflows within `maxDepth`, so compose proven research, implementation, design, verification, and approval graphs rather than copying them. Custom parents can also use runtime classification, dynamic fan-out and synthesis, adversarial verification, candidate tournaments, HIL gates, and bounded convergence.
 
 Workflow stage sessions are created in process and receive a typed stage policy rather than inheriting subagent environment flags. Resource reload never mutates `process.env`; stage options carry the subagent management/fanout policy directly, so concurrent stage creation is race-free while existing tool allowlists and the one-level delegation rule remain authoritative. Legacy child environment keys are only a compatibility path for older hosts.
 
@@ -66,7 +68,7 @@ Only attributed user actions notify. The matching `workflow({ action: "run" | "p
 
 Each notice carries two attributions. *Origin* is who launched the run and renders on every kind as "which you started" or "which the user started"; it is recorded once at dispatch, persisted through session restore and durable resume, and inherited by a continuation from the run it continues. *Actor* is who performed this one event ("The user resumed"). A run with no recorded origin omits the clause rather than guessing one.
 
-One attributed request produces one notice. A whole-run resume reports at run scope; a stage-scoped resume reports at stage scope when siblings remain paused. A quit reports the quit alone, never the pause it publishes on the way. Notices are deduplicated by run id together with the occurrence timestamp (`quitAt`/`resumedAt`), so repeated snapshot invalidations at one unchanged state notify once. Resuming reports a resume and never a start, whoever asked for it. Resuming a failed or blocked run launches a continuation under a fresh run id and its notice names both; resuming a quit run reuses the original workflow id so durable checkpoints replay, so that notice names the one id. A run already started, paused, or quit when notifications install (restore, replay, `/reload`, session-preserving reinstall) is seeded as delivered and stays silent, and nested child runs never notify at top level.
+One attributed request produces one notice. A whole-run resume reports at run scope; a stage-scoped resume reports at stage scope when siblings remain paused. A quit reports the quit alone, never the pause it publishes on the way. Notices are deduplicated by run id together with the occurrence timestamp (`quitAt`/`resumedAt`), so repeated snapshot invalidations at one unchanged state notify once. Resuming reports a resume and never a start, whoever asked for it. Supported resume of paused, quit, or recoverable failed/blocked work preserves the same workflow id and durable checkpoints; the notice names that one id. A run already started, paused, or quit when notifications install (restore, replay, `/reload`, session-preserving reinstall) is seeded as delivered and stays silent, and nested child runs never notify at top level.
 
 When a stage human-in-the-loop prompt is answered from the workflow TUI/stage chat, workflows also emits a separate display-only `workflows:hil-answer-notice` custom message. It records the answer for user-visible audit, but it does not wake the main agent, enter LLM context, or authorize answering later workflow prompts. Answers sent by the main-chat `workflow` tool do not emit this notice because the tool result already tells the main agent what happened.
 
@@ -685,7 +687,7 @@ Raw stage-chat prompt answer replay is live-memory only. `StageSnapshot.promptAn
 
 ### `workflow` tool (LLM-callable)
 
-Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
+The route-then-run contract above applies to model-tool launches:
 
 ```ts
 workflow({
@@ -761,7 +763,7 @@ export default workflow({
 });
 ```
 
-The `workflow` tool accepts named workflow execution (`workflow` plus `inputs`), discovery, inspection, messaging, run control, and reload. Author stage graphs with `ctx.task`, `ctx.chain`, and `ctx.parallel` inside workflow definitions.
+The `workflow` tool accepts routing (`route` with `state`), registered execution (`run` with `workflowId` and `inputs`), discovery, inspection, pending-prompt answers, run control, and reload. Author stage graphs with `ctx.task`, `ctx.chain`, and `ctx.parallel` inside workflow definitions.
 
 For large handoffs, prefer artifact paths over prompt injection: write stage output to `output`, set `outputMode: "file-only"` when the parent only needs the path, pass paths with `reads`, and instruct downstream agents explicitly with wording like `Read the file at <path>...`. Reserve `previous`/`{previous}` for compact summaries; avoid passing full session histories, all prior stage outputs, or every review round directly into the next model prompt. In review loops, save JSON review artifacts and pass only the latest review-round artifact, with a ledger or index file linking older rounds when needed.
 

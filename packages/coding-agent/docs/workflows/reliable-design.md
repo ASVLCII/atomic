@@ -2,11 +2,13 @@
 
 Use this guide to turn an objective into an acyclic, evidence-producing workflow with explicit contracts, context boundaries, verification, and stop conditions. Read [Custom Workflow Authoring](/workflows/authoring) first if you have not built a workflow definition yet.
 
-For model-tool launches, the router owns all semantic selection, including explicit named-workflow requests and inline/no-workflow/quickly preferences. Carry the user's actual words, context, uncertainty, preferences and constraints in neutral state; do not apply caller-side mode shortcuts or graph advocacy. A validated `none` decision means continue conversation, clarify, or work inline, not completion. User-issued `/workflow` commands and authored `ctx.workflow(...)` composition remain deliberate bypasses. For workflow authoring, carry the [domain/environment verification and media evidence contract](/workflows/verification) into worker, reviewer and final handoff prompts.
+Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
+
+The router owns all semantic selection. Preserve the user's actual words, uncertainty and preferences in neutral state; do not turn discussion into an implementation objective. User-issued `/workflow` commands launch directly and authored `ctx.workflow(...)` remains internal composition. For workflow authoring, carry the [domain/environment verification and media evidence contract](/workflows/verification) into worker, reviewer and final handoff prompts.
 
 ## Choosing an Execution Shape
 
-"Use a workflow" covers several execution shapes with different costs and guarantees. The following architecture pass and scoring rubric apply only to deliberate definition authoring and composition, not to choosing what the model-tool `run` will launch. Before that tool call, supply neutral state without selecting a graph; wait for its validated decision. Authoring a definition adds a candidate, not a launch commitment.
+The following architecture pass applies only to deliberate definition authoring and composition, not to model-tool selection. Authoring a definition adds a candidate, not a launch commitment. `run` uses the registered selection and explicit inputs without routing again; do not resend routing state.
 
 > **Authored multi-item orchestration:** Enumerate requested implementation items and prove their dependencies. For deliberately composed execution, keep independent items in bounded concurrent top-level runs with explicit worktrees and root failure boundaries; preserve ordered composition only for real code, artifact, contract, decision, approval, or merged-result dependencies. This does not preselect model-tool routing outcomes.
 
@@ -51,17 +53,10 @@ Sketch expected nodes and dependencies for each branch, loop, and nested boundar
 
 Compare candidate workflow **guarantees**, not only broad descriptions. A named graph fits only when it covers the task's lifecycle **and** produces the evidence required for every material requirement/risk. A generic implementation workflow can cover the lifecycle while missing exact API/type/build contracts, schemas/generated artifacts, state transitions, or domain-specific gates. **Do not treat "has reviewers" as proof that a task-specific risk is covered.**
 
-For deliberate definition design, ask these questions in order and stop at the cheapest shape that satisfies every remaining coverage row. These are authoring tradeoffs, not deterministic model-tool dispatch rules:
+For deliberate definition design, check coverage and reuse:
 
-1. **Is the outcome provable?** If success can be stated as evidence (tests green, artifact exists, behavior demonstrated, reviewer approves), the task fits a workflow. If no proof is possible or needed, inline is probably fine.
-2. **Is there structure?** Multiple subtasks, dependencies, handoffs, or parallel slices rule out inline execution. A single focused evidence-gathering pass does not.
-3. **Is there a loop or gate?** Any "until Y", "fix until passing", review/approval gate, or unknown-length repair cycle requires a workflow that enforces the stop condition, never an improvised inline retry loop or an overextended subagent call.
-4. **Is it one task or a queue of tasks?** "Address all open issues" or "fix every ticket assigned to me" is a factory request, not one workflow. Enumerate and dependency-classify the items first, then follow [Task queues and software factories](#task-queues-and-software-factories): independent items become bounded concurrent top-level per-item runs; dependent items share one ordered composed graph; independent dependency clusters become separate top-level runs.
-5. **Does an installed graph supply complete coverage?** Run a named workflow only if its objective, inputs, lifecycle, and produced evidence cover every material row. Do not force-fit a broad-but-partial match ([When to Use Workflows](/workflows#when-to-use-workflows)).
-6. **What routing signals shape the graph?** Broad repository uncertainty points to repository-focused Fan-out-and-synthesize; independent slices to Fan-out-and-synthesize; plausible-but-wrong contract risk to Adversarial verification or a task-specific verification stage; competing architectures or implementations to Generate-and-filter or Tournament; an explicit repeat-until condition to Loop until done; implementation work to a task-specific worker/reviewer loop; and exact API/build/schema requirements to dedicated deterministic gates.
-7. **Does a tested graph solve only part of the task?** Author one custom parent and nest that definition with `ctx.workflow(...)`, placing the missing research, verification, or deterministic gates around it instead of copying its prompts and gates.
-8. **Is it only specialist evidence-gathering?** If the parent keeps control, no completion gate is needed, and the work is bounded (a debug pass, a parallel research fanout, one noisy investigation), inline subagents are enough—and cheaper than a workflow.
-9. **Is it truly tiny?** Deterministic, low-risk, single-file/no-test/no-review—answer or edit inline and stop.
+1. **Does an installed graph supply complete coverage?** Compare its objective, inputs, lifecycle, and produced evidence against every material row.
+2. **Does a tested graph solve only part of the task?** Author one custom parent and nest that definition with `ctx.workflow(...)`, placing the missing research, verification, or deterministic gates around it instead of copying its prompts and gates.
 
 A first named workflow launch commits the selected execution shape for the turn. For one task, end the turn after that launch. For an independent queue, the selected shape is a bounded launch wave: issue every planned per-item top-level launch up to the concurrency bound before ending the turn. Do not casually chain unplanned unrelated top-level workflow launches. When one task needs multiple workflow capabilities or dependent items need ordered handoffs, design composition **before** launch: author one custom parent, import project/package definitions or builtins from `@bastani/atomic/workflows/builtin`, and call `ctx.workflow(...)`. Nested children preserve their stages and guarantees within the expanded graph up to `maxDepth`, but they remain under the parent's root lifecycle and failure boundary.
 
@@ -86,7 +81,7 @@ node | prerequisites | duration range and source | shared resources | evidence n
 
 For model-tool launches, report the workflow choice and `estimatedDuration` only after the router returns. The router selects a wall-clock range or `unknown` from task and catalog context; it is not measured timing, a guarantee or a `budget` override. Preserve brainstorming and unclear interactive intent in neutral state instead of inventing an objective or pre-announcing a workflow.
 
-Proceed with inherited budget limits without asking the user to choose a budget before each launch; preserve existing budget limits and approval gates. Omit `budget` unless the user specified a limit, inheriting the workflow declaration and config. When the user does state a limit, pass only the fields they named, leave every other field inherited, and use `0` only for a field the user asked to disable. Never convert an estimate into a cap.
+Proceed with inherited budget limits without asking the user to choose a budget before each launch; preserve existing budget limits and approval gates. When the user does state a limit, pass only the fields they named in `route`'s `state.userBudget` with exact provenance. Omission inherits the workflow declaration and config; zero disables only the specified field. `run` uses those registered constraints, not a new budget choice. Never convert an estimate into a cap.
 
 For example, with hypothetical timings, 6 minutes of implementation followed by independent 12-minute CI and 4-minute read-only review branches, then a 1-minute handoff, has a 19-minute critical path, not a 23-minute sum. Queue delays, repairs, and human approval can extend that. Authored scheduling analysis must cite actual project evidence rather than reuse these illustrative numbers; it does not replace the model-tool router's `estimatedDuration`.
 
@@ -124,59 +119,6 @@ When an arbitrary task-specific workflow has plausible-but-wrong contract risk, 
 4. After repair, rerun the deterministic verifier tools until the declared pass condition succeeds or the iteration budget is exhausted. Define pass, repair, failure, and iteration-limit conditions before launch.
 
 Use `ctx.tool` for workflow-owned external checks and side effects that benefit from durable checkpointing. Leave pure transformations as ordinary TypeScript; do not wrap every model-stage action in a tool call. A custom-loop pre-launch declaration must name the skeptical reviewer, deterministic verifier gates, how model-selected plans become tool executions, how evidence reaches evaluation/repair, and the bounded success/failure condition.
-
-### Judging task complexity
-
-Complexity is a property of risk, not effort. Score a task on five axes and let the **worst axis dominate** — complexity is not the sum:
-
-| Axis | Low | High |
-|---|---|---|
-| **Blast radius** | one file, one function | crosses module/package boundaries; touches shared contracts (APIs, schemas, migrations) |
-| **Uncertainty** | the exact edit is known before opening the file | the location or cause of the behavior is unknown |
-| **Verifiability cost** | type-checker or a glance confirms it | multi-step validation: build + tests + runtime behavior + artifact checks |
-| **Dependency structure** | independent steps | ordered handoffs where an early mistake propagates |
-| **Failure cost** | reversible edit | wire formats, published APIs, data migrations, releases |
-
-A one-line change to a serialization format is complex (high failure cost, exact contract). A 500-line mechanical rename is simple (zero uncertainty, type-checker-verified). The common trap is judging by effort instead of risk: long-but-mechanical is simple; short-but-contractual is not.
-
-Fast tells, usable in the first 30 seconds:
-
-- **Done-condition test:** if the success condition does not fit in one sentence, the task is complex or underspecified — clarify before guessing.
-- **The "and" test:** "fix X and update docs and add a test" is three tasks in one sentence; enumerate and classify each.
-- **Loop words:** "until it passes", "keep trying" make the task at least moderate — iteration is expected.
-- **Working-memory test:** more than about three interacting constraints at once means complex.
-
-**Threshold.** A task earns a workflow when at least two of these are true, or any one is strongly true:
-
-1. Two or more distinct phases with a real handoff (research → implement, implement → verify), not just steps.
-2. The done-condition needs proof — tests, builds, review, or a contract check. If "how do you know it works?" is a fair question, a verification stage is waiting to exist.
-3. Iteration is expected — an anticipated repair loop, not a straight line.
-4. Failure cost is high — even a one-line change gets adversarial verification.
-5. The work outlives one attention span — losing mid-task state is a real risk.
-
-The honest form of the threshold is a comparison: workflow overhead is roughly constant and small, while the cost of being wrong inline scales with uncertainty × failure cost — so the line crosses at "moderate" on any single axis. Guard against the ratchet failure mode: a task that looked simple, then accumulated exploratory calls, ad-hoc fixes, and an untracked mental TODO list is a workflow being run badly in-head; apply the ten-call rule from [When to Use Workflows](/workflows#when-to-use-workflows). Map axes to action: all low → inline now; only uncertainty high → short recon, then re-judge; any axis high with a checkable outcome → workflow with a stage producing evidence for the worst axis; failure cost high → add deterministic or adversarial gates regardless of the rest. When the mapping stays ambiguous, fall through to the [scoring rubric](#scoring-rubric) below.
-
-### Scoring rubric
-
-When the ladder is ambiguous, score the task on six dimensions (0–2 each):
-
-| Dimension | 0 | 1 | 2 |
-|---|---|---|---|
-| **Structure** | one action | a few sequential steps | many steps, dependencies, or parallel slices |
-| **Verifiability** | no objective check | spot-checkable | provable by tests, builds, artifacts, or review evidence |
-| **Iteration** | one pass suffices | may need one repair round | unknown-length loop until evidence passes |
-| **Risk** | trivial, reversible | scoped multi-file change | regressions, migrations, releases, or user-visible behavior |
-| **Duration** | seconds to minutes | tens of minutes | long-running, background, or resumable across sessions |
-| **Isolation** | one context is fine | one noisy investigation to quarantine | many slices needing clean contexts or adversarial independence |
-
-Interpretation:
-
-- **0–3 total:** inline. Adding stages creates more work than value.
-- **4–6 total, Iteration ≤ 1, no gate:** inline subagents when the parent should retain control, or a small named/custom workflow when tracking and artifacts matter.
-- **7+ total, or Iteration = 2, or Verifiability = 2 with a review/approval gate:** a real workflow. Prefer a named workflow when one fits the whole task; otherwise author a custom graph, nesting proven children where sub-problems overlap.
-- **Any single hard signal overrides the arithmetic:** an explicit loop/stop condition, an approval or evidence gate, or a request for durable/background execution puts the task in workflow territory regardless of total score.
-
-Use the rubric for deliberate authoring tradeoffs, not a caller-side mode override. For model-tool launches, pass task facts and preferences to the router. In either mode, stop unbounded reconnaissance by recording findings and taking the next concrete in-scope action.
 
 ### Task queues and software factories
 
@@ -409,7 +351,7 @@ Humans can provide preferences for the router or deliberately request definition
 - **State the boundary.** "Work in a separate worktree", "do not create a PR", or "stop after implementation" separates implementation from final actions.
 - **State the queue policy.** Say how to split, order, isolate, and bound queued items; otherwise Atomic runs the [dependency-triage and bounded-dispatch playbook](/workflows/reliable-design#task-queues-and-software-factories) before implementation. Ordinary list order and per-item "create a PR after" wording do not create a cross-item dependency.
 
-Absent these controls, preserve that absence in neutral state rather than fabricating preferences. The router decides workflow suitability and selection; the authoring rubric above does not override its result.
+Absent these controls, preserve that absence in neutral state rather than fabricating preferences. The router decides workflow suitability and selection; authoring guidance does not override its result.
 
 ## The Run Contract
 

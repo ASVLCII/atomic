@@ -29,7 +29,11 @@ In practice, that means:
 7. Require evidence before accepting the result.
 8. Ask for a summary, handoff, or next-step plan.
 
-A good workflow prompt does not just say what to try. It says what success looks like. Default to a workflow for non-trivial work or a request with inherent structure plus a verifiable objective: implementation, debugging, migrations, multi-file changes, validation, review gates, evidence requirements, and loop/stop-condition prompts all benefit from tracked execution. Use direct chat for tiny deterministic low-risk work. Do not force-fit a builtin—Atomic can author a custom TypeScript workflow inline and compose classify-and-act, fan-out-and-synthesize, adversarial verification, generate-and-filter, tournament, and loop-until-done patterns.
+A good workflow prompt does not just say what to try. It says what success looks like.
+
+Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
+
+For workflow authoring, Atomic supports custom TypeScript definitions and composition of reusable patterns; see [Reliable Workflow Design](../packages/coding-agent/docs/workflows/reliable-design.md).
 
 ---
 

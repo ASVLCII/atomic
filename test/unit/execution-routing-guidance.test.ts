@@ -30,12 +30,64 @@ const workflowDocumentationPaths = [
 	"packages/coding-agent/docs/workflows/operations.md",
 	"packages/coding-agent/docs/workflows/api-reference.md",
 	"packages/coding-agent/docs/quickstart.md",
+	"packages/coding-agent/docs/getting-started/first-session.md",
 	"packages/workflows/README.md",
 	"docs/workflow-playbook.md",
 	"README.md",
 ];
 
 describe("route-then-registered-run guidance", () => {
+	// #3106: inspect each caller location, not concatenated docs where a new contract
+	// elsewhere can mask an obsolete opening. Keep authoring/lifecycle checks below.
+	const callerSections = [
+		["packages/workflows/README.md", "", "### Custom workflow directories"],
+		["packages/coding-agent/docs/getting-started/first-session.md", "## First session", "## Verify the session"],
+		["docs/workflow-playbook.md", "## The core loop", "## Prompt anatomy"],
+		["packages/coding-agent/docs/workflows/reliable-design.md", "", "### The self-prompt"],
+	] as const;
+	for (const [path, start, end] of callerSections) {
+		test(`${path} caller entry teaches route then registered run`, async () => {
+			const text = await readRepositoryFile(path);
+			const from = text.indexOf(start);
+			const to = text.indexOf(end, from);
+			assert.ok(from >= 0 && to > from, `${path}: caller section exists`);
+			const section = text.slice(from, to).replaceAll("`", "");
+			for (const contract of [
+				/Call workflow route.*actual request.*message text\/document excerpts.*constraints.*state/,
+				/not file paths in place of content/,
+				/If it returns none, continue inline/,
+				/input contract.*prepare inputs.*workflow run.*registered workflow ID/,
+				/Ask only for genuinely missing information/,
+			])
+				assert.match(section, contract, path);
+		});
+	}
+	for (const path of workflowDocumentationPaths) {
+		test(`${path} has no caller selection defaults or run-as-router instructions`, async () => {
+			const text = (await readRepositoryFile(path)).replaceAll("`", "");
+			for (const obsolete of [
+				/default to (?:a )?workflows? for/i,
+				/workflow[- ]first/i,
+				/reserve direct chat for/i,
+				/requests? (?:are|is) workflow candidates/i,
+				/(?:multiple subtasks|handoffs|parallel slices).*rule out inline/i,
+				/(?:loop|gate|cycle).*requires a workflow/i,
+				/task earns a workflow|ten[- ]call rule|\d+[–-]\d+ total|hard signal overrides/i,
+				/model-tool run[^\n]*supply[^\n]*state/i,
+				/workflow plus inputs/i,
+			])
+				assert.doesNotMatch(text, obsolete, path);
+		});
+	}
+	test("README lifecycle guidance preserves one resume identity", async () => {
+		const text = await readRepositoryFile("packages/workflows/README.md");
+		const section = text.slice(
+			text.indexOf("### Workflow lifecycle notifications"),
+			text.indexOf("## Authoring API"),
+		);
+		assert.doesNotMatch(section, /(?:fresh|new) run id|notice names both/i);
+		assert.match(section, /resume.*same (?:workflow|execution|run) id/i);
+	});
 	// #3106: no caller selection heuristics or pre-routing rituals survive the clean break.
 	test("uses one concise content-bearing routing contract", () => {
 		for (const phrase of [
@@ -435,8 +487,6 @@ describe("route-then-registered-run guidance", () => {
 			"requirement/risk | required evidence | workflow/stage that produces it | gap",
 			'Do not treat "has reviewers" as proof that a task-specific risk is covered',
 			"Does an installed graph supply complete coverage?",
-			"Broad repository uncertainty points to repository-focused Fan-out-and-synthesize",
-			"implementation work to a task-specific worker/reviewer loop",
 			"first named workflow launch commits the selected execution shape for the turn",
 			"one custom parent",
 			"Choose the cheapest complete graph",
@@ -611,13 +661,10 @@ describe("route-then-registered-run guidance", () => {
 		}
 	});
 
-	test("synchronizes workflow-first docs with custom workflow authoring", async () => {
+	test("retains custom workflow authoring references without workflow-first mandates", async () => {
 		const documentation = (await Promise.all(workflowDocumentationPaths.map(readRepositoryFile))).join("\n");
 
 		for (const phrase of [
-			"Default to a workflow",
-			"non-trivial",
-			"verifiable objective",
 			"custom TypeScript",
 			"workflow({...})",
 			"dynamic fan-out",
@@ -631,12 +678,7 @@ describe("route-then-registered-run guidance", () => {
 			expect(documentation).toContain(phrase);
 		}
 
-		for (const regressionPhrase of [
-			"Multiple steps, files, tests, validation, or parallelism alone do not require a workflow",
-			"there is no fixed tool-call escalation threshold",
-			"workflow tool's create action",
-			'`action: "create"` to create a workflow',
-		]) {
+		for (const regressionPhrase of ["workflow tool's create action", '`action: "create"` to create a workflow']) {
 			expect(documentation).not.toContain(regressionPhrase);
 		}
 	});
@@ -918,7 +960,7 @@ describe("route-then-registered-run guidance", () => {
 			if (path.endsWith("reliable-design.md")) {
 				assert.match(
 					text,
-					/following architecture pass and scoring rubric apply only to deliberate definition authoring and composition/,
+					/following architecture pass applies only to deliberate definition authoring and composition/,
 				);
 				assert.match(text, /For an authored graph, document/);
 			}
