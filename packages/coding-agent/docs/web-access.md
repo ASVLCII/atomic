@@ -22,6 +22,8 @@ For a video, include the question in `prompt`:
 {"urls": ["/path/to/recording.mp4"], "prompt": "What error appears on screen?"}
 ```
 
+Local videos accept native absolute paths (including Windows drive and UNC paths), `./` or `../` relative paths, and `file://` URLs. Escape Windows backslashes in JSON, for example `{"urls": ["C:\\Videos\\recording.mp4"], "frames": 1}`.
+
 For webpages, `urls` is enough. `prompt` and `model` apply to video analysis, not webpage filtering or extraction. `forceClone` applies only to GitHub repositories.
 
 Use `frames` and `timestamp` only when you want images from YouTube or local video files. Omit both for readable text or transcripts. `frames` alone samples the whole video; `timestamp` accepts seconds, a time such as `1:25`, or a range such as `1:25-2:00`.

@@ -6,7 +6,19 @@ import { test } from "vitest";
 import { runBunSubprocess } from "../../packages/web-access/subprocess.ts";
 import { extractVideoFrame, getLocalVideoDuration } from "../../packages/web-access/video-extract.ts";
 import { getYouTubeStreamInfo } from "../../packages/web-access/youtube-extract.ts";
+import { inheritedPipes } from "../fixtures/web-subprocess-inherited-pipes.js";
 import { bunExecutable, spawnSyncCollect } from "../helpers/runtime.js";
+
+// #3111: descendants may retain both pipes after the direct child is killed.
+test.each(["abort", "timeout", "overflow"] as const)("Node bounds inherited-pipe cleanup after %s", inheritedPipes);
+
+test("Bun host bounds inherited-pipe cleanup and preserves primary errors", () => {
+	const result = spawnSyncCollect([bunExecutable(), "test/fixtures/web-subprocess-inherited-pipes.ts", "run"], {
+		timeout: 20_000,
+	});
+	assert.equal(result.exitCode, 0, result.stderr.toString());
+	assert.match(result.stdout.toString(), /inherited-pipes-ok/);
+});
 
 // #3105: exercise the shipped adapter under Node, without a synthetic Bun global.
 test("Node subprocess adapter executes without Bun and preserves binary output", async () => {

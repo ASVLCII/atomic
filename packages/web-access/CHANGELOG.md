@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 - SDK sessions sharing a resource loader now retain separate web result stores and pending-fetch/curator state, so closing or restoring one session does not erase another's results or cancel its pending content notification ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - SDK sessions now keep separate provider configuration caches and GitHub clones, so one session's cache cleanup does not delete another session's cloned files ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Operational web diagnostics within SDK-owned work now use the session's diagnostic sink with redacted messages instead of printing credentials, paths or remote errors to console ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Timeout, cancellation and output-limit failures no longer hang when subprocess descendants keep output pipes open; cleanup preserves the original error.
+- Local video extraction recognizes Windows drive and UNC paths and converts file URLs using the host's native path rules.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

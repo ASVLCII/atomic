@@ -30,22 +30,18 @@ export class AsyncSubprocessError extends Error {
 	}
 }
 
-async function readBounded(stream: Readable, maxBytes: number, onOverflow: () => void): Promise<Buffer> {
+async function readBounded(stream: Readable, maxBytes: number, onOverflow: (error: AsyncSubprocessError) => void): Promise<Buffer> {
 	const chunks: Buffer[] = [];
 	let bytes = 0;
-	let overflow = false;
 	for await (const chunk of stream) {
 		const value = chunk as Buffer;
 		bytes += value.byteLength;
 		if (bytes > maxBytes) {
-			if (!overflow) onOverflow();
-			overflow = true;
-		} else {
-			chunks.push(value);
+			const error = new AsyncSubprocessError(`Subprocess output exceeded ${maxBytes} bytes`, { code: "ENOBUFS", killed: true });
+			onOverflow(error);
+			throw error;
 		}
-	}
-	if (overflow) {
-		throw new AsyncSubprocessError(`Subprocess output exceeded ${maxBytes} bytes`, { code: "ENOBUFS", killed: true });
+		chunks.push(value);
 	}
 	return Buffer.concat(chunks, bytes);
 }
@@ -59,8 +55,7 @@ export async function runBunSubprocess(
 	if (options.signal?.aborted) {
 		throw new AsyncSubprocessError(`${command} aborted`, { code: "ABORT_ERR", killed: true });
 	}
-	let timedOut = false;
-	let aborted = false;
+	let primaryError: AsyncSubprocessError | undefined;
 	let escalation: ReturnType<typeof setTimeout> | undefined;
 	const proc = spawn(command, args, {
 		cwd: options.cwd,
@@ -71,32 +66,46 @@ export async function runBunSubprocess(
 		proc.once("error", (error: NodeJS.ErrnoException) => {
 			reject(new AsyncSubprocessError(error.message, { code: error.code }));
 		});
-		proc.once("close", (code) => resolve(code ?? -1));
+		proc.once("exit", (code) => resolve(code ?? -1));
 	});
 	const terminate = (): void => {
 		if (escalation) return;
 		proc.kill("SIGTERM");
-		escalation = setTimeout(() => { proc.kill("SIGKILL"); }, 500);
+		escalation = setTimeout(() => {
+			proc.kill("SIGKILL");
+			// Descendants can keep inherited descriptors open after the direct
+			// child exits. Bound that drain independently from child reaping.
+			proc.stdout.destroy();
+			proc.stderr.destroy();
+		}, 500);
 	};
-	const onAbort = (): void => { aborted = true; terminate(); };
+	const fail = (error: AsyncSubprocessError): void => {
+		primaryError ??= error;
+		terminate();
+	};
+	const onAbort = (): void => fail(new AsyncSubprocessError(`${command} aborted`, { code: "ABORT_ERR", killed: true }));
 	options.signal?.addEventListener("abort", onAbort, { once: true });
-	const timeout = setTimeout(() => { timedOut = true; terminate(); }, options.timeoutMs);
+	const timeout = setTimeout(() => fail(new AsyncSubprocessError(`${command} timed out`, { code: "ETIMEDOUT", killed: true })), options.timeoutMs);
 	const output = [
-		readBounded(proc.stdout, options.maxStdoutBytes, terminate),
-		readBounded(proc.stderr, options.maxStderrBytes ?? 256 * 1024, terminate),
+		readBounded(proc.stdout, options.maxStdoutBytes, fail),
+		readBounded(proc.stderr, options.maxStderrBytes ?? 256 * 1024, fail),
 	] as const;
 	try {
 		const [exitCode, stdout, stderrBuffer] = await Promise.all([exited, ...output]);
 		const stderr = stderrBuffer.toString("utf8");
-		if (timedOut) throw new AsyncSubprocessError(`${command} timed out`, { code: "ETIMEDOUT", stderr, killed: true });
-		if (aborted) throw new AsyncSubprocessError(`${command} aborted`, { code: "ABORT_ERR", stderr, killed: true });
+		if (primaryError) {
+			primaryError = new AsyncSubprocessError(primaryError.message, { code: primaryError.code, stderr, killed: true });
+			throw primaryError;
+		}
 		if (exitCode !== 0) throw new AsyncSubprocessError(`${command} exited with code ${exitCode}`, { code: String(exitCode), stderr });
 		return { exitCode, stdout, stderr };
 	} catch (error) {
+		const failure = primaryError ?? (error instanceof AsyncSubprocessError ? error :
+			new AsyncSubprocessError(error instanceof Error ? error.message : String(error), { killed: true }));
+		clearTimeout(timeout);
 		terminate();
 		await Promise.allSettled([exited, ...output]);
-		if (error instanceof AsyncSubprocessError) throw error;
-		throw new AsyncSubprocessError(error instanceof Error ? error.message : String(error), { killed: true });
+		throw failure;
 	} finally {
 		clearTimeout(timeout);
 		clearTimeout(escalation);

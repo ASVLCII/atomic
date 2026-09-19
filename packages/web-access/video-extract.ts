@@ -2,7 +2,8 @@ import { reportOwnedWebDiagnostic } from "./diagnostics.js";
 import { createOwnerState } from "./owner-state.js";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve, extname, basename, join, dirname } from "node:path";
+import { resolve, extname, basename, join, dirname, isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { activityMonitor } from "./activity.js";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
 import { queryGeminiApiWithVideo, getApiKey, API_BASE } from "./gemini-api.js";
@@ -97,13 +98,13 @@ export function isVideoFile(input: string): VideoFileInfo | null {
 	const config = loadVideoConfig();
 	if (!config.enabled) return null;
 
-	const isFilePath = input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input.startsWith("file://");
+	const isFilePath = isAbsolute(input) || input.startsWith("./") || input.startsWith("../") || input.startsWith(".\\") || input.startsWith("..\\") || input.startsWith("file://");
 	if (!isFilePath) return null;
 
 	let filePath = input;
 	if (input.startsWith("file://")) {
 		try {
-			filePath = decodeURIComponent(new URL(input).pathname);
+			filePath = fileURLToPath(input);
 		} catch {
 			return null;
 		}
