@@ -251,9 +251,15 @@ Disposal also waits for already-admitted initial extension binding, prompt/steer
 
 Asynchronous extension notifications, event-bus handlers, shortcuts and workflow activity observers also finish before their shutdown hooks run. This includes notifications from synchronous methods such as `setThinkingLevel()` and `setSessionName()`; their return types are unchanged. Release suspended callbacks independently rather than waiting for disposal to finish first.
 
+Shutdown and rollback also wait for tracked `pi.exec()` calls launched by cleanup handlers, even if the handler returns first. Prefer awaiting those calls in the handler so you can inspect their results, and give them a timeout or cancellation signal. Do not make a cleanup subprocess wait for disposal itself to finish. Fresh calls through captured APIs remain refused while cleanup drains, including failed or omitted factories.
+
+Call the unsubscribe returned by `pi.events.on()` or a workflow publisher's `dispose()` as soon as you no longer need that handle. Release is idempotent and removes the callback's retained data; you do not need to wait for session disposal. Automatic generation cleanup releases remaining handles and reports release failures.
+
 Closing still delivers queued completion events and persists completed conversation messages in order. Background session-summary requests, including superseded requests that ignored cancellation, must settle before disposal finishes; cancelled summaries cannot write stale results. Failed reload preparation rolls back resources acquired by candidate factories even when discovery rejects before a candidate runner exists. The original generation remains usable after a rejected transaction; cleanup failures remain visible through `ShutdownFailed`.
 
 Already-running tools also retain their completed results, details and `tool_result` hooks during close. Ordinary nontransactional reloads unwind their newly acquired resources on discovery failure while leaving caller-owned discovery resources alone; unlike a rejected transaction, an ordinary reload does not restore the retired generation.
+
+Custom-loader failures do not prevent acquisition rollback when `getExtensions()` itself is unavailable. Keep cleanup independent of rereading discovery results: capture the resources you own when acquiring them. Creation and reload preserve the original failure and report additional cleanup failures rather than replacing it with another getter error.
 
 Reload refuses new questions through retiring dialog functions as soon as it begins. If transactional reload fails, the surviving session can request input again through its current `ctx.ui`, but previously captured dialog functions remain closed. Do not cache dialog functions across reload attempts.
 

@@ -1783,3 +1783,40 @@ test.each(["close", "reload", "rollback", "cancel", "drain"])(
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: natural Node exit and repeatable GC prove cleanup ownership beyond callback return.
+test.each([
+	"getter-ordinary",
+	"getter-ordinary-cleanup",
+	"getter-transaction",
+	"getter-transaction-cleanup",
+	"getter-control",
+	"getter-creation",
+	"getter-after-transfer",
+	"spawn-close",
+	"spawn-close-error",
+	"spawn-control",
+	"spawn-candidate",
+	"spawn-candidate-error",
+	"spawn-factory",
+	"release-manual",
+	"release-invalidate",
+	"release-throwing",
+	"release-invalidate-throwing",
+])(
+	"built Node cleanup ownership boundaries (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[
+				process.execPath,
+				"--expose-gc",
+				fileURLToPath(new URL("../fixtures/sdk-host-cleanup-boundaries.mjs", import.meta.url)),
+				mode,
+			],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

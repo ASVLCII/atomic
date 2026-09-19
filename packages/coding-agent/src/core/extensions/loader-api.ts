@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Provider } from "@bastani/pi-ai";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { canonicalEventBusFor, type EventBus, registerCanonicalEventBus } from "../event-bus.js";
@@ -10,6 +11,7 @@ import {
 	isRetiredExtensionCleanup,
 	trackExtensionWork,
 } from "./extension-work.ts";
+import { hostInputError } from "./host-input.js";
 import {
 	captureRegistrationInvocation as captureInvocation,
 	invocationExtension,
@@ -41,8 +43,21 @@ type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
 const apiLifetime = Symbol.for("atomic.extension-api-lifetime.v1");
 type ExtensionWithLifetime = Extension & {
-	[apiLifetime]?: { retired: boolean; releases: Set<() => void> };
+	[apiLifetime]?: { retired: boolean; releases: Set<() => void>; cleanup?: AsyncLocalStorage<{ active: boolean }> };
 };
+
+/** Seal one unadopted factory without sealing its selected siblings' runtime. */
+export async function runExtensionAPICleanup(extension: Extension, operation: () => Promise<void>): Promise<void> {
+	const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+	if (!lifetime) return operation();
+	lifetime.cleanup ??= new AsyncLocalStorage<{ active: boolean }>();
+	const scope = { active: true };
+	try {
+		await lifetime.cleanup.run(scope, operation);
+	} finally {
+		scope.active = false;
+	}
+}
 
 /** Retire one factory without invalidating a runtime shared with selected factories. */
 export function retireExtensionAPI(extension: Extension): void {
@@ -87,7 +102,9 @@ export function createExtensionAPI(
 	const initialFlagOwnerOrigins = new Map(runtime.flagOwnerOrigins);
 	let state: "loading" | "active" | "failed" = "loading";
 	const assertActive = (inspection = false) => {
-		if ((extension as ExtensionWithLifetime)[apiLifetime]?.retired) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
+		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+		if (lifetime?.retired) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
+		if (lifetime?.cleanup && !lifetime.cleanup.getStore()?.active) throw hostInputError("SessionClosed");
 		if (state === "failed")
 			throw new Error(`Extension "${extension.path}" failed to load and its API is no longer active.`);
 		runtime.assertActive();
@@ -97,6 +114,21 @@ export function createExtensionAPI(
 		if (state === "loading") pendingRuntimeChanges.push(change);
 		else if (state === "active") change.apply();
 		else assertActive();
+	};
+	// Both ownership ledgers must forget a completed release, including on throw.
+	// Clearing the capture also makes a retained public unsubscribe handle harmless.
+	const trackRelease = (cleanup: () => void): (() => void) => {
+		const lifetime = (extension as ExtensionWithLifetime)[apiLifetime];
+		let pending: (() => void) | undefined = cleanup;
+		const release = runtime.trackEventBusSubscription(() => {
+			const callback = pending;
+			pending = undefined;
+			lifetime?.releases.delete(release);
+			callback?.();
+		});
+		lifetime?.releases.add(release);
+		if (state === "loading") loadingUnsubscribers.push(release);
+		return release;
 	};
 	// Successive load generations of one session each build a new facade over
 	// the same shared bus; mapping the facade back to that bus lets
@@ -112,15 +144,13 @@ export function createExtensionAPI(
 			const ownerLifetime = (extension as ExtensionWithLifetime)[apiLifetime];
 			const deliver = captureRegistrationInvocation(handler);
 			assertActive();
-			const unsubscribe = runtime.trackEventBusSubscription(
+			const unsubscribe = trackRelease(
 				eventBus.on(channel, (data) => {
-					if (ownerLifetime?.retired || !extensionWorkOpen(ownerRuntime)) return;
+					if (ownerLifetime?.retired || ownerLifetime?.cleanup || !extensionWorkOpen(ownerRuntime)) return;
 					if (state === "loading" || boundExtensionRuntimes.has(ownerRuntime))
 						return trackExtensionWork(ownerRuntime, async () => deliver(data));
 				}),
 			);
-			ownerLifetime?.releases.add(unsubscribe);
-			if (state === "loading") loadingUnsubscribers.push(unsubscribe);
 			return unsubscribe;
 		},
 	};
@@ -134,9 +164,7 @@ export function createExtensionAPI(
 		registerWorkflowActivityPublisher() {
 			assertActive();
 			const publisher = runtime.workflowActivityHub.registerWorkflowActivityPublisher();
-			(extension as ExtensionWithLifetime)[apiLifetime]?.releases.add(() => publisher.dispose());
-			if (state === "loading") loadingUnsubscribers.push(() => publisher.dispose());
-			return publisher;
+			return { ...publisher, dispose: trackRelease(() => publisher.dispose()) };
 		},
 		on(event: string, handler: HandlerFn): void {
 			assertActive();

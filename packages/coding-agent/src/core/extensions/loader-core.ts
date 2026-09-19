@@ -101,7 +101,7 @@ export async function instantiateExtensions(target: LoadExtensionsResult, cwd: s
 			extension.hidden = source.hidden;
 		}
 	} catch (error) {
-		const failures = await rollbackExtensionFactories(extensions, cwd);
+		const failures = await rollbackExtensionFactories(extensions, cwd, runtime);
 		try {
 			runtime.invalidate();
 		} catch (cleanupError) {
@@ -222,7 +222,7 @@ export async function loadExtensionFromFactory(
 		await factory(transaction.api);
 		transaction.commit();
 	} catch (error) {
-		const failures = await rollbackExtensionFactories([extension], resolvedCwd);
+		const failures = await rollbackExtensionFactories([extension], resolvedCwd, runtime);
 		try {
 			transaction.discard();
 		} catch (cleanupError) {

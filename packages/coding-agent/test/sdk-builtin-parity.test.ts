@@ -3988,3 +3988,305 @@ test("retired replacement cleanup cannot deliver successor events", async () => 
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// #3105: rollback must not ask the failed resource view for permission to clean acquisitions.
+test.each(["ordinary", "ordinary-cleanup", "transaction", "transaction-cleanup", "after-transfer", "control"])(
+	"reload acquisition rollback survives unavailable views (%s)",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-getter-rollback-"));
+		const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+		const modelRuntime = await ModelRuntime.create({
+			authPath: join(cwd, "auth"),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		const primary = new Error("extension view unavailable");
+		const cleanup = new Error("acquisition cleanup failed");
+		const active = new Set<number>();
+		let next = 0;
+		let unavailable = false;
+		class Loader extends DefaultResourceLoader {
+			override supportsTransactionalReload() {
+				return mode.startsWith("transaction");
+			}
+			override getExtensions() {
+				if (unavailable) throw primary;
+				return super.getExtensions();
+			}
+			override async reload() {
+				await super.reload();
+				if (next > 1 && mode !== "control" && mode !== "after-transfer") unavailable = true;
+			}
+			override async prepareReload(): Promise<never> {
+				await this.reload();
+				throw primary;
+			}
+		}
+		const loader = new Loader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					const id = ++next;
+					active.add(id);
+					pi.on("session_shutdown", () => {
+						active.delete(id);
+						if (id > 1 && mode.endsWith("cleanup")) throw cleanup;
+					});
+				},
+			],
+		});
+		await loader.reload();
+		const session = new AgentSession({
+			agent: new Agent(),
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager,
+			cwd,
+			modelRuntime,
+			resourceLoader: loader,
+		});
+		await session.bindExtensions({});
+		try {
+			const error = await session
+				.reload({
+					beforeSessionStart: () => {
+						if (mode === "after-transfer") {
+							unavailable = true;
+							throw primary;
+						}
+					},
+				})
+				.then(
+					() => undefined,
+					(cause: unknown) => cause,
+				);
+			unavailable = false;
+			if (mode === "control") assert.equal(error, undefined);
+			else if (mode.endsWith("cleanup")) {
+				assert.ok(error instanceof AggregateError);
+				assert.ok(error.errors.includes(primary));
+				assert.ok(error.errors.includes(cleanup));
+			} else assert.equal(error, primary);
+			assert.deepEqual(
+				[...active],
+				mode.startsWith("transaction") ? [1] : mode === "control" || mode === "after-transfer" ? [2] : [],
+			);
+			const closed = await session.dispose().then(
+				() => undefined,
+				(cause: unknown) => cause,
+			);
+			if (mode.endsWith("cleanup")) assert.equal((closed as { code: string }).code, "ShutdownFailed");
+			else assert.equal(closed, undefined);
+			assert.equal(active.size, 0);
+		} finally {
+			unavailable = false;
+			await session.dispose().catch(() => {});
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: cleanup can launch tracked execution without awaiting it; teardown still owns settlement.
+test.each(["close", "close-error", "candidate", "factory"])(
+	"cleanup subprocess settles before teardown (%s)",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-cleanup-exec-"));
+		const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+		const modelRuntime = await ModelRuntime.create({
+			authPath: join(cwd, "auth"),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		let child: Promise<import("../src/core/extensions/types.ts").ExecResult> | undefined;
+		let cleanupAPI!: import("../src/core/extensions/types.ts").ExtensionAPI;
+		let generation = 0;
+		let settled = false;
+		let completed = false;
+		let entered!: () => void;
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					const id = ++generation;
+					pi.on("session_shutdown", async () => {
+						if (mode === "candidate" && id === 1) return;
+						cleanupAPI = pi;
+						child = pi.exec(process.execPath, [
+							"-e",
+							'const fs=require("node:fs");fs.writeFileSync("started","");const t=setInterval(()=>{if(fs.existsSync("release")){clearInterval(t);process.stdout.write("complete");}},10);',
+						]);
+						void child.then(() => {
+							settled = true;
+						});
+						await vi.waitFor(() => assert.ok(existsSync(join(cwd, "started"))));
+						entered();
+						if (mode === "close-error") throw new Error("shutdown primary");
+					});
+					if (mode === "factory") throw new Error("factory primary");
+					if (mode === "candidate" && id > 1)
+						pi.on("session_start", () => {
+							throw new Error("startup primary");
+						});
+				},
+			],
+		});
+		let session: AgentSession | undefined;
+		const creating = createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			modelRuntime,
+			resourceLoader: loader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		});
+		const teardown =
+			mode === "factory"
+				? creating.then((result) => {
+						session = result.session;
+					})
+				: creating.then(async (result) => {
+						session = result.session;
+						if (mode === "candidate") await session.reload();
+						else await session.dispose();
+					});
+		const outcome = teardown.then(
+			() => {
+				completed = true;
+				return undefined;
+			},
+			(error: unknown) => {
+				completed = true;
+				return error;
+			},
+		);
+		try {
+			await started;
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			const premature = completed;
+			assert.equal(settled, false);
+			assert.throws(() => cleanupAPI.events.on("fresh-during-cleanup", () => {}), /closed|stale|no longer active/i);
+			const closing = mode === "candidate" ? session!.dispose().catch((error: unknown) => error) : undefined;
+			writeFileSync(join(cwd, "release"), "");
+			assert.equal((await child!).stdout, "complete");
+			const error = await outcome;
+			await closing;
+			assert.equal(premature, false, "teardown returned while cleanup child was live");
+			if (mode === "close-error") assert.equal((error as { code: string }).code, "ShutdownFailed");
+			if (mode === "candidate") {
+				assert.ok(error instanceof AggregateError);
+				assert.match(error.errors.map(String).join("\n"), /startup primary/);
+			}
+		} finally {
+			writeFileSync(join(cwd, "release"), "");
+			await child;
+			await outcome;
+			await session?.dispose().catch(() => {});
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);
+
+// #3105: public releases must forget their captures even while the owner remains reachable.
+test.each(["manual", "invalidate", "throwing", "invalidate-throwing"])(
+	"factory release bookkeeping retires completed handles (%s)",
+	async (mode) => {
+		const { createEventBus } = await import("../src/core/event-bus.ts");
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-release-ledger-"));
+		const settingsManager = SettingsManager.inMemory();
+		const modelRuntime = await ModelRuntime.create({
+			authPath: join(cwd, "auth"),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		const bus = createEventBus();
+		let releases = 0;
+		const eventBus = {
+			emit: bus.emit,
+			on: (channel: string, handler: (...args: unknown[]) => void) => {
+				const release = bus.on(channel, handler);
+				return () => {
+					release();
+					releases++;
+					if (mode.endsWith("throwing")) throw new Error("release failed");
+				};
+			},
+		};
+		let api!: import("../src/core/extensions/types.ts").ExtensionAPI;
+		let finish!: () => void;
+		let entered!: () => void;
+		const held = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			eventBus,
+			noExtensions: true,
+			extensionFactories: [
+				(pi) => {
+					api = pi;
+					pi.on("session_shutdown", async () => {
+						entered();
+						await held;
+					});
+				},
+			],
+		});
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			modelRuntime,
+			resourceLoader,
+			sessionManager: SessionManager.inMemory(cwd),
+			tools: [],
+			builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+		});
+		const extension = session.resourceLoader.getExtensions().extensions[0];
+		const ledger = (extension as unknown as Record<symbol, { releases: Set<() => void> }>)[
+			Symbol.for("atomic.extension-api-lifetime.v1")
+		].releases;
+		const unsubscribe = api.events.on("ephemeral", () => {});
+		const publisher = api.registerWorkflowActivityPublisher();
+		const closing = session.dispose().then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		try {
+			await started;
+			assert.equal(ledger.size, 2);
+			if (!mode.startsWith("invalidate")) {
+				if (mode === "throwing") assert.throws(unsubscribe, /release failed/);
+				else unsubscribe();
+				unsubscribe();
+				publisher.dispose();
+				publisher.dispose();
+				assert.equal(ledger.size, 0);
+			}
+			finish();
+			const error = await closing;
+			if (mode === "invalidate-throwing") assert.equal((error as { code: string }).code, "ShutdownFailed");
+			else assert.equal(error, undefined);
+			assert.equal(ledger.size, 0);
+			assert.equal(releases, 1);
+		} finally {
+			finish();
+			await closing;
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	},
+);

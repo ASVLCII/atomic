@@ -40,11 +40,11 @@ export function extensionWorkOpen(runtime: ExtensionRuntime): boolean {
 }
 
 export function trackExtensionWork<T>(runtime: ExtensionRuntime, operation: () => Promise<T>): Promise<T> {
-	return (runtime as OwnedRuntime)[workBinding]?.run(operation) ?? operation();
+	return (runtime as OwnedRuntime)[workBinding]?.run(operation) ?? trackSessionWork(runtime, operation);
 }
 
 export async function drainExtensionWork(runtime: ExtensionRuntime): Promise<void> {
-	await (runtime as OwnedRuntime)[workBinding]?.drain();
+	await ((runtime as OwnedRuntime)[workBinding]?.drain() ?? drainSessionWork(runtime));
 }
 
 /** Cleanup may inspect its retired resources, but cannot act on a successor. */

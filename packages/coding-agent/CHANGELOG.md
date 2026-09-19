@@ -81,6 +81,7 @@
 - Concurrent command replacements no longer circularly drain one another. Reload activation and commit failures clean their started candidates, and unpublished MCP initialization cleanup failures remain explicit during disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - SDK creation now cleans owned factory acquisitions omitted by extension selection without disabling selected extensions. Self-reload revokes captured old APIs before successor admission while retaining continuation cleanup and deferred failures ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Filtered creation and reload now retire omitted factories' APIs and subscriptions independently, preserving selected extensions. Captured extension actions refuse new work immediately during close/reload, while admitted subprocesses drain. Deferred shutdown after self-reload or command replacement can no longer mutate, acquire task hosts from, or send events into the successor ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Reload acquisition rollback no longer depends on a working extension getter. Shutdown and factory rollback now wait for tracked cleanup subprocesses after handlers return, while keeping fresh admission closed. Released event subscriptions and workflow publishers no longer retain completed release callbacks or their captured data after manual release or generation invalidation ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

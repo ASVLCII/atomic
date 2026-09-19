@@ -144,6 +144,13 @@ export async function emitSessionShutdownEvent(
 		} finally {
 			unsubscribe();
 		}
+		// Shutdown may start tracked cleanup without returning its promise. Join it
+		// after dispatch leaves its own work frame, including when a handler failed.
+		try {
+			await extensionRunner.drainWork();
+		} catch (error) {
+			failures.push(error instanceof Error ? error : new Error(String(error)));
+		}
 		if (failures.length)
 			throw Object.assign(new AggregateError(failures, "Extension shutdown failed"), { code: "ShutdownFailed" });
 		return true;

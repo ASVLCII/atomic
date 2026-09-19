@@ -13,6 +13,7 @@ import {
 } from "./extensions/loader-rollback.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { bindExtensionContextPublication } from "./extensions/runner-context.ts";
+import type { ExtensionRuntime } from "./extensions/types.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ExtensionProviderTransaction, ModelRuntime } from "./model-runtime.js";
 import type { PathMetadata } from "./package-manager.ts";
@@ -554,16 +555,15 @@ async function cleanupReloadRunner(runner: ExtensionRunner, reason: string): Pro
 
 async function reloadGeneration(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
 	return factoryAcquisitions.run({ pending: new Map(), replacement: true }, async () => {
+		// Record ownership at transfer, never by rereading a possibly failed loader view.
+		const retainedRuntimes = new Set<ExtensionRuntime>();
 		try {
-			await reloadOwnedGeneration.call(this, options);
+			await reloadOwnedGeneration.call(this, retainedRuntimes, options);
 		} catch (error) {
-			throw factoryRollbackError(
-				error,
-				await rollbackFactoryAcquisitions(new Set([this._resourceLoader.getExtensions().runtime])),
-			);
+			throw factoryRollbackError(error, await rollbackFactoryAcquisitions(retainedRuntimes));
 		}
 		// Custom discovery may be re-instantiated rather than adopted by the runner.
-		const failures = await rollbackFactoryAcquisitions(new Set([this._resourceLoader.getExtensions().runtime]));
+		const failures = await rollbackFactoryAcquisitions(retainedRuntimes);
 		if (failures.length)
 			throw Object.assign(new AggregateError(failures, "Reload discovery cleanup failed"), {
 				code: "ShutdownFailed",
@@ -571,7 +571,11 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 	});
 }
 
-async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
+async function reloadOwnedGeneration(
+	this: AgentSession,
+	retainedRuntimes: Set<ExtensionRuntime>,
+	options?: AgentSessionReloadOptions,
+): Promise<void> {
 	const reason = options?.reason ?? "reload";
 	const oldRunner = this._extensionRunner;
 	const previousFlagValues = oldRunner.getExplicitFlagValues();
@@ -587,6 +591,7 @@ async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionR
 		resetApiProviders();
 		await this._resourceLoader.reload();
 		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
+		retainedRuntimes.add(this._resourceLoader.getExtensions().runtime);
 		for (const extension of this._resourceLoader.getExtensions().extensions)
 			factoryAcquisitions.getStore()?.pending?.delete(extension);
 		const discoveryFailures = await rollbackFactoryAcquisitions(
@@ -698,6 +703,7 @@ async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionR
 	// Publication transferred ownership: keep the started candidate reachable even
 	// when reconstruction fails, and retain retiring cleanup through every step.
 	this._extensionRunner = candidateRunner;
+	retainedRuntimes.add(extensionsResult.runtime);
 	const failures: unknown[] = [];
 	try {
 		resetApiProviders();

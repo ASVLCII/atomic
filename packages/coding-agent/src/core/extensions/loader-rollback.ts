@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { retireExtensionAPI } from "./loader-api.ts";
+import { drainExtensionWork } from "./extension-work.ts";
+import { retireExtensionAPI, runExtensionAPICleanup } from "./loader-api.ts";
 import { createExtensionContext } from "./runner-context.ts";
 import { noOpUIContext } from "./runner-ui.ts";
 import type { Extension, ExtensionRuntime } from "./types.ts";
@@ -16,7 +17,7 @@ export async function rollbackFactoryAcquisitions(
 	const failures: unknown[] = [];
 	const runtimes = new Set<ExtensionRuntime>();
 	for (const [extension, { cwd, runtime }] of [...(acquired ?? [])].reverse()) {
-		failures.push(...(await rollbackExtensionFactories([extension], cwd)));
+		failures.push(...(await rollbackExtensionFactories([extension], cwd, runtime)));
 		runtimes.add(runtime);
 	}
 	for (const runtime of runtimes) {
@@ -31,7 +32,11 @@ export async function rollbackFactoryAcquisitions(
 }
 
 /** Factories can acquire resources before a session (and its runner) exists. */
-export async function rollbackExtensionFactories(extensions: Extension[], cwd: string): Promise<unknown[]> {
+export async function rollbackExtensionFactories(
+	extensions: Extension[],
+	cwd: string,
+	runtime: ExtensionRuntime,
+): Promise<unknown[]> {
 	const unavailable = (): never => {
 		throw new Error("Session is not initialized during factory rollback");
 	};
@@ -63,15 +68,22 @@ export async function rollbackExtensionFactories(extensions: Extension[], cwd: s
 	const failures: unknown[] = [];
 	for (const extension of [...extensions].reverse()) {
 		factoryAcquisitions.getStore()?.pending?.delete(extension);
-		for (const handler of extension.handlers.get("session_shutdown") ?? []) {
-			try {
-				await handler(
-					{ type: "session_shutdown", reason: factoryAcquisitions.getStore()?.replacement ? "new" : "quit" },
-					context,
-				);
-			} catch (error) {
-				failures.push(error);
+		await runExtensionAPICleanup(extension, async () => {
+			for (const handler of extension.handlers.get("session_shutdown") ?? []) {
+				try {
+					await handler(
+						{ type: "session_shutdown", reason: factoryAcquisitions.getStore()?.replacement ? "new" : "quit" },
+						context,
+					);
+				} catch (error) {
+					failures.push(error);
+				}
 			}
+		});
+		try {
+			await drainExtensionWork(runtime);
+		} catch (error) {
+			failures.push(error);
 		}
 		try {
 			retireExtensionAPI(extension);
