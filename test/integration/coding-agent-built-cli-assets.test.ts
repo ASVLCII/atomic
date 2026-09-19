@@ -43,7 +43,8 @@ function compileFixture(): void {
 	cpSync(join(packageDir, "src/modes/interactive/assets"), join(distDir, "modes/interactive/assets"), {
 		recursive: true,
 	});
-	cpSync(join(packageDir, "dist/builtin/intercom"), join(distDir, "builtin/intercom"), { recursive: true });
+	// #3105: the built CLI includes every shipped builtin, not only Intercom.
+	cpSync(join(packageDir, "dist/builtin"), join(distDir, "builtin"), { recursive: true });
 	mkdirSync(agentDir, { recursive: true });
 
 	// The standalone build copies package metadata into dist beside app.js. Running

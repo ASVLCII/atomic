@@ -2,7 +2,7 @@ import { basename, dirname } from "node:path";
 import { resetApiProviders } from "@bastani/pi-ai/compat";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { recoverProtectedStreamingCustomMessages } from "./agent-session-persistent-custom-messages.ts";
-import { replaceSessionTaskOwner } from "./agent-session-tasks.ts";
+import { replaceSessionTaskOwner } from "./agent-session-tasks.js";
 import type { AgentSessionReloadOptions, ExtensionBindings } from "./agent-session-types.ts";
 import { hostInputError } from "./extensions/host-input.js";
 import { ExtensionRunner } from "./extensions/index.js";

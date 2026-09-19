@@ -139,7 +139,7 @@ When a print-mode turn correctly finishes by calling an opt-in terminating struc
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable every tool, including Intercom, even with `--tools` |
 
-Default built-in tools: `read`, `bash`, `kill`, `edit`, `write`, `find`, `search`, `ask_user_question`, `todo`, plus `powershell` on native Windows when available. `ls` remains available but is not a default. `defaultTools` selects initial coding tools without narrowing extension/custom tools. `--tools` selects an explicit allowlist; `--exclude-tools` subtracts from it. `--no-builtin-tools` suppresses coding defaults when no allowlist is given. `--no-tools` overrides all selection. To retain Intercom with an allowlist, include `intercom` explicitly.
+Default built-in tools: `read`, `bash`, `kill`, `edit`, `write`, `find`, `search`, `ask_user_question`, `todo`, plus `powershell` on native Windows when a PowerShell executable is available. `ls` remains available but is not a default. `defaultTools` selects initial coding tools without narrowing extension/custom tools. `--tools` selects an explicit allowlist; `--exclude-tools` subtracts from it. `--no-builtin-tools` suppresses coding defaults when no allowlist is given. `--no-tools` overrides all selection. To retain Intercom with an allowlist, include `intercom` explicitly.
 
 ## Project Trust Options
 
