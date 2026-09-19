@@ -37,7 +37,7 @@ import { createStore, store } from "../../packages/workflows/src/shared/store.js
 import { installStoreWidget, scrollStoreWidget } from "../../packages/workflows/src/tui/store-widget-installer.js";
 import { workflowScrollHint } from "../../packages/workflows/src/tui/widget-scroll-hint.js";
 
-function registrations(): Extension {
+function registrations(ui?: ExtensionAPI["ui"]): Extension {
 	const extension: Extension = {
 		path: "workflow-fixture",
 		resolvedPath: "workflow-fixture",
@@ -51,6 +51,7 @@ function registrations(): Extension {
 		shortcuts: new Map(),
 	};
 	factory({
+		ui,
 		on() {},
 		registerTool() {},
 		registerCommand() {},
@@ -241,13 +242,10 @@ for (const route of ["native", "remote"])
 			let disposeRemote: (() => void) | undefined;
 			try {
 				await new Promise<void>((resolve) => setImmediate(resolve));
-				factory({
-					ui: f.context.createExtensionUIContext() as unknown as NonNullable<ExtensionAPI["ui"]>,
-					on() {},
-					registerTool() {},
-					registerCommand() {},
-					events: { on: () => () => {}, emit() {} },
-				});
+				// #3105: shortcut registration and widget mounting must share one workflow owner.
+				const extension = registrations(
+					f.context.createExtensionUIContext() as unknown as NonNullable<ExtensionAPI["ui"]>,
+				);
 				for (const id of ids)
 					store.recordRunStart({ id, name: id, status: "paused", startedAt: Date.now(), inputs: {}, stages: [] });
 				await Promise.resolve();
@@ -292,7 +290,6 @@ for (const route of ["native", "remote"])
 				f.context.editorContainer.clear();
 				f.context.editorContainer.addChild(editor);
 				f.tui.setFocus(editor);
-				const extension = registrations();
 				if (scenario.literal !== undefined) {
 					const shortcut = [...extension.shortcuts.values()].find(
 						(value) => value.keybinding === "app.workflows.scrollDown",
@@ -433,15 +430,10 @@ test("workflow wheel uses actual clipped bounds, contains boundaries, preserves 
 	const ids = Array.from({ length: 14 }, (_, i) => `adapter-wheel-${i}`);
 	try {
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		const extension = registrations();
-		// Install the same actual factory against the production UI.
-		factory({
-			ui: f.context.createExtensionUIContext() as unknown as NonNullable<ExtensionAPI["ui"]>,
-			on() {},
-			registerTool() {},
-			registerCommand() {},
-			events: { on: () => () => {}, emit() {} },
-		});
+		// #3105: use the widget owner's shortcuts, not a separately constructed factory.
+		const extension = registrations(
+			f.context.createExtensionUIContext() as unknown as NonNullable<ExtensionAPI["ui"]>,
+		);
 		for (const [i, id] of ids.entries())
 			store.recordRunStart({
 				id,
