@@ -90,7 +90,6 @@ for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", 
 				workflowType: "goal",
 				workflowId: "reserved-id",
 				status: "reserved",
-				estimatedDuration,
 				routerDecision: { workflowType: "goal", estimatedDuration, maxBudget: {} },
 			},
 			{ plain: true, width: 80 },
@@ -100,3 +99,54 @@ for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", 
 		assert.doesNotMatch(rendered, /started in background/);
 	});
 }
+
+for (const status of ["reserved", "not_launched", "failed"] as const) {
+	test(`route ${status} boxes the complete structured result`, () => {
+		const result: WorkflowToolResult = {
+			action: "route",
+			workflowType: status === "reserved" ? "goal" : status === "not_launched" ? "none" : "",
+			workflowId: status === "reserved" ? "reserved-id" : "",
+			status,
+			...(status === "failed"
+				? { error: "Routing unavailable. Retry later." }
+				: {
+						routerDecision: {
+							workflowType: status === "reserved" ? "goal" : "none",
+							estimatedDuration: "1hr15min" as const,
+							maxBudget: { maxTokens: 0 },
+						},
+					}),
+			...(status === "reserved" ? { inputSchema: {} } : { message: "Keep  spacing and 日本語." }),
+		};
+		for (const plain of [false, true]) {
+			for (const isPartial of [false, true]) {
+				const rendered = renderResult(result, { plain, isPartial, width: 100 });
+				assert.match(rendered, /╭ WORKFLOW ROUTE /);
+				assert.match(rendered, /╰─+╯/);
+				assert.doesNotMatch(rendered, /ROUTER DECISION/);
+				for (const line of JSON.stringify(result, null, 2).split("\n")) {
+					assert.ok(rendered.includes(` ${line} `), line);
+				}
+				assert.ok(rendered.split("\n").every((line) => visibleWidth(line) === 100));
+				const compact = renderResult(result, { plain, isPartial, width: 32 });
+				assert.ok(compact.split("\n").every((line) => visibleWidth(line) === 32));
+			}
+		}
+	});
+}
+
+test("route request timeout retains the workflow timeout notice", () => {
+	const rendered = renderResult(
+		{
+			action: "route",
+			status: "failed",
+			code: "WORKFLOW_TIMEOUT",
+			timeoutMs: 120000,
+			error: "Workflow route request timed out after 120000ms.",
+		},
+		{ plain: true, width: 80 },
+	);
+	assert.match(rendered, /╭ WORKFLOW TIMEOUT /);
+	assert.match(rendered, /Workflow route request timed out after 120000ms\./);
+	assert.doesNotMatch(rendered, /routerDecision|estimatedDuration/);
+});

@@ -103,7 +103,6 @@ type RouteResult = {
 	action: "route";
 	workflowType: string;
 	workflowId: string;
-	estimatedDuration?: WorkflowRouterOutput["estimatedDuration"];
 	routerDecision?: WorkflowRouterOutput;
 	inputSchema?: import("../shared/types.js").WorkflowDefinition["inputs"];
 	status: "reserved" | "not_launched" | "failed";
@@ -115,7 +114,6 @@ type RunResult = {
 	/** Validated routing decision; absent on inference/validation failure. */
 	workflowId?: string;
 	routerDecision?: WorkflowRouterOutput;
-	estimatedDuration?: WorkflowRouterOutput["estimatedDuration"];
 	inputContract?: import("../shared/types.js").WorkflowDefinition["inputs"];
 	name?: string;
 	runId: string;
@@ -432,7 +430,7 @@ function renderResultBody(result: WorkflowRegisteredToolResult | null | undefine
 		}
 
 		case "route":
-			return JSON.stringify(result, null, 2);
+			return renderNotice("WORKFLOW ROUTE", JSON.stringify(result, null, 2), opts, themed);
 		case "run": {
 			const r = result as RunResult;
 			if (r.status === "not_launched")

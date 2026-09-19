@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Headless launches return an accepted run identity for status inspection, without input pickers. Required durable gates remain pending until an authorized host or answer arrives, including when no host was initially bound. Explicit runtime execution policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Model-tool execution now requires `route` with content-bearing `state.task`, then `run` with the returned registered `workflowId` and validated inputs. Route returns the input schema without launching; input correction reuses the ID without rerouting. Old run-as-router calls and duration values are rejected. Estimates use 98 canonical quarter-hour labels through `1d`, plus `unknown` and `>1d`, without changing budgets ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
+- Workflow route and registered run results no longer repeat `estimatedDuration` at the top level. Read the canonical estimate from `routerDecision.estimatedDuration`.
 
 ### Added
 
@@ -57,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Builtin classifier and category-action stages now retain Intercom coordination without overriding caller-disabled tools or packages.
 - Overlapping SDK workflow owners now answer and withdraw questionnaires through their own session's broker rather than a sibling's.
 - Retain registered model-tool instance ownership across reload and durable recovery, authorize normalized/default/bulk lifecycle targets before inspection or mutation, and enforce explicit inline preferences even against contrary routing judgments ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
+- Workflow `route` results now display their structured output in a rounded `WORKFLOW ROUTE` box, including inline decisions and routing failures.
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
