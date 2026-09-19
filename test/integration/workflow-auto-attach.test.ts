@@ -204,7 +204,8 @@ describe("workflow auto-attach host entrypoints", () => {
 
 		const result = await executeWorkflow(host.tool, "attach-enabled", false);
 		assert.ok("status" in result && "runId" in result);
-		assert.equal(result.status, "completed");
+		// #3105: a headless launch acknowledges admission without awaiting completion.
+		assert.equal(result.status, "running");
 		assert.ok(result.runId.length > 0);
 
 		assert.equal(host.customCalls.length, 0);
