@@ -98,6 +98,8 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	processing.catch(() => {});
 	if (
 		awaitProtectedPersistence ||
+		// #3105: queued custom messages must enter history before the next provider turn.
+		event.type === "turn_end" ||
 		(event.type === "agent_end" && (this._fallbackModels.length > 0 || this._fallbackOriginModel !== undefined))
 	)
 		return processing.catch(() => {});
