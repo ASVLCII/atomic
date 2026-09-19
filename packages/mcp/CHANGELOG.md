@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent SDK sessions now retain separate pending OAuth state, PKCE verifiers and callback ownership, including after host callback rebinding; durable server credentials keep their existing storage ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Opening or closing an MCP native UI no longer closes another session's window; windows that finish opening after their UI closes are retired immediately ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - SDK-owned configuration, authentication and cleanup diagnostics now use redacted session diagnostics rather than console output ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Preserve lazy MCP connections during headless SDK startup even when an eager or keep-alive server is configured alongside uncached direct tools; terminal first-run discovery is unchanged ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.19] - 2026-09-13
 

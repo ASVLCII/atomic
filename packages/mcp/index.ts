@@ -196,6 +196,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       updateStatusBar(initializedState);
       let cancelWarmup: (() => void) | null = null;
       const warmup = scheduleMcpStartupWarmup(initializedState, {
+        hasUI: session.ctx.hasUI,
         subagentPolicy: session.ctx.subagentPolicy,
         shouldContinue: () => isCurrentSession(session) && state === initializedState,
         onDirectToolsChanged: async () => {

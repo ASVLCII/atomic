@@ -4866,6 +4866,70 @@ test("SDK MCP discovery stays lazy until an owned gateway call", async () => {
 	}
 });
 
+// #3105: an eager/keep-alive sibling must not bootstrap uncached lazy direct tools.
+test.each(["eager", "keep-alive"] as const)("SDK mixed %s MCP startup preserves lazy discovery", async (lifecycle) => {
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-sdk-mixed-mcp-"));
+	const requests = { eager: 0, lazy: 0 };
+	const server = createServer(async (request, response) => {
+		const name = request.url === "/lazy" ? "lazy" : "eager";
+		requests[name]++;
+		if (request.method !== "POST") {
+			response.writeHead(405).end();
+			return;
+		}
+		let body = "";
+		for await (const chunk of request) body += chunk;
+		const message = JSON.parse(body) as { id?: number; method: string };
+		if (message.id === undefined) {
+			response.writeHead(202).end();
+			return;
+		}
+		const result =
+			message.method === "initialize"
+				? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name, version: "1" } }
+				: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object", properties: {} } }] };
+		response
+			.writeHead(200, { "Content-Type": "application/json" })
+			.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address && typeof address === "object");
+	writeFileSync(
+		join(cwd, ".mcp.json"),
+		JSON.stringify({
+			mcpServers: {
+				eager: { url: `http://127.0.0.1:${address.port}/eager`, lifecycle },
+				lazy: { url: `http://127.0.0.1:${address.port}/lazy`, directTools: true },
+			},
+		}),
+	);
+	vi.stubEnv("ATOMIC_CODING_AGENT_DIR", join(cwd, "agent"));
+	let session: AgentSession | undefined;
+	try {
+		({ session } = await createAgentSession({
+			cwd,
+			agentDir: join(cwd, "agent"),
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory(),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+		}));
+		await new Promise((resolve) => setTimeout(resolve, 2_000));
+		assert.ok(requests.eager > 0, "startup did not connect the eager/keep-alive sibling");
+		assert.equal(requests.lazy, 0, "mixed startup connected an uncached lazy server");
+		assert.ok(!session.agent.state.tools.some((tool) => tool.name === "lazy_echo"), "startup registered lazy_echo");
+		const gateway = session.agent.state.tools.find((tool) => tool.name === "mcp")!;
+		const result = await gateway.execute("connect", { connect: "lazy" }, new AbortController().signal);
+		assert.ok(requests.lazy > 0, "first owned lazy use did not connect");
+		assert.equal(result.details?.error, undefined, JSON.stringify(result));
+	} finally {
+		await session?.dispose();
+		vi.unstubAllEnvs();
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 // #3105: startup failures are operational diagnostics, not remote text printed by the SDK.
 test("MCP startup diagnostics are quiet, redacted and owner attributed", async () => {
 	const root = mkdtempSync(join(tmpdir(), "atomic-sdk-mcp-diagnostics-"));

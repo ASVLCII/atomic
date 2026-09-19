@@ -86,6 +86,7 @@ test("MCP startup warmup discards post-connect metadata after cancellation", asy
 		openBrowser: async () => undefined,
 	} as unknown as McpExtensionState;
 	const handle = scheduleMcpStartupWarmup(state, {
+		hasUI: true,
 		onDirectToolsChanged: () => {
 			directToolCallbacks += 1;
 		},
