@@ -578,6 +578,7 @@ async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionR
 		if (options?.failOnExtensionErrors) {
 			throw new Error("Strict extension reload requires a transactional resource loader");
 		}
+		oldRunner.revokeAuthority();
 		await retireSessionReloadGeneration(this, () => cleanupReloadRunner(oldRunner, reason));
 		await this.settingsManager.reload();
 		resetApiProviders();
@@ -707,6 +708,7 @@ async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionR
 	}
 	const setupFailed = failures.length > 0;
 	try {
+		oldRunner.revokeAuthority();
 		await retireSessionReloadGeneration(this, () => cleanupReloadRunner(oldRunner, reason));
 	} catch (error) {
 		failures.push(error);

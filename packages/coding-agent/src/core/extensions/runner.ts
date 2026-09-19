@@ -18,6 +18,8 @@ import {
 	drainExtensionWork,
 	extensionWorkOpen,
 	resumeExtensionWork,
+	revokeExtensionAuthority,
+	runExtensionCleanup,
 	sealExtensionWork,
 } from "./extension-work.ts";
 import {
@@ -210,6 +212,7 @@ export class ExtensionRunner {
 	private shortcutDiagnostics: ResourceDiagnostic[] = [];
 	private commandDiagnostics: ResourceDiagnostic[] = [];
 	private staleMessage: string | undefined;
+	private authorityRevoked = false;
 	private readonly contextOwner = {};
 	private uiPromptBinding = 0;
 	private activeUIPrompt:
@@ -596,6 +599,11 @@ export class ExtensionRunner {
 		return this.shortcutDiagnostics;
 	}
 
+	revokeAuthority(): void {
+		this.authorityRevoked = true;
+		revokeExtensionAuthority(this.runtime);
+	}
+
 	invalidate(message = STALE_EXTENSION_CONTEXT_MESSAGE): void {
 		this.sealHostInput();
 		if (!this.staleMessage) {
@@ -605,6 +613,7 @@ export class ExtensionRunner {
 	}
 
 	private assertActive(): void {
+		if (this.authorityRevoked) this.runtime.assertActive();
 		if (this.staleMessage) {
 			throw new Error(this.staleMessage);
 		}
@@ -736,26 +745,27 @@ export class ExtensionRunner {
 		if (!admitted && event.type !== "session_shutdown" && !extensionWorkOpen(this.runtime))
 			return undefined as RunnerEmitResult<TEvent>;
 		const observerFailures: Error[] = [];
+		const dispatch = () =>
+			runGenericHandlers(
+				this.extensions,
+				this.createContext(),
+				event,
+				(error) => {
+					try {
+						this.emitError(error);
+					} catch (cause) {
+						if (event.type !== "session_shutdown") throw cause;
+						observerFailures.push(
+							new Error(`${error.extensionPath}: ${error.error}`),
+							new Error("Shutdown observer failed", { cause }),
+						);
+					}
+				},
+				isCurrent,
+			);
 		const result = await runResourceRegistrationBatch(
 			this.runtime,
-			() =>
-				runGenericHandlers(
-					this.extensions,
-					this.createContext(),
-					event,
-					(error) => {
-						try {
-							this.emitError(error);
-						} catch (cause) {
-							if (event.type !== "session_shutdown") throw cause;
-							observerFailures.push(
-								new Error(`${error.extensionPath}: ${error.error}`),
-								new Error("Shutdown observer failed", { cause }),
-							);
-						}
-					},
-					isCurrent,
-				),
+			() => (event.type === "session_shutdown" ? runExtensionCleanup(this.runtime, dispatch) : dispatch()),
 			admitted || event.type === "session_shutdown",
 		);
 		if (observerFailures.length)

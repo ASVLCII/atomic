@@ -79,6 +79,7 @@
 - Failed file-loaded extension factories now run registered rollback cleanup; cleanup failures reject instead of becoming discovery-only diagnostics. Reload seals retiring input before successor startup. Disposal drains asynchronous extension notifications, bus handlers, shortcuts and workflow observers before shutdown, including notifications from synchronous thinking/session-name setters ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Command-context session replacement no longer waits on its own command. It seals retiring admission and drains peers before handoff, while final disposal still drains the command continuation and cleanup. Closing preserves completed tool results and hooks, and nontransactional reload failures release owned acquisitions without closing borrowed discovery ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Concurrent command replacements no longer circularly drain one another. Reload activation and commit failures clean their started candidates, and unpublished MCP initialization cleanup failures remain explicit during disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- SDK creation now cleans owned factory acquisitions omitted by extension selection without disabling selected extensions. Self-reload revokes captured old APIs before successor admission while retaining continuation cleanup and deferred failures ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

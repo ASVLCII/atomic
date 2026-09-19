@@ -14,6 +14,7 @@ const candidate = mode.startsWith("candidate");
 const cleanupFails = mode.endsWith("cleanup");
 const active = new Set();
 const stopped = [];
+const capabilities = new Map();
 let next = 0;
 let reloading = false;
 let invoking;
@@ -31,7 +32,8 @@ const resourceLoader = new (acquisitions || mode === "self-ordinary" ? Loader : 
     const id = ++next;
     if (acquisitions) active.add(id);
     pi.events.on("acquire", async () => { enter(); await gate; active.add(id); });
-    pi.on("session_start", () => {
+    pi.on("session_start", (_event, ctx) => {
+      capabilities.set(id, { write: () => pi.setSessionName(`generation-${id}`), host: () => ctx.getAgentTaskHost() });
       if (candidate && reloading) { pi.events.emit("acquire"); throw new Error("candidate startup failed"); }
     });
     pi.registerCommand("reload-acquire", { description: "reload and finish owned work", handler: async () => {
@@ -40,7 +42,8 @@ const resourceLoader = new (acquisitions || mode === "self-ordinary" ? Loader : 
       if (mode === "self-twice") await session.reload();
       enter(); await gate; active.add(id);
     } });
-    pi.on("session_shutdown", () => {
+    pi.on("session_shutdown", (_event, ctx) => {
+      assert.equal(ctx.cwd, cwd);
       stopped.push(id); active.delete(id);
       if (cleanupFails && id === (acquisitions ? 3 : candidate ? 2 : 1)) throw new Error("owned cleanup failed");
     });
@@ -65,6 +68,14 @@ try {
     assert.equal(settled, false);
     if (candidate) assert.deepEqual(stopped, []);
     else assert.equal(stopped.includes(invoking), false, "invoking generation cannot shut down before its continuation");
+    if (!candidate) {
+      // External callers are not the admitted continuation whose cleanup is retained.
+      assert.throws(capabilities.get(invoking).write, /stale|no longer active/i);
+      assert.throws(capabilities.get(invoking).host, /stale|no longer active/i);
+      const [freshId, fresh] = [...capabilities].at(-1);
+      fresh.write(); assert.ok(fresh.host());
+      assert.equal(session.sessionManager.getSessionName(), `generation-${freshId}`);
+    }
     let closed = false;
     const close = session.dispose().then(() => { closed = true; }, error => { closed = true; return error; });
     await new Promise(resolve => setTimeout(resolve, 20));

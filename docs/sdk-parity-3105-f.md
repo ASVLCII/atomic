@@ -426,3 +426,38 @@ Remaining evidence limits are unchanged: noncooperative callbacks require indepe
 ### Contract amendments received
 
 "make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates.
+
+## Seventh continuation: frozen invariant delta (baseline `009b389e4`)
+
+The prior readiness claim is superseded by two reproduced ownership/authority failures. This supplements the existing lifecycle map; it does not replace it.
+
+| Invariant and transition | Materially distinct paths/adapters | Required regression dependencies and acceptance |
+| --- | --- | --- |
+| Every creation-owned factory transfers explicitly or is cleaned; selection is not ownership | SDK default discovery and unloaded caller DefaultResourceLoader with extensionsOverride; selected and omitted factories sharing one runtime; startup rollback | Subset, none and unfiltered selection; exact registrations/startup; omitted cleanup failure and later startup failure; cleanup exactly once; selected API, bus and task capabilities survive omitted cleanup. Retain borrowed/custom-loader/sibling and constructor rollback suites |
+| Retired authority ends before successor admission, independently of retained cleanup | Transactional and ordinary reload; captured extension API and context; invoking command continuation; terminal disposal and successive reload | During independent continuation hold both external mutation and task-host admission reject; fresh successor works. Disposal remains pending until independent release; late owned acquisition is cleaned; deferred shutdown failure remains ShutdownFailed. Preserve ordinary/successive reload, replacement reentrancy, durable workflow and input controls |
+
+Exact baseline probes: `node /tmp/3105-f-completion-filtered-acquisition.mjs filter` exit1 (omit remains active), `control` exit0; `node /tmp/3105-f-risk-retired-external.mjs failure` exit1 (external-stale-write and hostAcquired=true), `control` exit0. Logs `/tmp/3105-f-seventh-{filter-red,filter-control,authority-red,authority-control}.log`.
+Acceptance requires durable public SDK and natural-exit built Node host tests, build/check, complete SDK including review files, complete host parity and existing core/root/queue/task selections. API identity, raw payloads, aggregate failures and borrowed ownership remain frozen. Packed G/H/platform/live/remote coverage remains outside F.
+
+### Seventh batch executed acceptance
+
+Both remaining roots are repaired. Selection transfers only adopted factories; omitted acquisitions receive cleanup without invalidating a shared selected runtime. Reload revokes old API/context authority before reopening admission, separately from its retained continuation/drain/shutdown receipt. Shutdown dispatch has scoped cleanup access that expires when dispatch settles. No session API, payload policy or manager was introduced.
+
+| Invariant | Affected paths | Executed assertion/log | Residual gap |
+| --- | --- | --- | --- |
+| Every owned acquisition transfers or is cleaned, despite selection | `sdk.ts`, `extensions/loader-rollback.ts`; SDK and host parity, `sdk-host-filtered-acquisition.mjs` | `filtered creation owns every acquisition`: subset/none/all/startup/cleanup; exact selected commands/startup, selected mutation/task-host/bus capabilities, cleanup exactly once and retained cause. RED4 failures/1 control; GREEN5. `/tmp/3105-f-seventh-filter-source-{red,green}.log`; built natural-exit modes in `node-final.log` | Borrowed discovery remains caller-owned; existing sibling/custom-loader cases rerun |
+| Retired authority ends before successor admission; cleanup remains owned | `extensions/extension-work.ts`, `extensions/runner.ts`, `agent-session-extension-bindings.ts`; both parity files and `sdk-host-reload-ownership.mjs` | Held self-reload rejects both external mutation and task host; fresh successor works; terminal close remains pending; late acquisition cleaned and deferred failure retained. Source RED2; final focused GREEN9 including existing shell controls. Built self/self-cleanup/self-ordinary/self-twice pass in `node-final.log` | Noncooperative callbacks still require settlement; not a sandbox |
+| Shared boundaries preserve cancellation, reentrancy, aggregate failures and API/raw payload behavior | Existing complete SDK/review, host, lifecycle, queues/tasks selections | Complete final gates below; ordinary reload exact control and all14 ownership fixture modes exit0 | G/H packed/platform/live/remote evidence remains unexecuted |
+
+Exact commands and log mapping: `/tmp/3105-f-seventh-commands.txt`. Candidate is the signed commit containing this section; its exact SHA/signature is recorded in `/tmp/3105-f-seventh-execution.md` after commit. Baseline `009b389e4` and all prior A–E/F commits are preserved.
+
+- `npm run build` and `npm run check`: exit0, `/tmp/3105-f-seventh-{build,check}-final.log`.
+- Complete affected coding-agent selection including SDK review files: **72 files,643 passed**,14 unchanged credential/platform skips, `/tmp/3105-f-seventh-core-final.log`.
+- Complete host parity: **166/166 passed**, `/tmp/3105-f-seventh-host-final.log`.
+- Root lifecycle/MCP: **54 files,492 passed**, `/tmp/3105-f-seventh-unit-final.log`.
+- Observer/queues: **15 files,121 passed**,one unchanged platform skip, `/tmp/3105-f-seventh-queues-final.log`.
+- Tasks: **8 files,49 passed**, `/tmp/3105-f-seventh-tasks-final.log`.
+- Four exact failure/control invocations and14 built Node modes all exit0, `/tmp/3105-f-seventh-{exact,node}-final.log`. Durable host baseline RED2: `/tmp/3105-f-seventh-host-red.log`.
+- Supplemental qlty smells/metrics exit0, `/tmp/3105-f-seventh-{qlty,metrics}.log`; existing config unchanged. Large-module warnings remain, including constructAgentSession130 and reloadOwnedGeneration41. These do not replace build/check.
+
+The first broad core run caught two fresh-shell regressions: a runner context check consulted an invalidated runtime reused by an empty loader. Restricting that check to the explicitly retired runner preserves fresh contexts; both unchanged tests and the complete rerun pass. Initial new-test scaffold errors (command getter name, existing session-name trimming and aggregate startup error shape) were corrected before recording genuine RED. No old assertion was softened or skipped. Final source/test edits preceded every final gate; only guides, Unreleased and evidence notes followed. Temporary F notes were removed with unrelated `ISSUES.md` unchanged. No prior native spool failure recurred; no native repair is claimed. No install, forced exit, private DBOS cleanup, delegation, other-checkout edit or publication occurred.

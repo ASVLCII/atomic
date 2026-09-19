@@ -3475,6 +3475,7 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 	let next = 0;
 	const active = new Set<number>();
 	const shutdowns: number[] = [];
+	const capabilities: Array<{ write: () => void; host: () => object }> = [];
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir: cwd,
@@ -3483,6 +3484,12 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 		extensionFactories: [
 			(pi) => {
 				const id = ++next;
+				pi.on("session_start", (_event, ctx) => {
+					capabilities.push({
+						write: () => pi.setSessionName(`generation-${id}`),
+						host: () => ctx.getAgentTaskHost(),
+					});
+				});
 				pi.registerCommand("reload-acquire", {
 					description: "reload then acquire",
 					handler: async () => {
@@ -3492,7 +3499,9 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 						active.add(id);
 					},
 				});
-				pi.on("session_shutdown", () => {
+				pi.on("session_shutdown", (_event, ctx) => {
+					assert.equal(ctx.cwd, cwd, "shutdown retains scoped cleanup capabilities");
+					assert.equal(pi.getSessionName(), "generation-2");
 					shutdowns.push(id);
 					active.delete(id);
 					if (id === 1 && cleanupFails) throw new Error("retiring cleanup failed");
@@ -3514,6 +3523,11 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 	try {
 		await Promise.race([returned, prompt.catch(() => {})]);
 		assert.deepEqual(shutdowns, [], "old cleanup cannot precede the command continuation");
+		assert.throws(capabilities[0].write, /stale|no longer active/i);
+		assert.throws(capabilities[0].host, /stale|no longer active/i);
+		capabilities[1].write();
+		assert.ok(capabilities[1].host());
+		assert.equal(session.sessionManager.getSessionName(), "generation-2");
 		let closed = false;
 		close = session.dispose();
 		void close.then(
@@ -3541,3 +3555,87 @@ test.each([false, true])("self reload retains invoking continuation cleanup: %s"
 	assert.deepEqual(shutdowns, [1, 2]);
 	assert.equal(active.size, 0);
 });
+
+// #3105: discovery selection cannot discard ownership or revoke selected capabilities.
+test.each(["subset", "none", "all", "startup", "cleanup"])(
+	"filtered creation owns every acquisition: %s",
+	async (mode) => {
+		const cwd = mkdtempSync(join(tmpdir(), "sdk-filtered-"));
+		const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+		const active = new Set<string>();
+		const stopped: string[] = [];
+		const started: string[] = [];
+		let calls = 0;
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir: cwd,
+			settingsManager,
+			noExtensions: true,
+			extensionFactories: ["keep", "omit"].map((name) => (pi) => {
+				active.add(name);
+				pi.events.on("selected-ping", () => {
+					if (name === "keep") calls++;
+				});
+				pi.registerCommand(name, {
+					description: name,
+					handler: async (_args, ctx) => {
+						pi.setSessionName("  selected\n");
+						assert.ok(ctx.getAgentTaskHost());
+						pi.events.emit("selected-ping");
+					},
+				});
+				pi.on("session_start", () => {
+					started.push(name);
+					if (mode === "startup") throw new Error("selected startup failed");
+				});
+				pi.on("session_shutdown", () => {
+					stopped.push(name);
+					active.delete(name);
+					if (mode === "cleanup" && name === "omit") throw new Error("omitted cleanup failed");
+				});
+			}),
+			extensionsOverride: (base) => ({
+				...base,
+				extensions: mode === "all" ? base.extensions : base.extensions.slice(0, mode === "none" ? 0 : 1),
+			}),
+		});
+		let session: AgentSession | undefined;
+		try {
+			const creation = createAgentSession({
+				cwd,
+				agentDir: cwd,
+				settingsManager,
+				resourceLoader: loader,
+				sessionManager: SessionManager.inMemory(cwd),
+				tools: [],
+				builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+			});
+			if (mode === "startup" || mode === "cleanup") {
+				await assert.rejects(creation, (error: Error & { code?: string }) => {
+					if (mode === "cleanup") assert.equal(error.code, "ShutdownFailed");
+					const messages = (cause: unknown): string =>
+						cause instanceof AggregateError ? cause.errors.map(messages).join(";") : String(cause);
+					assert.match(messages(error), mode === "cleanup" ? /omitted cleanup failed/ : /selected startup failed/);
+					return true;
+				});
+			} else {
+				({ session } = await creation);
+				assert.deepEqual(started, mode === "none" ? [] : mode === "all" ? ["keep", "omit"] : ["keep"]);
+				assert.deepEqual(
+					session.extensionRunner.getRegisteredCommands().map((command) => command.name),
+					started,
+				);
+				if (mode !== "none") {
+					await session.prompt("/keep");
+					assert.equal(session.sessionManager.getSessionName(), "selected");
+					assert.equal(calls, 1);
+				}
+			}
+		} finally {
+			await session?.dispose();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+		assert.deepEqual([...active], []);
+		assert.deepEqual(stopped.sort(), ["keep", "omit"]);
+	},
+);

@@ -8,7 +8,9 @@ export const factoryAcquisitions = new AsyncLocalStorage<{
 	replacement?: boolean;
 }>();
 
-export async function rollbackFactoryAcquisitions(): Promise<unknown[]> {
+export async function rollbackFactoryAcquisitions(
+	retainedRuntimes: ReadonlySet<ExtensionRuntime> = new Set(),
+): Promise<unknown[]> {
 	const acquired = factoryAcquisitions.getStore()?.pending;
 	const failures: unknown[] = [];
 	const runtimes = new Set<ExtensionRuntime>();
@@ -17,6 +19,7 @@ export async function rollbackFactoryAcquisitions(): Promise<unknown[]> {
 		runtimes.add(runtime);
 	}
 	for (const runtime of runtimes) {
+		if (retainedRuntimes.has(runtime)) continue;
 		try {
 			runtime.invalidate();
 		} catch (error) {

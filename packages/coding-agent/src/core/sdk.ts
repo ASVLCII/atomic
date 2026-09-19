@@ -550,9 +550,10 @@ async function constructAgentSession(
 			throw new AggregateError([error, ...failures], "Session construction failed and rollback reported errors");
 		throw error;
 	}
-	// Ownership transfers to the session; startup rollback now uses its shared close.
+	// Only the selected factories transfer. Discovery may have acquired omitted factories.
 	const acquisitions = factoryAcquisitions.getStore();
-	if (acquisitions) delete acquisitions.pending;
+	const selected = resourceLoader.getExtensions();
+	for (const extension of selected.extensions) acquisitions?.pending?.delete(extension);
 	if (!options.settingsManager) ownedSettingsManagers.set(settingsManager, session);
 	const rollbackReason = sessionLifecycleCreation.getStore()?.replacement ? "new" : "quit";
 	registerStartupRollback(session.extensionRunner, async (error) => {
@@ -569,6 +570,13 @@ async function constructAgentSession(
 		throw error;
 	});
 	try {
+		// Omitted factories may share the selected runtime: release their acquisitions,
+		// but leave that runtime and its selected subscriptions owned by the runner.
+		const failures = await rollbackFactoryAcquisitions(new Set([selected.runtime]));
+		if (failures.length)
+			throw Object.assign(new AggregateError(failures, "Unselected extension cleanup failed"), {
+				code: "ShutdownFailed",
+			});
 		const extensionsResult = resourceLoader.getExtensions();
 		for (const failure of extensionsResult.errors) {
 			const builtin = getBuiltinPackageLocations().find(({ packageDir }) => {
