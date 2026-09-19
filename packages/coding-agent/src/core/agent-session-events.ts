@@ -95,7 +95,14 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	// Keep queue alive if an event handler fails. Agent-core must additionally
 	// await protected persistence and fallback reconciliation before the next
 	// provider request; other listener work stays nonblocking.
-	processing.catch(() => {});
+	processing.catch((error) => {
+		// #3105: callbacks interrupted by terminal disposal remain observable at shutdown.
+		if (this._disposed) {
+			const failures = shutdownEventFailures.get(this) ?? [];
+			failures.push(error instanceof Error ? error : new Error(String(error)));
+			shutdownEventFailures.set(this, failures);
+		}
+	});
 	if (
 		awaitProtectedPersistence ||
 		// #3105: only queued custom input needs this boundary; ordinary turn listeners
@@ -520,6 +527,7 @@ export function _disconnectFromAgent(this: AgentSession): void {
  * Call this when completely done with the session.
  */
 
+const shutdownEventFailures = new WeakMap<AgentSession, Error[]>();
 const sessionClosures = new WeakMap<AgentSession, Promise<void>>();
 const sessionRetirements = new WeakMap<AgentSession, Promise<void>>();
 
@@ -567,6 +575,11 @@ export function closeAgentSession(
 			else retired.resolve();
 		}
 		await attempt("active work", () => drainSessionWork(session));
+		await attempt("events", async () => {
+			await session._agentEventQueue.catch(() => {});
+			const failures = shutdownEventFailures.get(session);
+			if (failures?.length) throw new AggregateError(failures, "Session event callbacks failed");
+		});
 		await attempt("extensions", async () => {
 			await emitSessionShutdownEvent(session._extensionRunner, event);
 		});

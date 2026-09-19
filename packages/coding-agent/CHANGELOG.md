@@ -40,6 +40,7 @@
 - Reload now retains retiring-generation shutdown and invalidation when postcommit runtime reconstruction fails, preserving both setup and cleanup causes and keeping the candidate owned for disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Custom messages received during tool execution now enter conversation history after the tool results and before the next assistant response, including when extension callbacks finish asynchronously ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Entry renderer discovery preserves the registered function identity while transcript rendering uses the owning session and rejects retired runners ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Session disposal now reports event-listener failures occurring during shutdown through its aggregate rejection while still flushing consumed workflow reconciliation and attempting remaining cleanup ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
 - Stage-scoped durable workflow resume now refuses before dispatch instead of resuming the whole root, including restored local shadows of paused durable runs, and prefix resume no longer treats nested children as root candidates ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
 

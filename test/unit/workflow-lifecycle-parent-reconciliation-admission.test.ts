@@ -31,156 +31,180 @@ describe("workflow lifecycle parent reconciliation admission boundaries", () => 
 		while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
 	});
 
-	test("send admission makes a tool-pending terminal card visible and file-durable before model consumption", async () => {
-		const store = createStore();
-		store.recordRunStart({
-			id: "run-tool-pending",
-			name: "tool-pending",
-			inputs: {},
-			status: "running",
-			stages: [],
-			startedAt: 1,
-		});
-		const sessionDir = mkdtempSync(join(tmpdir(), "atomic-lifecycle-session-"));
-		tempDirs.push(sessionDir);
-		const sessionManager = SessionManager.create(process.cwd(), sessionDir);
-		let harness!: Harness;
-		let delivery: Promise<void> | undefined;
-		let sentNotice: Parameters<Harness["session"]["sendCustomMessage"]>[0] | undefined;
-		let admissionObserved = false;
-		let queuedDisposalAttempted = false;
-		let queuedDisposalError: Error | undefined;
-		const workflowTool: AgentTool = {
-			name: "workflow",
-			label: "Workflow",
-			description: "Launch a named workflow",
-			parameters: Type.Object({}),
-			execute: async () => {
-				assert.equal(store.recordRunEnd("run-tool-pending", "completed", { summary: "instant" }), true);
-				assert.ok(delivery, "the terminal snapshot must start lifecycle delivery synchronously");
-				await delivery;
-				const cardsAtAdmission = harness.session.messages.filter(
-					(message) => message.role === "custom" && message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE,
-				);
-				assert.equal(cardsAtAdmission.length, 1, "send admission must include the visible card");
-				const cardAtAdmission = cardsAtAdmission[0];
-				assert.equal(cardAtAdmission?.role, "custom");
-				if (cardAtAdmission?.role !== "custom") throw new Error("missing lifecycle card at admission");
-				assert.equal(cardAtAdmission.display, true);
-				assert.equal(cardAtAdmission.content, sentNotice?.content, "raw lifecycle content must not be rewritten");
-				assert.equal(
-					cardAtAdmission.details,
-					sentNotice?.details,
-					"the visible card keeps the exact details object",
-				);
-				const details = cardAtAdmission.details as WorkflowLifecycleNoticeDetails;
-				assert.equal("error" in details, false, "omitted optional lifecycle fields stay omitted");
-				assert.equal("stageId" in details, false);
-				const persistedAtAdmission = sessionManager
-					.getEntries()
-					.filter((entry) => entry.type === "custom_message" && entry.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE);
-				assert.equal(persistedAtAdmission.length, 1, "send admission must include one durable lifecycle card");
-				const sessionFile = sessionManager.getSessionFile();
-				assert.ok(sessionFile);
-				const reopenedAtAdmission = SessionManager.open(sessionFile, sessionDir, process.cwd());
-				assert.equal(
-					reopenedAtAdmission
+	for (const closeAtAdmission of [false, true])
+		test(`send admission makes a tool-pending terminal card visible and file-durable before model consumption (closing: ${closeAtAdmission})`, async () => {
+			const store = createStore();
+			store.recordRunStart({
+				id: "run-tool-pending",
+				name: "tool-pending",
+				inputs: {},
+				status: "running",
+				stages: [],
+				startedAt: 1,
+			});
+			const sessionDir = mkdtempSync(join(tmpdir(), "atomic-lifecycle-session-"));
+			tempDirs.push(sessionDir);
+			const sessionManager = SessionManager.create(process.cwd(), sessionDir);
+			let harness!: Harness;
+			let delivery: Promise<void> | undefined;
+			let sentNotice: Parameters<Harness["session"]["sendCustomMessage"]>[0] | undefined;
+			let admissionObserved = false;
+			let queuedDisposalAttempted = false;
+			let closing: Promise<void> | undefined;
+			let refusedAdmission: Promise<void> | undefined;
+			const workflowTool: AgentTool = {
+				name: "workflow",
+				label: "Workflow",
+				description: "Launch a named workflow",
+				parameters: Type.Object({}),
+				execute: async () => {
+					assert.equal(store.recordRunEnd("run-tool-pending", "completed", { summary: "instant" }), true);
+					assert.ok(delivery, "the terminal snapshot must start lifecycle delivery synchronously");
+					await delivery;
+					const cardsAtAdmission = harness.session.messages.filter(
+						(message) => message.role === "custom" && message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE,
+					);
+					assert.equal(cardsAtAdmission.length, 1, "send admission must include the visible card");
+					const cardAtAdmission = cardsAtAdmission[0];
+					assert.equal(cardAtAdmission?.role, "custom");
+					if (cardAtAdmission?.role !== "custom") throw new Error("missing lifecycle card at admission");
+					assert.equal(cardAtAdmission.display, true);
+					assert.equal(
+						cardAtAdmission.content,
+						sentNotice?.content,
+						"raw lifecycle content must not be rewritten",
+					);
+					assert.equal(
+						cardAtAdmission.details,
+						sentNotice?.details,
+						"the visible card keeps the exact details object",
+					);
+					const details = cardAtAdmission.details as WorkflowLifecycleNoticeDetails;
+					assert.equal("error" in details, false, "omitted optional lifecycle fields stay omitted");
+					assert.equal("stageId" in details, false);
+					const persistedAtAdmission = sessionManager
 						.getEntries()
 						.filter(
 							(entry) => entry.type === "custom_message" && entry.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE,
-						).length,
-					1,
-					"the admission receipt must be physically reopenable before the tool result exists",
-				);
-				admissionObserved = true;
-				return {
-					content: [
-						{
-							type: "text",
-							text: "Workflow tool-pending started in background (run-tool-pending). Status: running",
-						},
-					],
-					details: { action: "run", runId: "run-tool-pending", status: "running" },
-				};
-			},
-		};
-		harness = await createHarness({ tools: [workflowTool], sessionManager });
-		harnesses.push(harness);
-		unsubscriptions.push(
-			harness.session.subscribe((event) => {
-				if (
-					!queuedDisposalAttempted &&
-					event.type === "message_start" &&
-					event.message.role === "custom" &&
-					event.message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE
-				) {
-					queuedDisposalAttempted = true;
-					try {
-						harness.session.dispose();
-					} catch (error) {
-						queuedDisposalError = error instanceof Error ? error : new Error(String(error));
-					}
-				}
-			}),
-		);
-		unsubscriptions.push(
-			installWorkflowLifecycleNotifications({
-				store,
-				config: lifecycleConfig,
-				seedExisting: false,
-				sendMessage: (message, options) => {
-					sentNotice = message;
-					delivery = harness.session.sendCustomMessage(message, options);
-					return delivery;
+						);
+					assert.equal(persistedAtAdmission.length, 1, "send admission must include one durable lifecycle card");
+					const sessionFile = sessionManager.getSessionFile();
+					assert.ok(sessionFile);
+					const reopenedAtAdmission = SessionManager.open(sessionFile, sessionDir, process.cwd());
+					assert.equal(
+						reopenedAtAdmission
+							.getEntries()
+							.filter(
+								(entry) => entry.type === "custom_message" && entry.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE,
+							).length,
+						1,
+						"the admission receipt must be physically reopenable before the tool result exists",
+					);
+					admissionObserved = true;
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Workflow tool-pending started in background (run-tool-pending). Status: running",
+							},
+						],
+						details: { action: "run", runId: "run-tool-pending", status: "running" },
+					};
 				},
-			}),
-		);
-		let providerContext: Context | undefined;
-		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("workflow", {}, { id: "workflow-call-tool-pending" }), {
-				stopReason: "toolUse",
-			}),
-			(context) => {
-				providerContext = context;
-				return fauxAssistantMessage("tool-pending completed successfully.");
-			},
-		]);
+			};
+			harness = await createHarness({ tools: [workflowTool], sessionManager });
+			harnesses.push(harness);
+			unsubscriptions.push(
+				harness.session.subscribe((event) => {
+					if (
+						closeAtAdmission &&
+						!queuedDisposalAttempted &&
+						event.type === "message_start" &&
+						event.message.role === "custom" &&
+						event.message.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE
+					) {
+						queuedDisposalAttempted = true;
+						// #3105: disposal seals new admission synchronously while draining admitted reconciliation.
+						closing = harness.session.dispose();
+						void closing.catch(() => {}); // Observed below after the admitted prompt settles.
+						refusedAdmission = assert.rejects(harness.session.prompt("Must not be admitted"), {
+							code: "SessionClosed",
+						});
+					}
+				}),
+			);
+			unsubscriptions.push(
+				installWorkflowLifecycleNotifications({
+					store,
+					config: lifecycleConfig,
+					seedExisting: false,
+					sendMessage: (message, options) => {
+						sentNotice = message;
+						delivery = harness.session.sendCustomMessage(message, options);
+						return delivery;
+					},
+				}),
+			);
+			let providerContext: Context | undefined;
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("workflow", {}, { id: "workflow-call-tool-pending" }), {
+					stopReason: "toolUse",
+				}),
+				(context) => {
+					providerContext = context;
+					return fauxAssistantMessage("tool-pending completed successfully.");
+				},
+			]);
 
-		await harness.session.prompt("Run tool-pending.");
+			await harness.session.prompt("Run tool-pending.");
 
-		assert.equal(admissionObserved, true);
-		assert.equal(queuedDisposalAttempted, true);
-		assert.match(queuedDisposalError?.message ?? "", /queued protected reconciliation/);
-		assert.ok(providerContext);
-		assertWorkflowToolOrdering(providerContext);
-		const terminalUserMessages = providerContext.messages.filter(
-			(message) => message.role === "user" && getMessageText(message).includes('Workflow "tool-pending" completed'),
-		);
-		assert.equal(terminalUserMessages.length, 1, `provider context: ${JSON.stringify(providerContext.messages)}`);
-		const sessionFile = sessionManager.getSessionFile();
-		assert.ok(sessionFile);
-		const rawEntries = readFileSync(sessionFile, "utf8")
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
-		const rawCards = rawEntries.filter(
-			(entry) => entry.type === "custom_message" && entry.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE,
-		);
-		assert.equal(rawCards.length, 1);
-		assert.equal(rawCards[0]?.content, sentNotice?.content);
-		assert.deepEqual(rawCards[0]?.details, sentNotice?.details);
-		assert.equal(rawEntries.filter((entry) => entry.type === "custom_message" && entry.display === false).length, 1);
-		const reopened = SessionManager.open(sessionFile, sessionDir, process.cwd());
-		const reopenedMessages = convertToLlm(reopened.buildSessionContext().messages);
-		assertWorkflowToolOrdering({ messages: reopenedMessages });
-		assert.equal(
-			reopenedMessages.filter(
-				(message) =>
-					message.role === "user" && getMessageText(message).includes('Workflow "tool-pending" completed'),
-			).length,
-			1,
-		);
-	});
+			assert.equal(admissionObserved, true);
+			assert.equal(queuedDisposalAttempted, closeAtAdmission);
+			if (closeAtAdmission) {
+				assert.ok(refusedAdmission);
+				await refusedAdmission;
+				await closing;
+				assert.equal(providerContext, undefined, "terminal disposal must not start another provider turn");
+			} else {
+				assert.ok(providerContext);
+				assertWorkflowToolOrdering(providerContext);
+				const terminalUserMessages = providerContext.messages.filter(
+					(message) =>
+						message.role === "user" && getMessageText(message).includes('Workflow "tool-pending" completed'),
+				);
+				assert.equal(
+					terminalUserMessages.length,
+					1,
+					`provider context: ${JSON.stringify(providerContext.messages)}`,
+				);
+			}
+			const sessionFile = sessionManager.getSessionFile();
+			assert.ok(sessionFile);
+			const rawEntries = readFileSync(sessionFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const rawCards = rawEntries.filter(
+				(entry) => entry.type === "custom_message" && entry.customType === LIFECYCLE_NOTICE_CUSTOM_TYPE,
+			);
+			assert.equal(rawCards.length, 1);
+			assert.equal(rawCards[0]?.content, sentNotice?.content);
+			assert.deepEqual(rawCards[0]?.details, sentNotice?.details);
+			assert.equal(
+				rawEntries.filter((entry) => entry.type === "custom_message" && entry.display === false).length,
+				1,
+			);
+			const reopened = SessionManager.open(sessionFile, sessionDir, process.cwd());
+			const reopenedMessages = convertToLlm(reopened.buildSessionContext().messages);
+			assertWorkflowToolOrdering({ messages: reopenedMessages });
+			assert.equal(
+				reopenedMessages.filter(
+					(message) =>
+						message.role === "user" && getMessageText(message).includes('Workflow "tool-pending" completed'),
+				).length,
+				1,
+			);
+		});
 
 	test("a terminal notice between completed tool turns joins the next provider step", async () => {
 		const store = createStore();
