@@ -390,3 +390,39 @@ All runtime/test edits preceded these gates; only documentation and receipts fol
 ### Contract amendments received
 
 "make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates.
+
+## Sixth continuation contract
+
+Repair the latest three reload ownership roots within F: preparation acquisitions remain owned until transfer or cleanup, failed candidate callbacks drain before shutdown, and self-reload command continuations retain their generation cleanup until settlement. Public source and built Node failure/control pairs, aggregate cleanup failures, borrowed discovery preservation, normal build/check and complete focused gates are required. Prior API, payload, ownership and A–E/F acceptance remains unchanged. No publication or G/H work.
+
+### Sixth batch lifecycle-map verification
+
+All three consolidated roots are repaired. These rows connect the touched transfer boundaries from `continuation-1/lifecycle-map.md` to executed fault/interleaving checks, not inspection alone.
+
+| Map boundary and state transition | Current executable evidence |
+| --- | --- |
+| §3 acquisition ledger → candidate ownership → commit or rollback | Seven new public source cases include preparation success, beforeSessionStart rejection and discovery cleanup failure. Built `acquire-success`, `acquire-failure`, `acquire-cleanup` and exact subclass/plain probes release discovery3 and candidate4 as appropriate, preserving borrowed1. Untransferred acquisitions remain in the enclosing reload ledger; adopted factories transfer explicitly to runner cleanup |
+| §6/§7 admitted candidate callbacks → seal → drain → shutdown | Source candidate cases and built `candidate`/`candidate-cleanup` independently hold a bus callback after startup rejects, verify no shutdown or reload settlement before release, then require zero resources. Built scenarios overlap terminal disposal with rollback. Cleanup failure remains ShutdownFailed |
+| §4/§7 reload caller → continuation → retained generation cleanup | Source self-reload cases and built `self`, `self-cleanup`, `self-ordinary`, `self-twice` hold continuation after reload returns, verify final disposal remains pending, then require old cleanup after late acquisition. Ordinary and successive reloads preserve the same ownership. Deferred failures survive until final disposal; terminal drain excludes no caller |
+| §7 publication/failed-reload restoration and §8 all-cleanup invariant | Existing full publication, postcommit, initial-startup, borrowed loader, concurrent command replacement and durable workflow parity tests pass. Postcommit shutdown assertions now require discovery3 cleanup as well as retiring2 and candidate4, retaining the prior started-generation order |
+| Public API identity, optional fields, raw/ordered inputs, borrowed siblings/stages | No public session result, dispose/setter signature or payload policy changes. Complete prior A–E/F parity, queue, task and lifecycle selections pass; original borrowed discovery is not shut down |
+| RGR, guides/Unreleased, signed clean delivery and no publication | Exact three failures and all seven new source cases reproduced before their respective edits. SDK guide and Unreleased describe the repaired ownership boundaries; normal signed commit and hook evidence is in the execution receipt |
+
+Commands and selectors: `/tmp/3105-f-sixth-commands.txt`. Debugger run `8c13a9de`, execution receipt `/tmp/3105-f-sixth-execution.md`.
+
+- Normal `npm run build` and `npm run check`: exit0, `/tmp/3105-f-sixth-build.log` and `/tmp/3105-f-sixth-final-check.log`.
+- Complete coding-agent selection: **72 files,638 passed**,14 unchanged credential/platform skips, `/tmp/3105-f-sixth-core-green.log`.
+- Complete host parity: **161/161 passed**, `/tmp/3105-f-sixth-host.log`.
+- Root lifecycle/MCP: **54 files,492 passed**, `/tmp/3105-f-sixth-unit.log`.
+- Observer/queue: **15 files,121 passed**,one unchanged platform skip, `/tmp/3105-f-sixth-queues.log`.
+- Tasks: **8 files,49 passed**, `/tmp/3105-f-sixth-tasks.log`.
+- Six exact failure/control invocations and nine built Node modes: exit0, `/tmp/3105-f-sixth-{exact,node}-green.log`. RED logs: `/tmp/3105-f-sixth-{exact,acquisitions,candidate,caller}-red.log`.
+- Supplemental qlty smells/metrics: exit0, `/tmp/3105-f-sixth-{qlty,metrics}.log`; existing large-module complexity remains visible, no configuration/suppression change.
+
+The first broad core run found four postcommit assertions expecting only started-generation shutdowns `[2,4]`; they now require `[3,2,4]`, including the newly required preparation cleanup. The corresponding Node fixture retains the same stronger order assertion. The first ordinary self-reload fixture had no preloaded caller subclass discovery and exited13 before reaching its command; it now uses the documented loader setup and passes. A new test's getter-identity assumption was narrowed to failed transactions because successful custom-loader commit already updates discovery; borrowed resource preservation is still checked in every case. No existing assertion was suppressed or test skipped.
+
+Remaining evidence limits are unchanged: noncooperative callbacks require independent settlement; this does not forcibly terminate host code. G/H packed declarations/consumers, live services, other platforms and parent CI/publication gates are unexecuted here. The prior native spool observation did not recur and remains unattributed. No additional boundary defect is established by these checks; this is bounded verification, not an exhaustive claim about arbitrary host callbacks. Temporary F notes were removed while unrelated ISSUES.md remains unchanged. No publication, other-worktree write, forced exit or private DBOS teardown occurred.
+
+### Contract amendments received
+
+"make sure that you create PRs and loop until CI is green, then you can merge if so" and "and there is no addressable greptile feedback" remain parent-owned gates.

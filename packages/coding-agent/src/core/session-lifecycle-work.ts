@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 const currentWork = new AsyncLocalStorage<ReadonlySet<Promise<void>>>();
 const reloads = new WeakMap<object, Promise<void>>();
 const reloadCleanupFailures = new WeakMap<object, unknown[]>();
+const reloadRetirements = new WeakMap<object, Set<Promise<void>>>();
 const work = new WeakMap<object, Set<Promise<void>>>();
 const lifetimes = new WeakMap<object, AbortController>();
 export const sessionGenerationClosing = new WeakSet<object>();
@@ -63,9 +64,30 @@ export function trackSessionReload(session: object, operation: () => Promise<voi
 	return result;
 }
 
+/** Self-reload may return to its caller, but never relinquishes that generation's cleanup. */
+export function retireSessionReloadGeneration(session: object, cleanup: () => Promise<void>): Promise<void> {
+	const ancestors = currentWork.getStore();
+	const callers = [...(work.get(session) ?? [])].filter((item) => ancestors?.has(item));
+	if (!callers.length) return cleanup();
+	const pending = reloadRetirements.get(session) ?? new Set<Promise<void>>();
+	reloadRetirements.set(session, pending);
+	const receipt = Promise.all(callers)
+		.then(cleanup)
+		.catch((error: unknown) => {
+			const failures = reloadCleanupFailures.get(session) ?? [];
+			failures.push(error);
+			reloadCleanupFailures.set(session, failures);
+		});
+	pending.add(receipt);
+	void receipt.then(() => pending.delete(receipt));
+	return Promise.resolve();
+}
+
 export async function drainSessionReload(session: object): Promise<void> {
 	// Preparation errors belong to the reload caller; failed rollback also belongs to final cleanup.
 	await reloads.get(session)?.catch(() => {});
+	const pending = reloadRetirements.get(session);
+	while (pending?.size) await Promise.all(pending);
 	const failures = reloadCleanupFailures.get(session);
 	if (failures?.length)
 		throw Object.assign(new AggregateError(failures, "Reload cleanup failed"), { code: "ShutdownFailed" });

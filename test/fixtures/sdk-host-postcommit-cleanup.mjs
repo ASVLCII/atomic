@@ -41,7 +41,7 @@ try {
  });
  assert.deepEqual([...active], [4]); assert.equal(invalidated, true);
  if (failedCleanup) await assert.rejects(session.dispose(), { code: "ShutdownFailed" }); else await session.dispose();
- assert.equal(active.size, 0); assert.deepEqual(stopped, [2, 4]);
+ assert.equal(active.size, 0); assert.deepEqual(stopped, [3, 2, 4], "include preparation discovery cleanup");
  console.log(JSON.stringify({ mode, verified: true, active: active.size }));
 } finally {
  if (session) await session.dispose().catch(error => { if (!failedCleanup) throw error; });

@@ -3309,6 +3309,235 @@ test.each(["failure", "shutdown", "invalidation", "control"])(
 			rmSync(cwd, { recursive: true, force: true });
 		}
 		assert.equal(active.size, 0);
-		assert.deepEqual(stopped, [2, 4]);
+		assert.deepEqual(stopped, [3, 2, 4], "discovery acquisition also cleans up before the two started generations");
 	},
 );
+
+// #3105: preparation discovery is owned even when composition re-instantiates it.
+test.each(["success", "failure", "cleanup"])("reload preparation transfers every acquisition: %s", async (mode) => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-prepared-ownership-"));
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+	const active = new Set<number>();
+	let next = 0;
+	class Loader extends DefaultResourceLoader {
+		override getSystemPrompt() {
+			return super.getSystemPrompt();
+		}
+	}
+	const resourceLoader = new Loader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++next;
+				active.add(id);
+				pi.on("session_shutdown", () => {
+					active.delete(id);
+					if (mode === "cleanup" && id === 3) throw new Error("prepared cleanup failed");
+				});
+			},
+		],
+	});
+	await resourceLoader.reload();
+	const discovery = resourceLoader.getExtensions();
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	try {
+		const reload = session.reload(
+			mode === "failure"
+				? {
+						beforeSessionStart: () => {
+							throw new Error("declined reload");
+						},
+					}
+				: undefined,
+		);
+		if (mode === "success") await reload;
+		else await assert.rejects(reload, mode === "cleanup" ? { code: "ShutdownFailed" } : /declined reload/);
+		if (mode !== "success") assert.equal(resourceLoader.getExtensions(), discovery);
+		assert.equal(active.has(3), false, "unpublished preparation acquisition must be released");
+	} finally {
+		await session.dispose().catch((error) => {
+			assert.equal(mode, "cleanup");
+			assert.equal(error.code, "ShutdownFailed");
+		});
+		rmSync(cwd, { recursive: true, force: true });
+	}
+	assert.deepEqual([...active], [1], "only caller discovery remains borrowed");
+});
+
+// #3105: candidate startup rejection must not race its admitted callbacks.
+test.each([false, true])("failed reload candidate drains callbacks before cleanup: %s", async (cleanupFails) => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-candidate-callback-"));
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+	let release!: () => void;
+	let enter!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const entered = new Promise<void>((resolve) => {
+		enter = resolve;
+	});
+	let candidate = false;
+	let next = 0;
+	const active = new Set<number>();
+	const shutdowns: number[] = [];
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++next;
+				pi.events.on("acquire", async () => {
+					enter();
+					await gate;
+					active.add(id);
+				});
+				pi.on("session_start", () => {
+					if (candidate) {
+						pi.events.emit("acquire");
+						throw new Error("candidate failed");
+					}
+				});
+				pi.on("session_shutdown", () => {
+					shutdowns.push(id);
+					active.delete(id);
+					if (id === 2 && cleanupFails) throw new Error("candidate cleanup failed");
+				});
+			},
+		],
+	});
+	const { session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	});
+	candidate = true;
+	let settled = false;
+	const reload = session.reload().then(
+		() => {
+			settled = true;
+			return undefined;
+		},
+		(error) => {
+			settled = true;
+			return error;
+		},
+	);
+	try {
+		await entered;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(settled, false);
+		assert.deepEqual(shutdowns, []);
+	} finally {
+		release();
+		const error = await reload;
+		assert.ok(error);
+		if (cleanupFails) assert.equal(error.code, "ShutdownFailed");
+		await session.dispose().catch((error) => {
+			assert.equal(cleanupFails, true);
+			assert.equal(error.code, "ShutdownFailed");
+		});
+		rmSync(cwd, { recursive: true, force: true });
+	}
+	assert.equal(active.size, 0);
+	assert.deepEqual(shutdowns, [2, 1]);
+});
+
+// #3105: self-reload hands off, but its invoking continuation still owns old cleanup.
+test.each([false, true])("self reload retains invoking continuation cleanup: %s", async (cleanupFails) => {
+	const cwd = mkdtempSync(join(tmpdir(), "sdk-reload-caller-"));
+	const settingsManager = SettingsManager.inMemory({ sessionSummary: { enabled: false } });
+	let release!: () => void;
+	let enter!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const returned = new Promise<void>((resolve) => {
+		enter = resolve;
+	});
+	let session!: AgentSession;
+	let next = 0;
+	const active = new Set<number>();
+	const shutdowns: number[] = [];
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		noExtensions: true,
+		extensionFactories: [
+			(pi) => {
+				const id = ++next;
+				pi.registerCommand("reload-acquire", {
+					description: "reload then acquire",
+					handler: async () => {
+						await session.reload();
+						enter();
+						await gate;
+						active.add(id);
+					},
+				});
+				pi.on("session_shutdown", () => {
+					shutdowns.push(id);
+					active.delete(id);
+					if (id === 1 && cleanupFails) throw new Error("retiring cleanup failed");
+				});
+			},
+		],
+	});
+	({ session } = await createAgentSession({
+		cwd,
+		agentDir: cwd,
+		settingsManager,
+		resourceLoader,
+		sessionManager: SessionManager.inMemory(cwd),
+		tools: [],
+		builtins: { workflows: false, subagents: false, mcp: false, intercom: false, "web-access": false },
+	}));
+	const prompt = session.prompt("/reload-acquire");
+	let close: Promise<void> | undefined;
+	try {
+		await Promise.race([returned, prompt.catch(() => {})]);
+		assert.deepEqual(shutdowns, [], "old cleanup cannot precede the command continuation");
+		let closed = false;
+		close = session.dispose();
+		void close.then(
+			() => {
+				closed = true;
+			},
+			() => {
+				closed = true;
+			},
+		);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(closed, false);
+	} finally {
+		release();
+		await prompt.catch((error) => {
+			assert.equal(cleanupFails, true);
+			assert.equal(error.code, "ShutdownFailed");
+		});
+		await (close ?? session.dispose()).catch((error) => {
+			assert.equal(cleanupFails, true);
+			assert.equal(error.code, "ShutdownFailed");
+		});
+		rmSync(cwd, { recursive: true, force: true });
+	}
+	assert.deepEqual(shutdowns, [1, 2]);
+	assert.equal(active.size, 0);
+});

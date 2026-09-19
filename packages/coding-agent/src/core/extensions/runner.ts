@@ -13,7 +13,13 @@ import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
-import { bindExtensionWork, extensionWorkOpen, resumeExtensionWork, sealExtensionWork } from "./extension-work.ts";
+import {
+	bindExtensionWork,
+	drainExtensionWork,
+	extensionWorkOpen,
+	resumeExtensionWork,
+	sealExtensionWork,
+} from "./extension-work.ts";
 import {
 	copyHostQuestionnaire,
 	type HostDiagnostic,
@@ -349,6 +355,11 @@ export class ExtensionRunner {
 	cancelHostInput(): void {
 		this.inputBridge.cancel();
 	}
+	/** @internal Join this generation's callbacks without draining its reload caller. */
+	drainWork(): Promise<void> {
+		return drainExtensionWork(this.runtime);
+	}
+
 	/** @internal Seal input admission without invalidating shutdown handlers. */
 	sealHostInput(): void {
 		this.inputBridge.close();

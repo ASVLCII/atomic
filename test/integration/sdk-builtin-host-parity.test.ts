@@ -1713,3 +1713,27 @@ test.each(["failure", "shutdown", "invalidation", "control"])(
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );
+
+// #3105: transfer, rollback and self-reload retain all generation-owned execution.
+test.each([
+	"acquire-success",
+	"acquire-failure",
+	"acquire-cleanup",
+	"candidate",
+	"candidate-cleanup",
+	"self",
+	"self-cleanup",
+	"self-ordinary",
+	"self-twice",
+])(
+	"built Node reload acquisition and callback ownership (%s)",
+	(mode) => {
+		const result = spawnSyncCollect(
+			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-reload-ownership.mjs", import.meta.url)), mode],
+			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
+		);
+		assert.equal(result.exitCode, 0, result.stderr.toString());
+		assert.match(result.stdout.toString(), /"verified":true/);
+	},
+	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
+);

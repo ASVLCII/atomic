@@ -23,6 +23,7 @@ import {
 	drainSessionWork,
 	hasSessionReload,
 	renewSessionWork,
+	retireSessionReloadGeneration,
 	sessionGenerationClosing,
 	trackSessionReload,
 	trackSessionWork,
@@ -534,7 +535,40 @@ async function reloadAdmitted(this: AgentSession, options?: AgentSessionReloadOp
 	}
 }
 
+async function cleanupReloadRunner(runner: ExtensionRunner, reason: string): Promise<void> {
+	const failures: unknown[] = [];
+	for (const cleanup of [
+		() => runner.drainWork(),
+		() => reason === "reload" && emitSessionShutdownEvent(runner, { type: "session_shutdown", reason: "reload" }),
+		() => runner.invalidate(),
+	]) {
+		try {
+			await cleanup();
+		} catch (error) {
+			failures.push(error);
+		}
+	}
+	if (failures.length)
+		throw Object.assign(new AggregateError(failures, "Reload retiring cleanup failed"), { code: "ShutdownFailed" });
+}
+
 async function reloadGeneration(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
+	return factoryAcquisitions.run({ pending: new Map(), replacement: true }, async () => {
+		try {
+			await reloadOwnedGeneration.call(this, options);
+		} catch (error) {
+			throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
+		}
+		// Custom discovery may be re-instantiated rather than adopted by the runner.
+		const failures = await rollbackFactoryAcquisitions();
+		if (failures.length)
+			throw Object.assign(new AggregateError(failures, "Reload discovery cleanup failed"), {
+				code: "ShutdownFailed",
+			});
+	});
+}
+
+async function reloadOwnedGeneration(this: AgentSession, options?: AgentSessionReloadOptions): Promise<void> {
 	const reason = options?.reason ?? "reload";
 	const oldRunner = this._extensionRunner;
 	const previousFlagValues = oldRunner.getExplicitFlagValues();
@@ -544,22 +578,13 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		if (options?.failOnExtensionErrors) {
 			throw new Error("Strict extension reload requires a transactional resource loader");
 		}
-		try {
-			if (reason === "reload")
-				await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
-		} finally {
-			oldRunner.invalidate();
-		}
+		await retireSessionReloadGeneration(this, () => cleanupReloadRunner(oldRunner, reason));
 		await this.settingsManager.reload();
 		resetApiProviders();
-		await factoryAcquisitions.run({ pending: new Map(), replacement: true }, async () => {
-			try {
-				await this._resourceLoader.reload();
-				this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
-			} catch (error) {
-				throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
-			}
-		});
+		await this._resourceLoader.reload();
+		this._buildRuntime({ activeToolNames, flagValues: previousFlagValues, includeAllExtensionTools: true });
+		for (const extension of this._resourceLoader.getExtensions().extensions)
+			factoryAcquisitions.getStore()?.pending?.delete(extension);
 		if (this._disposed) throw hostInputError("SessionClosed");
 		await options?.beforeSessionStart?.();
 		if (this._disposed) throw hostInputError("SessionClosed");
@@ -572,13 +597,7 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 	}
 
 	const settingsTransaction = await this.settingsManager.prepareReload();
-	const resourceTransaction = await factoryAcquisitions.run({ pending: new Map(), replacement: true }, async () => {
-		try {
-			return await prepareResourceReload(settingsTransaction.settingsManager);
-		} catch (error) {
-			throw factoryRollbackError(error, await rollbackFactoryAcquisitions());
-		}
-	});
+	const resourceTransaction = await prepareResourceReload(settingsTransaction.settingsManager);
 	const errors = resourceTransaction.loader.getExtensions().errors;
 	const extensionsResult = resourceTransaction.loader.getExtensions();
 	for (const [name, value] of previousFlagValues) {
@@ -605,6 +624,14 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 	let commitPreparedResources: (() => void) | undefined;
 	let rollbackPreparedResources: (() => void) | undefined;
 	try {
+		// The rollback below now owns these factories; discovery-only acquisitions
+		// remain in the enclosing ledger until the entire reload settles.
+		for (const extension of extensionsResult.extensions) factoryAcquisitions.getStore()?.pending?.delete(extension);
+		const discoveryFailures = await rollbackFactoryAcquisitions();
+		if (discoveryFailures.length)
+			throw Object.assign(new AggregateError(discoveryFailures, "Reload discovery cleanup failed"), {
+				code: "ShutdownFailed",
+			});
 		this._bindExtensionCore(candidateRunner, publication);
 		candidateRunner.setHostBindings(
 			this._extensionHumanInput,
@@ -639,6 +666,8 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		for (const cleanup of [
 			() => rollbackPreparedResources?.(),
 			() => publication.discard(),
+			() => candidateRunner.sealHostInput(),
+			() => candidateRunner.drainWork(),
 			() => emitSessionShutdownEvent(candidateRunner, { type: "session_shutdown", reason: "reload" }),
 			() => candidateRunner.invalidate(),
 		]) {
@@ -677,15 +706,10 @@ async function reloadGeneration(this: AgentSession, options?: AgentSessionReload
 		failures.push(error);
 	}
 	const setupFailed = failures.length > 0;
-	for (const cleanup of [
-		() => reason === "reload" && emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" }),
-		() => oldRunner.invalidate(),
-	]) {
-		try {
-			await cleanup();
-		} catch (error) {
-			failures.push(error);
-		}
+	try {
+		await retireSessionReloadGeneration(this, () => cleanupReloadRunner(oldRunner, reason));
+	} catch (error) {
+		failures.push(error);
 	}
 	if (failures.length > (setupFailed ? 1 : 0))
 		throw Object.assign(new AggregateError(failures, "Reload retiring cleanup failed"), { code: "ShutdownFailed" });

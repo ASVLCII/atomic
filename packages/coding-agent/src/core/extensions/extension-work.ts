@@ -1,4 +1,4 @@
-import { trackSessionWork } from "../session-lifecycle-work.ts";
+import { drainSessionWork, trackSessionWork } from "../session-lifecycle-work.ts";
 import type { ExtensionRuntime } from "./types.ts";
 
 // Runtime objects can cross the built/source loader boundary. Keep the binding on
@@ -7,13 +7,15 @@ const workBinding = Symbol.for("atomic.extension-work.v1");
 interface WorkBinding {
 	sealed: boolean;
 	run<T>(operation: () => Promise<T>): Promise<T>;
+	drain(): Promise<void>;
 }
 type OwnedRuntime = ExtensionRuntime & { [workBinding]?: WorkBinding };
 
 export function bindExtensionWork(runtime: ExtensionRuntime, owner: object): void {
 	(runtime as OwnedRuntime)[workBinding] ??= {
 		sealed: false,
-		run: (operation) => trackSessionWork(owner, operation),
+		run: (operation) => trackSessionWork(owner, () => trackSessionWork(runtime, operation)),
+		drain: () => drainSessionWork(runtime),
 	};
 }
 
@@ -33,4 +35,8 @@ export function extensionWorkOpen(runtime: ExtensionRuntime): boolean {
 
 export function trackExtensionWork<T>(runtime: ExtensionRuntime, operation: () => Promise<T>): Promise<T> {
 	return (runtime as OwnedRuntime)[workBinding]?.run(operation) ?? operation();
+}
+
+export async function drainExtensionWork(runtime: ExtensionRuntime): Promise<void> {
+	await (runtime as OwnedRuntime)[workBinding]?.drain();
 }
