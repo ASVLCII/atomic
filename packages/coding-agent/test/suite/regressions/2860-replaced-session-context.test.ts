@@ -191,7 +191,8 @@ describe("regression #2860: replaced session callbacks", () => {
 
 		await runtime.session.prompt("/repro");
 
-		expect(events).toEqual(["start:1", "shutdown:1", "start:2", "with:1"]);
+		// #3105: a self-replacing command retains its cleanup until its continuation settles.
+		expect(events.slice(0, 3)).toEqual(["start:1", "start:2", "with:1"]);
 		expect(replacementSessionFile).toBeDefined();
 		expect(replacementSessionFile).not.toBe(oldSessionFile);
 		expect(staleCtxThrows).toBe(true);
@@ -200,6 +201,10 @@ describe("regression #2860: replaced session callbacks", () => {
 			"user:Hello from the new session!",
 			"assistant:hello reply",
 		]);
+		await runtime.dispose();
+		expect(events.filter((event) => event === "shutdown:1")).toHaveLength(1);
+		expect(events.filter((event) => event === "shutdown:2")).toHaveLength(1);
+		expect(events.indexOf("shutdown:1")).toBeGreaterThan(events.indexOf("with:1"));
 	});
 
 	it("supports withSession for fork", async () => {
