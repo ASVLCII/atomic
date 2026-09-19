@@ -353,6 +353,13 @@ export default function webAccess(pi: ExtensionAPI) {
 		}),
 		execute: (...args) => executeHeavyTool(loadHeavy, "code_search", args),
 		renderResult: (...args) => renderHeavyToolResult(loadedHeavy?.heavy ?? null, "code_search", args),
+		renderCall(args, theme) {
+			const input = args as { repoName?: string; query?: string } | undefined;
+			let text = theme.fg("toolTitle", theme.bold("code_search"));
+			if (typeof input?.repoName === "string") text += " " + theme.fg("accent", input.repoName);
+			if (typeof input?.query === "string") text += "\n" + theme.fg("muted", input.query);
+			return new Text(text, 0, 0);
+		},
 	});
 
 	pi.registerTool({
