@@ -19,7 +19,7 @@ test("public workflow fixtures have source mappings matching published declarati
 		const mapping = config.compilerOptions.paths[`@bastani/atomic/${subpath}`];
 		// Wildcard source mappings can omit the extension; TypeScript supplies it.
 		assert.deepEqual(mapping, [subpath.endsWith("*") ? source.replace(/\.ts$/, "") : source]);
-		assert.equal(await fileExists(resolve(root, source.replace("*", "open-claude-design"))), true);
+		assert.equal(await fileExists(resolve(root, source.replaceAll("*", "open-claude-design"))), true);
 	}
 	assert.equal(config.compilerOptions.paths["@bastani/atomic/workflows/*"], undefined);
 });
