@@ -33,6 +33,8 @@ export function createDurableChildWorkflowPrimitive(input: {
 	readonly runTopology: DurableStageRunTopology;
 	/** Publish the validated durable identity consumed by the child runner. */
 	readonly setChildDurableInvocation: (invocation: DurableChildInvocation) => void;
+	/** Reject live work before allocating or persisting a new boundary. */
+	readonly assertLiveWorkAllowed?: () => void;
 	readonly workflow: <
 		TChildInputs extends WorkflowInputValues,
 		TChildOutputs extends WorkflowOutputValues,
@@ -103,6 +105,7 @@ export function createDurableChildWorkflowPrimitive(input: {
 			return cachedResult as WorkflowChildResult<TChildOutputs>;
 		}
 		validateDurableChildInvocation(descriptor);
+		input.assertLiveWorkAllowed?.();
 		// Resolve durable ownership before either UUID can be allocated. A new
 		// invocation publishes an identity whose start record is awaited by the
 		// inner runner before child code is dispatched.

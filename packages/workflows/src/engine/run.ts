@@ -273,6 +273,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		// recomputing it, so resuming an agent-started run still reads as one the
 		// agent started. Only the resume itself is attributed to its requester.
 		...(continuationOrigin !== undefined ? { origin: continuationOrigin } : {}),
+		modelOwner: opts.continuation?.source.modelOwner ?? opts.modelOwner,
 		// A resumed run reports the resume that produced it, never a fresh start —
 		// whether it continues under a new id or reclaims the original one.
 		...(opts.resumeActor !== undefined
@@ -295,7 +296,9 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 			const children = (childrenByParent.get(run.id) ?? []).map(build);
 			return children.length === 0 ? { run } : { run, children };
 		};
-		return build(snapshots.find((snapshot) => snapshot.id === runSnapshot.id) ?? runSnapshot);
+		// #3106: this snapshot replaces the prior same-ID view at admission. Meter
+		// its baseline now, not the discarded root's usage, or fresh spend is lost.
+		return build(runSnapshot);
 	};
 	const budget = createRunBudgetController({
 		run: runSnapshot,
@@ -663,6 +666,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 			pendingChildDurableInvocation = invocation;
 		},
 		recordCachedStage,
+		assertLiveWorkAllowed: () => assertFrontierConsumed(),
 		runTopology: durableRunTopology(runSnapshot),
 		workflow,
 	});
@@ -900,6 +904,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 				...(runSnapshot.rootRunId !== undefined ? { rootRunId: runSnapshot.rootRunId } : {}),
 				...(runSnapshot.resumedFromRunId !== undefined ? { resumedFromRunId: runSnapshot.resumedFromRunId } : {}),
 				...(runSnapshot.origin !== undefined ? { origin: runSnapshot.origin } : {}),
+				modelOwner: runSnapshot.modelOwner,
 				...(runSnapshot.resumeFromStageId !== undefined
 					? { resumeFromStageId: runSnapshot.resumeFromStageId }
 					: {}),
@@ -921,6 +926,7 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 						? undefined
 						: {
 								...durableRootRegistration,
+								modelOwner: runSnapshot.modelOwner,
 								...workflowInvocationMetadata(
 									inputRuntimeDefaults,
 									workflowInvocationCwd,
@@ -1018,6 +1024,10 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 		const returned = classifyReturnedRunStatus(result, runSnapshot);
 		if (returned.status === "completed") assertFrontierConsumed();
 		const recorded = activeStore.recordRunEnd(runId, returned.status, result, returned.error, returned.metadata);
+		// Durable identity must reach its terminal state even if the session journal fails.
+		if (opts.parentRun === undefined) recordRunTimingCheckpoint(durableBackend, runSnapshot);
+		durableBackend.setWorkflowStatus(runId, returned.status, undefined, returned.metadata?.resumable);
+		await durableBackend.flush(runId);
 		appendRunEndWhenRecorded(opts.persistence, recorded, {
 			runId,
 			status: returned.status,
@@ -1028,9 +1038,6 @@ export async function run<TInputs extends WorkflowInputValues, TRunInputs extend
 			...(runSnapshot.durationMs !== undefined ? { durationMs: runSnapshot.durationMs } : {}),
 			ts: Date.now(),
 		});
-		if (opts.parentRun === undefined) recordRunTimingCheckpoint(durableBackend, runSnapshot);
-		durableBackend.setWorkflowStatus(runId, returned.status, undefined, returned.metadata?.resumable);
-		await durableBackend.flush(runId);
 		return reconcileTerminalRunResult(
 			runId,
 			runSnapshot,

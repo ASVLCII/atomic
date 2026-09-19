@@ -52,12 +52,22 @@ async function executeWorkflow(
 	workflow: "attach-enabled" | "attach-default",
 	hasUI: boolean,
 ) {
+	const ctx = { ...workflowRouterContext(workflow), hasUI };
+	const route = await tool.execute(
+		"route-auto-attach",
+		{ action: "route", state: workflowRouterState() },
+		undefined,
+		undefined,
+		ctx,
+	);
+	assert.equal(route.details.action, "route");
+	assert.ok("workflowId" in route.details);
 	const response = await tool.execute(
 		"workflow-auto-attach-test",
-		{ action: "run", workflow, inputs: {}, state: workflowRouterState() },
+		{ action: "run", workflowId: route.details.workflowId, inputs: {} },
 		undefined,
 		undefined,
-		{ ...workflowRouterContext(workflow), hasUI },
+		ctx,
 	);
 	return response.details;
 }

@@ -8,14 +8,8 @@ import { GraphFrontierTracker } from "../../packages/workflows/src/engine/graph-
 import { run } from "../../packages/workflows/src/engine/run.js";
 import { createToolNodeLifecycle } from "../../packages/workflows/src/engine/run-tool-node-lifecycle.js";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
-import {
-	claimActiveBlockedResume,
-	finalizeActiveBlockedSourceAfterContinuation,
-	finalizeResumedActiveBlockedSourceRun,
-} from "../../packages/workflows/src/extension/runtime-active-block-claim.js";
 import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { createContinuationReplayIndex } from "../../packages/workflows/src/runs/foreground/executor-continuation.js";
-import { type SessionEntry, scanInFlightRuns } from "../../packages/workflows/src/shared/persistence-restore.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import type { RunSnapshot, StageSnapshot, ToolNodeSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
@@ -716,7 +710,10 @@ describe("continuation tool-parent identity map", () => {
 		await jobs.get(retried.runId)?.promise;
 		assert.equal(store.runs().find((run) => run.id === retried.runId)?.status, "completed");
 		assert.equal(toolCalls, 1);
-		assert.equal(store.runs().find((run) => run.id === source.id)?.status, "killed");
+		// #3106: the reserved identity completes, without killing a separate source.
+		assert.equal(retried.runId, source.id);
+		assert.equal(store.runs().filter((run) => run.id === source.id).length, 1);
+		assert.equal(backend.getWorkflow(source.id)?.status, "completed");
 		setDurableBackend(undefined);
 	});
 
@@ -804,7 +801,9 @@ describe("continuation tool-parent identity map", () => {
 		if (!retried.ok) return;
 		await jobs.get(retried.runId)?.promise;
 		assert.equal(store.runs().find((run) => run.id === retried.runId)?.status, "completed");
-		assert.equal(store.runs().find((run) => run.id === source.id)?.status, "killed");
+		assert.equal(retried.runId, source.id);
+		assert.equal(store.runs().filter((run) => run.id === source.id).length, 1);
+		assert.equal(backend.getWorkflow(source.id)?.status, "completed");
 		setDurableBackend(undefined);
 	});
 
@@ -897,101 +896,5 @@ describe("continuation tool-parent identity map", () => {
 		assert.equal(toolCalls, 1);
 		assert.equal(store.getStagePromptAnswer(source.id, pending.stageId)?.value, true);
 		setDurableBackend(undefined);
-	});
-
-	test("settlement ordering persists successes once and keeps mismatches reload-recoverable", () => {
-		const store = createStore();
-		const entries: Array<{ type: string; payload: Record<string, unknown> }> = [];
-		const persistence = {
-			appendEntry(type: string, payload: Record<string, unknown>): string {
-				entries.push({ type, payload });
-				return `entry-${entries.length}`;
-			},
-		};
-		const blocked = (id: string): RunSnapshot => ({
-			id,
-			name: "retry-order",
-			inputs: {},
-			status: "running",
-			stages: [],
-			startedAt: 1,
-			resumable: true,
-			failureDisposition: "active_blocked",
-			failureRecoverability: "recoverable",
-			error: "blocked",
-		});
-		const exercise = (id: string, settleFirst: boolean, mismatch: boolean): void => {
-			const source = blocked(id);
-			store.recordRunStart(source);
-			persistence.appendEntry("workflow.run.start", { runId: id, name: source.name, inputs: {}, ts: 1 });
-			const claim = claimActiveBlockedResume(store, id);
-			assert.ok(claim);
-			const settle = () =>
-				finalizeActiveBlockedSourceAfterContinuation({
-					claim,
-					source,
-					continuationRunId: `c-${id}`,
-					persistence,
-					...(mismatch
-						? { result: { error: "atomic-workflows: insufficient_state: replay topology mismatch for tool t" } }
-						: {}),
-				});
-			if (settleFirst) settle();
-			finalizeResumedActiveBlockedSourceRun(claim, source, `c-${id}`);
-			if (!settleFirst) settle();
-			settle();
-			const live = store.runs().find((run) => run.id === id);
-			const terminalEntries = entries.filter(
-				(entry) => entry.type === "workflow.run.end" && entry.payload.runId === id,
-			);
-			assert.equal(terminalEntries.length, mismatch ? 0 : 1);
-			assert.equal(live?.status, mismatch ? "running" : "killed");
-			assert.equal(live?.resumable, mismatch);
-			if (mismatch) assert.equal(live?.endedAt, undefined);
-		};
-
-		exercise("success-settle-first", true, false);
-		exercise("success-kill-first", false, false);
-		exercise("mismatch-settle-first", true, true);
-		exercise("mismatch-kill-first", false, true);
-
-		const sessionEntries: SessionEntry[] = entries.map((entry, index) => ({
-			id: `entry-${index + 1}`,
-			type: entry.type,
-			payload: {
-				runId: String(entry.payload.runId ?? ""),
-				name: String(entry.payload.name ?? ""),
-				inputs: {},
-				ts: typeof entry.payload.ts === "number" ? entry.payload.ts : 1,
-			},
-		}));
-		assert.deepEqual(
-			scanInFlightRuns(sessionEntries).map((run) => run.runId),
-			["mismatch-settle-first", "mismatch-kill-first"],
-		);
-
-		for (const status of ["completed", "killed"] as const) {
-			const terminal = blocked(`external-${status}`);
-			store.recordRunStart(terminal);
-			assert.equal(
-				store.recordRunEnd(
-					terminal.id,
-					status,
-					status === "completed" ? {} : undefined,
-					undefined,
-					status === "killed" ? { failureDisposition: "terminal_killed" } : {},
-				),
-				true,
-			);
-			const claim = claimActiveBlockedResume(store, terminal.id);
-			assert.ok(claim);
-			finalizeActiveBlockedSourceAfterContinuation({
-				claim,
-				source: terminal,
-				continuationRunId: `c-${terminal.id}`,
-				result: { error: "atomic-workflows: insufficient_state: replay topology mismatch for tool t" },
-			});
-			assert.equal(store.runs().find((run) => run.id === terminal.id)?.status, status);
-		}
 	});
 });

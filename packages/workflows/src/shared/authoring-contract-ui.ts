@@ -316,6 +316,7 @@ export interface RunOpts {
 	readonly continuation?: RunContinuationOpts;
 	/** Who launched this run. A continuation inherits its source run's origin instead. */
 	readonly origin?: WorkflowActor;
+	readonly modelOwner?: string;
 	/** Who requested the resume that produced this continuation run. */
 	readonly resumeActor?: WorkflowActor;
 	readonly parentRun?: WorkflowParentRunLink;

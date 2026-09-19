@@ -14,13 +14,8 @@ import { setDurableBackend } from "../../packages/workflows/src/durable/factory.
 import workflowExtension from "../../packages/workflows/src/extension/index.js";
 import type { ExtensionAPI, WorkflowToolArgs } from "../../packages/workflows/src/extension/public-types.js";
 import type { WorkflowRegisteredToolResult } from "../../packages/workflows/src/extension/render-result.js";
-import {
-	decisionMessage,
-	decisionModel,
-	messageStream,
-	registeredDecisionRuntime,
-} from "../helpers/structured-output.js";
-import { workflowRouterState } from "../helpers/workflow-router.js";
+import { decisionModel, messageStream, registeredDecisionRuntime } from "../helpers/structured-output.js";
+import { workflowDecisionMessage as decisionMessage, workflowRouterState } from "../helpers/workflow-router.js";
 
 // Real resource-loader and host-session replacement, not a registry helper invocation.
 const HOST_WORKFLOW_RELOAD_TIMEOUT_MS = 120_000;
@@ -112,12 +107,11 @@ test(
 				return registered;
 			};
 			const args: WorkflowToolArgs = {
-				workflow: "host-changed",
-				inputs: { task: "Approved work" },
+				action: "route",
 				state: workflowRouterState(),
 			};
 			const first = await tool().execute("before", args);
-			assert.equal((first.details as WorkflowRegisteredToolResult).action, "run");
+			assert.equal((first.details as WorkflowRegisteredToolResult).action, "route");
 			assert.ok(captures[0]!.workflows.some((entry) => entry.name === "host-removed"));
 			held = createAssistantMessageEventStream();
 			const began = new Promise<void>((resolve) => {
@@ -143,7 +137,7 @@ test(
 			// Real host lifetime guards reject the captured tool before it can publish any result.
 			await assert.rejects(pending, /stale after session replacement or reload/);
 			assert.equal(admissions.mock.calls.length, 0);
-			const fresh = await tool().execute("after", { ...args, inputs: { replacement: "Fresh inputs" } });
+			const fresh = await tool().execute("after", args);
 			const freshDetails = fresh.details as WorkflowRegisteredToolResult;
 			assert.ok("routerDecision" in freshDetails);
 			assert.deepEqual(freshDetails.routerDecision, {
@@ -168,7 +162,7 @@ test(
 			);
 			assert.equal(admissions.mock.calls.length, 0);
 		} finally {
-			session.dispose();
+			await session.dispose();
 			setDurableBackend(undefined);
 			vi.restoreAllMocks();
 			vi.unstubAllEnvs();

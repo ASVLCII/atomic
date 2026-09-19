@@ -34,10 +34,15 @@ const WorkflowResponseSchema = Type.Union(
 
 export const WorkflowParametersSchema = Type.Object(
 	{
+		workflowId: Type.Optional(
+			Type.String({
+				description: "Execution UUID registered by route, required by run. This is not a workflow definition name.",
+			}),
+		),
 		workflow: Type.Optional(
 			Type.String({
 				description:
-					"Workflow ID for get/inputs inspection. Deprecated and ignored for model-tool run; only the router selects execution. This field is not user intent.",
+					"Workflow definition name for get/inputs inspection only. Cannot override a registered execution selection.",
 			}),
 		),
 		inputs: Type.Optional(
@@ -53,6 +58,7 @@ export const WorkflowParametersSchema = Type.Object(
 			Type.Union(
 				[
 					Type.Literal("models"),
+					Type.Literal("route"),
 					Type.Literal("run"),
 					Type.Literal("list"),
 					Type.Literal("get"),

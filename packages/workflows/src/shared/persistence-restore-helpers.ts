@@ -504,6 +504,7 @@ export function restoreTerminalRuns(entries: readonly SessionEntry[], store: Sto
 			...(runMeta.resumedFromRunId !== undefined ? { resumedFromRunId: runMeta.resumedFromRunId } : {}),
 			...(runMeta.resumeFromStageId !== undefined ? { resumeFromStageId: runMeta.resumeFromStageId } : {}),
 			...(runMeta.origin !== undefined ? { origin: runMeta.origin } : {}),
+			modelOwner: runMeta.modelOwner,
 			...(runMeta.accumulatedDurationMs !== undefined
 				? { accumulatedDurationMs: runMeta.accumulatedDurationMs }
 				: {}),
@@ -588,6 +589,7 @@ export function findRunStartMetadata(
 	readonly resumeFromStageId?: string;
 	readonly accumulatedDurationMs?: number;
 	readonly origin?: WorkflowActor;
+	readonly modelOwner?: string;
 	readonly budget?: RunBudgetSnapshot;
 	readonly budgetState?: RunBudgetState;
 } {
@@ -614,6 +616,7 @@ export function findRunStartMetadata(
 				? { accumulatedDurationMs }
 				: {}),
 			...(origin === "user" || origin === "agent" ? { origin } : {}),
+			...(typeof entry.payload.modelOwner === "string" ? { modelOwner: entry.payload.modelOwner } : {}),
 			...(budget !== undefined ? { budget } : {}),
 			...(budgetState !== undefined ? { budgetState } : {}),
 		};

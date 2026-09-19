@@ -424,18 +424,23 @@ async function runScenario(control: "quit" | "pause" = "quit", omission?: "retur
 		//    wait is bounded and its outcome is recorded rather than thrown —
 		//    a run that quit did not pause simply never re-executes anything,
 		//    and the assertions below say so with the CLI's own words.
+		const endingsBeforeResume = cli.runEndings().length;
 		await cli.prompt("resume", `/workflow resume ${runId}`);
 		const reexecuted =
 			omission === undefined && (await cli.settle(() => readState().hangExecutions > 1, RESUME_SETTLE_TIMEOUT_MS));
 		if (reexecuted) await cli.waitUntil(() => !readState().hangRunning, "the re-executed callback to settle");
 		if (control === "pause")
 			await cli.waitUntil(
-				() => cli.runEndings().some((ending) => ending.runId !== runId),
+				() =>
+					cli
+						.runEndings()
+						.slice(endingsBeforeResume)
+						.some((ending) => ending.runId === runId),
 				"resumed continuation to settle",
 			);
-		const resumedRunId =
-			control === "pause" ? cli.runEndings().findLast((ending) => ending.runId !== runId)!.runId : runId;
-		const afterResume = runDetail(await statusSurface(cli, "status-resumed", resumedRunId));
+		// #3106: resume settles the original execution identity, never a fork.
+		assert.ok(cli.runEndings().every((ending) => ending.runId === runId));
+		const afterResume = runDetail(await statusSurface(cli, "status-resumed", runId));
 
 		return {
 			stateAfterReload,

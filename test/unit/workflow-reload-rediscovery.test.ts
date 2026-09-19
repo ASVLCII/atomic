@@ -119,9 +119,19 @@ function createHarness(overrides: Partial<ExtensionAPI> = {}): Harness {
 		commands,
 		messages,
 		async execute(args, ctx = { hasUI: false } as PiExecuteContext) {
-			if ((args.action ?? "run") === "run") {
-				args = { ...args, state: workflowRouterState(args.budget) };
+			ctx = { ...ctx, sessionId: "reload-fixture-owner" };
+			if (args.action === "run") {
 				ctx = { ...workflowRouterContext(args.workflow ?? "", args.budget), ...ctx };
+				const routed = await tool!.execute(
+					"route-reload-fixture",
+					{ action: "route", state: workflowRouterState(args.budget) },
+					undefined,
+					undefined,
+					ctx,
+				);
+				if (routed.details.action !== "route" || routed.details.status !== "reserved")
+					throw new Error(JSON.stringify(routed.details));
+				args = { action: "run", workflowId: routed.details.workflowId, inputs: args.inputs };
 			}
 			const result = await tool!.execute("reload-matrix-call", args, undefined, undefined, ctx);
 			return result.details;

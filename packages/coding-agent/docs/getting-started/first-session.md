@@ -13,9 +13,9 @@ description: Start Atomic, run a first task, invoke a built-in workflow, and ste
 
 On a fresh install with no prior Atomic startup state, Atomic shows a one-time first-run explanation after any What's New notes and directly above the input box describing Atomic as a verifiable coding agent runtime for building and running agent workflows you can feel confident in. Returning users with prior startup state are marked onboarded automatically and continue directly into the normal chat UI; stored credentials by themselves do not skip the first-run explanation. The composer is the normal Atomic input from the start: type a message, run `/login` first if no provider is connected, or launch a workflow command without a special onboarding transition.
 
-Once Atomic starts, default to a workflow for non-trivial work and for requests with inherent structure plus a verifiable objective. Implementation, build, debugging, bug fixes, migrations, features, scoped multi-file edits, validation/review work, and loop-shaped requests are workflow candidates; reserve direct chat for tiny deterministic low-risk answers or edits where tracking clearly adds more overhead than value.
+Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
 
-Workflow-first is not builtin-only or monolithic. Atomic can discover and run named builtin, project, user, and package workflows; author a rich custom TypeScript `workflow({...})` inline; and compositionally import reusable workflow definitions—including builtins from `@bastani/atomic/workflows/builtin`—into parent workflows with `ctx.workflow(...)`. Nested children can nest again within `maxDepth`, so custom graphs can combine proven research, implementation, design, verification, and approval workflows instead of copying them. They can also classify and branch, dynamically fan out and synthesize artifacts, run adversarial repair cycles, tournament-rank candidates, and loop until checks pass with explicit bounds.
+Atomic can discover and run named builtin, project, user, and package workflows; author a rich custom TypeScript `workflow({...})` inline; and compositionally import reusable workflow definitions—including builtins from `@bastani/atomic/workflows/builtin`—into parent workflows with `ctx.workflow(...)`. Nested children can nest again within `maxDepth`, so custom graphs can combine proven research, implementation, design, verification, and approval workflows instead of copying them. They can also classify and branch, dynamically fan out and synthesize artifacts, run adversarial repair cycles, tournament-rank candidates, and loop until checks pass with explicit bounds.
 
 Atomic turns repeatable engineering loops into executable stages with inspectable evidence instead of relying on a markdown checklist the model may or may not follow.
 
@@ -79,7 +79,7 @@ Use goal to update the CLI docs, include one example, run the docs build, and fi
 Use ralph to research and implement specs/rate-limit.md, then review and repair it within three loops.
 ```
 
-Atomic chooses a complete execution shape, fills inputs from the request, and confirms before launch. Use Goal when a durable ledger and receipt-backed reviewer gate fit the task. Use Ralph when the job benefits from a research-first implementation/review loop. For exact domain contracts that either builtin does not cover, author a custom graph with deterministic checks and bounded repairs.
+For natural-language launches, Atomic follows the route-then-run contract above and preserves your explicit approval gates. Direct user `/workflow <name>` commands launch the named workflow without a prior route reservation. Goal provides a durable ledger and receipt-backed reviewer gate; Ralph provides a research-first implementation/review loop. Custom graphs can add domain-specific deterministic checks and bounded repairs.
 
 ### Monitor and steer a run
 

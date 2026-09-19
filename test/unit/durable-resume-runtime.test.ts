@@ -27,6 +27,7 @@ import { createCancellationRegistry } from "../../packages/workflows/src/runs/ba
 import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import type { StageSessionRuntime } from "../../packages/workflows/src/runs/foreground/stage-runner.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
+import type { RunSnapshot } from "../../packages/workflows/src/shared/store-types.js";
 import type { WorkflowDefinition } from "../../packages/workflows/src/shared/types.js";
 import type { WorkflowRegistry } from "../../packages/workflows/src/workflows/registry.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
@@ -138,6 +139,53 @@ describe("resumeDurableWorkflow", () => {
 		};
 	}
 
+	// #3106: a failed resume attempt must not delete state belonging to the instance.
+	test("paused resume startup failure preserves the original snapshot and notices", async () => {
+		const workflowId = testRunId("paused-resume-startup-failure");
+		backend.registerWorkflow({
+			workflowId,
+			name: "resumable-pipeline",
+			inputs: { topic: "data" },
+			createdAt: 1,
+			status: "paused",
+			resumable: true,
+			completedCheckpoints: 1,
+		});
+		const source: RunSnapshot = {
+			id: workflowId,
+			name: "resumable-pipeline",
+			inputs: { topic: "data" },
+			startedAt: 1,
+			status: "paused",
+			stages: [],
+			resumable: true,
+		};
+		store.recordRunStart(source);
+		store.recordNotice({
+			id: "retained",
+			runId: workflowId,
+			level: "info",
+			message: "retained evidence",
+			createdAt: 1,
+		});
+		const result = await resumeDurableWorkflow(workflowId, {
+			...deps(),
+			baseRunOpts: {
+				...deps().baseRunOpts,
+				persistence: {
+					appendEntry() {
+						throw new Error("startup write failed");
+					},
+				},
+			},
+		});
+		assert.equal(result.ok, false);
+		assert.match(result.message, /startup write failed/);
+		assert.equal(store.runs().length, 1);
+		assert.equal(store.runs()[0], source);
+		assert.equal(store.notices()[0]?.id, "retained");
+		assert.equal(backend.getWorkflow(workflowId)?.status, "paused");
+	});
 	test("returns not_registered when id is unknown", async () => {
 		const unknownId = testRunId("wf-does-not-exist");
 		const result = await resumeDurableWorkflow(unknownId, deps());

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { describe, test } from "vitest";
+import { getDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { testRunId } from "../helpers/run-id.js";
 import type { ExtensionRuntime } from "./slash-dispatch-utils.js";
 import {
@@ -59,7 +60,8 @@ describe("tool run-control actions", () => {
 		assert.equal(wasDispatched(), false);
 		assert.match((result as { error?: string }).error ?? "", /workflows cannot invoke workflows/);
 	}
-	test("makeExecuteWorkflowTool resume starts linked continuation for failed resumable workflow", async () => {
+	// #3106: resume retains one instance and replays completed checkpoints without effects.
+	test("makeExecuteWorkflowTool resumes the same failed resumable workflow", async () => {
 		const sourceRunId = testRunId(`resume-tool-source-${Date.now()}`);
 		const def = workflow({
 			name: "tool-resume-wf",
@@ -121,6 +123,14 @@ describe("tool run-control actions", () => {
 			failedStageId: "old-second",
 			failureKind: "rate_limit",
 		});
+		getDurableBackend().registerWorkflow({
+			workflowId: sourceRunId,
+			name: def.name,
+			inputs: {},
+			createdAt: Date.now(),
+			status: "failed",
+			resumable: true,
+		});
 
 		const calls: string[] = [];
 		const runtime = createExtensionRuntime({
@@ -147,14 +157,15 @@ describe("tool run-control actions", () => {
 			message: string;
 		};
 		assert.equal(r.status, "running");
-		assert.notEqual(r.runId, sourceRunId);
-		assert.match(r.message, /Resuming failed workflow/);
+		assert.equal(r.runId, sourceRunId);
+		assert.match(r.message, /Resuming durable workflow.*completed checkpoints will be replayed/);
 		await jobTracker.get(r.runId)?.promise;
 		assert.deepEqual(calls, ["second:first-old"]);
 		const continued = store.runs().find((run) => run.id === r.runId)!;
 		assert.equal(continued.status, "completed");
 		assert.equal(continued.resumedFromRunId, sourceRunId);
 		assert.equal(continued.stages[0]!.replayed, true);
-		assert.equal(store.runs().find((run) => run.id === sourceRunId)!.status, "failed");
+		assert.equal(store.runs().filter((run) => run.id === sourceRunId).length, 1);
+		assert.equal(getDurableBackend().getWorkflow(sourceRunId)?.status, "completed");
 	});
 });

@@ -99,9 +99,21 @@ type GetResult = {
 	details?: WorkflowDetails;
 	error?: string;
 };
+type RouteResult = {
+	action: "route";
+	workflowType: string;
+	workflowId: string;
+	estimatedDuration?: WorkflowRouterOutput["estimatedDuration"];
+	routerDecision?: WorkflowRouterOutput;
+	inputSchema?: import("../shared/types.js").WorkflowDefinition["inputs"];
+	status: "reserved" | "not_launched" | "failed";
+	message?: string;
+	error?: string;
+};
 type RunResult = {
 	action: "run";
 	/** Validated routing decision; absent on inference/validation failure. */
+	workflowId?: string;
 	routerDecision?: WorkflowRouterOutput;
 	estimatedDuration?: WorkflowRouterOutput["estimatedDuration"];
 	inputContract?: import("../shared/types.js").WorkflowDefinition["inputs"];
@@ -213,6 +225,7 @@ type DependencyResult = {
 };
 
 export type WorkflowToolResult =
+	| RouteResult
 	| DependencyResult
 	| ListResult
 	| StatusResult
@@ -418,6 +431,8 @@ function renderResultBody(result: WorkflowRegisteredToolResult | null | undefine
 			);
 		}
 
+		case "route":
+			return JSON.stringify(result, null, 2);
 		case "run": {
 			const r = result as RunResult;
 			if (r.status === "not_launched")

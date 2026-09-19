@@ -105,6 +105,8 @@ export interface DispatcherOpts {
 	/** Reports the exact detached identity before startup admission is awaited. */
 	onRunAccepted?: (runId: string) => void;
 	assertRoutingCurrent?: () => void;
+	reservedRunId?: string;
+	modelOwner?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +194,7 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 
 			opts.signal?.throwIfAborted();
 			opts.assertRoutingCurrent?.();
-			const runId = crypto.randomUUID();
+			const runId = opts.reservedRunId ?? crypto.randomUUID();
 			// D1/D10: derive the possible-stage set from the definition source at
 			// admission; a missing entry or scan failure is fine (undefined),
 			// the scan itself never blocks launch.
@@ -236,6 +238,7 @@ export async function dispatch(args: WorkflowToolArgs, opts: DispatcherOpts): Pr
 					cwd: opts.cwd,
 					defaultSessionDir: opts.defaultSessionDir,
 					...(opts.origin === undefined ? {} : { origin: opts.origin }),
+					modelOwner: opts.modelOwner,
 					...(possibleStages === undefined ? {} : { possibleStages }),
 					runId,
 					startupSignal: opts.signal,

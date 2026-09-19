@@ -153,7 +153,7 @@ async function waitForDispatchResult(out: WorkflowToolResult): Promise<void> {
 
 describe("MCP entrypoints — workflow tool execute", () => {
 	let emits: ScopeEmit[];
-	let toolExecute: (args: WorkflowToolArgs, ctx: PiExecuteContext) => Promise<unknown>;
+	let toolExecute: (args: WorkflowToolArgs, ctx: PiExecuteContext) => Promise<WorkflowToolResult>;
 
 	let runtime: ReturnType<typeof buildTestRuntime>;
 	beforeEach(() => {
@@ -168,12 +168,13 @@ describe("MCP entrypoints — workflow tool execute", () => {
 		vi.restoreAllMocks();
 	});
 
-	const runArgs = (): WorkflowToolArgs => ({
-		action: "run",
-		workflow: "mcp-restricted",
-		inputs: {},
-		state: workflowRouterState(),
-	});
+	const routeArgs = (): WorkflowToolArgs => ({ action: "route", state: workflowRouterState() });
+	const launch = async () => {
+		const ctx = routerContext();
+		const route = await toolExecute(routeArgs(), ctx);
+		assert.equal(route.action, "route");
+		return toolExecute({ action: "run", workflowId: route.workflowId, inputs: {} }, ctx);
+	};
 	const routerContext = () => workflowRouterContext("mcp-restricted");
 
 	// #3089: MCP scope and runtime admission remain untouched while routing is pending.
@@ -186,16 +187,25 @@ describe("MCP entrypoints — workflow tool execute", () => {
 			return stream;
 		});
 		const dispatch = vi.spyOn(runtime, "dispatch");
-		const pending = toolExecute(runArgs(), ctx);
+		const pending = toolExecute(routeArgs(), ctx);
 		await entered.promise;
 		assert.deepEqual(emits, []);
 		assert.equal(dispatch.mock.calls.length, 0);
 		stream.push({
 			type: "done",
 			reason: "toolUse",
-			message: decisionMessage({ workflowType: "mcp-restricted", maxBudget: {}, estimatedDuration: "unknown" }),
+			message: decisionMessage({
+				workflowType: "mcp-restricted",
+				maxBudget: {},
+				estimatedDuration: "unknown",
+				interaction: "executable",
+				complexity: "workflow_beneficial",
+			}),
 		});
-		const out = await pending;
+		const route = await pending;
+		assert.equal(route.action, "route");
+		assert.equal(dispatch.mock.calls.length, 0);
+		const out = await toolExecute({ action: "run", workflowId: route.workflowId, inputs: {} }, ctx);
 		await waitForToolResult(out);
 		assert.equal(infer.mock.calls.length, 1);
 		assert.equal(dispatch.mock.calls.length, 1);
@@ -203,13 +213,13 @@ describe("MCP entrypoints — workflow tool execute", () => {
 	});
 
 	test("tool execute emits mcp.scope.set (set then clear) when running mcp-restricted workflow", async () => {
-		const out = await toolExecute(runArgs(), routerContext());
+		const out = await launch();
 		await waitForToolResult(out);
 		assertScopeEmitSequence(emits);
 	});
 
 	test("set payload stageId is a non-empty string", async () => {
-		const out = await toolExecute(runArgs(), routerContext());
+		const out = await launch();
 		await waitForToolResult(out);
 		const setEmit = emits.find((e) => e.payload.allow !== null);
 		assert.equal(typeof setEmit!.payload.stageId, "string");
@@ -217,7 +227,7 @@ describe("MCP entrypoints — workflow tool execute", () => {
 	});
 
 	test("clear payload uses same stageId as set payload", async () => {
-		const out = await toolExecute(runArgs(), routerContext());
+		const out = await launch();
 		await waitForToolResult(out);
 		const setEmit = emits.find((e) => e.payload.allow !== null)!;
 		const clearEmit = emits.find((e) => e.payload.allow === null)!;
@@ -240,7 +250,10 @@ describe("MCP entrypoints — workflow tool execute", () => {
 		});
 		const execute = makeExecuteWorkflowTool(runtime, () => undefined);
 		// Should not throw, should complete
-		const result = await execute(runArgs(), routerContext());
+		const ctx = routerContext();
+		const route = await execute(routeArgs(), ctx);
+		assert.equal(route.action, "route");
+		const result = await execute({ action: "run", workflowId: route.workflowId, inputs: {} }, ctx);
 		assert.equal(result.action, "run");
 		assert.ok("runId" in result && result.runId);
 		assert.ok("status" in result && result.status === "running");

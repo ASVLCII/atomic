@@ -19,8 +19,12 @@ import type {
 import type { WorkflowRegisteredToolResult } from "../../packages/workflows/src/extension/render-result.js";
 import { makeExecuteWorkflowTool } from "../../packages/workflows/src/extension/workflow-tool.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
-import { decisionMessage, messageStream } from "../helpers/structured-output.js";
-import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
+import { messageStream } from "../helpers/structured-output.js";
+import {
+	workflowDecisionMessage as decisionMessage,
+	workflowRouterContext,
+	workflowRouterState,
+} from "../helpers/workflow-router.js";
 
 const originalCwd = process.cwd();
 const roots: string[] = [];
@@ -104,7 +108,6 @@ async function fixture() {
 type CapturedWorkflow = { name: string; description: string; inputs: Record<string, { type: string }> };
 type CapturedState = {
 	workflows: CapturedWorkflow[];
-	proposed: { workflow: string };
 	task: { documents: { content: string }[] };
 };
 type CapturedRequest = { state: CapturedState; questions: Record<string, { criteria: Record<string, string> }> };
@@ -115,7 +118,7 @@ type RoutingHarness = {
 	noAdmission: () => void;
 };
 
-async function inspectRoutes(f: RoutingHarness, proposed: string) {
+async function inspectRoutes(f: RoutingHarness, _target: string) {
 	const ctx = workflowRouterContext("none");
 	let ordinaryState: CapturedState | undefined;
 	let choices: string[] = [];
@@ -125,9 +128,9 @@ async function inspectRoutes(f: RoutingHarness, proposed: string) {
 		choices = schema.properties.workflowType.anyOf.map((option) => option.const);
 		return messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} }));
 	};
-	const args = { workflow: proposed, state: workflowRouterState(), inputs: { task: "Approved task" } };
+	const args = { action: "route" as const, state: workflowRouterState() };
 	const ordinary = await f.execute(args, ctx);
-	assert.equal(ordinary.action, "run");
+	assert.equal(ordinary.action, "route");
 	assert.equal(ordinary.status, "not_launched", ordinary.error);
 	assert.ok(ordinaryState);
 	const expected = ["none", ...f.registryNames()];
@@ -165,7 +168,7 @@ async function inspectRoutes(f: RoutingHarness, proposed: string) {
 	);
 	ctx.getRouterModel = () => "typesafe-ai/jev";
 	const jevResult = await f.execute(args, ctx);
-	assert.equal(jevResult.action, "run");
+	assert.equal(jevResult.action, "route");
 	assert.equal(jevResult.status, "not_launched", jevResult.error);
 	assert.ok(jev);
 	assert.deepEqual(Object.keys(jev.questions.workflow!.criteria), expected);
@@ -322,8 +325,8 @@ test("overlapping in-flight decisions cannot launch a removed or same-name chang
 		if (captured.length === 2) entered.resolve();
 		return streams[captured.length - 1]!;
 	};
-	const pending = ["changed-route", "removed-route"].map((name) =>
-		f.execute({ workflow: name, state: workflowRouterState(), inputs: { task: "Approved work" } }, ctx),
+	const pending = ["changed-route", "removed-route"].map(() =>
+		f.execute({ action: "route", state: workflowRouterState() }, ctx),
 	);
 	await entered.promise;
 	f.noAdmission();
@@ -342,7 +345,7 @@ test("overlapping in-flight decisions cannot launch a removed or same-name chang
 		});
 	});
 	for (const result of await Promise.all(pending)) {
-		assert.equal(result.action, "run");
+		assert.equal(result.action, "route");
 		assert.equal(result.status, "failed");
 		assert.match(result.error ?? "", /registry changed/);
 		assert.equal(result.routerDecision, undefined);
@@ -417,14 +420,8 @@ for (const mutation of ["add", "remove", "rename", "same-name replacement"] as c
 			if (snapshots.length === targets.length) entered.resolve();
 			return streams[snapshots.length - 1]!;
 		};
-		const pending = targets.map((workflow) =>
-			tool.execute(
-				"stale-route",
-				{ workflow, inputs: { task: "approved" }, state: workflowRouterState() },
-				undefined,
-				undefined,
-				ctx,
-			),
+		const pending = targets.map(() =>
+			tool.execute("stale-route", { action: "route", state: workflowRouterState() }, undefined, undefined, ctx),
 		);
 		await entered.promise;
 		f.noAdmission();
@@ -456,12 +453,12 @@ for (const mutation of ["add", "remove", "rename", "same-name replacement"] as c
 			});
 		});
 		for (const result of await Promise.all(pending)) {
-			assert.equal(result.details.action, "run");
+			assert.equal(result.details.action, "route");
 			assert.equal(result.details.status, "failed");
 			assert.match("error" in result.details ? (result.details.error ?? "") : "", /registry changed/);
 			assert.equal("routerDecision" in result.details, false);
 			const visible = JSON.parse(result.content[0]!.text as string);
-			assert.equal(visible.runId, "");
+			assert.equal(visible.workflowId, "");
 			assert.equal(visible.status, "failed");
 			assert.equal("routerDecision" in visible, false);
 			assert.match(visible.error, /retry explicitly with fresh state/);

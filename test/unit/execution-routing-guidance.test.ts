@@ -30,87 +30,97 @@ const workflowDocumentationPaths = [
 	"packages/coding-agent/docs/workflows/operations.md",
 	"packages/coding-agent/docs/workflows/api-reference.md",
 	"packages/coding-agent/docs/quickstart.md",
+	"packages/coding-agent/docs/getting-started/first-session.md",
 	"packages/workflows/README.md",
 	"docs/workflow-playbook.md",
 	"README.md",
 ];
 
-describe("workflow-first execution routing", () => {
-	test("routes neutral task state without assistant preselection", () => {
-		for (const phrase of [
-			"without choosing a workflow first",
-			"router owns all semantic selection",
-			"Preserve the user's actual context and preferences",
-			"Do not pre-announce a chosen workflow or duration",
-			"brainstorming",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
+describe("route-then-registered-run guidance", () => {
+	// #3106: inspect each caller location, not concatenated docs where a new contract
+	// elsewhere can mask an obsolete opening. Keep authoring/lifecycle checks below.
+	const callerSections = [
+		["packages/workflows/README.md", "", "### Custom workflow directories"],
+		["packages/coding-agent/docs/getting-started/first-session.md", "## First session", "## Verify the session"],
+		["docs/workflow-playbook.md", "## The core loop", "## Prompt anatomy"],
+		["packages/coding-agent/docs/workflows/reliable-design.md", "", "### The self-prompt"],
+	] as const;
+	for (const [path, start, end] of callerSections) {
+		test(`${path} caller entry teaches route then registered run`, async () => {
+			const text = await readRepositoryFile(path);
+			const from = text.indexOf(start);
+			const to = text.indexOf(end, from);
+			assert.ok(from >= 0 && to > from, `${path}: caller section exists`);
+			const section = text.slice(from, to).replaceAll("`", "");
+			for (const contract of [
+				/Call workflow route.*actual request.*message text\/document excerpts.*constraints.*state/,
+				/not file paths in place of content/,
+				/If it returns none, continue inline/,
+				/input contract.*prepare inputs.*workflow run.*registered workflow ID/,
+				/Ask only for genuinely missing information/,
+			])
+				assert.match(section, contract, path);
+		});
+	}
+	for (const path of workflowDocumentationPaths) {
+		test(`${path} has no caller selection defaults or run-as-router instructions`, async () => {
+			const text = (await readRepositoryFile(path)).replaceAll("`", "");
+			for (const obsolete of [
+				/default to (?:a )?workflows? for/i,
+				/workflow[- ]first/i,
+				/reserve direct chat for/i,
+				/requests? (?:are|is) workflow candidates/i,
+				/(?:multiple subtasks|handoffs|parallel slices).*rule out inline/i,
+				/(?:loop|gate|cycle).*requires a workflow/i,
+				/task earns a workflow|ten[- ]call rule|\d+[–-]\d+ total|hard signal overrides/i,
+				/model-tool run[^\n]*supply[^\n]*state/i,
+				/workflow plus inputs/i,
+			])
+				assert.doesNotMatch(text, obsolete, path);
+		});
+	}
+	test("README lifecycle guidance preserves one resume identity", async () => {
+		const text = await readRepositoryFile("packages/workflows/README.md");
+		const section = text.slice(
+			text.indexOf("### Workflow lifecycle notifications"),
+			text.indexOf("## Authoring API"),
+		);
+		assert.doesNotMatch(section, /(?:fresh|new) run id|notice names both/i);
+		assert.match(section, /resume.*same (?:workflow|execution|run) id/i);
 	});
-
-	test("keeps early routing guidance without forcing a mode announcement", () => {
+	// #3106: no caller selection heuristics or pre-routing rituals survive the clean break.
+	test("uses one concise content-bearing routing contract", () => {
 		for (const phrase of [
+			"Call workflow route",
+			"actual request",
+			"not file paths in place of content",
+			"If it returns none, continue inline",
+			"input contract",
+			"registered workflow ID",
+			"Ask only for genuinely missing information",
+		])
+			expect(modelVisibleRouting).toContain(phrase);
+		for (const obsolete of [
 			"Budget reconnaissance",
 			"roughly ten exploratory tool calls",
-			"when inline was requested, continue directly with the same validation bar",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
-
-		for (const forcedAnnouncement of [
-			"Decide the execution mode before your first tool call",
-			"state it in one short line: inline",
-		]) {
-			expect(modelVisibleRouting).not.toContain(forcedAnnouncement);
-		}
+			"workflow-architecture pass",
+			"Run every slice through a child workflow",
+			"broad repository uncertainty →",
+			"Every model-tool run",
+		])
+			expect(workflowGuidance.join("\n")).not.toContain(obsolete);
 	});
-
-	test("keeps explicit preferences and suitability router-owned", () => {
+	test("retains workflow authoring and internal composition without caller preselection", () => {
 		for (const phrase of [
-			"Put explicit named-workflow",
-			"Do not implement caller-side keyword selection",
-			"unclear goals",
-			"unjustified orchestration overhead",
-			"None means continue conversation, clarify, or work inline",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
-	});
-
-	test("supports named and rich inline TypeScript workflows", () => {
-		for (const phrase of [
-			"builtin, project, user, or package",
-			"custom TypeScript `workflow({...})` with normal coding tools",
-			"reload workflow resources",
-			"Do not force-fit",
-			"deterministic branching",
-			"dynamic fan-out",
-			"child workflows",
-			"structured outputs",
-			"human-in-the-loop prompts",
-			"explicit stop conditions",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
-	});
-
-	test("teaches compositional imports and nested builtin workflows", () => {
-		for (const phrase of [
-			"Workflow definitions are normal TypeScript modules",
-			"@bastani/workflows/builtin",
-			"ctx.workflow(childDefinition, { inputs, stageName })",
-			"Imported children may nest more workflows",
-			"maxDepth",
-			"expanded parent graph",
-			"Pass definitions, not registry-name strings or paths",
-			"nest `fanOutAndSynthesize` for repository mapping",
-			"wrap `openClaudeDesign`",
+			"custom TypeScript workflow({...})",
+			"reload",
+			"ctx.workflow",
 			"consuming only declared outputs",
-		]) {
+			"inputSchema",
+			"approval",
+		])
 			expect(modelVisibleRouting).toContain(phrase);
-		}
 	});
-
 	test("guides authored workflows to checkpoint workflow-owned side effects", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		for (const phrase of [
@@ -151,16 +161,9 @@ describe("workflow-first execution routing", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		const modelSelection = await readRepositoryFile("packages/coding-agent/docs/models/model-selection.md");
 
-		for (const phrase of [
-			"assign every model stage a role and failure cost",
-			"When the user delegates the best-stage-model choice",
-			'author `model: "auto"` on stages or shared chain/parallel options',
-			"actual stage prompt after input interpolation",
-			"supplied context, catalog, and shipped evaluation guidance",
-			"deterministic checks as tool nodes with no model call",
-		]) {
-			expect(authoringGuidance).toContain(phrase);
-		}
+		expect(authoringGuidance).toContain(
+			"apply the stage role and failure-cost policy independently to the primary and every fallback",
+		);
 
 		for (const phrase of [
 			"measurement configuration used for that benchmark result",
@@ -188,8 +191,6 @@ describe("workflow-first execution routing", () => {
 		const modelSelection = await readRepositoryFile("packages/coding-agent/docs/models/model-selection.md");
 
 		for (const phrase of [
-			"Preserve explicit user model, effort, and hard constraint requests",
-			"retain each fallback's effort",
 			"apply the stage role and failure-cost policy independently to the primary and every fallback",
 			"An explicit user request for a level overrides the role default",
 		]) {
@@ -210,10 +211,6 @@ describe("workflow-first execution routing", () => {
 	test("rejects invented thinking levels and requires the compact assignment before launch", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		for (const phrase of [
-			"report model and thinking as pending until the routing result exists",
-			"For deliberately concrete stages, use catalog-supported models and efforts",
-			"Never invent an unsupported effort",
-			"Do not preselect a concrete model or effort in place of auto",
 			"append a thinking suffix only when that exact level appears in the entry's `availableThinkingLevels`",
 			"treat an absent or empty `availableThinkingLevels` as no suffix support",
 			"never fabricate an unsupported catalog level",
@@ -262,39 +259,14 @@ describe("workflow-first execution routing", () => {
 			"Generate-and-filter",
 			"Tournament",
 			"Loop until done",
-			"classify a request and dispatch category-specific stages",
-			"fan out per package",
-			"fresh-context verifiers",
-			"tournament-rank",
-			"max-iteration escape hatch",
 		]) {
 			expect(modelVisibleRouting).toContain(phrase);
 		}
 	});
 
-	test("requires a pre-launch coverage pass and selected execution shape", () => {
-		for (const phrase of [
-			"workflow-architecture pass",
-			"implementation lifecycle needs",
-			"whole-codebase research needs",
-			"exact API/type/build contracts",
-			"schema or generated-artifact contracts",
-			"state transitions/lifecycle behavior",
-			"requirement/risk | required evidence | workflow/stage that produces it | gap",
-			"covers the lifecycle and produces evidence for every material requirement/risk",
-			'Do not treat "has reviewers" as proof that a task-specific risk is covered',
-			"first named workflow launch commits the selected execution shape for the turn",
-			"chain unplanned unrelated launches",
-			"design one custom parent before launch",
-			"Choose the cheapest graph",
-			"Avoid decorative composition and duplicated research or review loops",
-			"For an authored graph, document its evidence",
-			"Do not announce that it will run before the router's decision",
-			"definition authoring does not pin model-tool selection",
-			"stop/repair conditions",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
+	test("does not require a caller architecture pass before routing", () => {
+		expect(workflowGuidance.join("\n")).not.toContain("workflow-architecture pass");
+		expect(workflowGuidance.join("\n")).toContain("Read the workflow docs/examples");
 	});
 	test("sizes the unit of verified implementation work", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
@@ -313,11 +285,8 @@ describe("workflow-first execution routing", () => {
 	test("routes each implementation slice to a child workflow", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		for (const phrase of [
-			"Run every slice through a child workflow",
-			"own implement/review/repair lifecycle",
-			"goal",
-			"ralph",
-			"task-specific child",
+			"For an authored multi-slice implementation graph",
+			"own objective, evidence and bounded implement/review/repair lifecycle",
 			"ctx.workflow(...)",
 		]) {
 			expect(authoringGuidance).toContain(phrase);
@@ -397,11 +366,8 @@ describe("workflow-first execution routing", () => {
 			"MUST NOT create self-edges or dependency edges from the current frontier to an existing ancestor",
 			"Redesign or stop before launch",
 			"distinct tracked work for every iteration",
-			"stable per-iteration identity and call order",
-			"nested workflows through `ctx.workflow(...)` boundaries",
 			"incremental edge checks",
 			"DBOS hydration validation",
-			"acyclic topology | node/edge sketch for branches and loops | architecture pass | unresolved back-edge",
 		]) {
 			expect(authoringGuidance).toContain(phrase);
 		}
@@ -431,25 +397,6 @@ describe("workflow-first execution routing", () => {
 	});
 
 	test("routes independent implementation queues to bounded top-level runs", async () => {
-		for (const phrase of [
-			"enumerate every item before launch",
-			"independent, dependent, or clustered",
-			"For a mixed queue with dependent A → B and unrelated C",
-			"prerequisites are already merged into each selected base",
-			"compose only the A → B dependency cluster",
-			"shared files, API contracts, migrations, generated artifacts",
-			"Launch C as its own concurrent top-level named workflow with its own root failure boundary",
-			'Do not infer a cross-item sequence from list order or from "create a PR after"',
-			"does not put the whole queue in one parent",
-			"Prove the dependency before serializing independent workflow items",
-			"separate concurrent top-level named workflow runs with bounded concurrency",
-			"complete bounded wave of planned per-item top-level launches",
-			"item → run ID → worktree → branch → result/PR map",
-			"first item's review, repair, or check failure must not block unrelated items",
-			"checkout isolation, not concurrent top-level execution",
-		]) {
-			expect(workflowGuidance.join("\n")).toContain(phrase);
-		}
 		const documentation = await readRepositoryFile("packages/coding-agent/docs/workflows/reliable-design.md");
 		for (const phrase of [
 			"Interpret ordering words locally unless a cross-item dependency is explicit",
@@ -525,40 +472,11 @@ describe("workflow-first execution routing", () => {
 		}
 	});
 
-	test("retains every risk-based routing signal in model-visible guidance", () => {
-		for (const phrase of [
-			"broad repository uncertainty → Fan-out-and-synthesize with repository-focused branches",
-			"independent slices → Fan-out-and-synthesize",
-			"plausible-but-wrong contract risk → Adversarial verification",
-			"competing architectures or implementations → Generate-and-filter or Tournament",
-			"explicit repeat-until condition → Loop until done",
-			"implementation lifecycle → a task-specific worker/reviewer loop",
-			"exact API/build/schema requirements → dedicated deterministic gates",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
-	});
-
-	test("requires skeptical reviewer plans and authoritative verifier loops", () => {
-		for (const phrase of [
-			"fresh-context grumpy/skeptical-but-fair reviewer",
-			"without invented requirements",
-			"structured verifier plan",
-			"exact probe, inputs, command/assertion, expected success condition, and requirement/risk covered",
-			"direct task-specific `ctx.tool(...)` gates",
-			"model select high-value probes through structured output",
-			"compile, test, schema generation/validation, runtime, or artifact-inspection checks",
-			"Actual tool results—not model self-report",
-			"consolidated evidence-backed repair findings",
-			"implementation child repairs them",
-			"bounded pass, repair, failure, and iteration-limit conditions",
-			"keep pure transformations as ordinary TypeScript",
-			"do not wrap every model-stage action in a tool call",
-			"how model-selected plans become tool executions",
-			"how failures reach bounded repair",
-		]) {
-			expect(modelVisibleRouting).toContain(phrase);
-		}
+	test("selection criteria live in the router, not caller trigger lists", async () => {
+		const router = await readRepositoryFile("packages/workflows/src/extension/workflow-router.ts");
+		expect(router).toContain("interaction");
+		expect(router).toContain("complexity");
+		expect(modelVisibleRouting).not.toContain("independent slices → Fan-out-and-synthesize");
 	});
 
 	test("mirrors risk/evidence routing and verifier-loop guidance in workflow docs", async () => {
@@ -569,8 +487,6 @@ describe("workflow-first execution routing", () => {
 			"requirement/risk | required evidence | workflow/stage that produces it | gap",
 			'Do not treat "has reviewers" as proof that a task-specific risk is covered',
 			"Does an installed graph supply complete coverage?",
-			"Broad repository uncertainty points to repository-focused Fan-out-and-synthesize",
-			"implementation work to a task-specific worker/reviewer loop",
 			"first named workflow launch commits the selected execution shape for the turn",
 			"one custom parent",
 			"Choose the cheapest complete graph",
@@ -701,7 +617,7 @@ describe("workflow-first execution routing", () => {
 	test("keeps subagents complementary without universal delegation", () => {
 		for (const phrase of [
 			"focused specialist work inside workflows",
-			"workflows are the default for non-trivial structured work",
+			"call workflow run with the registered workflow ID",
 			"single subagent",
 			"parallel tasks",
 			"debugger subagent for actual failures",
@@ -710,6 +626,7 @@ describe("workflow-first execution routing", () => {
 		}
 
 		for (const obsoletePolicy of [
+			"workflows are the default for non-trivial structured work",
 			"all non-trivial operations should be delegated",
 			"spawn a debugger subagent first",
 			"Prefer async mode for every subagent launch",
@@ -744,13 +661,10 @@ describe("workflow-first execution routing", () => {
 		}
 	});
 
-	test("synchronizes workflow-first docs with custom workflow authoring", async () => {
+	test("retains custom workflow authoring references without workflow-first mandates", async () => {
 		const documentation = (await Promise.all(workflowDocumentationPaths.map(readRepositoryFile))).join("\n");
 
 		for (const phrase of [
-			"Default to a workflow",
-			"non-trivial",
-			"verifiable objective",
 			"custom TypeScript",
 			"workflow({...})",
 			"dynamic fan-out",
@@ -764,12 +678,7 @@ describe("workflow-first execution routing", () => {
 			expect(documentation).toContain(phrase);
 		}
 
-		for (const regressionPhrase of [
-			"Multiple steps, files, tests, validation, or parallelism alone do not require a workflow",
-			"there is no fixed tool-call escalation threshold",
-			"workflow tool's create action",
-			'`action: "create"` to create a workflow',
-		]) {
+		for (const regressionPhrase of ["workflow tool's create action", '`action: "create"` to create a workflow']) {
 			expect(documentation).not.toContain(regressionPhrase);
 		}
 	});
@@ -1012,10 +921,9 @@ describe("workflow-first execution routing", () => {
 	 */
 	test("keeps the inherited budget and heartbeat cadence until the user asks", () => {
 		for (const phrase of [
-			"Do not pass a `budget` unless the user asked for a limit",
-			"omitting `budget` inherits the workflow declaration and config",
-			"pass only the fields they named",
-			"Pass budget only for a user-specified limit",
+			"Explicit user limits belong in route state.userBudget",
+			"omission inherits and zero disables only its field",
+			"Never convert an estimate into a cap",
 			"Heartbeat cadence is 15 minutes by default",
 			"Keep that interval unless the user explicitly asks for a different cadence",
 			"A heartbeat is a periodic alignment check",
@@ -1052,7 +960,7 @@ describe("workflow-first execution routing", () => {
 			if (path.endsWith("reliable-design.md")) {
 				assert.match(
 					text,
-					/following architecture pass and scoring rubric apply only to deliberate definition authoring and composition/,
+					/following architecture pass applies only to deliberate definition authoring and composition/,
 				);
 				assert.match(text, /For an authored graph, document/);
 			}

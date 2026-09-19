@@ -8,7 +8,11 @@ import { Type } from "typebox";
 import { afterEach, beforeEach, describe, test } from "vitest";
 import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
-import { createInMemoryTestBackend, setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
+import {
+	createInMemoryTestBackend,
+	getDurableBackend,
+	setDurableBackend,
+} from "../../packages/workflows/src/durable/factory.js";
 import factory, { type ExtensionAPI, type PiCommandOptions } from "../../packages/workflows/src/extension/index.js";
 import { createExtensionRuntime, type ExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
 import { makeExecuteWorkflowTool } from "../../packages/workflows/src/extension/workflow-tool.js";
@@ -438,6 +442,15 @@ describe("workflow lazy-startup continuation fixes", () => {
 			error: "boom",
 		});
 		store.recordRunEnd(sourceRunId, "failed", undefined, "boom", { resumable: true, failedStageId: "retry-old" });
+		// #3106: resume requires the original durable instance, not a snapshot-only fork.
+		getDurableBackend().registerWorkflow({
+			workflowId: sourceRunId,
+			name: def.name,
+			inputs: {},
+			createdAt: Date.now(),
+			status: "failed",
+			resumable: true,
+		});
 		let runtime: ExtensionRuntime = createExtensionRuntime({ registry: createRegistry([]) });
 		let ensureCalls = 0;
 		const handler = makeExecuteWorkflowTool(
@@ -458,6 +471,7 @@ describe("workflow lazy-startup continuation fixes", () => {
 		assert.equal(ensureCalls, 1);
 		assert.equal(result.action, "resume");
 		assert.equal(result.status, "running");
+		assert.equal(result.runId, sourceRunId);
 		assert.match(result.message ?? "", /Resum/);
 	});
 

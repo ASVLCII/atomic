@@ -96,12 +96,13 @@ async function runContinuation(
 }
 
 describe("resumed continuation lifecycle notices", () => {
-	test("a user-resumed continuation reports the resume, names both runs, and never reports a start", async () => {
+	// #3106: a resume names the one execution identity, not a linked new run.
+	test("a user-resumed instance reports its identity and never reports a start", async () => {
 		const store = createStore();
 		const source = failedSourceRun(store, "8c31", "agent");
 		const { sent, unsubscribe } = install(store);
 		try {
-			await runContinuation(store, source, "4d7e", "user");
+			await runContinuation(store, source, source.id, "user");
 
 			const resumed = sent.filter((notice) => notice.details?.kind === "resumed");
 			assert.equal(resumed.length, 1, "a continuation reports exactly one resume");
@@ -110,12 +111,12 @@ describe("resumed continuation lifecycle notices", () => {
 				false,
 				"the user experienced a resume, not a new run",
 			);
-			assert.equal(resumed[0]?.details?.runId, "4d7e");
-			assert.equal(resumed[0]?.details?.continuedFromRunId, "8c31");
+			assert.equal(resumed[0]?.details?.runId, source.id);
+			assert.equal("continuedFromRunId" in resumed[0]!.details!, false);
 			assert.equal(resumed[0]?.details?.origin, "agent", "origin is inherited from the run being continued");
 			assert.match(
 				resumed[0]?.content ?? "",
-				/^▶ The user resumed the workflow "goal" \(run 4d7e, continuing run 8c31\), which you started/,
+				/^▶ The user resumed the workflow "goal" \(run 8c31\), which you started/,
 			);
 		} finally {
 			unsubscribe();
@@ -128,24 +129,25 @@ describe("resumed continuation lifecycle notices", () => {
 		const unattributedSource = failedSourceRun(store, "src-none", undefined);
 		const { sent, unsubscribe } = install(store);
 		try {
-			await runContinuation(store, userSource, "cont-user", "user");
-			await runContinuation(store, unattributedSource, "cont-none", "user");
+			await runContinuation(store, userSource, userSource.id, "user");
+			await runContinuation(store, unattributedSource, unattributedSource.id, "user");
 			// An agent-requested continuation of a user-started run: origin and actor
 			// disagree, and only the agent-requested one stays out of the chat.
 			const agentSource = failedSourceRun(store, "src-agent-req", "user");
-			await runContinuation(store, agentSource, "cont-agent-req", "agent");
+			await runContinuation(store, agentSource, agentSource.id, "agent");
 
 			// Assert on every kind, not just the resumes: a continuation that reported
 			// a spurious `started` alongside them would otherwise pass unnoticed. The
 			// source fixtures are ordinary user-started runs and may report their own.
 			const startedContinuations = sent.filter(
-				(notice) => notice.details?.kind === "started" && notice.details.runId.startsWith("cont-"),
+				(notice) => notice.details?.kind === "started" && notice.details.runId !== agentSource.id,
 			);
 			assert.deepEqual(startedContinuations, [], "a continuation is never a fresh launch, whoever requested it");
+			assert.equal(sent.filter((notice) => notice.details?.kind === "started").length, 1);
 			const resumed = sent.filter((notice) => notice.details?.kind === "resumed");
 			assert.deepEqual(
 				resumed.map((notice) => notice.details?.runId),
-				["cont-user", "cont-none"],
+				["src-user", "src-none"],
 				"an agent-requested continuation reports nothing",
 			);
 			assert.equal(resumed[0]?.details?.origin, "user");
@@ -153,7 +155,7 @@ describe("resumed continuation lifecycle notices", () => {
 			assert.equal(resumed[1]?.details?.origin, undefined, "an unrecorded origin is omitted, never guessed");
 			assert.doesNotMatch(resumed[1]?.content ?? "", /which/);
 
-			const continuation = store.runs().find((candidate) => candidate.id === "cont-agent-req");
+			const continuation = store.runs().find((candidate) => candidate.id === agentSource.id);
 			assert.equal(continuation?.origin, "user", "origin survives the resume without flipping to the requester");
 		} finally {
 			unsubscribe();

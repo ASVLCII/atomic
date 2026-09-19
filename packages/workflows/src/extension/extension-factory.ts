@@ -136,11 +136,11 @@ function factory(pi: ExtensionAPI): void {
 		const result = await executeWorkflowTool(args, ctx, signal, onRunAccepted);
 		if (
 			workflowPolicyFromContext(ctx).allowInputPicker &&
-			typeof args.workflow === "string" &&
 			result.action === "run" &&
 			result.status === "running" &&
 			result.runId.length > 0 &&
-			runtimeState.runtimeProxy.registry.get(args.workflow)?.autoAttach === true
+			result.name !== undefined &&
+			runtimeState.runtimeProxy.registry.get(result.name)?.autoAttach === true
 		) {
 			overlay.open(result.runId, overlaySurfaceFromContext(ctx));
 		}

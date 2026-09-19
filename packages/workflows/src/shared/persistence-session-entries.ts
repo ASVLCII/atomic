@@ -43,6 +43,7 @@ export interface RunStartPayload {
 	readonly resumedFromRunId?: string;
 	/** Who launched this run, when the launcher was attributable. */
 	readonly origin?: WorkflowActor;
+	readonly modelOwner?: string;
 	readonly resumeFromStageId?: string;
 	/** Elapsed ms inherited from prior sessions of a resumed run. */
 	readonly accumulatedDurationMs?: number;
@@ -165,6 +166,7 @@ export function appendRunStart(api: PersistenceAPI, payload: RunStartPayload): v
 		...(payload.rootRunId !== undefined ? { rootRunId: payload.rootRunId } : {}),
 		...(payload.resumedFromRunId !== undefined ? { resumedFromRunId: payload.resumedFromRunId } : {}),
 		...(payload.origin !== undefined ? { origin: payload.origin } : {}),
+		modelOwner: payload.modelOwner,
 		...(payload.resumeFromStageId !== undefined ? { resumeFromStageId: payload.resumeFromStageId } : {}),
 		...(payload.accumulatedDurationMs !== undefined ? { accumulatedDurationMs: payload.accumulatedDurationMs } : {}),
 		...(payload.budget !== undefined ? { budget: payload.budget } : {}),

@@ -80,17 +80,17 @@ describe("tool run-control actions", () => {
 			registry: createRegistry([def]),
 		});
 		const handler = makeExecuteWorkflowTool(runtime, () => undefined);
+		const ctx = workflowRouterContext("tool-answers-ctx-ui-input");
+		const route = await handler({ action: "route", state: workflowRouterState() }, ctx);
+		assert.equal(route.action, "route");
 
-		const started = await handler(
-			{ action: "run", workflow: "tool-answers-ctx-ui-input", state: workflowRouterState() },
-			workflowRouterContext("tool-answers-ctx-ui-input"),
-		);
+		const started = await handler({ action: "run", workflowId: route.workflowId }, ctx);
 		assert.equal(started.action, "run");
 		const runId = (started as { runId: string }).runId;
 		assert.ok(runId);
 
 		const prompt = await waitForToolPrompt(runId);
-		const stages = await handler({ action: "stages", runId, statusFilter: "all" }, {} as never);
+		const stages = await handler({ action: "stages", runId, statusFilter: "all" }, ctx);
 		assert.equal(stages.action, "stages");
 		const awaitingStage = (
 			stages as {
@@ -112,7 +112,7 @@ describe("tool run-control actions", () => {
 				stageId: prompt.stageId,
 				text: "from workflow tool",
 			},
-			{} as never,
+			ctx,
 		);
 		assert.equal(answered.action, "answer");
 		assert.equal((answered as { status: string }).status, "ok");

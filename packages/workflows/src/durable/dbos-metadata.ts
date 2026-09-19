@@ -81,6 +81,7 @@ export function encodeMetadata(metadata: DurableWorkflowMetadata): WorkflowSeria
 			...(metadata.failureDisposition !== undefined ? { failureDisposition: metadata.failureDisposition } : {}),
 			...(metadata.failedToolNodeId !== undefined ? { failedToolNodeId: metadata.failedToolNodeId } : {}),
 			...(metadata.origin !== undefined ? { origin: metadata.origin } : {}),
+			modelOwner: metadata.modelOwner,
 			...(metadata.invocationCwd !== undefined ? { invocationCwd: metadata.invocationCwd } : {}),
 			...(metadata.workflowCwd !== undefined ? { workflowCwd: metadata.workflowCwd } : {}),
 			...(metadata.repositoryRoot !== undefined ? { repositoryRoot: metadata.repositoryRoot } : {}),

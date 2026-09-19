@@ -72,7 +72,10 @@ export function createRunStoreMethods(context: StoreContext): RunStoreMethods {
 		},
 
 		recordRunStart(run: RunSnapshot): void {
-			state.runs.push(run);
+			// Resume replaces the snapshot, not the identity's prompt answers or notices.
+			const index = state.runs.findIndex((existing) => existing.id === run.id);
+			if (index === -1) state.runs.push(run);
+			else state.runs[index] = run;
 			context.bumpAndNotify();
 		},
 

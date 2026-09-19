@@ -223,6 +223,7 @@ export function restoreOnSessionStart(
 				...(runMeta.rootRunId !== undefined ? { rootRunId: runMeta.rootRunId } : {}),
 				...(runMeta.resumedFromRunId !== undefined ? { resumedFromRunId: runMeta.resumedFromRunId } : {}),
 				...(runMeta.origin !== undefined ? { origin: runMeta.origin } : {}),
+				modelOwner: runMeta.modelOwner,
 				...(runMeta.resumeFromStageId !== undefined ? { resumeFromStageId: runMeta.resumeFromStageId } : {}),
 				...(runMeta.accumulatedDurationMs !== undefined
 					? { accumulatedDurationMs: runMeta.accumulatedDurationMs }
@@ -264,6 +265,7 @@ export function restoreOnSessionStart(
 				...(runMeta.rootRunId !== undefined ? { rootRunId: runMeta.rootRunId } : {}),
 				...(runMeta.resumedFromRunId !== undefined ? { resumedFromRunId: runMeta.resumedFromRunId } : {}),
 				...(runMeta.origin !== undefined ? { origin: runMeta.origin } : {}),
+				modelOwner: runMeta.modelOwner,
 				...(runMeta.resumeFromStageId !== undefined ? { resumeFromStageId: runMeta.resumeFromStageId } : {}),
 				...(runMeta.budget !== undefined ? { budget: runMeta.budget } : {}),
 				...(runMeta.budgetState !== undefined ? { budgetState: runMeta.budgetState } : {}),
@@ -291,6 +293,7 @@ export function restoreOnSessionStart(
 				...(runMeta.rootRunId !== undefined ? { rootRunId: runMeta.rootRunId } : {}),
 				...(runMeta.resumedFromRunId !== undefined ? { resumedFromRunId: runMeta.resumedFromRunId } : {}),
 				...(runMeta.origin !== undefined ? { origin: runMeta.origin } : {}),
+				modelOwner: runMeta.modelOwner,
 				...(runMeta.resumeFromStageId !== undefined ? { resumeFromStageId: runMeta.resumeFromStageId } : {}),
 				...(runMeta.budget !== undefined ? { budget: runMeta.budget } : {}),
 				...(runMeta.budgetState !== undefined ? { budgetState: runMeta.budgetState } : {}),

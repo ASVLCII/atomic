@@ -23,7 +23,23 @@ import { registerWorkflowTool } from "../../packages/workflows/src/extension/wor
 import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
+import { type JevFixtureRequest, jevFixtureResponse } from "../helpers/jev-tournament.js";
 import { workflowRouterContext, workflowRouterState } from "../helpers/workflow-router.js";
+
+const jevNone = async (_url: string, init: RequestInit) =>
+	Response.json(
+		jevFixtureResponse(
+			JSON.parse(String(init.body)) as JevFixtureRequest,
+			(_keys, id) =>
+				({
+					workflow: "none",
+					duration: "unknown",
+					budget: "preserve",
+					interaction: "executable",
+					complexity: "workflow_beneficial",
+				})[id]!,
+		),
+	);
 
 vi.mock("child_process", async (importOriginal) => ({
 	...(await importOriginal<typeof import("node:child_process")>()),
@@ -112,34 +128,7 @@ test("TypeSafe none preserves exact budget limits alongside credential-named con
 	const budget = { maxTokens: 0, maxCost: 0.123456789, warnAtPercent: 12.345 };
 	f.ctx.getRouterModel = () => "typesafe-ai/jev";
 	vi.stubEnv("TYPESAFE_AI_API_KEY", "mock-key");
-	const transport = vi.fn(async () =>
-		Response.json({
-			model: "jev-2026-09",
-			answers: {
-				workflow: {
-					type: "choice",
-					choice: "none",
-					probabilities: { none: 1, "credential-contract": 0, other: 0 },
-					confidence: 1,
-				},
-				budget: { type: "choice", choice: "preserve", probabilities: { preserve: 1 }, confidence: 1 },
-				duration: {
-					type: "choice",
-					choice: "unknown",
-					probabilities: {
-						unknown: 1,
-						under_5_minutes: 0,
-						"5_to_15_minutes": 0,
-						"15_to_60_minutes": 0,
-						"1_to_4_hours": 0,
-						over_4_hours: 0,
-					},
-					confidence: 1,
-				},
-			},
-			usage: { input_tokens: 20, output_tokens: 10 },
-		}),
-	);
+	const transport = vi.fn(jevNone);
 	vi.stubGlobal("fetch", transport);
 	const result = await f.route({ ...f.args, state: workflowRouterState(budget) });
 	assert.deepEqual(result.decision, { estimatedDuration: "unknown", workflowType: "none", maxBudget: budget });
@@ -174,36 +163,10 @@ function registeredFixture(metadata?: { field: string; text: string }) {
 	const tool = registerWorkflowTool({ registerTool: () => {} }, execute, async (_policy, run) => run())!;
 	const ctx = workflowRouterContext("none");
 	const infer = vi.spyOn(ctx.modelRegistry!, "streamSimple");
-	const transport = vi.fn(async () =>
-		Response.json({
-			model: "jev-2026-09",
-			answers: {
-				workflow: {
-					type: "choice",
-					choice: "none",
-					probabilities: { none: 1, [definition.normalizedName]: 0 },
-					confidence: 1,
-				},
-				budget: { type: "choice", choice: "preserve", probabilities: { preserve: 1 }, confidence: 1 },
-				duration: {
-					type: "choice",
-					choice: "unknown",
-					probabilities: {
-						unknown: 1,
-						under_5_minutes: 0,
-						"5_to_15_minutes": 0,
-						"15_to_60_minutes": 0,
-						"1_to_4_hours": 0,
-						over_4_hours: 0,
-					},
-					confidence: 1,
-				},
-			},
-			usage: { input_tokens: 20, output_tokens: 10 },
-		}),
-	);
+	const transport = vi.fn(jevNone);
 	vi.stubGlobal("fetch", transport);
 	const args: WorkflowToolArgs = {
+		action: "route",
 		workflow: definition.name,
 		inputs: { task: "Approved work" },
 		state: workflowRouterState(),
@@ -225,7 +188,7 @@ function registeredFixture(metadata?: { field: string; text: string }) {
 
 const locations = [
 	"literal request",
-	"intent",
+	"additional constraint",
 	"conversation",
 	"constraint",
 	"document source",
@@ -241,7 +204,7 @@ const locations = [
 ] as const;
 
 // #3089: opaque configured keys must never reach either provider through the registered tool.
-for (const action of ["run", undefined] as const) {
+for (const action of ["route"] as const) {
 	for (const provider of ["ordinary", "jev"] as const) {
 		for (const [kind, key, envName] of [
 			["opaque", "opaque-round-two-3089", "TYPESAFE_AI_API_KEY"],
@@ -259,22 +222,22 @@ for (const action of ["run", undefined] as const) {
 					const state = f.args.state!;
 					switch (location) {
 						case "literal request":
-							state.literalRequest = text;
+							state.task = text;
 							break;
-						case "intent":
-							state.intent = text;
+						case "additional constraint":
+							state.constraints!.push(text);
 							break;
 						case "conversation":
-							state.conversation[0]!.text = text;
+							state.conversation![0]!.text = text;
 							break;
 						case "constraint":
-							state.constraints.push(text);
+							state.constraints!.push(text);
 							break;
 						case "document source":
-							state.documents[0]!.source = text;
+							state.documents![0]!.source = text;
 							break;
 						case "document content":
-							state.documents[0]!.content = text;
+							state.documents![0]!.content = text;
 							break;
 						case "budget provenance":
 							state.userBudget = { limits: {}, provenance: text };
@@ -405,7 +368,7 @@ for (const provider of ["ordinary", "jev"] as const) {
 				const f = registeredFixture();
 				f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
 				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev" : "decision-test/chat");
-				f.args.state!.conversation[0]!.text = `Context ${key} end`;
+				f.args.state!.conversation![0]!.text = `Context ${key} end`;
 				const result = await f.call();
 				assert.equal(f.infer.mock.calls.length, 0);
 				assert.equal(f.transport.mock.calls.length, 0);
@@ -450,7 +413,7 @@ test("safe OAuth metadata routes without refreshing tokens or executing credenti
 	const registry = new ModelRegistry(runtime);
 	const f = registeredFixture();
 	f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
-	f.args.state!.conversation[0]!.text = "Review known-account for user@example.test";
+	f.args.state!.conversation![0]!.text = "Review known-account for user@example.test";
 	const result = await f.call();
 	assert.equal(f.infer.mock.calls.length, 1);
 	assert.equal(f.transport.mock.calls.length, 0);
@@ -481,7 +444,7 @@ test("previously resolved command credentials are excluded without executing aga
 	const registry = new ModelRegistry(runtime);
 	const f = registeredFixture();
 	f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
-	f.args.state!.literalRequest = `Review ${key}`;
+	f.args.state!.task = `Review ${key}`;
 	const result = await f.call();
 	assert.equal(f.infer.mock.calls.length, 0);
 	assert.equal(f.transport.mock.calls.length, 0);

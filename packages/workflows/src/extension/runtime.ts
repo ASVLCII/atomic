@@ -10,13 +10,13 @@
  *            src/workflows/registry.ts
  */
 
+import { resumableEntryFromHandle } from "../durable/backend.js";
 import { type DurabilityWarningSink, getDurableBackend, initializeDurableBackend } from "../durable/factory.js";
+import { resumeDurableWorkflow } from "../durable/resume-runtime.js";
 import { resolveToolResumeFrontier } from "../durable/tool-resume-frontier.js";
 import { currentToolControlRegistry, type ToolControlRegistry } from "../engine/run-tool-control-registry.js";
 import { type CancellationRegistry, currentCancellationRegistry } from "../runs/background/cancellation-registry.js";
 import { currentJobTracker, type JobTracker } from "../runs/background/job-tracker.js";
-import type { DetachedRunOpts } from "../runs/background/runner.js";
-import { launchDetachedUntilStartup, workflowStartupFailureMessage } from "../runs/background/startup-admission.js";
 import { type RunOpts, resolveAndValidateInputs } from "../runs/foreground/executor.js";
 import { currentStageControlRegistry, type StageControlRegistry } from "../runs/foreground/stage-control-registry.js";
 import type { StageAdapters } from "../runs/foreground/stage-runner.js";
@@ -37,13 +37,6 @@ import { createRegistry } from "../workflows/registry.js";
 import { dispatch } from "./dispatcher.js";
 import type { WorkflowToolArgs } from "./index.js";
 import type { WorkflowToolResult } from "./render-result.js";
-import {
-	claimActiveBlockedResume,
-	discardFailedActiveBlockedContinuation,
-	finalizeActiveBlockedSourceAfterContinuation,
-	finalizeResumedActiveBlockedSourceRun,
-	releaseActiveBlockedClaim,
-} from "./runtime-active-block-claim.js";
 import { createDurableResumeRuntime, type DurableResumeRuntime } from "./runtime-durable-resume.js";
 import { raceWorkflowRequestAbort } from "./workflow-request-abort.js";
 
@@ -134,7 +127,7 @@ export interface ExtensionRuntime extends DurableResumeRuntime {
 	 */
 	dispatch(args: WorkflowToolArgs, options?: RuntimeDispatchOptions): Promise<WorkflowToolResult>;
 
-	/** Start a linked continuation for a failed resumable named workflow run. */
+	/** Resume a failed resumable named workflow under its existing execution identity. */
 	resumeFailedRun(
 		sourceRunId: string,
 		stageId?: string,
@@ -142,6 +135,9 @@ export interface ExtensionRuntime extends DurableResumeRuntime {
 	): Promise<ResumeFailedRunResult>;
 }
 export interface RuntimeDispatchOptions {
+	/** Reserved model-tool identity, supplied only by the registered admission door. */
+	readonly reservedRunId?: string;
+	readonly modelOwner?: string;
 	readonly policy?: WorkflowExecutionPolicy;
 	/** Who launched this run. Only an attributable launcher supplies it. */
 	readonly origin?: WorkflowActor;
@@ -320,168 +316,49 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				message: `insufficient_state: ${err instanceof Error ? err.message : String(err)}`,
 			};
 		}
-		const stageMessage = (verb: string, runId: string): string =>
-			`${verb} workflow "${def.name}" from run ${source.id}${resolvedStage.toolNodeId !== undefined ? ` at tool ${resolvedStage.toolNodeId}` : resolvedStage.stageId === undefined ? " at workflow start" : ` at stage ${resolvedStage.stageId}`} (run ${runId}).`;
-		const launchContinuation = (hooks?: Pick<DetachedRunOpts, "onWorkflowStartReady" | "onRawSettled">) =>
-			launchDetachedUntilStartup(def, sourceInputs, {
-				...runOptions(options?.policy),
-				startupSignal: options?.signal,
-				continuation: {
-					source,
-					...(resolvedStage.stageId !== undefined ? { resumeFromStageId: resolvedStage.stageId } : {}),
-					...(resolvedStage.toolNodeId !== undefined ? { resumeFromToolNodeId: resolvedStage.toolNodeId } : {}),
+		const backend = getDurableBackend();
+		const handle = backend.getWorkflow(source.id);
+		if (handle === undefined)
+			return { ok: false, reason: "insufficient_state", message: `No durable checkpoint state for ${source.id}.` };
+		const resumed = await resumeDurableWorkflow(
+			source.id,
+			{
+				registry,
+				durableBackend: backend,
+				jobs,
+				signal: options?.signal,
+				onRunAccepted: options?.onRunAccepted,
+				baseRunOpts: {
+					...runOptions(options?.policy),
+					...(options?.actor === undefined ? {} : { resumeActor: options.actor }),
+					...(options?.budget === undefined ? {} : { budget: options.budget }),
+					continuation: {
+						source,
+						...(resolvedStage.stageId === undefined ? {} : { resumeFromStageId: resolvedStage.stageId }),
+						...(resolvedStage.toolNodeId === undefined ? {} : { resumeFromToolNodeId: resolvedStage.toolNodeId }),
+					},
 				},
-				...(options?.actor === undefined ? {} : { resumeActor: options.actor }),
-				...(jobs !== undefined ? { jobs } : {}),
-				...(options?.budget === undefined ? {} : { budget: options.budget }),
-				...(hooks?.onWorkflowStartReady === undefined ? {} : { onWorkflowStartReady: hooks.onWorkflowStartReady }),
-				...(hooks?.onRawSettled === undefined ? {} : { onRawSettled: hooks.onRawSettled }),
-			});
-		if (isActiveBlockedResumable) {
-			// Durable source stays blocked/resumable. The local snapshot is killed
-			// as soon as the continuation is admitted so this session has one
-			// active entry. A fail-closed mismatch puts the reserved snapshot back.
-			const claim = claimActiveBlockedResume(activeStore, source.id);
-			if (claim === undefined) {
-				return {
-					ok: false,
-					reason: "not_resumable",
-					message: `run ${source.id} is already being resumed in this session`,
-				};
-			}
-			const reservedSource: RunSnapshot = {
-				...source,
-				stages: source.stages.map((stage) => ({ ...stage })),
-				toolNodes: source.toolNodes?.map((node) => ({ ...node })),
-			};
-			let admitted = false;
-			let launch: ReturnType<typeof launchContinuation>;
-			try {
-				launch = launchContinuation({
-					onWorkflowStartReady: () => {
-						admitted = true;
-					},
-					onRawSettled: (_ok, result, error) => {
-						if (!admitted) return;
-						finalizeActiveBlockedSourceAfterContinuation({
-							claim,
-							source: reservedSource,
-							continuationRunId: result?.runId ?? launch.accepted.runId,
-							persistence,
-							result,
-							error,
-						});
-					},
-				});
-			} catch (error) {
-				releaseActiveBlockedClaim(claim);
-				return {
-					ok: false,
-					reason: "insufficient_state",
-					message: `failed to resume run ${source.id}: ${error instanceof Error ? error.message : String(error)}`,
-				};
-			}
-			const { accepted } = launch;
-			options?.onRunAccepted?.(accepted.runId);
-			const admission = await launch.wait;
-			if (!admission.started) {
-				const startupError = workflowStartupFailureMessage(
-					admission,
-					activeStore.runs().find((run) => run.id === accepted.runId)?.error,
-					`workflow run ${accepted.runId} ended before startup admission`,
-				);
-				if (getDurableBackend().isAdmissionUnavailable?.(accepted.runId)) {
-					releaseActiveBlockedClaim(claim);
-					return {
-						ok: false,
-						reason: "insufficient_state",
-						message: `continuation for run ${source.id} failed to start: ${startupError}; cleanup skipped: database admission unavailable; source left resumable`,
-					};
-				}
-				try {
-					await discardFailedActiveBlockedContinuation(getDurableBackend(), accepted.runId, activeStore);
-				} catch (error) {
-					releaseActiveBlockedClaim(claim);
-					return {
-						ok: false,
-						reason: "insufficient_state",
-						message: `continuation for run ${source.id} failed to start (${startupError}) and cleanup failed: ${error instanceof Error ? error.message : String(error)}; source left resumable`,
-					};
-				}
-				releaseActiveBlockedClaim(claim);
-				return {
-					ok: false,
-					reason: "insufficient_state",
-					message: `continuation for run ${source.id} failed to start: ${startupError}; source left resumable`,
-				};
-			}
-			try {
-				finalizeResumedActiveBlockedSourceRun(claim, source, accepted.runId);
-			} catch (error) {
-				releaseActiveBlockedClaim(claim);
-				return {
-					ok: false,
-					reason: "insufficient_state",
-					message: `insufficient_state: failed to finalize resumed source ${source.id}: ${error instanceof Error ? error.message : String(error)}`,
-				};
-			}
-			return {
-				ok: true,
-				runId: accepted.runId,
-				sourceRunId: source.id,
-				resumeFromStageId: resolvedStage.stageId,
-				...(resolvedStage.toolNodeId !== undefined ? { resumeFromToolNodeId: resolvedStage.toolNodeId } : {}),
-				message: stageMessage("Resuming blocked", accepted.runId),
-			};
-		}
-		let launch: ReturnType<typeof launchContinuation>;
-		try {
-			launch = launchContinuation();
-		} catch (error) {
+			},
+			[resumableEntryFromHandle(handle)],
+		);
+		if (!resumed.ok)
 			return {
 				ok: false,
-				reason: "insufficient_state",
-				message: `failed to resume run ${source.id}: ${error instanceof Error ? error.message : String(error)}`,
+				reason:
+					resumed.reason === "workflow_not_found"
+						? "workflow_not_found"
+						: resumed.reason === "not_resumable" || resumed.reason === "stale"
+							? "not_resumable"
+							: "insufficient_state",
+				message: resumed.message,
 			};
-		}
-		const { accepted } = launch;
-		options?.onRunAccepted?.(accepted.runId);
-		const admission = await launch.wait;
-		if (!admission.started) {
-			const startupError = workflowStartupFailureMessage(
-				admission,
-				activeStore.runs().find((run) => run.id === accepted.runId)?.error,
-				`workflow run ${accepted.runId} ended before startup admission`,
-			);
-			if (getDurableBackend().isAdmissionUnavailable?.(accepted.runId)) {
-				return {
-					ok: false,
-					reason: "insufficient_state",
-					message: `continuation for run ${source.id} failed to start: ${startupError}; cleanup skipped: database admission unavailable; source left resumable`,
-				};
-			}
-			try {
-				await discardFailedActiveBlockedContinuation(getDurableBackend(), accepted.runId, activeStore);
-			} catch (error) {
-				return {
-					ok: false,
-					reason: "insufficient_state",
-					message: `continuation for run ${source.id} failed to start (${startupError}) and cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-				};
-			}
-			return {
-				ok: false,
-				reason: "insufficient_state",
-				message: `continuation for run ${source.id} failed to start: ${startupError}`,
-			};
-		}
 		return {
 			ok: true,
-			runId: accepted.runId,
+			runId: source.id,
 			sourceRunId: source.id,
 			resumeFromStageId: resolvedStage.stageId,
-			...(resolvedStage.toolNodeId !== undefined ? { resumeFromToolNodeId: resolvedStage.toolNodeId } : {}),
-			message: stageMessage("Resuming failed", accepted.runId),
+			...(resolvedStage.toolNodeId === undefined ? {} : { resumeFromToolNodeId: resolvedStage.toolNodeId }),
+			message: resumed.message,
 		};
 	}
 
@@ -514,6 +391,8 @@ export function createExtensionRuntime(opts: ExtensionRuntimeOpts = {}): Extensi
 				resolvePossibleStageEntry,
 				policy: options?.policy,
 				assertRoutingCurrent: options?.assertRoutingCurrent,
+				reservedRunId: options?.reservedRunId,
+				modelOwner: options?.modelOwner,
 				...(options?.origin === undefined ? {} : { origin: options.origin }),
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 				...(options?.onRunAccepted === undefined ? {} : { onRunAccepted: options.onRunAccepted }),

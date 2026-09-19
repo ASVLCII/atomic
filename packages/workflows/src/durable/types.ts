@@ -44,6 +44,7 @@ export interface DurableWorkflowHandle {
 	readonly invocationCwd?: string;
 	/** Who launched this workflow, when the launcher was attributable. */
 	readonly origin?: WorkflowActor;
+	readonly modelOwner?: string;
 	/** Resolved workflow cwd when an input-bound reusable worktree was set up. */
 	readonly workflowCwd?: string;
 	/** Invoking repository root used for reusable worktree validation. */
@@ -308,6 +309,7 @@ export interface DurableWorkflowMetadata {
 	readonly exitReason?: string;
 	readonly invocationCwd?: string;
 	readonly origin?: WorkflowActor;
+	readonly modelOwner?: string;
 	readonly workflowCwd?: string;
 	readonly repositoryRoot?: string;
 	readonly gitWorktreeRoot?: string;
@@ -342,6 +344,7 @@ export interface ResumableWorkflowEntry {
 	readonly exitReason?: string;
 	readonly invocationCwd?: string;
 	readonly origin?: WorkflowActor;
+	readonly modelOwner?: string;
 	readonly workflowCwd?: string;
 	readonly repositoryRoot?: string;
 	readonly gitWorktreeRoot?: string;

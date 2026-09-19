@@ -336,10 +336,11 @@ describe("non-attachable tool interactions", () => {
 			{ getRuntime: () => runtime, policy: undefined, ensureWorkflowResourcesLoaded: async () => {} } as never,
 		);
 		assert.equal(resumed.status, "running");
-		assert.notEqual(resumed.runId, source.id);
+		assert.equal(resumed.runId, source.id);
 		await sleep(100);
 		const continuation = store.runs().find((candidate) => candidate.resumedFromRunId === source.id);
 		assert.equal(continuation?.status, "completed");
+		assert.equal(store.runs().filter((candidate) => candidate.id === source.id).length, 1);
 	});
 
 	test("tool does not snapshot-resume an exited failure without a durable registration", async () => {

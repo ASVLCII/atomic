@@ -4,18 +4,12 @@ import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
-import {
-	claimActiveBlockedResume,
-	finalizeActiveBlockedSourceAfterContinuation,
-	finalizeResumedActiveBlockedSourceRun,
-	isReplayTopologyMismatchFailure,
-	releaseActiveBlockedClaim,
-} from "../../packages/workflows/src/extension/runtime-active-block-claim.js";
 import { createJobTracker } from "../../packages/workflows/src/runs/background/job-tracker.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
+import { testRunId } from "../helpers/run-id.js";
 
-const runId = "active-blocked-claim";
+const runId = testRunId("active-blocked-claim");
 
 afterEach(() => setDurableBackend(undefined));
 
@@ -59,7 +53,7 @@ function registerBlockedDurable(backend: InMemoryDurableBackend, completedCheckp
 
 class FailingInvocationMetadataBackend extends InMemoryDurableBackend {
 	override registerWorkflow(handle: Parameters<InMemoryDurableBackend["registerWorkflow"]>[0]): void {
-		if (handle.workflowId !== runId && handle.invocationCwd !== undefined) {
+		if (handle.invocationCwd !== undefined) {
 			throw new Error("invocation metadata persistence failed");
 		}
 		super.registerWorkflow(handle);
@@ -79,37 +73,8 @@ function claimFlow() {
 	});
 }
 
-test("recognizes replay-topology mismatch and ambiguity reasons", () => {
-	assert.equal(
-		isReplayTopologyMismatchFailure(
-			{ error: "atomic-workflows: insufficient_state: replay topology mismatch for tool t" },
-			undefined,
-		),
-		true,
-	);
-	assert.equal(
-		isReplayTopologyMismatchFailure(
-			{ error: "atomic-workflows: insufficient_state: replay topology ambiguous for stage t" },
-			undefined,
-		),
-		true,
-	);
-});
-
 describe("active-blocked resume claim", () => {
-	test("scopes duplicate claims to one store", () => {
-		const firstStore = createStore();
-		const secondStore = createStore();
-		const first = claimActiveBlockedResume(firstStore, runId);
-		assert.ok(first);
-		assert.equal(claimActiveBlockedResume(firstStore, runId), undefined);
-		const independent = claimActiveBlockedResume(secondStore, runId);
-		assert.ok(independent);
-		releaseActiveBlockedClaim(first);
-		releaseActiveBlockedClaim(independent);
-	});
-
-	test("dispatches a fresh-ID continuation and keeps the durable source blocked/resumable", async () => {
+	test("continues the same identity and completes its durable state", async () => {
 		const backend = new InMemoryDurableBackend();
 		registerBlockedDurable(backend);
 		setDurableBackend(backend);
@@ -125,16 +90,10 @@ describe("active-blocked resume claim", () => {
 		const result = await runtime.resumeFailedRun(runId);
 		assert.equal(result.ok, true);
 		const continuationId = result.ok ? result.runId : "";
-		// A fresh-ID continuation is dispatched (its id differs from the source).
-		assert.notEqual(continuationId, runId);
+		// #3106: a continuation resumes the reserved instance, not a second run.
+		assert.equal(continuationId, runId);
 		await jobs.get(continuationId)?.promise;
-
-		// The durable source is left blocked/resumable (not mutated), so the work
-		// stays recoverable if this process dies.
-		assert.equal(backend.getWorkflow(runId)?.status, "blocked");
-		assert.equal(backend.getWorkflow(runId)?.resumable, true);
-		// The local source snapshot is killed (same-session routing won't re-resume).
-		assert.equal(store.runs().find((run) => run.id === runId)?.status, "killed");
+		assert.equal(backend.getWorkflow(runId)?.status, "completed");
 		assert.equal(store.runs().find((run) => run.id === continuationId)?.status, "completed");
 	});
 
@@ -183,10 +142,7 @@ describe("active-blocked resume claim", () => {
 		const result = await runtime.resumeFailedRun(runId);
 
 		assert.equal(result.ok, false);
-		assert.match(
-			result.ok ? "" : result.message,
-			/failed to start: run\.start persistence failed; source left resumable/u,
-		);
+		assert.match(result.ok ? "" : result.message, /run\.start persistence failed/u);
 		assert.equal(callbacks, 0);
 		// No orphan running continuation snapshot.
 		assert.equal(store.runs().filter((run) => run.id !== runId).length, 0);
@@ -198,7 +154,7 @@ describe("active-blocked resume claim", () => {
 		assert.equal(backend.getWorkflow(runId)?.resumable, true);
 	});
 
-	test("leaves the source resumable when durable invocation metadata registration fails", async () => {
+	test("same-ID continuation does not register unrelated invocation metadata", async () => {
 		const backend = new FailingInvocationMetadataBackend();
 		registerBlockedDurable(backend);
 		setDurableBackend(backend);
@@ -210,8 +166,9 @@ describe("active-blocked resume claim", () => {
 			description: "",
 			inputs: {},
 			outputs: {},
-			run: async () => {
+			run: async (ctx) => {
 				callbacks += 1;
+				await ctx.stage("only").prompt("go");
 				return {};
 			},
 		});
@@ -224,22 +181,12 @@ describe("active-blocked resume claim", () => {
 
 		const result = await runtime.resumeFailedRun(runId);
 
-		assert.equal(result.ok, false);
-		assert.match(
-			result.ok ? "" : result.message,
-			/failed to start: invocation metadata persistence failed; source left resumable/u,
-		);
-		assert.equal(callbacks, 0);
-		assert.equal(store.runs().filter((run) => run.id !== runId).length, 0);
-		const source = store.runs().find((run) => run.id === runId);
-		assert.ok(source);
-		assert.equal(source.endedAt, undefined);
-		assert.equal(backend.getWorkflow(runId)?.status, "blocked");
-		assert.equal(backend.getWorkflow(runId)?.resumable, true);
-		assert.deepEqual(
-			backend.listResumableWorkflows().map((run) => run.workflowId),
-			[runId],
-		);
+		assert.equal(result.ok, true);
+		assert.equal(result.runId, runId);
+		await jobs.get(runId)?.promise;
+		assert.equal(callbacks, 1);
+		assert.equal(store.runs().length, 1);
+		assert.equal(backend.getWorkflow(runId)?.status, "completed");
 	});
 
 	test("refuses a concurrent second resume (one winner)", async () => {
@@ -280,7 +227,7 @@ describe("active-blocked resume claim", () => {
 
 		const first = await runtime.resumeFailedRun(runId);
 		assert.equal(first.ok, true);
-		// A second resume is refused because the local source is already killed.
+		// #3106: the identity already has an executor, not a killed source/link pair.
 		const second = await runtime.resumeFailedRun(runId);
 		assert.equal(second.ok, false);
 
@@ -316,188 +263,102 @@ describe("active-blocked resume claim", () => {
 		assert.equal(result.ok, true);
 		const continuationId = result.ok ? result.runId : "";
 		await jobs.get(continuationId)?.promise;
-		assert.equal(store.runs().find((run) => run.id === runId)?.status, "killed");
+		assert.equal(store.runs().find((run) => run.id === runId)?.status, "completed");
 		assert.equal(store.runs().find((run) => run.id === continuationId)?.status, "completed");
 		assert.equal(terminalPersistenceCalls, 1);
-		assert.equal(backend.getWorkflow(runId)?.status, "blocked");
-		assert.equal(backend.getWorkflow(runId)?.resumable, true);
+		assert.equal(backend.getWorkflow(runId)?.status, "completed");
 	});
 
-	test("restoring a blocked source after a topology mismatch keeps prompt answers and notices", () => {
-		const store = createStore();
-		store.recordRunStart({
-			id: runId,
-			name: "claim-flow",
-			inputs: {},
-			status: "running",
-			stages: [],
-			startedAt: 1,
-		});
-		store.recordStageStart(runId, {
-			id: "ask",
-			name: "ask",
-			status: "running",
-			parentIds: [],
-			toolEvents: [],
-		});
-		assert.equal(
-			store.recordStagePromptAnswer(
-				runId,
-				"ask",
-				{ id: "p1", kind: "confirm", message: "proceed?", createdAt: 2 },
-				true,
-			),
-			true,
-		);
-		store.recordStageEnd(runId, {
-			id: "ask",
-			name: "ask",
-			status: "completed",
-			parentIds: [],
-			toolEvents: [],
-		});
-		store.recordStageStart(runId, {
-			id: "only",
-			name: "only",
-			status: "failed",
-			parentIds: ["ask"],
-			toolEvents: [],
-			error: "login",
-			failureKind: "auth",
-			failureRecoverability: "recoverable",
-			failureDisposition: "active_blocked",
-			failureMessage: "login required",
-		});
-		store.recordRunBlocked(runId, "login", {
-			failedStageId: "only",
-			failureKind: "auth",
-			failureRecoverability: "recoverable",
-			failureDisposition: "active_blocked",
-			failureMessage: "login required",
-			resumable: true,
-		});
-		store.recordNotice({
-			id: "blocked-notice",
-			runId,
-			level: "warning",
-			message: "WORKFLOW BLOCKED",
-			createdAt: 3,
-		});
-		const source = store.runs().find((run) => run.id === runId);
-		assert.ok(source);
-		const reserved = {
-			...source,
-			stages: source.stages.map((stage) => ({ ...stage })),
-		};
-		const claim = claimActiveBlockedResume(store, source.id);
-		assert.ok(claim);
-		finalizeResumedActiveBlockedSourceRun(claim, source, "continuation");
-		assert.equal(store.runs().find((run) => run.id === runId)?.status, "killed");
-		finalizeActiveBlockedSourceAfterContinuation({
-			claim,
-			source: reserved,
-			continuationRunId: "continuation",
-			result: { error: "atomic-workflows: insufficient_state: replay topology mismatch for tool t" },
-		});
-		const restored = store.runs().find((run) => run.id === runId);
-		assert.ok(restored);
-		assert.notEqual(restored.status, "killed");
-		assert.equal(restored.resumable, true);
-		assert.equal(store.getStagePromptAnswer(runId, "ask")?.value, true);
-		assert.equal(restored.stages.find((stage) => stage.id === "ask")?.promptAnswerState, "available");
-		assert.equal(
-			store.notices().some((notice) => notice.runId === runId && notice.message === "WORKFLOW BLOCKED"),
-			true,
-		);
-	});
-
-	test("restoring a blocked source after ambiguous replay topology keeps prompt answers and notices", () => {
-		const store = createStore();
-		store.recordRunStart({
-			id: runId,
-			name: "claim-flow",
-			inputs: {},
-			status: "running",
-			stages: [],
-			startedAt: 1,
-		});
-		store.recordStageStart(runId, {
-			id: "ask",
-			name: "ask",
-			status: "running",
-			parentIds: [],
-			toolEvents: [],
-		});
-		assert.equal(
-			store.recordStagePromptAnswer(
-				runId,
-				"ask",
-				{ id: "p1", kind: "confirm", message: "proceed?", createdAt: 2 },
-				true,
-			),
-			true,
-		);
-		store.recordStageEnd(runId, {
-			id: "ask",
-			name: "ask",
-			status: "completed",
-			parentIds: [],
-			toolEvents: [],
-		});
-		store.recordStageStart(runId, {
-			id: "only",
-			name: "only",
-			status: "failed",
-			parentIds: ["ask"],
-			toolEvents: [],
-			error: "login",
-			failureKind: "auth",
-			failureRecoverability: "recoverable",
-			failureDisposition: "active_blocked",
-			failureMessage: "login required",
-		});
-		store.recordRunBlocked(runId, "login", {
-			failedStageId: "only",
-			failureKind: "auth",
-			failureRecoverability: "recoverable",
-			failureDisposition: "active_blocked",
-			failureMessage: "login required",
-			resumable: true,
-		});
-		store.recordNotice({
-			id: "blocked-notice",
-			runId,
-			level: "warning",
-			message: "WORKFLOW BLOCKED",
-			createdAt: 3,
-		});
-		const source = store.runs().find((run) => run.id === runId);
-		assert.ok(source);
-		const reserved = {
-			...source,
-			stages: source.stages.map((stage) => ({ ...stage })),
-		};
-		const claim = claimActiveBlockedResume(store, source.id);
-		assert.ok(claim);
-		finalizeResumedActiveBlockedSourceRun(claim, source, "continuation");
-		assert.equal(store.runs().find((run) => run.id === runId)?.status, "killed");
-		finalizeActiveBlockedSourceAfterContinuation({
-			claim,
-			source: reserved,
-			continuationRunId: "continuation",
-			result: {
-				error: 'atomic-workflows: insufficient_state: replay topology ambiguous for stage "t" (replayKey "stage:task:t:1") in source run source',
+	// #3106: the durable CAS, not a caller's snapshot, decides resume admission.
+	test("a terminal control that wins pending resume admission is never overwritten", async () => {
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		class HeldAdmissionBackend extends InMemoryDurableBackend {
+			override async transitionWorkflowStatus(
+				...args: Parameters<InMemoryDurableBackend["transitionWorkflowStatus"]>
+			) {
+				entered.resolve();
+				await release.promise;
+				return super.transitionWorkflowStatus(...args);
+			}
+		}
+		const backend = new HeldAdmissionBackend();
+		registerBlockedDurable(backend);
+		setDurableBackend(backend);
+		const store = seedBlockedRun();
+		const jobs = createJobTracker();
+		let calls = 0;
+		const runtime = createExtensionRuntime({
+			registry: createRegistry([claimFlow()]),
+			store,
+			jobs,
+			adapters: {
+				prompt: {
+					prompt: async () => {
+						calls += 1;
+						return "done";
+					},
+				},
 			},
 		});
-		const restored = store.runs().find((run) => run.id === runId);
-		assert.ok(restored);
-		assert.notEqual(restored.status, "killed");
-		assert.equal(restored.resumable, true);
-		assert.equal(store.getStagePromptAnswer(runId, "ask")?.value, true);
-		assert.equal(restored.stages.find((stage) => stage.id === "ask")?.promptAnswerState, "available");
-		assert.equal(
-			store.notices().some((notice) => notice.runId === runId && notice.message === "WORKFLOW BLOCKED"),
-			true,
-		);
+		const pending = runtime.resumeFailedRun(runId);
+		await entered.promise;
+		backend.setWorkflowStatus(runId, "cancelled", 0, false);
+		assert.equal(store.recordRunEnd(runId, "killed"), true);
+		release.resolve();
+		const result = await pending;
+		assert.equal(result.ok, false);
+		assert.equal(calls, 0);
+		assert.equal(jobs.has(runId), false);
+		assert.equal(backend.getWorkflow(runId)?.status, "cancelled");
+		assert.equal(store.runs()[0]?.status, "killed");
+		assert.equal(store.runs().length, 1);
+		assert.equal((await runtime.resumeFailedRun(runId)).ok, false);
+	});
+
+	// #3106: concurrent runtime views cannot each acquire the same instance.
+	test("overlapping resumes from different runtime views admit one executor", async () => {
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		class HeldAdmissionBackend extends InMemoryDurableBackend {
+			override async transitionWorkflowStatus(
+				...args: Parameters<InMemoryDurableBackend["transitionWorkflowStatus"]>
+			) {
+				entered.resolve();
+				await release.promise;
+				return super.transitionWorkflowStatus(...args);
+			}
+		}
+		const backend = new HeldAdmissionBackend();
+		registerBlockedDurable(backend);
+		setDurableBackend(backend);
+		const jobs = createJobTracker();
+		let calls = 0;
+		const makeRuntime = () =>
+			createExtensionRuntime({
+				registry: createRegistry([claimFlow()]),
+				store: seedBlockedRun(),
+				jobs,
+				adapters: {
+					prompt: {
+						prompt: async () => {
+							calls += 1;
+							return "done";
+						},
+					},
+				},
+			});
+		const first = makeRuntime().resumeFailedRun(runId);
+		await entered.promise;
+		const second = await makeRuntime().resumeFailedRun(runId);
+		assert.equal(second.ok, false);
+		assert.equal(calls, 0);
+		release.resolve();
+		const admitted = await first;
+		assert.equal(admitted.ok, true);
+		if (admitted.ok) assert.equal(admitted.runId, runId);
+		await jobs.get(runId)?.promise;
+		assert.equal(calls, 1);
+		assert.equal(backend.getWorkflow(runId)?.status, "completed");
 	});
 });

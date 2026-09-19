@@ -675,9 +675,9 @@ describe("token and cost budget metering", () => {
 
 		const report = budgetOutcome(result.result);
 		const snapshots = store.runs().filter((candidate) => candidate.id === runId);
-		assert.equal(snapshots.length, 2);
+		// #3106: one identity owns one store snapshot, including metered usage.
+		assert.equal(snapshots.length, 1);
 		assert.equal(snapshots[0]?.stages.length, 3);
-		assert.equal(snapshots[1]?.stages.length, 0);
 		assert.equal(report?.status, "budget_exceeded");
 		assert.equal(report?.dimension, "tokens");
 		assert.equal(report?.reading, 15);
@@ -790,7 +790,7 @@ describe("token and cost budget metering", () => {
 		);
 
 		const report = budgetOutcome(result.result);
-		const current = store.runs().filter((candidate) => candidate.id === runId)[1];
+		const current = store.runs().find((candidate) => candidate.id === runId);
 		assert.equal(report?.status, "budget_exceeded");
 		assert.equal(report?.dimension, "tokens");
 		assert.equal(report?.reading, 280);
@@ -843,11 +843,12 @@ describe("token and cost budget metering", () => {
 		assert.equal(report?.dimension, "tokens");
 		assert.equal(report?.reading, 280);
 		assert.equal(report?.ceiling, 250);
+		assert.equal(snapshots.length, 1);
 		assert.deepEqual(
 			snapshots[0]?.stages.map((stage) => stage.name),
-			["prior-spend", "fresh-spend"],
+			["fresh-spend"],
 		);
-		assert.equal(snapshots[1]?.budgetState?.accounting?.tokens, 280);
+		assert.equal(snapshots[0]?.budgetState?.accounting?.tokens, 280);
 	});
 
 	test("budget durable resume carries token and cost accounting after the prior snapshot is removed", async () => {
