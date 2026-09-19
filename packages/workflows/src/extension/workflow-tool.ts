@@ -175,11 +175,9 @@ export function makeExecuteWorkflowTool(
 					if (decision.workflowType === "none")
 						return {
 							action,
-							workflowType: "none",
 							workflowId: "",
 							status: "not_launched",
 							routerDecision: decision,
-							estimatedDuration: decision.estimatedDuration,
 							message: WORKFLOW_INLINE_GUIDANCE,
 						};
 					routed.assertCurrent();
@@ -187,18 +185,15 @@ export function makeExecuteWorkflowTool(
 					const entry = reservations.register(ctx, selected, decision, routed.assertCurrent);
 					return {
 						action,
-						workflowType: decision.workflowType,
 						workflowId: entry.id,
 						status: "reserved",
 						routerDecision: decision,
-						estimatedDuration: decision.estimatedDuration,
 						inputSchema: structuredClone(selected.inputs),
 					};
 				} catch (error) {
 					if (signal?.aborted) throw signal.reason ?? error;
 					return {
 						action,
-						workflowType: "",
 						workflowId: "",
 						status: "failed",
 						error: error instanceof Error ? error.message : String(error),
@@ -234,7 +229,6 @@ export function makeExecuteWorkflowTool(
 							status: "needs_input",
 							name: definition.normalizedName,
 							routerDecision: structuredClone(decision),
-							estimatedDuration: decision.estimatedDuration,
 							inputContract: structuredClone(definition.inputs),
 							message: `${error instanceof Error ? error.message : String(error)} Correct inputs and retry run with the same workflowId. No workflow was launched.`,
 						};
@@ -266,7 +260,6 @@ export function makeExecuteWorkflowTool(
 								...result,
 								workflowId: reserved.id,
 								routerDecision: structuredClone(decision),
-								estimatedDuration: decision.estimatedDuration,
 							}
 						: result;
 				} catch (error) {
@@ -285,9 +278,7 @@ export function makeExecuteWorkflowTool(
 						runId: entry?.id ?? "",
 						workflowId: entry?.id ?? "",
 						status: "failed",
-						...(decision === undefined
-							? {}
-							: { routerDecision: structuredClone(decision), estimatedDuration: decision.estimatedDuration }),
+						...(decision === undefined ? {} : { routerDecision: structuredClone(decision) }),
 						error: error instanceof Error ? error.message : String(error),
 					};
 				}

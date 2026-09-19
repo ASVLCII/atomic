@@ -220,7 +220,8 @@ test("different selection returns its decision without stale-input execution", a
 	assert.ok("routerDecision" in result.details);
 	assert.equal(result.details.routerDecision?.workflowType, "review-only");
 	assert.equal(result.details.status, "needs_input");
-	assert.equal(result.details.estimatedDuration, "unknown");
+	assert.equal("estimatedDuration" in result.details, false);
+	assert.equal(result.details.routerDecision?.estimatedDuration, "unknown");
 	assert.deepEqual(result.details.inputContract, f.runtime.registry.get("review-only")!.inputs);
 	assert.match(result.details.message ?? "", /required input/);
 	assert.equal(f.infer.mock.calls.length, 1);
@@ -293,7 +294,9 @@ test("explicit inline preference reaches router and prevents reservation", async
 	const result = await f.call();
 	assert.equal(f.infer.mock.calls.length, 1);
 	assert.equal(result.details.action, "route");
-	assert.equal("workflowType" in result.details && result.details.workflowType, "none");
+	assert.equal("workflowType" in result.details, false);
+	assert.ok("routerDecision" in result.details);
+	assert.equal(result.details.routerDecision?.workflowType, "none");
 	f.noLaunch();
 });
 
@@ -981,7 +984,8 @@ for (const request of [
 		const result = await f.call({ ...f.args, workflow: "assistant-preselected-not-registered", state });
 		assert.ok("routerDecision" in result.details);
 		assert.equal(result.details.status, "not_launched");
-		assert.equal(result.details.estimatedDuration, "15min");
+		assert.equal("estimatedDuration" in result.details, false);
+		assert.equal(result.details.routerDecision?.estimatedDuration, "15min");
 		assert.equal(f.infer.mock.calls.length, 1);
 		f.noLaunch();
 	});
@@ -997,7 +1001,8 @@ for (const legacy of [undefined, "approved-change", "not-registered"]) {
 		assert.ok(result.details.action === "run");
 		assert.ok("routerDecision" in result.details);
 		assert.equal(result.details.routerDecision?.workflowType, "review-only");
-		assert.equal(result.details.estimatedDuration, "15min");
+		assert.equal("estimatedDuration" in result.details, false);
+		assert.equal(result.details.routerDecision?.estimatedDuration, "15min");
 		assert.ok(result.details.runId);
 		await f.jobs.get(result.details.runId)!.promise;
 		assert.equal(f.store.runs()[0]!.name, "review-only");

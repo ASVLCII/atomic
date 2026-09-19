@@ -125,7 +125,10 @@ test.each(["structured", "jev"] as const)(
 		);
 		assert.equal(route.action, "route");
 		if (route.action !== "route") throw new Error("wrong action");
-		assert.equal(route.workflowType, "registered");
+		assert.equal("workflowType" in route, false);
+		assert.equal(route.routerDecision?.workflowType, "registered");
+		assert.equal("estimatedDuration" in route, false);
+		assert.equal(route.routerDecision?.estimatedDuration, "unknown");
 		assert.deepEqual(route.inputSchema, f.definition.inputs);
 		assert.equal(f.store.runs().length, 0);
 		const args = { action: "run" as const, workflowId: route.workflowId };
@@ -143,6 +146,11 @@ test.each(["structured", "jev"] as const)(
 		assert.equal(provider === "jev" ? vi.mocked(fetch).mock.calls.length : f.inference.mock.calls.length, 1);
 		const retry = await f.execute({ ...args, inputs: { objective: "approved" } }, f.ctx);
 		assert.match("error" in retry ? (retry.error ?? "") : "", /Terminal/);
+		for (const result of [missing, ...results, retry]) {
+			assert.equal("estimatedDuration" in result, false);
+			assert.ok("routerDecision" in result);
+			assert.deepEqual(result.routerDecision, route.routerDecision);
+		}
 		assert.equal(f.body.mock.calls.length, 1);
 	},
 );
@@ -476,8 +484,11 @@ test.each(["structured", "jev"] as const)(
 			f.ctx,
 		);
 		assert.equal(result.action, "route");
-		assert.equal(result.workflowType, "none");
+		assert.equal("workflowType" in result, false);
+		assert.equal(result.routerDecision?.workflowType, "none");
 		assert.equal(result.workflowId, "");
+		assert.equal("estimatedDuration" in result, false);
+		assert.equal(result.routerDecision?.estimatedDuration, "unknown");
 		const run = await f.execute(
 			{ action: "run", workflowId: result.workflowId, inputs: { objective: "approved" } },
 			f.ctx,
@@ -542,4 +553,20 @@ test("owner can pause all and resume each independent registered instance", asyn
 	}
 	await Promise.all(f.jobs.runIds().map((id) => f.jobs.get(id)!.promise));
 	assert.equal(f.body.mock.calls.length, 4);
+});
+
+test("route inference failure returns no fabricated decision or duration", async () => {
+	const f = fixture();
+	f.inference.mockImplementation(() => {
+		throw new Error("Routing unavailable");
+	});
+	const result = await f.execute({ action: "route", state: { task: "Implement approved work" } }, f.ctx);
+	assert.equal(result.action, "route");
+	assert.equal(result.status, "failed");
+	assert.equal(result.workflowId, "");
+	assert.match(result.error ?? "", /Structured output provider request failed/);
+	assert.equal("routerDecision" in result, false);
+	assert.equal("workflowType" in result, false);
+	assert.equal("estimatedDuration" in result, false);
+	assert.equal(f.store.runs().length, 0);
 });
