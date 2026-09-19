@@ -34,8 +34,12 @@ export async function createStageSkillFixture() {
 	const userSkill = await skill("stage-user", "user", "STAGE USER ALTERNATIVE.");
 	const mainSkill = await skill("main-project", "project", "MAIN SKILL BODY MUST NOT REACH STAGE.");
 	let catalog = buildSkillCatalog([stageSkill, userSkill], [stageSkill]);
+	let resources = createTestResourceLoader();
 	const loader = {
-		...createTestResourceLoader(),
+		...resources,
+		getExtensions: () => resources.getExtensions(),
+		// #3105: reload retires the old runtime; discovery must publish a fresh generation.
+		reload: async () => { resources = createTestResourceLoader(); },
 		getSkills: () => ({ skills: [stageSkill], diagnostics: [] }),
 		getSkillCatalog: () => catalog,
 	};
@@ -93,8 +97,8 @@ export async function createStageSkillFixture() {
 			await stage.session.abort();
 			await running;
 			registry.clear();
-			stage.cleanup();
-			main.cleanup();
+			await stage.cleanup();
+			await main.cleanup();
 			rmSync(directory, { recursive: true, force: true });
 		},
 	};

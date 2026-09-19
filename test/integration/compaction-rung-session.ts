@@ -89,7 +89,7 @@ export interface RungSession {
 	manager: SessionManager;
 	events: AgentSessionEvent[];
 	continueCalls: () => number;
-	dispose: () => void;
+	dispose: () => Promise<void>;
 }
 
 export interface RungSessionOptions {

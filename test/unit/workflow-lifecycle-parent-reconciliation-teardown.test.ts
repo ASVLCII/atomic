@@ -13,12 +13,13 @@ describe("workflow lifecycle parent reconciliation teardown", () => {
 	const harnesses: Harness[] = [];
 	const unsubscriptions: Array<() => void> = [];
 
-	afterEach(() => {
+	afterEach(async () => {
 		while (unsubscriptions.length > 0) unsubscriptions.pop()?.();
-		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 	});
 
-	test("permanent consumed-reconciliation persistence failure stops host replacement before invalidation", async () => {
+	// #3105: failed retirement invalidates authority but preserves the persistence cause and recovery state.
+	test("permanent consumed-reconciliation failure retires the host and preserves recovery state", async () => {
 		const store = createStore();
 		store.recordRunStart({
 			id: "run-permanent-persistence",
@@ -118,19 +119,35 @@ describe("workflow lifecycle parent reconciliation teardown", () => {
 			runtime.setRebindSession(async () => {
 				rebindCalls += 1;
 			});
-			const liveContextCwd = oldSession.extensionRunner.createContext().cwd;
-
-			await assert.rejects(runtime.newSession(), /permanent hidden reconciliation write failure/);
+			let shutdownFailure: AggregateError | undefined;
+			await assert.rejects(runtime.newSession(), (error) => {
+				assert.ok(error instanceof AggregateError);
+				assert.equal("code" in error && error.code, "ShutdownFailed");
+				assert.ok(
+					error.errors.some(
+						(component: Error) =>
+							component.cause instanceof Error &&
+							component.cause.message === "permanent hidden reconciliation write failure",
+					),
+				);
+				shutdownFailure = error;
+				return true;
+			});
 
 			assert.equal(hiddenPersistenceAttempts >= 2, true, "host teardown must make the final persistence attempt");
-			assert.equal(beforeSessionInvalidateCalls, 0);
+			assert.equal(beforeSessionInvalidateCalls, 1);
 			assert.equal(createRuntimeCalls, 0);
 			assert.equal(rebindCalls, 0);
-			assert.equal(runtime.session, oldSession, "the host must retain the recoverable session");
-			assert.equal(oldSession.extensionRunner.createContext().cwd, liveContextCwd, "extensions must remain valid");
+			assert.equal(runtime.session, oldSession, "a failed retirement must not publish a replacement");
+			assert.throws(() => oldSession.extensionRunner.createContext().cwd, /no longer active|stale|invalid/i);
+			const retainedRun = store.runs().find((run) => run.id === "run-permanent-persistence");
+			assert.equal(retainedRun?.status, "completed");
+			assert.deepEqual(retainedRun?.stages, []);
 			assert.equal(protectedEntries.length, 1, "protected recovery state must not be discarded");
 			assert.equal(protectedEntries[0], protectedEntry);
 			assert.equal(protectedEntry.phase, "persistence-failed");
+			assert.equal(harnesses.pop(), harness);
+			await assert.rejects(harness.cleanup(), (error) => error === shutdownFailure);
 		} finally {
 			runtime?.setBeforeSessionInvalidate(undefined);
 			runtime?.setRebindSession(undefined);

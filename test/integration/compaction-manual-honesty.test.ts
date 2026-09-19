@@ -76,7 +76,7 @@ test("manual compaction with every model rate limited reports a real diagnostic 
 		const result = await built.session.compact({ preserve_recent: 2 });
 		assert.equal(result.rung, "planned");
 	} finally {
-		built.dispose();
+		await built.dispose();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
@@ -120,7 +120,7 @@ test("an over-limit post-tool context with a tiny region persists a fresh bounda
 		assert.ok(Array.isArray(finish(rebuilt)));
 		assert.equal(built.continueCalls(), 0);
 	} finally {
-		built.dispose();
+		await built.dispose();
 	}
 });
 
@@ -165,7 +165,7 @@ test("a fitting post-tool threshold crossing with a tiny region is a safe no-op"
 		assert.equal(ends[0].result, undefined);
 		assert.equal(ends[0].midTurn, true);
 	} finally {
-		built.dispose();
+		await built.dispose();
 	}
 });
 
@@ -194,7 +194,7 @@ test("an over-hard-limit post-tool crossing with a tiny region reaches fresh", a
 		assert.equal(calls.length, 0);
 		assert.equal(built.continueCalls(), 0);
 	} finally {
-		built.dispose();
+		await built.dispose();
 	}
 });
 
@@ -214,7 +214,7 @@ test("real overflow recovery keeps fresh reachable for a tiny region", async () 
 		assert.equal((boundary as { details?: VerbatimCompactionDetails }).details?.rung, "fresh");
 		assert.equal(calls.length, 0);
 	} finally {
-		built.dispose();
+		await built.dispose();
 	}
 });
 
@@ -243,7 +243,7 @@ test("a small recoverable region is still refused, never cleared", async () => {
 		);
 		assert.equal(calls.length, 0);
 	} finally {
-		built.dispose();
+		await built.dispose();
 	}
 });
 
@@ -269,6 +269,6 @@ test("a caller cannot inject load_bearing urgency through the public compact doo
 		assert.equal(ends.length, 1);
 		assert.equal(ends[0].result, undefined);
 	} finally {
-		built.dispose();
+		await built.dispose();
 	}
 });

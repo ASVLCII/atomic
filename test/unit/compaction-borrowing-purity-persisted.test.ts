@@ -97,7 +97,7 @@ interface PersistedHarness {
 	continueCalls: () => number;
 	models: string[];
 	sessionFile: string;
-	dispose: () => void;
+	dispose: () => Promise<void>;
 }
 
 async function createPersistedSession(directory: string): Promise<PersistedHarness> {
@@ -254,7 +254,7 @@ test("a rescued compaction appends exactly one durable boundary and nothing else
 		);
 		assert.equal(harness.continueCalls(), 0);
 	} finally {
-		harness.dispose();
+		await harness.dispose();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
@@ -282,7 +282,7 @@ test("no borrowed or session credential reaches the durable session artifacts", 
 			assert.ok(!raw.includes("apiKey"), `${file} contains an apiKey field`);
 		}
 	} finally {
-		harness.dispose();
+		await harness.dispose();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });

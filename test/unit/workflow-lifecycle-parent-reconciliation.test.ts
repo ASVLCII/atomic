@@ -22,9 +22,9 @@ describe("workflow lifecycle parent reconciliation", () => {
 	const tempDirs: string[] = [];
 	const unsubscriptions: Array<() => void> = [];
 
-	afterEach(() => {
+	afterEach(async () => {
 		while (unsubscriptions.length > 0) unsubscriptions.pop()?.();
-		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 		while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
 	});
 

@@ -95,7 +95,7 @@ export interface Harness {
 	events: AgentSessionEvent[];
 	eventsOfType<T extends AgentSessionEvent["type"]>(type: T): Extract<AgentSessionEvent, { type: T }>[];
 	tempDir: string;
-	cleanup: () => void;
+	cleanup: () => Promise<void>;
 }
 
 function createTempDir(): string {
@@ -224,11 +224,13 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			return events.filter((event): event is Extract<AgentSessionEvent, { type: T }> => event.type === type);
 		},
 		tempDir,
-		cleanup() {
-			session.dispose();
-			fauxProvider.unregister();
-			if (existsSync(tempDir)) {
-				rmSync(tempDir, { recursive: true });
+		async cleanup() {
+			// #3105: persistence must settle before fixture files and providers disappear.
+			try {
+				await session.dispose();
+			} finally {
+				fauxProvider.unregister();
+				if (existsSync(tempDir)) rmSync(tempDir, { recursive: true });
 			}
 		},
 	};
