@@ -216,10 +216,10 @@ impl NapiStruct {
     let js_name = format_js_property_name(&f.js_name);
 
     let arg = match is_optional {
-      false => format!("{}: {}", &js_name, arg),
+      false => format!("{}: {}", js_name, arg),
       true => match self.use_nullable {
-        false => format!("{}?: {}", &js_name, arg),
-        true => format!("{}: {} | null", &js_name, arg),
+        false => format!("{}?: {}", js_name, arg),
+        true => format!("{}: {} | null", js_name, arg),
       },
     };
     field_str.push_str(&arg);
@@ -255,7 +255,11 @@ impl NapiStruct {
           .collect::<Vec<_>>()
           .join("\n");
         if class.ctor {
-          format!("{}\nconstructor({})", def, ctor_args.join(", "))
+          if def.is_empty() {
+            format!("constructor({})", ctor_args.join(", "))
+          } else {
+            format!("{}\nconstructor({})", def, ctor_args.join(", "))
+          }
         } else {
           def
         }
@@ -288,8 +292,8 @@ impl NapiStruct {
               .filter_map(|f| self.gen_field(f).map(|(field, _)| field)),
           )
           .collect::<Vec<_>>()
-          .join(", ");
-          format!("  | {{ {def} }} ")
+          .join("; ");
+          format!("  | {{ {def} }}")
         })
         .collect::<Vec<_>>()
         .join("\n"),
