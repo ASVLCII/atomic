@@ -48,7 +48,7 @@
 - All bundled workflows and subagents now default to `model: "auto"`, selecting task-specific models and efforts instead of fixed fallback chains. Explicit model/effort selections remain supported; main-chat defaults and user-authored resources are unchanged.
 - Automatic model selection now ranks up to three distinct eligible models with individual reasoning efforts. Subagents and workflow stages try them in order before remaining configured fallbacks; workflow resume preserves the ranking.
 - Automatic subagent and workflow-stage model selection now uses bounded excerpts of long tasks, preserving their beginning, end and protected `<keepContext>` spans. Execution prompts and hard model constraints remain unchanged; oversized protected content retains the existing router fallback behavior.
-- Automatic subagent and workflow-stage model selection now sends the compact factual `evals.md` benchmark records as the router's `evals` state field instead of sending the general model-selection guide. The guide stays human-readable and links to the dated eval records.
+- Automatic subagent and workflow-stage model selection now sends the compact factual `evals.md` benchmark records as the router's evals state field instead of sending the general model-selection guide. The guide stays human-readable and links to the dated eval records.
 
 ### Fixed
 
