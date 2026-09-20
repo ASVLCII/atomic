@@ -32,13 +32,13 @@ export interface ModelRoute {
 const instructions =
 	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals`. Consider task fit, measured effort, dates, caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
 
-const MODEL_SELECTION_EVALS_JSON_BYTES = 11_000;
+const MODEL_SELECTION_EVALS_JSON_BYTES = 14_000;
 
 async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {
 		const evals = await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
-		// Complete default-source rows fit with the 12 KB task excerpt under Jev's
-		// conservative 24 KB state+longest-question proof. Never trim scores.
+		// Markdown tables of default-source rows fit with the 12 KB task excerpt under
+		// Jev's 30 KB state+longest-question proof (below TypeSafe's 32k-token limit).
 		if (!evals.trim() || Buffer.byteLength(JSON.stringify(evals), "utf8") > MODEL_SELECTION_EVALS_JSON_BYTES)
 			throw new Error("Invalid evals");
 		return evals;

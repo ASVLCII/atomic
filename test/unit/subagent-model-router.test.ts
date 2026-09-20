@@ -82,7 +82,7 @@ function jevPayloadBytes(body: string): { total: number; stateAndLongestQuestion
 	};
 }
 
-const ROUTING_STATE_AND_LONGEST_BYTES = 24_000;
+const ROUTING_STATE_AND_LONGEST_BYTES = 30_000;
 const ROUTING_STATE_AND_ALL_BYTES = 48_000;
 
 test("execution routing keeps the real evals, 12KB task, and nine verbose candidates within Jev budgets", async () => {
@@ -131,7 +131,7 @@ test("execution routing keeps the real evals, 12KB task, and nine verbose candid
 		task: taskNearRoutingLimit(),
 		agent,
 	});
-	assert.equal(transport.mock.calls.length, 13);
+	assert.equal(transport.mock.calls.length, 3);
 	assert.equal(seen.size, candidates.length);
 	assert.ok(
 		maxStateAndLongest <= ROUTING_STATE_AND_LONGEST_BYTES,
@@ -166,7 +166,7 @@ test("auto routing receives the shipped evals document verbatim", async () => {
 	assert.equal(state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
 	assert.match(state.evals, /# Evals/);
 	assert.match(state.evals, /DeepSWE/);
-	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 24_000);
+	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 30_000);
 	assert.equal(options?.maxRetries, 0);
 });
 test("self-contained agents retain their task fallback without duplicate instructions metadata", async () => {
@@ -462,10 +462,10 @@ for (const evalsCase of ["missing", "empty", "oversized"] as const) {
 		const read = vi.spyOn(fs, "readFile");
 		if (evalsCase === "missing") read.mockRejectedValueOnce(new Error("missing"));
 		if (evalsCase === "empty") read.mockResolvedValueOnce("");
-		if (evalsCase === "oversized") read.mockResolvedValueOnce("evals ".repeat(2_000));
+		if (evalsCase === "oversized") read.mockResolvedValueOnce("evals ".repeat(3_000));
 		await assert.rejects(
 			f.route(),
-			/Auto routing requires a nonempty evals\.md document within 11,000 JSON-encoded bytes/,
+			/Auto routing requires a nonempty evals\.md document within 14,000 JSON-encoded bytes/,
 		);
 		assert.equal(f.infer.mock.calls.length, 0);
 	});
@@ -662,7 +662,7 @@ test("hello-world routing receives evals and fits one small Jev request", async 
 		),
 	);
 	assert.ok(Buffer.byteLength(body) <= 48_000);
-	assert.ok(stateAndQuestionBytes <= 24_000);
+	assert.ok(stateAndQuestionBytes <= 30_000);
 	assert.match(payload.state.evals, /# Evals/);
 	assert.equal(payload.state.model_selection_guide, undefined);
 	assert.equal(payload.state.policy, undefined);
@@ -684,7 +684,7 @@ test("maximal real eval routing payload preserves prompt and stays under conserv
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
 		const body = String(init.body);
 		const bytes = jevPayloadBytes(body);
-		assert.ok(bytes.stateAndLongestQuestion <= 24_000, String(bytes.stateAndLongestQuestion));
+		assert.ok(bytes.stateAndLongestQuestion <= 30_000, String(bytes.stateAndLongestQuestion));
 		assert.ok(bytes.total <= 48_000, String(bytes.total));
 		const request = JSON.parse(body) as JevFixtureRequest & { model: string };
 		assert.equal(request.state.task, task);
@@ -713,7 +713,7 @@ test("real eval routing tournament preserves evals in every Jev request", async 
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
 		const body = String(init.body);
 		const bytes = jevPayloadBytes(body);
-		assert.ok(bytes.stateAndLongestQuestion <= 24_000, String(bytes.stateAndLongestQuestion));
+		assert.ok(bytes.stateAndLongestQuestion <= 30_000, String(bytes.stateAndLongestQuestion));
 		assert.ok(bytes.total <= 48_000, String(bytes.total));
 		const request = JSON.parse(body) as JevFixtureRequest;
 		assert.equal(request.state.evals, evals);
@@ -739,7 +739,7 @@ test("long auto-routing tasks fit Jev while preserving protected requirements an
 	const task = `Review this change.\n${"reference data ".repeat(10000)}${protectedText}${"more data ".repeat(10000)}\nReport defects.`;
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
 		const body = JSON.parse(String(init.body));
-		assert.ok(Buffer.byteLength(String(init.body)) < 24000);
+		assert.ok(Buffer.byteLength(String(init.body)) < 30_000);
 		assert.ok(body.state.task.includes(protectedText));
 		assert.match(body.state.task, /Review this change/);
 		assert.match(body.state.task, /Report defects/);
@@ -832,10 +832,10 @@ test("auto routing keeps exact benchmark identity and provenance distinctions", 
 		assert.match(state.evals, /Fable 5 fallback=Opus 4\.8/);
 		assert.match(state.evals, /Fable 5\.1 Default Fallback/);
 		assert.match(state.evals, /Inkling AA `xhigh` is distinct from Frontier `0\.99`/);
-		assert.match(state.evals, /Harness: cc=claude-code, gb=grok-build, msa=mini-swe-agent/);
+		assert.match(state.evals, /Harness: `cc`=claude-code, `gb`=grok-build, `msa`=mini-swe-agent/);
 		assert.match(state.evals, /`—`=source null, not 0/);
-		assert.match(state.evals, /GPT-6 Astra\[max;codex\] 53\.3\/58\.8\/—\/4\.59\/30\.1/);
-		assert.match(state.evals, /Claude Fable 5\.1\[medium;cc\] 50\.9\/55\.5\/0\.0\/3\.28\/26\.1/);
+		assert.match(state.evals, /\| GPT-6 Astra \| max \| codex \| 53\.3 \| 58\.8 \| — \| 4\.59 \| 30\.1 \|/);
+		assert.match(state.evals, /\| Claude Fable 5\.1 \| medium \| cc \| 50\.9 \| 55\.5 \| 0\.0 \| 3\.28 \| 26\.1 \|/);
 		assert.equal(state.model_selection_guide, undefined);
 		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
 	});

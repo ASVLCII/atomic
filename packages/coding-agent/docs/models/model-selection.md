@@ -17,7 +17,7 @@ Subagent and workflow-stage `model: "auto"` routes before execution starts. Atom
 - the agent or stage name and description,
 - the eligible provider/model and effort choices with catalog capabilities and prices,
 - hard `modelConstraints`, and
-- the compact factual [Evals](/models/evals) document.
+- the factual markdown tables in [Evals](/models/evals).
 
 The router returns one primary `{ model, effort }` pair and up to two ordered fallback pairs. It cannot add candidates, bypass constraints, alter the execution prompt, change the selected chat model, or use Jev as an execution model. [`routerModel`](/settings#routermodel) chooses the decision provider only.
 

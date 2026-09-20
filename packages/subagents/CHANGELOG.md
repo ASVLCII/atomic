@@ -10,6 +10,7 @@
 
 - All builtin agents now default to `model: "auto"` instead of pinned models and fallback chains. Explicit model overrides and builtin effort settings remain effective, including empty legacy `thinking` values that clear an inherited effort and fallback suffixes that override legacy defaults. Hard model constraints still apply to every candidate; main-chat and custom-agent defaults are unchanged.
 - Automatic model selection ranks up to three distinct eligible models and tries them in order before remaining configured fallbacks and the current chat model, retaining each selected effort and skipping duplicate model IDs.
+- Automatic model routing now receives `evals.md` as markdown tables of dated benchmark records rather than packed one-line rows.
 - Orchestrator model-pinning guidance now treats `evals.md` as factual per-evaluation records and leaves unmatching catalogs unpinned instead of describing benchmark rows as recommendations.
 
 ### Fixed
@@ -20,7 +21,7 @@
 - Automatic model routing allows up to three repairs after a malformed or schema-invalid answer, sharing the original decision deadline and never starting a child before a valid decision. Authentication/provider failures, cancellation and stale catalogs are not retried.
 - In-process children inherit SDK model/auth configuration, settings, resource discovery and human-input callbacks without restoring parent-disabled packages or tools. Fallback keeps the same restrictions, startup runs once, and suppressed Intercom cannot mint supervisor grants ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - All builtin specialists now include Intercom for live coordination, while preserving explicit parent tool and package restrictions.
-- Automatic model routing uses compact dated benchmark records instead of full human guides. Jev bounds every comparison, including verbose catalogs below 255 options, without truncating tasks or weakening model constraints.
+- Automatic model routing uses dated benchmark records instead of full human guides. Jev bounds every comparison, including verbose catalogs below 255 options, without truncating tasks or weakening model constraints.
 
 ### Removed
 

@@ -47,8 +47,27 @@ const fixturePath = "test/fixtures/router-benchmark/source-fidelity.json";
 async function sourceFixture(): Promise<SourceFidelityFixture> {
 	return readJson<SourceFidelityFixture>(fixturePath);
 }
+function tableCells(row: string): string[] {
+	return row
+		.split("|")
+		.slice(1, -1)
+		.map((cell) => cell.trim());
+}
 function sectionRows(document: string, prefix: string): string[] {
-	return document.split("\n").filter((line) => line.startsWith(prefix) && /^\w\d{2} /.test(line));
+	return document.split("\n").filter((line) => new RegExp(`^\\| ${prefix}\\d{2} `).test(line));
+}
+function compactRow(row: string, prefix: string): string {
+	const cells = tableCells(row);
+	if (prefix === "A") {
+		const [id, model, ...values] = cells;
+		return `${id} ${model}|${values.join("/")}`;
+	}
+	if (prefix === "D") {
+		const [id, model, effort, ...values] = cells;
+		return `${id} ${model}[${effort}] ${values.join(" ")}`;
+	}
+	const [id, model, effort, harness, ...values] = cells;
+	return `${id} ${model}[${effort};${harness}] ${values.join("/")}`;
 }
 function sourceValues(row: string, prefix: string): string[] {
 	if (prefix === "A") return row.split("|")[1]!.split("/");
@@ -59,9 +78,8 @@ function sourceValues(row: string, prefix: string): string[] {
 
 function aaRowIdentities(document: string): string[] {
 	return sectionRows(document, "A").map((row) => {
-		const match = row.match(/^(A\d{2}) (.+)\|/u);
-		assert.ok(match, row);
-		return `${match[1]} ${match[2]}`;
+		const cells = tableCells(row);
+		return `${cells[0]} ${cells[1]}`;
 	});
 }
 
@@ -70,7 +88,7 @@ function sourceLabelsBySlug(labels: readonly AaSourceLabel[]): Map<string, AaSou
 }
 
 function assertSourceRows(document: string, rows: readonly string[], prefix: string, expectedValues: number): void {
-	const actual = sectionRows(document, prefix);
+	const actual = sectionRows(document, prefix).map((row) => compactRow(row, prefix));
 	assert.deepEqual(actual, rows, `${prefix} rows must preserve source order, identity, and displayed values`);
 	assert.equal(actual.length, rows.length);
 	const values = actual.map((row) => sourceValues(row, prefix));
@@ -151,10 +169,10 @@ test("the factual evals document preserves source-shaped benchmark records and p
 		assert.match(evals, new RegExp(source.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
 		assert.ok(source.units.length > 10, `${name} source units metadata`);
 	}
-	assert.match(evals, /GPT-6 Astra\[max;codex\]/);
-	assert.match(evals, /DeepSeek V4 Pro 0813\[high;chisel\]/);
-	assert.match(evals, /MiniMax M3\[none;msa\]/);
-	assert.match(evals, /Mistral 3\.5 Medium\[none;chisel\]/);
+	assert.match(evals, /\| GPT-6 Astra \| max \| codex \|/);
+	assert.match(evals, /\| DeepSeek V4 Pro 0813 \| high \| chisel \|/);
+	assert.match(evals, /\| MiniMax M3 \| none \| msa \|/);
+	assert.match(evals, /\| Mistral 3\.5 Medium \| none \| chisel \|/);
 	assert.match(evals, /Fable 5 fallback=Opus 4\.8/);
 	assert.match(evals, /Inkling `0\.99` is unexplained/);
 	assert.match(evals, /`∅`=source null\/absent, not zero/);

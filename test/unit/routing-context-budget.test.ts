@@ -11,7 +11,7 @@ import { decisionMessage, decisionRequest, messageStream } from "../helpers/stru
 // state plus the longest question. The implementation has no Jev tokenizer, so
 // these byte ceilings are deliberately below those token limits and include the
 // actual JSON request fields sent to `/v1/systemone`.
-const CONSERVATIVE_STATE_AND_QUESTION_BYTES = 24_000;
+const CONSERVATIVE_STATE_AND_QUESTION_BYTES = 30_000;
 const CONSERVATIVE_STATE_AND_ALL_BYTES = 48_000;
 
 function serializedJevBytes(body: string): { total: number; stateAndLongestQuestion: number } {
@@ -70,7 +70,7 @@ test("Jev partitions fewer than 255 verbose candidates before dispatch without l
 	assert.ok(transport.mock.calls.length > 1);
 });
 
-for (const task of ["x".repeat(30_000), "界".repeat(9_000)]) {
+for (const task of ["x".repeat(36_000), "界".repeat(11_000)]) {
 	for (const pinned of [false, true]) {
 		test(`oversized ${Buffer.byteLength(task) === task.length ? "ASCII" : "multibyte"} state is preserved for fallback, pinned=${pinned}`, async () => {
 			vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
@@ -140,7 +140,7 @@ test("a finalist context overflow preserves spent Jev usage and original candida
 	vi.spyOn(console, "warn").mockImplementation(() => {});
 	const original = decisionRequest();
 	const criteria = Object.fromEntries(
-		Array.from({ length: 8 }, (_, i) => [`c${i}`, i === 3 || i === 4 ? "short" : "x".repeat(6_000)]),
+		Array.from({ length: 8 }, (_, i) => [`c${i}`, i === 3 || i === 4 ? "short" : "x".repeat(7_500)]),
 	);
 	const transport = vi.fn(async (_url: string, init: RequestInit) =>
 		Response.json(jevFixtureResponse(JSON.parse(String(init.body)) as JevFixtureRequest)),
@@ -203,7 +203,7 @@ for (const pinned of [true, false]) {
 				questions: {
 					route: {
 						instructions: "Choose a route",
-						criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`c${i}`, "x".repeat(4_800)])),
+						criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`c${i}`, "x".repeat(6_400)])),
 					},
 				},
 				decode: () => ({ route: "review" as const }),
@@ -231,7 +231,7 @@ test("a retained sentinel cannot cause a four-candidate tournament to repeat for
 				route: {
 					instructions: "Choose a route",
 					retainForFinal: "c3",
-					criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`c${i}`, "x".repeat(4_800)])),
+					criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`c${i}`, "x".repeat(6_400)])),
 				},
 			},
 			decode: () => ({ route: "review" as const }),

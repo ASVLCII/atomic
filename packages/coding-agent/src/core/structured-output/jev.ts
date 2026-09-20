@@ -148,9 +148,9 @@ async function askJev<T extends TSchema>(
 }
 
 // No Jev tokenizer is published. Charge every UTF-8 byte as a potential token,
-// with 25% headroom below the documented 32k/64k limits for provider framing.
+// staying below the documented 32k/64k token limits for provider framing.
 // This is deliberately conservative, not an exact token count. Never trim state.
-const STATE_AND_QUESTION_BYTES = 24_000;
+const STATE_AND_QUESTION_BYTES = 30_000;
 const STATE_AND_ALL_BYTES = 48_000;
 const PACKING_HEADROOM_BYTES = 512;
 const byteSize = (value: object): number => Buffer.byteLength(JSON.stringify(value), "utf8");

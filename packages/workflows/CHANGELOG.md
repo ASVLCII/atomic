@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - All builtin workflow model stages now default to `model: "auto"`, including composed child runs, scoring, reviews and final handoffs. Removed pinned fallback chains while preserving explicit tournament model assignments and custom-workflow defaults.
 - Automatic stage model selection ranks up to three distinct eligible models, trying them before remaining configured fallbacks. Durable checkpoints retain the ordered candidates and their efforts without rerouting on resume.
 - Workflow model-pinning guidance now treats `evals.md` as factual per-evaluation records and leaves unmatching catalogs unpinned instead of describing benchmark rows as recommendations.
+- Automatic stage model selection now receives `evals.md` as markdown tables of dated benchmark records.
 
 ### Fixed
 
