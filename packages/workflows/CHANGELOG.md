@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - All builtin workflow model stages now default to `model: "auto"`, including composed child runs, scoring, reviews and final handoffs. Removed pinned fallback chains while preserving explicit tournament model assignments and custom-workflow defaults.
+- Automatic stage model selection ranks up to three distinct eligible models, trying them before remaining configured fallbacks. Durable checkpoints retain the ordered candidates and their efforts without rerouting on resume.
 
 ### Fixed
 
@@ -69,6 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Workflow `route` results now display their structured output in a rounded `WORKFLOW ROUTE` box, including inline decisions and routing failures.
 - Removed the redundant `ROUTER DECISION` box from workflow `run` output while preserving run status and identity.
 - Workflow node model labels now update immediately when a session applies a fallback, including successive fallbacks, without refreshing the graph ([#3110](https://github.com/bastani-inc/atomic/issues/3110)).
+- Reduced workflow routing context by sending each workflow contract only with its candidate and preserving exact budgets in code. Verbose catalogs now split into bounded comparisons; oversized task context uses automatic chat fallback or fails when Jev is explicitly pinned, without changing route/run reservations.
 
 ## [0.9.20-alpha.1] - 2026-09-14
 

@@ -483,10 +483,28 @@ function stageRunTopology(
 export function isRouterSelection(value: unknown): value is import("@bastani/atomic").ModelRouterOutput {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const record = value as Record<string, WorkflowSerializableValue>;
+	const isPair = (pair: WorkflowSerializableValue): boolean => {
+		if (typeof pair !== "object" || pair === null || Array.isArray(pair)) return false;
+		const fields = pair as Record<string, WorkflowSerializableValue>;
+		return (
+			Object.keys(pair).length === 2 &&
+			typeof fields.model === "string" &&
+			(fields.effort === null || isReasoningLevel(fields.effort))
+		);
+	};
 	return (
-		Object.keys(record).length === 2 &&
+		Object.keys(record).every((key) => ["model", "effort", "fallbacks"].includes(key)) &&
 		typeof record.model === "string" &&
-		(record.effort === null || isReasoningLevel(record.effort))
+		(record.effort === null || isReasoningLevel(record.effort)) &&
+		(record.fallbacks === undefined ||
+			(Array.isArray(record.fallbacks) &&
+				record.fallbacks.length <= 2 &&
+				record.fallbacks.every(isPair) &&
+				new Set([
+					record.model,
+					...record.fallbacks.map((pair) => (pair as Record<string, WorkflowSerializableValue>).model),
+				]).size ===
+					record.fallbacks.length + 1))
 	);
 }
 

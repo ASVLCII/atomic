@@ -23,6 +23,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseExpression } from "@babel/parser";
 
 /** Emit a warning once a test consumes this share of its effective timeout. */
 export const WARN_RATIO = 0.4;
@@ -115,10 +116,12 @@ export function reportedTestCount(json: string): number {
 	return (report.testResults ?? []).reduce((total, result) => total + (result.assertionResults?.length ?? 0), 0);
 }
 
-const DECLARATION_HEAD = "(?:\\.(?:only|skip|todo|failing|serial|concurrent|sequential))*\\s*\\(";
+const DECLARATION_HEAD = "(?:\\.(?:only|skip|todo|failing|serial|concurrent|sequential))*(?<each>\\.each)?\\s*\\(";
 const DESCRIBE = /^(\s*)describe(?:\.(?:only|skip|todo|each|if))*\s*\(/u;
-const CLOSER = /^(\s*)\},\s*([0-9][0-9_]*|[A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*;?\s*$/u;
-const TRAILING_VALUE = /^\s*([0-9][0-9_]*|[A-Za-z_$][A-Za-z0-9_$]*)\s*,?\s*$/u;
+const NUMERIC_TERM = "(?:[0-9][0-9_]*|[A-Za-z_$][A-Za-z0-9_$]*)";
+const TIMEOUT_EXPRESSION = `${NUMERIC_TERM}(?:\\s*\\+\\s*${NUMERIC_TERM})*`;
+const CLOSER = new RegExp(`^(\\s*)\\},\\s*(${TIMEOUT_EXPRESSION})\\s*\\)\\s*;?\\s*$`, "u");
+const TRAILING_VALUE = new RegExp(`^\\s*(${TIMEOUT_EXPRESSION})\\s*,?\\s*$`, "u");
 const CALL_END = /^(\s*)\)\s*;?\s*$/u;
 const NAME_LITERAL = /^\s*(["'`])((?:\\.|(?!\1).)*)\1/u;
 
@@ -132,6 +135,18 @@ function numericConstants(lines: string[]): Map<string, number> {
 		if (match?.[1] && match[2]) constants.set(match[1], Number(match[2].replaceAll("_", "")));
 	}
 	return constants;
+}
+
+/** Resolve literal/constant sums without executing test source. */
+function timeoutValue(expression: string, constants: Map<string, number>): number | undefined {
+	let total = 0;
+	for (const raw of expression.split("+")) {
+		const term = raw.trim();
+		const value = /^[0-9]/u.test(term) ? Number(term.replaceAll("_", "")) : constants.get(term);
+		if (value === undefined || !Number.isFinite(value)) return undefined;
+		total += value;
+	}
+	return total;
 }
 
 /**
@@ -183,7 +198,7 @@ function describeScopes(lines: string[], index: number, indent: string): string[
  * Locate the explicit timeout argument that terminates a test declaration, in
  * both formatted shapes this repository uses: `}, 60_000);` on one line, and a
  * multi-line call whose penultimate line is a bare `240_000,` after `},`.
- * Returns the raw token plus the indentation of the call's own closing line.
+ * Returns the raw numeric expression plus the indentation of the call's closing line.
  */
 function timeoutTail(lines: string[], index: number): { raw: string; indent: string } | undefined {
 	const line = lines[index] as string;
@@ -200,6 +215,39 @@ function timeoutTail(lines: string[], index: number): { raw: string; indent: str
 	return { raw: value[1], indent: callEnd[1] as string };
 }
 
+/** Expand only literal scalar tables and %s titles, never executing a test module. */
+function tableTestNames(source: string): string[] {
+	try {
+		const call = parseExpression(source.trim().replace(/;$/u, ""), {
+			sourceType: "module",
+			plugins: ["typescript"],
+		});
+		if (call.type !== "CallExpression" || call.callee.type !== "CallExpression") return [];
+		let table = call.callee.arguments[0];
+		if (table?.type === "TSAsExpression") table = table.expression;
+		const title = call.arguments[0];
+		if (table?.type !== "ArrayExpression" || title?.type !== "StringLiteral") return [];
+		if (title.value.replace(/%%|%s/gu, "").includes("%")) return [];
+		const names: string[] = [];
+		for (const row of table.elements) {
+			if (row?.type !== "StringLiteral" && row?.type !== "NumericLiteral" && row?.type !== "BooleanLiteral") {
+				return [];
+			}
+			let used = false;
+			const name = title.value.replace(/%%|%s/gu, (token) => {
+				if (token === "%%") return "%";
+				if (used) return token;
+				used = true;
+				return String(row.value);
+			});
+			names.push(name);
+		}
+		return names;
+	} catch {
+		return [];
+	}
+}
+
 /**
  * Map each declared test to its explicit timeout argument, keyed by the fully
  * qualified `scope > name` it is reported under.
@@ -208,11 +256,11 @@ function timeoutTail(lines: string[], index: number): { raw: string; indent: str
  * terminal name too would lend that budget to a same-named test in a sibling
  * scope that declared none, scoring it against a timeout it never had.
  *
- * The scan is line-based rather than AST-based on purpose: it must never throw
- * on syntax it does not model, and an unresolved declaration degrades to the
- * suite default instead of to a wrong budget. A declaration is matched to its
- * terminating line by indentation, which excludes the far more common inner
- * `}, <number>)` of a nested callback such as `setTimeout` or a poll helper.
+ * Timeout boundaries are scanned by indentation, excluding the more common inner
+ * `}, <number>)` of nested callbacks such as `setTimeout` or a poll helper. Literal
+ * test.each tables are parsed without evaluating source to recover reported names.
+ * Unsupported syntax or dynamic tables degrade to the suite default, never a
+ * guessed budget or an executed test module.
  */
 export function declaredTimeouts(source: string): Map<string, number> {
 	const lines = source.split(/\r?\n/);
@@ -226,7 +274,7 @@ export function declaredTimeouts(source: string): Map<string, number> {
 	for (let index = 0; index < lines.length; index++) {
 		const tail = timeoutTail(lines, index);
 		if (!tail) continue;
-		const value = /^[0-9]/u.test(tail.raw) ? Number(tail.raw.replaceAll("_", "")) : constants.get(tail.raw);
+		const value = timeoutValue(tail.raw, constants);
 		if (value === undefined || !Number.isFinite(value)) continue;
 		for (let back = index; back >= 0; back--) {
 			const candidate = lines[back] as string;
@@ -236,8 +284,10 @@ export function declaredTimeouts(source: string): Map<string, number> {
 				.slice(back, back + 3)
 				.join(" ")
 				.slice((opener[0] as string).length);
-			const name = NAME_LITERAL.exec(head)?.[2];
-			if (name) record([...describeScopes(lines, back, tail.indent), name].join(" > "), value);
+			const names = opener.groups?.each
+				? tableTestNames(lines.slice(back, index + 1).join("\n"))
+				: [NAME_LITERAL.exec(head)?.[2]].filter((name): name is string => name !== undefined);
+			for (const name of names) record([...describeScopes(lines, back, tail.indent), name].join(" > "), value);
 			break;
 		}
 	}

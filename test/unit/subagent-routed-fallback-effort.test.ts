@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import type { ExtensionContext } from "@bastani/atomic";
+import type { Api, Context, Model } from "@bastani/pi-ai";
 import { test, vi } from "vitest";
 import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import { applyBuiltinOverrides } from "../../packages/subagents/src/agents/agent-overrides.js";
@@ -41,7 +42,12 @@ async function dispatch(
 		find: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
 		hasConfiguredAuth: () => true,
 		containsConfiguredCredential: async () => false,
-		streamSimple: () => messageStream(decisionMessage({ model: "decision-test/primary", effort })),
+		streamSimple: (_model: Model<Api>, context: Context) => {
+			const { questions } = JSON.parse(context.messages[0]!.content as string);
+			const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
+			const selected = candidates.find((pair) => pair.effort === effort) ?? candidates[0];
+			return messageStream(decisionMessage({ model: selected.model, effort: selected.effort }));
+		},
 	};
 	const agent: AgentConfig = {
 		name: "worker",
@@ -86,38 +92,39 @@ async function dispatch(
 	return capture.spec;
 }
 
-test("unsuffixed routed fallback uses the selected low effort, not agent high", async () => {
+test("ranked routed alternatives retain selected low effort rather than agent high", async () => {
 	const spec = await dispatch("low");
 	assert.equal(spec.thinkingLevel, "low");
-	assert.deepEqual(spec.fallbackModels, ["decision-test/fallback"]);
+	assert.deepEqual(spec.fallbackModels, ["decision-test/fallback:low", "decision-test/parent:low"]);
 });
 
 for (const effort of ["off", null] as const) {
 	test(`unsuffixed reasoning fallback inherits effective off from routed ${effort}`, async () => {
 		const spec = await dispatch(effort);
 		assert.equal(spec.thinkingLevel, "off");
-		assert.deepEqual(spec.fallbackModels, ["decision-test/fallback"]);
+		assert.deepEqual(spec.fallbackModels, ["decision-test/fallback:off", "decision-test/parent:off"]);
 	});
 }
 
-test("explicit fallback suffix outranks fallbackThinkingLevels and routed default", async () => {
+test("ranked alternatives precede and deduplicate explicitly configured fallbacks", async () => {
 	const spec = await dispatch("low", {
 		fallbackModels: ["decision-test/fallback:high"],
 		fallbackThinkingLevels: ["low"],
 	});
-	assert.deepEqual(spec.fallbackModels, []);
+	assert.deepEqual(spec.fallbackModels, ["decision-test/fallback:low", "decision-test/parent:low"]);
 	const allowed = await dispatch("low", {
 		fallbackModels: ["decision-test/fallback:low"],
 		fallbackThinkingLevels: ["high"],
 	});
-	assert.deepEqual(allowed.fallbackModels, ["decision-test/fallback:low"]);
+	assert.deepEqual(allowed.fallbackModels, ["decision-test/fallback:low", "decision-test/parent:low"]);
 });
 
-test("fallbackThinkingLevels continues to control an unsuffixed fallback", async () => {
-	assert.deepEqual((await dispatch("low", { fallbackThinkingLevels: ["high"] })).fallbackModels, []);
-	assert.deepEqual((await dispatch("low", { fallbackThinkingLevels: ["low"] })).fallbackModels, [
-		"decision-test/fallback:low",
-	]);
+test("legacy fallback effort does not override the ranked alternative's explicit effort", async () => {
+	for (const level of ["high", "low"])
+		assert.deepEqual((await dispatch("low", { fallbackThinkingLevels: [level] })).fallbackModels, [
+			"decision-test/fallback:low",
+			"decision-test/parent:low",
+		]);
 });
 
 test("ordinary dispatch retains agent effort and the unfiltered parent fallback", async () => {
@@ -126,7 +133,7 @@ test("ordinary dispatch retains agent effort and the unfiltered parent fallback"
 	assert.deepEqual(spec.fallbackModels, ["decision-test/fallback", "decision-test/parent"]);
 });
 
-test("builtin legacy effort preserves explicit fallback suffixes unless hard constraints exclude them", async () => {
+test("builtin legacy effort selects ranked alternatives without widening hard constraints", async () => {
 	const { agents } = loadAgentsFromDirWithDiagnostics(join(process.cwd(), "packages/subagents/agents"), "builtin");
 	const overridden = applyBuiltinOverrides(
 		agents,
@@ -139,14 +146,14 @@ test("builtin legacy effort preserves explicit fallback suffixes unless hard con
 	assert.ok(worker);
 	const spec = await dispatch("low", worker, true, false);
 	assert.equal(spec.thinkingLevel, "low");
-	assert.ok(spec.fallbackModels?.includes("decision-test/fallback:high"));
+	assert.deepEqual(spec.fallbackModels, ["decision-test/fallback:low", "decision-test/parent:low"]);
 	const restricted = await dispatch("low", worker);
-	assert.deepEqual(restricted.fallbackModels, []);
+	assert.deepEqual(restricted.fallbackModels, ["decision-test/fallback:low", "decision-test/parent:low"]);
 	const agentRestricted = await dispatch(
 		"low",
 		{ ...worker, modelConstraints: { allowedEfforts: ["low"] } },
 		true,
 		false,
 	);
-	assert.deepEqual(agentRestricted.fallbackModels, []);
+	assert.deepEqual(agentRestricted.fallbackModels, ["decision-test/fallback:low", "decision-test/parent:low"]);
 });

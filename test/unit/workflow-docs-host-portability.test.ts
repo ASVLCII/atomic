@@ -114,12 +114,14 @@ describe("published workflow examples stay host-portable", () => {
 		const workflows = await readRepositoryFile("packages/coding-agent/docs/workflows/authoring.md");
 		const quickstart = await readRepositoryFile("packages/coding-agent/docs/getting-started/installation.md");
 
-		for (const phrase of [
-			"executes inside whichever host is running Atomic",
-			"Bun is not defined",
-			"node:child_process",
+		for (const guidance of [
+			/binaries run under Bun/i,
+			/npm installs run under Node/i,
+			/`Bun\.\*` global is available only when Atomic itself runs under Bun/,
+			/Bun is not defined/,
+			/node:child_process/,
 		]) {
-			expect(workflows, "workflows/authoring.md").toContain(phrase);
+			expect(workflows, "workflows/authoring.md").toMatch(guidance);
 		}
 
 		for (const phrase of ["a package-manager install runs under Node", "Bun is not defined"]) {

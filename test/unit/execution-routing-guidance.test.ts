@@ -875,7 +875,7 @@ describe("route-then-registered-run guidance", () => {
 
 	test("keeps source-layout policy aligned across workflow authoring docs", async () => {
 		const sharedPolicyPhrases = [
-			"Keep a small, readable workflow in one entry file",
+			/Keep a small(?:, readable)? workflow in one (?:readable )?entry file/,
 			"meaningful source boundary",
 			"improves clarity, reuse, ownership, or testability",
 			"keep the graph and control flow in the top-level workflow entry file",
@@ -894,12 +894,12 @@ describe("route-then-registered-run guidance", () => {
 			"one file per stage",
 			"wrapper-only modules",
 			"hide the graph across files",
-			"line counts alone as a module boundary",
+			/[Ll]ine counts alone (?:as|are not) a module boundary/,
 		];
 		for (const path of ["packages/coding-agent/docs/workflows/authoring.md", "packages/workflows/README.md"]) {
 			const documentation = await readRepositoryFile(path);
 			for (const phrase of sharedPolicyPhrases) {
-				expect(documentation, path).toContain(phrase);
+				expect(documentation, path).toMatch(phrase);
 			}
 			for (const layoutLine of [
 				".atomic/workflows/code-review.ts",

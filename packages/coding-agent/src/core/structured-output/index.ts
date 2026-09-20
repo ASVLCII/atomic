@@ -87,7 +87,13 @@ async function inferChat<T extends TSchema>(
 				decisionModel,
 				{
 					systemPrompt: `${STRUCTURED_DECISION_POLICY}\n\n${request.instructions}\n\nCall ${STRUCTURED_OUTPUT_TOOL_NAME} exactly once with the decision. Do not use prose or other tools.`,
-					messages: [{ role: "user", content: JSON.stringify({ state: request.state }), timestamp: Date.now() }],
+					messages: [
+						{
+							role: "user",
+							content: JSON.stringify({ state: request.state, questions: request.jev.questions }),
+							timestamp: Date.now(),
+						},
+					],
 					tools: [
 						{
 							name: tool.name,

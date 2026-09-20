@@ -404,6 +404,7 @@ function getAliases(): Record<string, string> {
 	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@bastani/pi-ai");
 	const piAiProvidersEntry = resolveWorkspaceOrImport("ai/dist/providers/all.js", "@bastani/pi-ai");
 	const piAiCopilotEnvEntry = resolveWorkspaceOrImport("ai/dist/providers/github-copilot-env.js", "@bastani/pi-ai");
+	const piAiProviderEnvEntry = resolveWorkspaceOrImport("ai/dist/utils/provider-env.js", "@bastani/pi-ai");
 	const piAiGatewayBindingEntry = resolveWorkspaceOrImport(
 		"ai/dist/api/cloudflare-gateway-binding.js",
 		"@bastani/pi-ai",
@@ -420,6 +421,7 @@ function getAliases(): Record<string, string> {
 		"@bastani/pi-ai/oauth": piAiOauthEntry,
 		"@bastani/pi-ai/providers/all": piAiProvidersEntry,
 		"@bastani/pi-ai/providers/github-copilot-env": piAiCopilotEnvEntry,
+		"@bastani/pi-ai/utils/provider-env": piAiProviderEnvEntry,
 		"@bastani/pi-ai/compat": piAiEntry,
 		"@bastani/pi-ai/api/cloudflare-gateway-binding": piAiGatewayBindingEntry,
 		"@bastani/pi-ai": piAiEntry,

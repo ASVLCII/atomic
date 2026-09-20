@@ -38,6 +38,7 @@
 - SDK session creation now includes shipped Atomic builtin extensions and resources, shares CLI defaults, and completes extension startup before returning. Supply startup host bindings through the extensionBindings option; rebinding no longer repeats startup. Failed startup rolls back the partial session, and missing shipped packages report `code: "BuiltinUnavailable"` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Main chat, workflow stages, and subagents now default to long prompt-cache retention where supported. Unset retention uses ordinary caching for OpenAI models without known extended-retention support, such as GPT-4o, and five-minute caching for older Bedrock Claude models, such as Claude 3.7. Explicit retention choices remain unchanged; use `PI_CACHE_RETENTION=short` to opt back into shorter caching. Anthropic one-hour cache writes cost more than five-minute writes, so savings depend on reuse.
 - All bundled workflows and subagents now default to `model: "auto"`, selecting task-specific models and efforts instead of fixed fallback chains. Explicit model/effort selections remain supported; main-chat defaults and user-authored resources are unchanged.
+- Automatic model selection now ranks up to three distinct eligible models with individual reasoning efforts. Subagents and workflow stages try them in order before remaining configured fallbacks; workflow resume preserves the ranking.
 
 ### Fixed
 
@@ -100,6 +101,8 @@
 - Built-in Cloudflare AI Gateway, GitHub Copilot, and OpenCode routes now respect OpenAI model limits when choosing default cache retention, avoiding unsupported extended retention on models such as GPT-4o. Explicit retention overrides remain unchanged.
 - Jev failures now report SDK error classes, recognized context-limit diagnostics and safe request IDs instead of generic provider-availability advice. Requests use the TypeSafe SDK without hidden retries or body logging.
 - Automatic routing switches from Jev to the current chat model after an HTTP/connection failure or exhausted output repairs. By default each provider gets an initial attempt plus three corrective retries for invalid output, with a reported switch and one shared context, validation contract and deadline. Explicit router selections and general structured-output calls remain pinned.
+- Reduced automatic model and workflow routing context by using compact benchmark records and per-candidate contracts instead of full guides and repeated catalogs. Jev now checks every request against conservative context budgets, splits verbose choices even below 255 options, and avoids sending oversized inputs without truncating task requirements.
+- Extension imports of provider environment helpers now resolve correctly during workflow loading and reload instead of failing with `compat.js/utils/provider-env` module errors.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

@@ -61,6 +61,8 @@ export function parseModelConstraints(value: unknown): ModelConstraints | undefi
 export type ModelRouterOutput = {
 	readonly model: string;
 	readonly effort: string | null;
+	/** Ranked alternatives, excluding the primary. Absent on legacy recorded selections. */
+	readonly fallbacks?: readonly { readonly model: string; readonly effort: string | null }[];
 };
 /** Every applicable declaration must hold; a caller never widens a definition restriction. */
 export function eligiblePair(

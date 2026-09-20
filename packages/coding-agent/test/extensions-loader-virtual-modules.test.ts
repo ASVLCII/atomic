@@ -55,6 +55,40 @@ describe("extension loader pi-ai compat aliases", () => {
 		expect(fs.existsSync(target!)).toBe(true);
 		expect(target).not.toBe(aliases["@bastani/pi-ai"]);
 	});
+
+	it("registers provider environment helpers for binary extension imports", async () => {
+		// #3129: binaries use virtual modules instead of the filesystem aliases.
+		const modules = await extensionLoaderTestHooks.loadVirtualModules();
+		const providerEnv = await import("@bastani/pi-ai/utils/provider-env");
+		assert.equal(modules["@bastani/pi-ai/utils/provider-env"], providerEnv);
+	});
+
+	it(
+		"loads provider environment helpers through transformed extension imports",
+		async () => {
+			// #3129: the broad pi-ai alias must not resolve this as compat.js/utils/provider-env.
+			const directory = fs.mkdtempSync(path.join(os.tmpdir(), "atomic-provider-env-extension-"));
+			try {
+				const extensionPath = path.join(directory, "extension.ts");
+				fs.writeFileSync(
+					extensionPath,
+					`
+import { getProviderEnvValue } from "@bastani/pi-ai/utils/provider-env";
+if (getProviderEnvValue("ATOMIC_ALIAS_PROBE", { ATOMIC_ALIAS_PROBE: "scoped" }) !== "scoped") {
+  throw new Error("extension lost the scoped provider environment");
+}
+export default function extension() {}
+`,
+				);
+				const factory = await extensionLoaderTestHooks.loadExtensionModuleTransformed(extensionPath);
+				assert.equal(typeof factory, "function");
+			} finally {
+				fs.rmSync(directory, { recursive: true, force: true });
+			}
+		},
+		REAL_EXTENSION_LOADER_TEST_TIMEOUT_MS,
+	);
+
 	it(
 		"maps pi-tui layout helpers through both loader resolution paths",
 		async () => {

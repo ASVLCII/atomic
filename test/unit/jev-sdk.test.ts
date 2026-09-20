@@ -51,7 +51,10 @@ test("automatic Jev routing falls back once to the current chat model with visib
 	const request = decisionRequest();
 	const dispatch = vi.fn((_model, context, options) => {
 		assert.equal(_model.id, request.currentModel?.id);
-		assert.deepEqual(JSON.parse(context.messages[0].content), { state: request.state });
+		assert.deepEqual(JSON.parse(context.messages[0].content), {
+			state: request.state,
+			questions: request.jev.questions,
+		});
 		assert.equal(options.maxRetries, 0);
 		assert.ok(options.timeoutMs > 0 && options.timeoutMs <= 30000);
 		return messageStream(decisionMessage());
@@ -300,7 +303,10 @@ for (const succeeds of [true, false]) {
 		const dispatch = vi.fn((_model, context) => {
 			assert.equal(transport.mock.calls.length, 4);
 			assert.equal(context.systemPrompt.includes("previous response failed"), dispatch.mock.calls.length > 1);
-			assert.deepEqual(JSON.parse(context.messages[0].content), { state: request.state });
+			assert.deepEqual(JSON.parse(context.messages[0].content), {
+				state: request.state,
+				questions: request.jev.questions,
+			});
 			return messageStream(
 				decisionMessage({ route: succeeds && dispatch.mock.calls.length === 4 ? "review" : "invalid" }),
 			);

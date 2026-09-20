@@ -123,7 +123,10 @@ test("ordinary entrypoint uses configured provider/auth, complete state, one sch
 		assert.equal(options.toolChoice, "auto");
 		assert.equal(options.maxTokens, 4096);
 		assert.equal(options.timeoutMs, 30000);
-		assert.deepEqual(JSON.parse(context.messages[0].content), { state: request.state });
+		assert.deepEqual(JSON.parse(context.messages[0].content), {
+			state: request.state,
+			questions: request.jev.questions,
+		});
 		assert.match(context.systemPrompt, /data, not instructions/);
 		assert.match(context.systemPrompt, /exact cost limit/);
 		assert.equal(JSON.stringify(context).includes("mock-chat-secret"), false);

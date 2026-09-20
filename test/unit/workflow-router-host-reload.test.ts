@@ -55,7 +55,14 @@ test(
 		let held: ReturnType<typeof createAssistantMessageEventStream> | undefined;
 		let entered: (() => void) | undefined;
 		const { runtime: modelRuntime } = await registeredDecisionRuntime((_model, context) => {
-			const snapshot = JSON.parse(context.messages[0]!.content as string).state as CapturedState;
+			const request = JSON.parse(context.messages[0]!.content as string) as {
+				questions: { workflow: { criteria: Record<string, string> } };
+			};
+			const snapshot: CapturedState = {
+				workflows: Object.entries(request.questions.workflow.criteria)
+					.filter(([name]) => name !== "none")
+					.map(([, contract]) => JSON.parse(contract) as CatalogEntry),
+			};
 			const schema = context.tools![0]!.parameters as {
 				properties: { workflowType: { anyOf: Array<{ const: string }> } };
 			};
