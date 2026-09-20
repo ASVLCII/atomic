@@ -135,7 +135,7 @@ async function inspectRoutes(f: RoutingHarness, _target: string) {
 		ordinaryState = captureState(context.messages[0]!.content as string);
 		const schema = context.tools![0]!.parameters as { properties: { workflowType: { anyOf: { const: string }[] } } };
 		choices = schema.properties.workflowType.anyOf.map((option) => option.const);
-		return messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} }));
+		return messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "none", maxBudget: {} }));
 	};
 	const args = { action: "route" as const, state: workflowRouterState() };
 	const ordinary = await f.execute(args, ctx);
@@ -353,7 +353,7 @@ test("overlapping in-flight decisions cannot launch a removed or same-name chang
 			type: "done",
 			reason: "toolUse",
 			message: decisionMessage({
-				estimatedDuration: "unknown",
+				estimatedDuration: "15min",
 				workflowType: index === 0 ? "changed-route" : "removed-route",
 				maxBudget: {},
 			}),
@@ -464,7 +464,7 @@ for (const mutation of ["add", "remove", "rename", "same-name replacement"] as c
 			stream.push({
 				type: "done",
 				reason: "toolUse",
-				message: decisionMessage({ estimatedDuration: "unknown", workflowType: targets[index]!, maxBudget: {} }),
+				message: decisionMessage({ estimatedDuration: "15min", workflowType: targets[index]!, maxBudget: {} }),
 			});
 		});
 		for (const result of await Promise.all(pending)) {

@@ -87,7 +87,7 @@ function fixture(
 						(_keys, id) =>
 							({
 								workflow: "registered",
-								duration: "unknown",
+								duration: "15min",
 								interaction: "executable",
 								complexity: "workflow_beneficial",
 								budget: "preserve",
@@ -128,7 +128,7 @@ test.each(["structured", "jev"] as const)(
 		assert.equal("workflowType" in route, false);
 		assert.equal(route.routerDecision?.workflowType, "registered");
 		assert.equal("estimatedDuration" in route, false);
-		assert.equal(route.routerDecision?.estimatedDuration, "unknown");
+		assert.equal(route.routerDecision?.estimatedDuration, "15min");
 		assert.deepEqual(route.inputSchema, f.definition.inputs);
 		assert.equal(f.store.runs().length, 0);
 		const args = { action: "run" as const, workflowId: route.workflowId };
@@ -488,7 +488,7 @@ test.each(["structured", "jev"] as const)(
 		assert.equal(result.routerDecision?.workflowType, "none");
 		assert.equal(result.workflowId, "");
 		assert.equal("estimatedDuration" in result, false);
-		assert.equal(result.routerDecision?.estimatedDuration, "unknown");
+		assert.equal(result.routerDecision?.estimatedDuration, "15min");
 		const run = await f.execute(
 			{ action: "run", workflowId: result.workflowId, inputs: { objective: "approved" } },
 			f.ctx,

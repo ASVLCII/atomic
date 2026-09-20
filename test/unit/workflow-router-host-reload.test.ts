@@ -75,7 +75,7 @@ test(
 				entered?.();
 				return held;
 			}
-			return messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} }));
+			return messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "none", maxBudget: {} }));
 		});
 		const settingsManager = SettingsManager.inMemory({
 			routerModel: "decision-test/chat",
@@ -138,7 +138,7 @@ test(
 			held.push({
 				type: "done",
 				reason: "toolUse",
-				message: decisionMessage({ estimatedDuration: "unknown", workflowType: "host-changed", maxBudget: {} }),
+				message: decisionMessage({ estimatedDuration: "15min", workflowType: "host-changed", maxBudget: {} }),
 			});
 			held = undefined;
 			// Real host lifetime guards reject the captured tool before it can publish any result.
@@ -148,7 +148,7 @@ test(
 			const freshDetails = fresh.details as WorkflowRegisteredToolResult;
 			assert.ok("routerDecision" in freshDetails);
 			assert.deepEqual(freshDetails.routerDecision, {
-				estimatedDuration: "unknown",
+				estimatedDuration: "15min",
 				workflowType: "none",
 				maxBudget: {},
 			});

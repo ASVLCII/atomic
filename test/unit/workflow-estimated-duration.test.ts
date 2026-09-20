@@ -8,20 +8,21 @@ import {
 } from "../../packages/workflows/src/extension/workflow-estimated-duration.js";
 
 // Regression for #3106: wire labels are the complete canonical quarter-hour set.
-test("workflow durations enumerate exactly 96 finite labels and two sentinels", () => {
+test("workflow durations enumerate exactly 96 finite labels and the over-one-day option", () => {
 	const expected = Array.from({ length: 96 }, (_, index) => {
 		const minutes = (index + 1) * 15;
 		if (minutes === 1440) return "1d";
 		const hours = Math.floor(minutes / 60);
 		return `${hours ? `${hours}hr` : ""}${minutes % 60 ? `${minutes % 60}min` : ""}`;
 	});
-	expected.push("unknown", ">1d");
+	expected.push(">1d");
 	assert.deepEqual(estimatedDurations, expected);
 	assert.deepEqual(Object.keys(durationCriteria), expected);
 	const validator = Compile(WorkflowEstimatedDurationSchema);
 	for (const value of expected) assert.equal(validator.Check(value), true, value);
 	for (const value of [
 		"",
+		"unknown",
 		"0min",
 		"16min",
 		"24hr",
@@ -38,7 +39,7 @@ test("workflow durations enumerate exactly 96 finite labels and two sentinels", 
 		assert.equal(validator.Check(value), false, value);
 });
 
-test("workflow duration meanings define rounding boundaries and insufficient evidence", () => {
+test("workflow duration meanings define rounding boundaries without an unknown choice", () => {
 	for (const [label, lower, upper] of [
 		["15min", 0, 15],
 		["1hr", 45, 60],
@@ -52,5 +53,5 @@ test("workflow duration meanings define rounding boundaries and insufficient evi
 		);
 	}
 	assert.match(durationCriteria[">1d"]!, /greater than 1440 minutes/);
-	assert.match(durationCriteria.unknown!, /insufficient evidence/);
+	assert.equal(Object.hasOwn(durationCriteria, "unknown"), false);
 });

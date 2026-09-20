@@ -33,7 +33,7 @@ const jevNone = async (_url: string, init: RequestInit) =>
 			(_keys, id) =>
 				({
 					workflow: "none",
-					duration: "unknown",
+					duration: "15min",
 					budget: "preserve",
 					interaction: "executable",
 					complexity: "workflow_beneficial",
@@ -135,7 +135,7 @@ test("TypeSafe none preserves exact budget limits alongside credential-named con
 	const transport = vi.fn(jevNone);
 	vi.stubGlobal("fetch", transport);
 	const result = await f.route({ ...f.args, state: workflowRouterState(budget) });
-	assert.deepEqual(result.decision, { estimatedDuration: "unknown", workflowType: "none", maxBudget: budget });
+	assert.deepEqual(result.decision, { estimatedDuration: "15min", workflowType: "none", maxBudget: budget });
 	assert.equal(transport.mock.calls.length, 1);
 	assert.equal(f.infer.mock.calls.length, 0);
 });
@@ -283,7 +283,7 @@ for (const action of ["route"] as const) {
 				assert.equal(result.details.status, "not_launched");
 				assert.ok("routerDecision" in result.details);
 				assert.deepEqual(result.details.routerDecision, {
-					estimatedDuration: "unknown",
+					estimatedDuration: "15min",
 					workflowType: "none",
 					maxBudget: {},
 				});
@@ -423,7 +423,7 @@ test("safe OAuth metadata routes without refreshing tokens or executing credenti
 	assert.equal(f.transport.mock.calls.length, 0);
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		workflowType: "none",
 		maxBudget: {},
 	});

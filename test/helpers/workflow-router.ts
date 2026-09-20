@@ -35,7 +35,7 @@ export function workflowRouterContext(workflowType: string, maxBudget: WorkflowB
 					decisionMessage({
 						workflowType,
 						maxBudget,
-						estimatedDuration: "unknown",
+						estimatedDuration: "15min",
 						interaction: "executable",
 						complexity: "workflow_beneficial",
 					}),

@@ -35,9 +35,9 @@ const state = {
 	],
 };
 
-// #3106: both real inference adapters receive evidence and all 98 canonical choices.
+// #3106: both real inference adapters receive evidence and all 97 canonical choices.
 for (const provider of ["structured", "jev"] as const) {
-	test(`${provider} preserves content, attribution, workflow names and the 98-value contract`, async () => {
+	test(`${provider} preserves content, attribution, workflow names and the 97-value contract`, async () => {
 		const runtime = createExtensionRuntime({ registry: createRegistry().register(definition) });
 		const ctx = workflowRouterContext("actual-name");
 		let duration = "15min";
@@ -100,7 +100,7 @@ for (const provider of ["structured", "jev"] as const) {
 			assert.equal(result.decision.workflowType, "actual-name");
 			assert.equal("interaction" in result.decision, false);
 		}
-		assert.equal(calls, 98);
+		assert.equal(calls, 97);
 	});
 }
 
@@ -227,7 +227,7 @@ for (const provider of ["structured", "jev"] as const) {
 				return messageStream(
 					decisionMessage({
 						workflowType: "none",
-						estimatedDuration: "unknown",
+						estimatedDuration: "15min",
 						maxBudget: {},
 						interaction: "conversational",
 						complexity: "inline_sufficient",

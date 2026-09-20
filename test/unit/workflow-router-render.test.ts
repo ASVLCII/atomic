@@ -62,7 +62,7 @@ test("needs_input renders a selected but unlaunched workflow, including partial 
 					name: "chosen",
 					status: "needs_input",
 					runId: "",
-					routerDecision: { workflowType: "chosen", maxBudget: {}, estimatedDuration: "unknown" },
+					routerDecision: { workflowType: "chosen", maxBudget: {}, estimatedDuration: "15min" },
 					message: "No workflow was launched. Required input: approval.",
 				},
 				{ plain, isPartial, width: 100 },
@@ -85,7 +85,7 @@ for (const status of ["running", "completed", "failed", "skipped", "cancelled", 
 			runId: "339e05a4-2289-408e-9076-d1a348f582ae",
 			status,
 		};
-		const decision = { workflowType: "chosen", maxBudget: {}, estimatedDuration: "unknown" as const };
+		const decision = { workflowType: "chosen", maxBudget: {}, estimatedDuration: "15min" as const };
 		for (const plain of [false, true]) {
 			for (const isPartial of [false, true]) {
 				for (const width of [32, 80]) {
@@ -107,7 +107,7 @@ for (const status of ["running", "completed", "failed", "skipped", "cancelled", 
 }
 
 // #3106: presentation uses canonical labels directly for reservation and execution.
-for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", ">1d", "unknown"] as const) {
+for (const estimatedDuration of ["15min", "1hr", "1hr15min", "23hr45min", "1d", ">1d"] as const) {
 	test(`route presents ${estimatedDuration} without a display conversion`, () => {
 		const rendered = renderResult(
 			{
