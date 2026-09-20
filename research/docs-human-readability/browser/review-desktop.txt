@@ -1,0 +1,12 @@
+### Result
+{"text":"During a live post-mortem turn, Escape aborts only the retained conversation’s active work and restores queued steering/follow-up text to the editor. The conversation queue remains held. Clearing or restoring every visible queued item does not release that hold. The next ordinary submission releases the conversation queue before starting a new turn. Neither action pauses, resumes, or changes the terminal workflow execution state.","width":{"viewport":1440,"document":1440},"count":1}
+### Ran Playwright code
+```js
+await (async page => { const p = page.getByText('During a live post-mortem turn, Escape aborts only', {exact:false}); await p.waitFor(); await p.scrollIntoViewIfNeeded(); return {text:await p.innerText(), width:await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth})), count:await p.count()}; })(page);
+```
+### Page
+- Page URL: http://localhost:3334/workflows/operations
+- Page Title: Operations - Atomic
+- Console: 0 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-20T01-06-18-388Z.log#L1

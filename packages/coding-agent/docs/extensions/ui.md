@@ -192,7 +192,7 @@ ctx.ui.theme.fg("accent", "styled text");  // Access current theme
 
 Calling `setToolsExpanded()` with the current value is a no-op.
 
-Atomic's default working indicator keeps the literal one-cell `∀` fixed while following the active theme's optional `workingIndicator` tone overrides through a dark → accent → bright/bold → accent → dark ramp every 88ms. Any omitted tones are derived from selected-surface, `accent`, and `text` roles. `NO_COLOR` keeps regular/bold activity without foreground-color escapes, and `ATOMIC_REDUCED_MOTION=1` uses a static regular accent `∀` without a timer. Custom working-indicator frames and intervals are rendered verbatim. If you want colors, add them to the frame strings yourself, for example with `ctx.ui.theme.fg(...)`.
+The default indicator is `∀`. `ATOMIC_REDUCED_MOTION=1` makes it static, and `NO_COLOR` disables foreground colors. Custom frames and intervals render as supplied; add colors with `ctx.ui.theme.fg(...)` if wanted.
 
 These APIs customize presentation only; they do not start work or emit an extension stream event before prompt startup. See [Working Indicator Customization](/tui#pattern-4b-working-indicator-customization) for accepted-prompt, pre-stream, and agent-turn handoff timing.
 
@@ -285,7 +285,6 @@ The callback receives:
 - `done(value)` - Call to close component and return value
 
 Pass `{ signal }` to dismiss the custom UI if an operation is aborted; the returned promise rejects with the signal reason.
-Custom component `handleInput` methods must return `true` when they consume an input and `false` (or `undefined`) when they do not. In fullscreen mode, an unhandled viewport key continues to the transcript; remote components also fall through on a failed or timed-out reply.
 
 Custom component `handleInput` methods must return `true` when they consume an input and `false` or `undefined` when they do not. In fullscreen mode, an unhandled viewport key continues to the transcript; remote components also fall through on a failed or timed-out reply. Return `true` for a handled key so it is not applied twice.
 
@@ -321,7 +320,7 @@ const result = await ctx.ui.custom<string | null>(
 
 See [TUI components](/tui) for the full `OverlayOptions` API and [overlay-qa-tests.ts](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/examples/extensions/overlay-qa-tests.ts) for examples.
 
-Pass `{ reserveTranscriptRows: true }` for a blocking bottom-anchored dialog. A reserving overlay must set `overlayOptions.anchor` to `bottom-left`, `bottom-center`, or `bottom-right`; `row` and a nonzero `offsetY` are rejected because they invalidate the transcript-intersection model. Horizontal placement options remain supported. An overlay is composited over the transcript rather than measured into the layout, so without this option a tall dialog can cover the whole screen and the transcript rows it covers can never be scrolled above it. With it, the host bounds the overlay so at least six transcript rows stay visible. Top and bottom margins limit the wrapper before pi-tui composition, preventing a second fixed-head crop. Numeric and percentage `maxHeight` values are also resolved before active-row windowing and removed from the options passed to pi-tui. The host computes each visible bottom overlay's real intersection with the transcript and reserves the connected covered suffix once, so scrolling to the end keeps the newest output readable. A measured height change on mount or resize requests one automatic settling repaint. Margins, overlapping overlays, resize, and temporary visibility changes are reflected each frame. A temporarily hidden overlay — through `OverlayHandle.setHidden(true)` or a false `OverlayOptions.visible` result — contributes no intersection until it becomes visible again. Permanent handle removal, closure, and raw host removal release that exact overlay's registration; the shared reserve remains until its final overlay leaves. Leave the option unset for an overlay that is meant to take the screen, such as a full-screen graph. The built-in `ask_user_question` dialog sets it.
+Pass `{ reserveTranscriptRows: true }` for a blocking bottom dialog that must leave at least six transcript rows visible. Set `overlayOptions.anchor` to `bottom-left`, `bottom-center`, or `bottom-right`; `row` and nonzero `offsetY` are rejected. Horizontal placement, margins, and numeric or percentage `maxHeight` remain supported. Reservation updates on resize and visibility changes and ends when the overlay closes. Leave it unset for a full-screen overlay. The built-in `ask_user_question` dialog uses it.
 
 ```typescript
 const result = await ctx.ui.custom<string | null>(
@@ -336,7 +335,7 @@ const result = await ctx.ui.custom<string | null>(
 
 A component mounted with `reserveTranscriptRows` always releases configured fullscreen transcript actions and vertical wheel input to the host viewport, including while a nested input has focus. The component keeps all other keyboard and mouse input, including text editing, arrows, confirmation, cancellation, and clicks. This rule applies only to reserving overlays; other focused overlays still receive page and wheel input first and can keep it by returning `true`.
 
-Bounding a tall dialog means dropping rows, and the host would otherwise have to guess which. Embed `OVERLAY_ACTIVE_ROW_MARKER` in the line your component most needs kept — the selected row of a list — and the host places what it keeps around that row instead of taking a fixed head, even when the effective `maxHeight` is only one row. The mark is a zero-width APC sequence that `visibleWidth` measures as zero, terminated with ST as ECMA-48 requires. The renderer strips it centrally, in the last transform over the composited screen before it is written out, so it never reaches the terminal — from a reserving overlay, an ordinary overlay, an inline mount, a widget, or a workflow stage chat alike. Embed it once per frame; the host uses the first line that carries it. Put it anywhere on that line: a mark buried mid-line is removed just as a trailing one is. The `ask_user_question` dialog marks every active selectable row, including single- and multi-select options, Next, Submit, Cancel, and inline sentinel rows. Focused pi-tui inputs also anchor the bound through their cursor marker, so arrow keys and text input stay visible on a 16-row terminal.
+Embed `OVERLAY_ACTIVE_ROW_MARKER` once per frame on the line that should stay visible when the dialog is cropped, usually the selected row. The first marked line wins, even with `maxHeight: 1`; the marker has zero visible width and is removed before terminal output. Focused inputs also keep their cursor row visible.
 
 ```typescript
 import { OVERLAY_ACTIVE_ROW_MARKER } from "@bastani/atomic";

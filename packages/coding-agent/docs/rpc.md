@@ -40,7 +40,11 @@ Common options:
 
 All commands support an optional `id` field for request/response correlation. If provided, the corresponding response will include the same `id`.
 
-If a complete saved provider/model default names a provider that remains unsupported after provider registration, the process stays live but `prompt` returns a correlated error with the generic configuration diagnostic before any user/model event is emitted. `get_available_models` and other non-prompt commands remain available. A successful explicit `set_model`, or a successful `cycle_model` that returns a different available model, clears the startup condition and allows later prompts. A null or unchanged cycle result does not clear it. Replacing the session applies the newly created session's condition again. Supported providers with an unknown model or missing authentication retain ordinary automatic fallback behavior.
+A complete saved provider/model default can block prompts if its provider remains unsupported after registration. The process stays live, but `prompt` returns a correlated error with the generic configuration diagnostic before emitting any user/model event. `get_available_models` and other non-prompt commands remain available.
+
+Clear this condition with a successful explicit `set_model` or a successful `cycle_model` that returns a different available model. A null or unchanged cycle result does not clear it. Replacing the session applies the new session's condition again.
+
+Supported providers with an unknown model or missing authentication retain ordinary automatic fallback behavior.
 
 ### Framing
 

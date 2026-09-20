@@ -1,0 +1,4 @@
+### Result
+Total messages: 1 (Errors: 0, Warnings: 1)
+
+[WARNING] Connected to Socket.io @ http://localhost:3333/_next/static/chunks/4498f8325a9e42af.js:21

@@ -1,0 +1,25 @@
+Initial integration commit: d62271260e3d2952aef4cd39c1c08e4ee5c22eac
+Amended to record completed gates, preserve raw line endings in fence checks, and correct commit-message paragraph formatting.
+The final amended SHA and repeated checks are in the execution receipt.
+
+Enabled pre-commit hooks:
+check for added large files: Passed
+check for case conflicts: Passed
+check illegal windows names: Skipped (no applicable files)
+check json: Passed
+check for merge conflicts: Passed
+check toml: Skipped (no applicable files)
+check yaml: Passed
+detect private key: Passed
+cargo fmt --check: Skipped (no applicable files)
+cargo clippy: Skipped (no applicable files)
+biome check --write: Skipped (no applicable files)
+npm run check: Passed
+
+prek validate-config prek.toml: All configs are valid.
+git verify-commit HEAD: Good git signature, ED25519.
+git merge-base --is-ancestor 2175058c1e1dfd5850a61914566ab45110a65ef4 HEAD: exit 0.
+git status --porcelain: empty.
+python3 research/docs-human-readability/verify.py plus cmp against committed coverage.json: exit 0.
+
+The root check emitted six pre-existing informational Biome diagnostics, not warnings or errors; no runtime fixes were made. Saved command logs have trailing blank whitespace removed for git diff --check; diagnostic content is unchanged.

@@ -107,7 +107,11 @@ For an abstention option that must remain available, set the question's optional
 
 Overflow requires multiple HTTP requests and can increase latency and billed input tokens because each request repeats the unchanged state. Returned usage sums all successful requests; `responseModel` identifies the last response. Grouping can change the winner: this tournament does not guarantee the result of an unlimited flat Choice or a globally optimal selection.
 
-Jev documents 32k tokens for state plus the longest question and 64k for state plus all questions. Atomic uses an estimate of serialized JSON characters divided by four to pack questions and overflowing candidate batches. This is not a matching tokenizer or a guaranteed fit: actual provider limits remain authoritative. Atomic never trims state, rejects solely on the estimate, or retries a rejected request. Indivisible oversized context is sent once; an HTTP 422 stops the operation. If context is rejected, supply appropriate concise context explicitly or choose an ordinary inference model with suitable context capacity. Jev response bodies are limited to 1 MiB per request. Atomic validates answer types, choices, probability distributions and usage, without imposing a confidence threshold.
+Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Atomic estimates context when packing questions, but the estimate does not guarantee a fit; actual provider limits remain authoritative.
+
+Atomic never trims state, rejects solely on the estimate, or retries a rejected request. It sends indivisible oversized context once; HTTP 422 stops the operation. If context is rejected, explicitly supply concise context or choose an ordinary inference model with enough capacity.
+
+Jev response bodies are limited to 1 MiB per request. Atomic validates answer types, choices, probability distributions and usage without imposing a confidence threshold.
 
 ## Cancellation and failures
 

@@ -5,7 +5,7 @@ description: "Atomic documentation overview"
 
 # Atomic Documentation
 
-Atomic is the loop engine for all engineering work: a terminal coding-agent runtime for reliable, inspectable engineering loops. It stays small at the core while being extended through TypeScript extensions, skills, prompt templates, themes, workflows, subagents, MCP, web access, and Atomic packages.
+Atomic is a terminal coding-agent runtime for repeatable, inspectable engineering work. Extend its small core with TypeScript extensions, skills, prompt templates, themes, workflows, subagents, MCP, web access, and Atomic packages.
 
 ## Quick start
 
@@ -57,7 +57,7 @@ For the full first-run flow, see [Quickstart](/quickstart).
 
 ## Documentation paths
 
-The documentation is organized by what you are trying to do, not by product area. Pick the path that matches your intent.
+Choose a documentation path based on what you want to do.
 
 - **[Learn](/guides)** — install Atomic, run a first session, and get good at everyday use. Start with the [Quickstart](/quickstart) if you have never run Atomic, then read the [Guides](/guides).
 - **[Build](/build)** — extend Atomic with prompt templates, skills, subagents, intercom, workflows, extensions, and packages, or embed it with [programmatic use](/programmatic).

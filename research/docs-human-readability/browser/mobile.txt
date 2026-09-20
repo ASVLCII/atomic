@@ -1,0 +1,12 @@
+### Result
+[{"route":"/getting-started/installation","title":"Installation - Atomic","width":390,"scrollWidth":390},{"route":"/compaction","title":"Context and compaction - Atomic","width":390,"scrollWidth":390},{"route":"/intercom/operations","title":"Intercom operations - Atomic","width":390,"scrollWidth":390},{"route":"/models","title":"Custom models - Atomic","width":390,"scrollWidth":390},{"route":"/sdk","title":"SDK - Atomic","width":390,"scrollWidth":390},{"route":"/subagents/reference","title":"Subagent reference - Atomic","width":390,"scrollWidth":390},{"route":"/workflows/operations","title":"Operations - Atomic","width":390,"scrollWidth":390},{"route":"/workflows/api-reference","title":"API reference - Atomic","width":390,"scrollWidth":390},{"route":"/tools","title":"Built-in tools - Atomic","width":390,"scrollWidth":390},{"route":"/development","title":"Development - Atomic","width":390,"scrollWidth":390}]
+### Ran Playwright code
+```js
+await (async page => {const results=[]; for(const route of ["getting-started/installation","compaction","intercom/operations","models","sdk","subagents/reference","workflows/operations","workflows/api-reference","tools","development"]){await page.goto("http://localhost:3333/"+route);await page.locator("h1").first().waitFor();results.push(await page.evaluate(()=>({route:location.pathname,title:document.title,width:innerWidth,scrollWidth:document.documentElement.scrollWidth})));} return results;})(page);
+```
+### Page
+- Page URL: http://localhost:3333/development
+- Page Title: Development - Atomic
+- Console: 0 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-20T00-41-23-724Z.log#L13-L22

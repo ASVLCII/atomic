@@ -11,7 +11,9 @@ description: Start Atomic, run a first task, invoke a built-in workflow, and ste
 
 ## First session
 
-On a fresh install with no prior Atomic startup state, Atomic shows a one-time first-run explanation after any What's New notes and directly above the input box describing Atomic as a verifiable coding agent runtime for building and running agent workflows you can feel confident in. Returning users with prior startup state are marked onboarded automatically and continue directly into the normal chat UI; stored credentials by themselves do not skip the first-run explanation. The composer is the normal Atomic input from the start: type a message, run `/login` first if no provider is connected, or launch a workflow command without a special onboarding transition.
+On a fresh install with no prior startup state, Atomic shows a one-time explanation of its coding-agent runtime and verifiable workflows. It appears after any What's New notes, directly above the input box. Returning users with prior startup state skip it automatically; stored credentials alone do not skip it.
+
+The normal Atomic input is ready from the start. Type a message, run `/login` if no provider is connected, or launch a workflow command. No separate onboarding step is required.
 
 Call `workflow route` with the actual request, relevant message text/document excerpts, and explicit constraints in `state`, not file paths in place of content. If it returns `none`, continue inline. Otherwise use its input contract to prepare inputs, then call `workflow run` with the registered workflow ID. Ask only for genuinely missing information.
 

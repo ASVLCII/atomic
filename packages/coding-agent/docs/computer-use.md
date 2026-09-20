@@ -59,9 +59,7 @@ Prefer direct file automation for structured tasks such as assembling slides, fi
 
 Before writing a script, identify the input format, required features, output path, and library or app version. Read the relevant API reference rather than guessing methods. Start with a read-only query or a disposable copy. Save to a new path and reopen the result to check its contents; use a compatible viewer or renderer when appearance matters. Scripts still need the same authorization as UI actions to overwrite, upload, or publish files.
 
-For scripts that operate an application, also keep these application-specific checks:
-
-Before writing a script, identify the target app/version, input document, object names, and output path. Read the application's API reference or scripting dictionary rather than guessing methods. Start with a read-only query or a disposable copy, and keep a record of which operations changed the document.
+For scripts that operate an application, also identify the target app/version and object names. Read its API reference or scripting dictionary, and record which operations changed the document.
 
 ### macOS recipe: create a draft with osascript
 

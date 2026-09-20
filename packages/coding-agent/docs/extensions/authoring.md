@@ -30,11 +30,11 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-Editable user, project, and package extensions and user workflows are loaded through [jiti](https://github.com/unjs/jiti), so TypeScript works without compilation. `/reload` uses content-hash invalidation across the complete imported file graph: an unchanged graph can reuse its evaluated factory, while a direct edit or a transitive dependency edit re-evaluates that extension's modules.
+Editable extensions and workflows support TypeScript without compilation. `/reload` picks up edits to an extension or its imported helpers; unchanged modules may retain module-scoped state.
 
 Imports from Atomic's supplied core packages keep the running host's classes and shared state across `/reload`, including on Windows. The supported `@earendil-works/pi-coding-agent` compatibility import shares those exports with `@bastani/atomic`, so class comparisons and `instanceof` checks work across both names after reload. Edits to your extension and its imported local helpers still take effect; restart Atomic after updating Atomic itself.
 
-In Bun compiled or bundled single-file builds, Atomic's five fixed installed builtin extension bundles (workflows, subagents, MCP, web access, and Intercom) take a separate startup path. Atomic installs its live host-module bridge, imports each precompiled bundle natively once, and reuses the evaluated factory across `/reload`. This avoids jiti source reads, transforms, hashing, and graph manifests for immutable shipped code. A builtin bundle's module-scoped state is therefore **not** re-evaluated by `/reload` in those builds. This optimization is limited to exact installed entries of identity-verified Atomic packages; editable extensions and workflows retain the dynamic behavior above.
+In Bun single-file builds, installed builtin bundles retain module-scoped state across `/reload`. Restart Atomic to reload shipped code.
 
 If the factory returns a `Promise`, Atomic awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `pi.registerProvider()` are flushed.
 
@@ -206,7 +206,6 @@ export default function (pi: ExtensionAPI) {
 
 **Shutdown.** `session_shutdown` still runs for resources you opened. If the object holds sockets, watchers, or timers, close them there. The next `session_start` or first use can recreate them inside the same session-scoped object.
 
-
 ## Custom Tools
 
 Register tools the LLM can call via `pi.registerTool()`. Tools appear in the system prompt and can have custom rendering.
@@ -217,7 +216,7 @@ Use `promptGuidelines` to add tool-specific bullets to the default system prompt
 
 **Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix or grouping. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
 
-Note: Some models are idiots and include the @ prefix in tool path arguments. Built-in tools strip a leading @ before resolving paths. If your custom tool accepts a path, normalize a leading @ as well.
+Some models include the @ prefix in tool path arguments. Built-in tools strip a leading @ before resolving paths. If your custom tool accepts a path, normalize a leading @ as well.
 
 If your custom tool mutates files, use `withFileMutationQueue()` so it participates in the same per-file queue as built-in `edit` and `write`. This matters because tool calls run in parallel by default. Without the queue, two tools can read the same old file contents, compute different updates, and then whichever write lands last overwrites the other.
 
@@ -314,7 +313,11 @@ pi.registerTool({
 
 **Signaling errors:** To mark a tool execution as failed (sets `isError: true` on the result and reports it to the LLM), throw an error from `execute`. Returning a value never sets the error flag regardless of what properties you include in the return object.
 
-**Early termination:** Return `terminate: true` from `execute()` to hint that the automatic follow-up LLM call should be skipped after the current tool batch. This only takes effect when every finalized tool result in that batch is terminating. Atomic does not register `structured_output` in normal agent sessions by default; use `createStructuredOutputTool({ schema, capture, output, name })` when an extension, SDK session, or workflow stage needs a schema-backed final-answer tool. The factory uses the supplied schema as the tool parameters directly, captures the tool arguments as whatever JSON value matches the schema, emits the same pretty-printed JSON as the terminating tool-result text for `atomic -p`, optionally writes them to the configured `output.outputPath`, and terminates the turn. In text print mode, a terminating result from a factory-created structured-output tool is emitted to stdout as the final response. Custom factory names are opt-in tools: if you register `final_decision`, include `final_decision` in any explicit `tools` allowlist; if you register the default `structured_output` name, it is available only to that session/runtime.
+Return `terminate: true` from `execute()` to skip the automatic follow-up model call only when every finalized result in the tool batch also terminates.
+
+For a schema-backed final-answer tool, use `createStructuredOutputTool({ schema, capture, output, name })`. Atomic does not register `structured_output` in normal sessions by default. The factory uses your schema directly as tool parameters, captures the matching JSON value, returns pretty-printed JSON as terminating result text, and optionally writes `output.outputPath`. Text print mode emits that result as the final stdout response.
+
+Include a custom name such as `final_decision` in any explicit tool allowlist. The default `structured_output` name is likewise available only in the session/runtime where you register it.
 
 ```typescript
 // Correct: throw to signal an error

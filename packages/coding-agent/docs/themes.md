@@ -143,7 +143,7 @@ vim ~/.atomic/agent/themes/my-theme.json
 
 3. Select the theme via `/settings`.
 
-**Hot reload:** When you edit the currently active custom theme file, Atomic reloads it automatically for immediate visual feedback.
+Atomic automatically reloads the active custom theme when you edit its file, so you can see changes immediately.
 
 ## Theme Format
 

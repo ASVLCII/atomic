@@ -35,7 +35,10 @@ description: Theme file format, every color token, and accepted color values.
 - `name` is required, must be unique, and must not contain `/`.
 - `vars` is optional. Define reusable colors here, then reference them in `colors` or `workingIndicator`.
 - `colors` must define all 51 required tokens. `scrollbarThumb` is optional and falls back to `selectedBg` when omitted. `searchMatchBg` and `searchMatchText` remain accepted for older theme files but are unused.
-- `workingIndicator` is optional and may override any subset of the six tones in the outward half of the ordinary `∀` ramp; Atomic derives omitted tones from selected background, accent, and text roles, then mirrors the palette back after `peak`. Explicit numeric values from 0 through 255 remain exact terminal palette indices. When a numeric index from 0 through 15 seeds an omitted tone, Atomic mixes from its built-in approximation of the common ANSI RGB value; the terminal still controls the actual appearance of the explicit index. Both explicit and derived tones update on theme hot reload.
+- `workingIndicator` is optional. It can override any of the six tones in the outward half of the ordinary `∀` ramp. Atomic derives omitted tones from selected background, accent, and text roles, then mirrors the palette back after `peak`.
+  - Explicit numeric values from 0 through 255 remain exact terminal palette indices.
+  - When an index from 0 through 15 seeds an omitted tone, Atomic mixes from its built-in approximation of the common ANSI RGB value. The terminal still controls the explicit index's actual appearance.
+  - Both explicit and derived tones update on theme hot reload.
 
 The `$schema` field enables editor auto-completion and validation.
 

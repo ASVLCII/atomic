@@ -81,11 +81,7 @@ and `+` alone inserts a blank line. There are no old-text or context rows. To in
 
 #### Block resolution
 
-`replace block`, `delete block`, and `insert after block` first use the native Rust tree-sitter `blockRangeAt` primitive
-from `@bastani/atomic-natives`. The brace/indent heuristic is used only as a fallback when the native binding is
-unavailable. Resolution selects the outermost syntactic node beginning on N. Where a language folds a decorator or
-annotation into its construct—Python `@dec` plus `def`, and TypeScript/Java annotations—anchoring at the first decorator
-resolves both. A Rust `#[attr]` and doc- or line-comments are separate sibling nodes: anchoring there resolves that node
+`replace block`, `delete block`, and `insert after block` select the outermost syntactic node beginning on N when syntax-aware resolution is available. A brace/indent fallback may be used otherwise. Where a language folds a decorator or annotation into its construct, such as Python `@dec` plus `def` or TypeScript/Java annotations, anchoring at the first decorator resolves both. A Rust `#[attr]` and doc- or line-comments are separate sibling nodes: anchoring there resolves that node
 alone, and replacing it with a construct body duplicates the untouched construct. Use `replace N..M:` or `delete N..M`
 with explicit lines to take both, and confirm the `→ resolved lines A-B (K lines)` echo before continuing.
 
@@ -129,9 +125,7 @@ Atomic's hand parser deliberately accepts these non-canonical shapes:
 The parser does **not** tolerate `delete N..M:` or a body under `delete`/`delete block`, `-` diff rows, apply-patch file
 sentinels inside the patch, unified-diff/`@@` hunk headers, bare numeric hunk headers, malformed/absent section headers,
 unsafe or non-positive anchors, oversized ranges, empty `insert`/`insert after block`, or empty `replace block` hunks.
-
-Notable difference from the upstream reference: Atomic accepts an empty concrete `replace N..M:` as a deletion, and
-unresolvable `insert after block` operations lower to plain `insert after` with a warning rather than failing.
+Use the canonical syntax above even when a compatibility form is accepted.
 
 ### Outputs
 
@@ -249,18 +243,12 @@ delete 20
 
 ### Limits and caps
 
-- `HL_FILE_HASH_LENGTH = 4`; canonical tags match `HL_FILE_HASH_RE_RAW = [0-9A-F]{4}` and are content-derived,
-  session-store snapshot pointers.
+- Tags contain four hexadecimal characters and belong to the current session.
 - Anchors must be positive safe integers no greater than `Number.MAX_SAFE_INTEGER`.
-- `HL_MAX_EXPANDED_RANGE_LINES = 100_000`; an inclusive numeric range is rejected before expansion above that size.
-- `MISMATCH_CONTEXT = 2`; mismatch and unresolved-block previews show up to two lines on either side of each anchor.
-- The repeated identical no-op hard limit in `edit.ts` is `3`; attempts one and two return the diagnostic, while attempt
-  three throws it with a `STOP.` prefix.
-- `RECOVERY_FUZZ_FACTOR = 0`; snapshot recovery does not slide a patch hunk to a nearby duplicate.
-- Format constants are `HL_FILE_PREFIX = "["`, `HL_FILE_SUFFIX = "]"`, `HL_FILE_HASH_SEP = "#"`,
-  `HL_PAYLOAD_REPLACE = "+"`, `HL_RANGE_SEP = ".."`, and `HL_HEADER_COLON = ":"`; operation keywords are `replace`,
-  `delete`, `insert`, `block`, `before`, `after`, `head`, and `tail`.
-- Explicit `+TEXT` that resembles a valid hunk header remains literal and emits `HUNK_LIKE_LITERAL_WARNING`.
+- Numeric ranges are limited to 100,000 lines.
+- Mismatch and unresolved-block previews show up to two lines on either side of an anchor.
+- An identical no-op payload returns a diagnostic twice; the third attempt fails with `STOP.`. Re-read and verify the anchor instead of repeating it.
+- Recovery never slides a hunk to a nearby duplicate. Explicit `+TEXT` resembling a hunk header remains literal and produces a warning.
 
 Across whole-file, truncated, and range/offset reads of LF or CRLF text, numbered output treats a terminal newline as a
 separator, not an extra synthetic row. Genuine blank lines—including one immediately before that terminal newline—remain
@@ -291,20 +279,14 @@ angle-bracketed names stand for runtime substitutions. Parser errors that origin
 - `Patch input did not produce any sections.`
 - ``Missing hashline snapshot tag for <path>; use `[<path>#tag]` from your latest read/search output. To create a new file, use the write tool.``
 - `Conflicting hashline snapshot tags for <path>: #<first tag> and #<second tag>. Re-read the file and retry with one current header.`
-- `Hashline Patcher requires a SnapshotStore; section tags are opaque store pointers.`
+- If a host reports that its snapshot store is unavailable, report the integration error rather than inventing a tag.
 - `File not found: <path>. Use the write tool to create new files.`
 
 #### Tokenizer and anchors
 
-- `Tokenizer is closed; call reset() before reusing.`
 - `line N: line anchor "<digits>" is not a safe integer; line numbers must be positive safe integers no greater than 9007199254740991.`
 - `line N: expected a line number such as "119", "112", "7"; got "<input>". Use [PATH#hash] from your latest read for file-version binding.`
 - `Line N does not exist (file has M lines)`
-- `Invalid line reference. Expected a bare line number from read/search output plus the section header content-hash tag (for example [src/foo.ts#1A2B] and line "160") Received "abc"..`
-- `Line number must be >= 1, got 0 in "0".`
-
-These two messages are retained by the low-level `parseTag` helper but currently have no caller in Atomic, so the `edit`
-tool cannot emit them.
 
 #### Ranges, bodies, and hunk conflicts
 
@@ -319,9 +301,7 @@ tool cannot emit them.
 - ``line N: `replace block N:` needs at least one `+TEXT` body row. To delete a block, use `delete block N`.``
 - `line N: anchor line A is already targeted by another hunk on line M. Issue ONE hunk per range; payload is only the final desired content, never a before/after pair.`
 
-A concrete `replace N..M:` with no body is not an error: Atomic treats it as deletion. `messages.ts` retains the unused
-`EMPTY_REPLACE` text `` `replace N..M:` needs at least one `+TEXT` body row. To delete lines, use `delete N..M`. ``, but
-the current concrete-replace parser does not emit it.
+A concrete `replace N..M:` with no body is accepted as deletion. Prefer `delete N..M` to make the intent clear.
 
 #### Contamination and malformed hunk headers
 
@@ -341,7 +321,7 @@ the current concrete-replace parser does not emit it.
   Numbered, `*`-marked context follows after a blank line when the anchor is in range.
 - Without a resolver:
   ``line N: `replace block`/`delete block`/`insert after block` are not available here (no block resolver configured). Use a concrete line range.``
-- ``internal error: unresolved `replace block` edit reached the applier (resolveBlockEdits was not run).``
+- An internal apply error indicates a host integration problem. Report the exact diagnostic; use explicit ranges when block resolution is unavailable.
 
 `insert after block` resolution failure is a warning and lowering, not an error.
 
@@ -361,8 +341,6 @@ Edit rejected for <path>: file changed between read and edit.
 Section is bound to #<expected tag>, but the current file hashes to #<actual tag>. If a prior edit in this session modified this file, copy the [path#newhash] header from that edit's response; otherwise re-read the file with `read` to refresh the tag before retrying.
 ```
 
-When the path is absent in a low-level call, the literal ` for <path>` segment is omitted.
-
 #### No-op edits
 
 A single-file or all-no-op call returns this text without writing on attempts one and two:
@@ -371,10 +349,7 @@ A single-file or all-no-op call returns this text without writing on attempts on
 Edits to <path> parsed and applied cleanly, but produced no change: your body row(s) are byte-identical to the file at the targeted lines. The bug is somewhere else — re-read the file before issuing another edit. Do NOT widen the payload or add lines; verify the anchor first.
 ```
 
-From attempt two onward it appends `No-op count for this identical payload: N.` on a new line. Attempt three throws the
-same text prefixed with `STOP. `. A mixed multi-section call containing a no-op throws
-`Hashline edit for <path> did not change the file.` The lower-level patcher can also emit
-`Edits to <path> resulted in no changes being made.` during multi-section `apply` or `preflight`.
+From attempt two onward, the result includes `No-op count for this identical payload: N.` Attempt three fails with `STOP.`. A no-op in a mixed multi-section call also fails. Re-read the file and verify the intended change before retrying.
 
 ### Warnings
 
@@ -398,12 +373,6 @@ Warnings that have active emission sites are emitted verbatim beneath the refres
   `kept K structural closing line(s) the range deleted without restating`.
 - `Applied N parallel edit calls as one snapshot-anchored batch.`
 
-`messages.ts` also defines two coalescing-warning strings, although the current parser has no emission site for them and
-rejects overlapping deletes instead:
-
-- ``Two hunks targeted the same range; kept only the second. One `replace N..M:` hunk per range — the body is the final content, never old+new.``
-- ``Dropped a bare hunk overlapped by the concrete hunk after it. One `replace N..M:` hunk per range — the body is the final content, never old+new.``
-
 ## `write`
 
 Read an existing file before overwriting it with `write`. Atomic checks that the content still matches what this session observed, so another agent's changes are not silently discarded. Creating a new file does not require a prior read.
@@ -413,13 +382,13 @@ Two refusals use the `FILE_MUTATION_CONFLICT` code and include the requester ide
 - `no_prior_observation`: this session has not read, written, or edited the file. Another session's read, including one from a previous run, does not count.
 - `changed_since_observation`: the file changed. The error names the first diverging line and shows the expected and current content. Read the file again before retrying.
 
-The check and write share a per-file mutation queue. If a result is aborted after bytes reach disk, Atomic still records the new snapshot so a retry recognizes its own write.
+If cancellation arrives after bytes reach disk, a retry still recognizes this session's write.
 
 Standalone `createWriteToolDefinition(cwd)` and `createWriteTool(cwd)` instances retain their own observations across `local://` writes, just as they do for plain paths, even when no `hashlineStore` is supplied. Separate instances still need an explicitly shared store to share observations.
 
-Creating a file claims the path exclusively. `write` asks the filesystem for create-or-fail semantics (`O_EXCL`) whenever it has just observed the path as absent, so a file that appears in the window between that check and the write is reported as `target_exists` with a description of what is there now, rather than being silently truncated. Overwrites do not request exclusivity, since they are replacing a file the session has already accounted for.
+If a file appears between the absence check and creation, local `write` refuses with `target_exists` rather than overwriting it. An unreadable existing file produces `target_unreadable`, with a filesystem code when available.
 
-`WriteOperations` carries the read `write` performs before every write. Custom implementations must supply it, and it must report absence as `undefined` while rejecting for anything else: a path that exists but cannot be read is not a free path, and reporting it as absent would present it as a fresh create and truncate it. Such a rejection surfaces as `target_unreadable`, including the filesystem error code when the backend supplies one. Routing the read through `WriteOperations` is what lets a remote or sandboxed implementation have these checks run against the filesystem its writes actually land on, instead of against local disk. An implementation that cannot express exclusive create may ignore that request and overwrite; it then loses only the race against writers outside Atomic, since the mutation queue already excludes writers inside it.
+Custom `WriteOperations` implementations must read from the same filesystem they write to. Return `undefined` only for absence and reject other read failures. Honor exclusive-create requests to protect against writers outside Atomic; adapters that ignore them lose that protection.
 
 ## `bash` and `bashInterceptor`
 
@@ -469,7 +438,7 @@ Use `find` to locate paths by glob and `search` to match file contents with a re
 
 Copied quotes around paths are removed. Existing paths containing spaces, commas, or semicolons are kept intact. Otherwise, comma/semicolon-separated paths split when at least one part resolves; whitespace-separated paths split only when every part resolves.
 
-Local `find` uses native glob matching, falling back to the packaged `fd` helper when native bindings are unavailable. Results include `scopePath`, `fileCount`, `files`, truncation and missing-path metadata, and streamed `onUpdate` snapshots during long scans.
+Results include `scopePath`, `fileCount`, `files`, truncation and missing-path metadata, and streamed `onUpdate` snapshots during long scans.
 
 ### Searching contents
 
@@ -482,7 +451,7 @@ Local `find` uses native glob matching, falling back to the packaged `fd` helper
 - `skip` pages files and is ignored for single-file searches. At the internal collection ceiling, refine the pattern or path as the output requests.
 - Context defaults to one line before and three after each match, controlled by `search.contextBefore` and `search.contextAfter`. Line selectors scope matches first; context outside the range does not count as a hit.
 
-Local search uses native ripgrep matching with a 4 MiB file cap, hidden-file and `.gitignore` handling, and line truncation. Resource-backed searches use the native in-memory matcher when available, with a JavaScript fallback for multiline/resource edge cases.
+Local search limits files to 4 MiB and truncates long lines. Hidden files and `.gitignore` rules follow the selected options.
 
 Details include scope, counts, file lists, per-file match counts, missing paths, and displayed-content metadata. `fileLimitReached` and `meta.limits.fileLimit` indicate more matching files. Hashline rows distinguish matches (`*LINE:...`) from context (` LINE:...`).
 
@@ -531,9 +500,7 @@ Output limits depend on the source:
 
 Successful reads include `details.meta.source` and `sourcePath`, plus `truncation` and `limits` when applicable.
 
-Atomic blocks private, localhost, and cloud-metadata URL targets. This includes numeric/short-form private IPs such as `2130706433`, octal/hex dotted forms, and `127.1`; IPv4-compatible and IPv4-mapped IPv6; NAT64 and 6to4 private-address forms; and the IPv6 link-local `fe80::/10` range. It revalidates redirects, pins DNS-validated addresses, and caps streamed bodies.
-
-`ATOMIC_ALLOW_PRIVATE_URL_READS=1` is a development-only escape hatch for trusted local tests. Never set it from untrusted project configuration.
+Atomic blocks private, localhost, and cloud-metadata URL targets, including alternative numeric IP spellings and IPv6 forms. Redirects are checked too. Use an accessible public URL rather than trying alternate spellings to bypass the restriction.
 
 ## `ask_user_question`
 
@@ -560,20 +527,18 @@ A cancelled or unanswered question is not approval. If no usable question tool i
 
 ## Persisted tool output
 
-Output that does not fit in a tool result is written to a file, and the result points at it — `Full output: <path>` for `bash`, `Full output saved to: <path>` for any tool result that crosses the persistence threshold. Those files are storage, so Atomic bounds where they go, how large they get, and how long they live.
+When output does not fit in a tool result, Atomic saves it to a file and returns its path: `Full output: <path>` for `bash`, or `Full output saved to: <path>` for any tool result that crosses the persistence threshold. Atomic limits these files' location, size, and lifetime.
 
-**Where.** A session that persists to disk keeps its tool results in `<sessionDir>/tool-results/`, unchanged. Everything else — `bash` overflow logs, streamed spill files, and tool results for in-memory sessions — goes under one owner- and session-scoped temp tree:
+**Where.** Disk-persisted sessions keep tool results in `<sessionDir>/tool-results/`. Bash overflow logs, streamed spill files, and tool results for in-memory sessions use one owner- and session-scoped temp tree:
 
 ```text
 <tmpdir>/atomic-<uid>/<session-id>/
 ```
 
-On Windows, where there is no uid, the account name is used instead — qualified by its domain and followed by a short digest, so that `CONTOSO\Alice` and `FABRIKAM\Alice`, or two names that reduce to the same safe path component, do not share one tree. The session id is reduced to a single safe path component, so a session id containing separators or `..` cannot place files outside that tree.
+On Windows, the temp root uses an account-specific name instead of a uid. Atomic refuses unsafe shared or linked temp paths. On systems that support POSIX permissions, directories use `0700` and files use `0600`. If storage cannot be made safe or written, the tool reports no spill path.
 
-Directories are created with `0700` and files with `0600` on platforms that support them. On POSIX that is enforced: a root owned by another account is refused and a too-permissive one is tightened. On Windows, Node exposes neither an owner SID nor a POSIX mode, so before adopting an existing component Atomic reads its security descriptor through PowerShell `Get-Acl` and decides from SIDs: the owner must be the current user, SYSTEM, or Administrators, and every access-allowed DACL entry must grant only those principals. A foreign-owned root, a root other accounts can access (a machine-wide redirected `TMP`), and a descriptor that cannot be read or fully parsed are all refused. A successful verification is cached per path per process, keyed to the directory's metadata identity — creation, change, and last-write times — so both a directory swapped underneath the path and an in-place DACL edit (which bumps the NTFS change time) force a fresh descriptor read; only a directory whose metadata is unchanged skips the subprocess.
+Each persisted file is capped at 64 MB. Output beyond the cap is replaced by `[Output truncated: persisted-output cap of 67108864 bytes reached]`; the returned `fullOutputPath` still points to that capped file. UTF-8 characters are not split, and binary bytes are preserved.
 
-Because that path is predictable, Atomic validates it rather than trusting it. Every component below the system temp directory is created one level at a time and checked: a symlink is refused outright, a directory owned by another account is refused, and a directory of this account's left too permissive is tightened to `0700` and re-checked. Refusal fails closed — the tool runs with no spill file and reports no path, instead of writing your command output into a directory someone else planted. Only the final session directory is treated as replaceable: a stale file or link sitting exactly where a session directory belongs is removed (a link by itself, never its target) and recreated.
+Cleanup removes temp trees and `tool-results` directories whose newest file is more than 30 days old. One fresh file keeps the directory. This includes custom roots selected with `--session-dir`, `ATOMIC_CODING_AGENT_SESSION_DIR`, or `sessionDir`.
 
-**How large.** No single persisted-output file exceeds 64 MB. Output that lands exactly on the cap is kept whole; only output that passes it is cut off there, with `[Output truncated: persisted-output cap of 67108864 bytes reached]` appended in place of the rest. The cut lands on a character boundary even when a multi-byte character is split across two chunks of streamed output, and bytes that are not valid UTF-8 — binary command output — are written through unchanged rather than decoded. The truncation is in the file only; the tool result and its `fullOutputPath` are unaffected. If a spill file cannot be written at all, `bash` reports no path rather than one pointing at a file that is not there.
-
-**How long.** Tool-output storage is reaped on age. A sweep runs shortly after startup, off the startup path, and removes session temp trees and `tool-results` directories whose newest file is more than 30 days old. It covers the default project-nested session roots and a custom session directory chosen with `--session-dir`, `ATOMIC_CODING_AGENT_SESSION_DIR`, or the `sessionDir` setting. The newest entry decides the whole directory: one fresh file keeps everything beside it, so a path recorded weeks ago stays readable as long as the tree is still in use. Each target is throttled to once a day by a `.last-cleanup` marker and guarded by a `.cleanup.lock` exclusive lock, so concurrent Atomic sessions never race each other; for session storage that pair lives in a control directory under the temp root rather than inside the scanned directory. A tree belonging to a session the running process is using is never reaped, so a `Full output saved to:` path stays valid for the life of the session that produced it. Session transcripts and `.jsonl` session files are outside the sweep entirely: only the temp trees and `tool-results` directories are ever deleted, symlinks are never followed out of a target, and a directory the sweep cannot verify as a real directory is skipped rather than read.
+Output from a session in the running process remains available for that session's lifetime. Cleanup never deletes session transcripts or `.jsonl` files and does not follow symlinks. Copy important output elsewhere before relying on it long-term.

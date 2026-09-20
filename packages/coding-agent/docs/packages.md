@@ -11,7 +11,7 @@ Atomic packages bundle extensions, skills, prompt templates, themes, and workflo
 
 ## Where to go next
 
-Atomic packages bundle and distribute extensions, skills, prompts, themes, and workflows. Read this page to install and manage them, then continue:
+Read this page to install and manage packages, then continue:
 
 - [Creating packages](/packages/authoring) — create a package, lay out its structure, and declare dependencies.
 - [Package reference](/packages/reference) — filtering, scope, and deduplication contracts.
@@ -59,7 +59,9 @@ atomic update --extension npm:@foo/bar
 
 These commands manage Atomic packages and `atomic update` can update the Atomic CLI installation. To uninstall Atomic itself, see [Quickstart](/getting-started/installation#uninstall).
 
-Self-update resolves an exact advertised package/version target and installs that pinned spec, so the update cannot drift to a newer registry release during installation. Any release note supplied by the update service is shown before installation. Atomic only updates installations it can verify are writable and managed by the detected global package manager; otherwise it prints a manual command. On Windows, loaded native dependencies are temporarily quarantined during replacement and stale quarantine directories are cleaned on later update attempts.
+Self-update installs an exact advertised package/version, so it cannot drift to a newer registry release during installation. Atomic shows any release note supplied by the update service before installing.
+
+Atomic updates only installations it can verify are writable and managed by the detected global package manager. Otherwise, follow the manual command it prints.
 
 By default, `install` and `remove` write to user settings (`~/.atomic/agent/settings.json`). Use `-l` to write to project settings (`.atomic/settings.json`; legacy `.pi/settings.json` is also read) instead. Project settings can be shared with your team, and Atomic installs any missing packages automatically on startup after the project is trusted.
 
@@ -72,7 +74,7 @@ atomic -e git:github.com/user/repo
 
 For local directories, `-e <dir>` also borrows project-local Atomic resources under `<dir>/.atomic`, legacy `<dir>/.pi`, and `<dir>/.agents/skills` when present. Because borrowed extensions and workflows can execute code, Atomic resolves trust for that extension source before loading those borrowed project-local resources.
 
-Workflows discovered through `-e` keep that same trusted resource set when they create child stage sessions. Stage agents get fresh resource loaders seeded from the parent snapshot, so package tools/extensions, subagents and agent definitions, skills, prompt templates, themes, workflows, and trusted borrowed project-local resources remain available in workflow stages unless the stage supplies its own explicit `resourceLoader`.
+Workflow stages launched through `-e` inherit the same trusted resources, including package tools, extensions, agent definitions, skills, prompts, themes, and workflows. An explicit stage `resourceLoader` overrides that inheritance.
 
 ## Package Sources
 

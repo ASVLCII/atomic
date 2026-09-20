@@ -7,7 +7,7 @@ description: Extend Atomic with skills, subagents, intercom, workflows, extensio
 
 Customize an Atomic session or embed it in your own software. Choose a starting point below.
 
-If you have not run Atomic yet, start at the [Quickstart](/quickstart). If you are looking for an exact contract rather than a way to build something, go to the [Reference index](/reference).
+New to Atomic? Start with the [Quickstart](/quickstart). To look up an exact contract, use the [Reference index](/reference).
 
 ## Choose the lightest mechanism
 

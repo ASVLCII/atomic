@@ -1,0 +1,6 @@
+### Result
+{"text":"During a live post-mortem turn, Escape aborts only the retained conversation’s active work and restores queued steering/follow-up text to the editor. The conversation queue remains held. Clearing or restoring every visible queued item does not release that hold. The next ordinary submission releases the conversation queue before starting a new turn. Neither action pauses, resumes, or changes the terminal workflow execution state.","rect":{"x":20,"y":268.0625,"width":350,"height":308,"top":268.0625,"right":370,"bottom":576.0625,"left":20},"viewport":390,"document":390}
+### Ran Playwright code
+```js
+await (async page => { const p = page.getByText('During a live post-mortem turn, Escape aborts only', {exact:false}); await p.scrollIntoViewIfNeeded(); const result = await p.evaluate(el=>({text:el.textContent,rect:el.getBoundingClientRect().toJSON(),viewport:innerWidth,document:document.documentElement.scrollWidth})); if(result.document !== result.viewport || result.rect.x < 0 || result.rect.right > result.viewport) throw Error('overflow'); return result; })(page);
+```

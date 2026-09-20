@@ -30,7 +30,13 @@ Use `/login` in interactive mode, then select a provider:
 - xAI (Grok/X subscription)
 - Radius
 
-Use `/login <provider>` (for example `/login openrouter` or `/login kimi-coding`) to jump directly to a provider, then select subscription or API-key authentication when both are available. OpenRouter opens its provider-owned browser PKCE flow and asks whether it should mint a new API key; complete the browser redirect before returning to Atomic. On a remote or headless machine the browser cannot reach the loopback callback, so the OpenRouter login also accepts a pasted value: give it the final redirect URL, or the authorization code on its own. Claude and ChatGPT (Codex) offer the same paste fallback, as does an extension provider that sets `usesCallbackServer`. Kimi Code displays its provider-owned device URL/code and polls until approval, then refreshes expired tokens automatically. Built-in and extension-provided OAuth use the same direct and isolated-session lifecycle: engine-only extensions expose only safe display metadata to the terminal, while acquisition, transactional persistence, and logout remain engine-owned. Credentials and executable provider functions never cross to the isolated frontend; model-catalog refresh is separate bounded background work.
+Use `/login <provider>`, such as `/login openrouter` or `/login kimi-coding`, to go directly to a provider. Select subscription or API-key authentication when both are available.
+
+OpenRouter opens its browser PKCE flow and asks whether to mint a new API key. Complete the browser redirect before returning to Atomic. On remote or headless machines, the browser cannot reach the loopback callback; paste the final redirect URL or authorization code instead. Claude, ChatGPT Codex, and extension providers that set `usesCallbackServer` offer the same fallback.
+
+Kimi Code displays its device URL/code and polls until approval, then refreshes expired tokens automatically.
+
+Built-in and extension-provided OAuth work in both direct and isolated sessions. Login completes once credentials are saved; model-catalog refresh runs separately.
 
 Escape or Ctrl+C quietly cancels the matching login, including immediate/pre-device native aborts, and leaves the previously committed credential and catalog unchanged. Provider denial, device expiry, timeout, browser/network/protocol failure, malformed responses, token exchange, and persistence failures remain visible. Atomic claims success when the provider flow and credential persistence complete; it does not wait for model-catalog or ambient-availability refresh work.
 
@@ -40,7 +46,9 @@ Type `/logout ` to autocomplete providers with stored credentials, or use `/logo
 
 ### Token Refresh
 
-A stored OAuth token is refreshed once fewer than **five minutes** of validity remain, rather than at expiry, so a long turn is not started on a credential that dies mid-request. The refresh runs inside the `auth.json` lock and re-checks the stored expiry after taking it, so concurrent sessions sharing one credential file — subagents, workflow stages, RPC children — refresh it once between them rather than once each, and a session that arrives after the rotation finds nothing to do. A token still outside the window is not touched.
+Atomic refreshes a stored OAuth token when fewer than **five minutes** of validity remain, so a long turn does not start with a token about to expire. Tokens outside this window are untouched.
+
+Concurrent sessions sharing `auth.json`, including workflow stages and subagents, coordinate token refresh rather than rotating the same credential independently.
 
 ### Verify Readiness Before a Session
 
@@ -72,13 +80,13 @@ The selection Atomic records stays the canonical `-fast` identity even when the 
 
 A fast variant's route owns two request fields: the upstream model ID and the service tier. A `before_provider_request` hook may rewrite anything else, but replacing the payload with a non-object or changing either route-owned field is refused with an error naming the model and the remedy, because a model recorded, persisted, and billed as `-fast` must not go out as a different model or at an ordinary tier. Select the normal sibling instead when a request needs different routing. A model without a fast variant keeps unrestricted hook freedom, and an explicit per-request service tier still applies to it without granting fast-model identity.
 
-Atomic does not publish a fast variant for a model whose API is served by an extension's own stream function, including a natively registered provider: it cannot enforce the route through a transport it does not serialize. Such a provider keeps its normal models and its own transport untouched.
+Models served by an extension's own stream function, including native provider registrations, do not get automatic fast variants. Their normal models and custom transport remain available.
 
 Fast behavior comes from explicit route metadata attached when the variant is derived — never from the `-fast` suffix. If a provider, a `models.json` custom model, or an extension already defines that exact `-fast` ID, that model wins: it routes exactly as it is declared, Atomic suppresses the derived duplicate, and interactive startup and `--list-models` print a warning naming the model to rename or remove. Fast variants are not derived for Azure OpenAI, OpenRouter, or generic OpenAI-compatible providers.
 
-Provider-owned names that end in `-fast` remain ordinary exact IDs. The Vercel AI Gateway currently advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-fast`; Atomic preserves both live-catalog records and their long-context prices without attaching `fastRoute` to the suffixed ID. OpenRouter independently advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-pro`, also with request-wide long-context prices. If either live provider withdraws a record, the next generated catalog omits it rather than keeping a handwritten mirror.
+Provider-owned names ending in `-fast` remain ordinary exact IDs. Vercel AI Gateway advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-fast`; OpenRouter advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-pro`. Their catalog prices and routing apply, not Atomic's first-party fast routing. Check the live catalog before selecting one.
 
-For first-party OpenAI Codex models on the shared ChatGPT Codex transport, explicit fast-route metadata — not the final payload tier, a caller flag, or the `-fast` suffix — selects the routing contract: `originator: codex_cli_rs` plus `x-codex-routing-hint: model=<base-upstream-model>;tier=priority` on both HTTP/SSE and WebSocket transports. Credential resolution preserves that identity when it resolves to the first-party ChatGPT endpoint; merely using `api: "openai-codex-responses"` under a renamed provider or proxy does not grant it. WebSocket fallback, reconnect, and HTTP retry attempts reuse the model route's identity, and switching between normal and fast model routes drops a cached socket before reuse. Requests to the standard OpenAI API send only the tier. On a normal model Atomic keeps the normal `originator: pi` identity and sends no routing hint, even if a standalone caller explicitly requests `serviceTier: priority`. The same contract covers standalone `modelRuntime.stream()`/`complete()`/`streamSimple()`/`completeSimple()` requests.
+First-party Codex fast models keep their priority routing across retries and transport changes. Renaming a provider or setting `serviceTier: priority` on a normal model does not grant fast-model identity.
 
 Pick fast variants deliberately in workflows: parallel fan-out multiplies provider usage, and priority-tier requests are billed at a higher rate.
 
@@ -114,7 +122,7 @@ OAuth logins get their Copilot host from the token GitHub issues during login. E
 
 A `models.json` provider `baseUrl` for `github-copilot` overrides all of the above. Without `COPILOT_GITHUB_TOKEN` the provider is left exactly as upstream `pi-ai` defines it.
 
-Chat requests authenticated with a raw `COPILOT_GITHUB_TOKEN` (including `github_pat_`, `ghp_`, `gho_`, and `ghu_` tokens) send `Copilot-Integration-Id: copilot-developer-cli`. A `Copilot-Integration-Id` supplied through `models.json` provider headers, `modelOverrides`, or per request always takes precedence, including an explicit `vscode-chat` value. Exchanged OAuth tokens containing a `tid=` segment keep the existing OAuth headers unchanged. The env-token routing implementation and its exported helpers now live in `@bastani/pi-ai`.
+Chat requests authenticated with a raw `COPILOT_GITHUB_TOKEN`, including `github_pat_`, `ghp_`, `gho_`, and `ghu_` tokens, send `Copilot-Integration-Id: copilot-developer-cli`. A header supplied through `models.json`, `modelOverrides`, or per request takes precedence, including `vscode-chat`. Exchanged OAuth tokens containing `tid=` keep their OAuth headers.
 
 Business and enterprise tokens sent to the individual host return `421 Misdirected Request`; if you see that, set `COPILOT_API_TARGET` to the host your organization issues.
 
@@ -130,7 +138,6 @@ The `codebase-locator`, `codebase-pattern-finder`, and `codebase-research-locato
 
 Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens in `auth.json`; its model catalog refreshes independently and is cached in `models-store.json`. API-key authentication is also available through `/login radius` or `RADIUS_API_KEY`. Custom Radius gateways can be declared in `models.json` with `"oauth": "radius"` and the gateway `baseUrl`.
 
-
 ## API Keys
 
 ### Environment Variables or Auth File
@@ -142,13 +149,13 @@ export ANTHROPIC_API_KEY=sk-ant-...
 atomic
 ```
 
-After a successful API-key or OAuth login, Atomic persists the credential and immediately marks that provider available against the model snapshot already loaded in the active session. It does not make login wait for cache restoration, ambient-availability checks, or another model-catalog request. Open `/model` to use that authenticated snapshot immediately; the selector restores and refreshes dynamic catalogs in the background with a 15-second deadline and keeps selection responsive if a provider is slow or unavailable.
+After login, open `/model` to use the authenticated cached snapshot immediately. Catalog refresh runs in the background with a 15-second deadline and falls back to cached models if the provider is slow or unavailable.
 
-`/logout` follows the same transaction boundary in reverse: once the stored credential is deleted, Atomic immediately removes that stored-auth projection and returns to the editor without refreshing model catalogs. A short, bounded local probe preserves models when authentication still exists through an environment variable or runtime key. Refresh work that began before either login or logout cannot later overwrite the newer credential snapshot.
+Logout returns without waiting for catalog refresh. Models can remain available if an environment variable or runtime key still authenticates the provider; remove that source separately. Earlier refreshes cannot undo a later login or logout.
 
-On a remote or headless machine, paste the authorization code or final redirect URL into the login prompt when the provider offers manual entry. A completed exchange must either return to the editor or show an error; it does not require deleting `~/.atomic`. Existing OAuth credentials use the same `auth.json` schema after the pi-ai model-runtime migration and are loaded in place.
+On remote or headless machines, paste the authorization code or final redirect URL when the login prompt offers manual entry. A completed exchange returns to the editor or shows an error; it does not require deleting `~/.atomic` or migrating existing OAuth credentials.
 
-Remote pi.dev catalogs persist their ETag and are revalidated with `If-None-Match`; an empty `304` keeps the cached models and counts as a successful check. Atomic renders the cached snapshot immediately, preserves each provider's last usable catalog on refresh failure, and prefers newer bundled data over stale remote overlays. See [Custom Models](/models/reference#catalog-freshness-and-precedence).
+Catalog failures preserve the last usable models for each provider. See [catalog freshness and precedence](/models/reference#catalog-freshness-and-precedence).
 
 | Provider                           | Environment Variable                                                      | `auth.json` key              |
 | ---------------------------------- | ------------------------------------------------------------------------- | ---------------------------- |
@@ -193,7 +200,7 @@ Remote pi.dev catalogs persist their ETag and are revalidated with `If-None-Matc
 
 Z.AI and Z.AI Coding Plan (China) default to `glm-5.3` (`zai/glm-5.3` and `zai-coding-cn/glm-5.3`), and both direct providers also expose the multimodal `glm-5.3-flash`. Baseten defaults to its directly selectable `zai-org/GLM-5.3` and also exposes `zai-org/GLM-5.3-Fast` and the multimodal `zai-org/GLM-5.3-Flash`; OpenRouter exposes `z-ai/glm-5.3` and `z-ai/glm-5.3-flash`. The full and Flash entries support `low`, `high`, and `max` reasoning; Baseten's Fast entry also supports `off`. Built-in workflow and subagent chains include the Z.AI, Z.AI Coding Plan, Baseten, and OpenRouter routes at `:high`. Use Baseten's `zai-org/GLM-5.2` or `zai-org/GLM-5.3-Fast` when fully disabled reasoning is required. Qwen Token Plan Individual defaults to `qwen3.8-max` and uses the international `QWEN_TOKEN_PLAN_API_KEY` shared with the existing Qwen Token Plan provider. These catalogs follow their upstream providers, so use `--list-models` for the current entries.
 
-Reference for environment variables and `auth.json` keys: `findEnvKeys()` / `getEnvApiKey()` in the installed `@bastani/pi-ai` dependency (`node_modules/@bastani/pi-ai/dist/env-api-keys.d.ts`). The private provider map those functions use is in `node_modules/@bastani/pi-ai/dist/env-api-keys.js`; Atomic does not include a separate `packages/ai` source directory in this monorepo.
+Use the table above for environment-variable and `auth.json` names.
 
 #### Auth File
 
@@ -245,7 +252,6 @@ API-key credentials may include provider-scoped `env` values. They take preceden
 ```
 
 Use this when Atomic should use provider settings different from the project shell environment.
-
 
 ### Key Resolution
 
@@ -492,7 +498,7 @@ Replace the former direct ID `typesafe-ai/jev` with `typesafe-ai/jev-latest` in 
 
 With an empty `routerModel`, configured Jev credentials select Jev for prerequisite workflow and subagent-auto routing. An explicit router selection takes precedence. General SDK structured-output requests select their inference model explicitly. This does not change the `structured_output` tool's model. User-issued `/workflow` commands bypass launch routing.
 
-Atomic sends `POST https://api.typesafe.ai/v1/systemone` with wire model `jev-latest`, Bearer authentication, shared state and typed Choice questions. It does not send OpenAI chat-completion requests or ask Jev to generate arbitrary JSON Schema. Workflow and automatic model routers allow an initial attempt plus up to three repairs for malformed or schema-invalid answers within one shared deadline; generic SDK structured decisions remain one-shot. Authentication/provider failures, cancellation and stale catalogs are not retried. Choices above 255 options use a bounded multi-request tournament that includes every original candidate, retains three per batch, and compares finalists. Questions are packed using estimated context accounting, not a guaranteed tokenizer fit; state is never trimmed and actual context overflows fail at the provider. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits) for usage, grouping sensitivity and cancellation behavior.
+Routers can repair malformed or schema-invalid answers up to three times after the initial attempt, within one shared deadline. Generic SDK decisions remain one-shot. Large choices can require several requests, increasing latency and usage; state is never trimmed automatically. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits) before sending large candidate lists or context.
 
 HTTP 401 means check the key saved through `/login typesafe-ai` or `TYPESAFE_API_KEY`, 422 means check the question/state contract, and 429 or 529 means wait before retrying explicitly. Configured credentials do not verify access or quota. See [TypeSafe's API](https://docs.typesafe.ai/api.md) and [Choice reference](https://docs.typesafe.ai/primitives/choice.md).
 

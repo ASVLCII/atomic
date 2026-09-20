@@ -51,7 +51,17 @@ Sent and received messages are recorded in session history as `intercom_sent` / 
 
 ### Targeting Sessions and Pending Workflow Stages
 
-Live-session lookup accepts an exact full Intercom session ID, an exact case-insensitive session name, or a unique 8-character hexadecimal prefix of a UUID-backed session ID. Exact names and IDs take precedence. Ambiguous prefixes report only authorized candidates and require the full UUID; other truncations are rejected. An isolated child can select its authorized supervisor by a unique UUID prefix without gaining access to unrelated groups. Workflow stages use the canonical `workflow:<rootRunId>/<segment>[/<segment>...]` path printed by `intercom list` and workflow status surfaces; an exact target works while the row is `PENDING` and after it becomes `RUNNING`. Each segment may be a stage name, run id, or glob: `*` matches one segment and may be embedded, while `**` matches any depth. Status surfaces label pending stages whose pre-start delivery capability is unavailable without presenting a usable target and never advertise a retained pending stage after its run terminates. The `sessionId` shown by `workflow status` belongs to the workflow SDK and is **not** an Intercom target.
+Live-session lookup accepts:
+
+- An exact full Intercom session ID.
+- An exact case-insensitive session name.
+- A unique 8-character hexadecimal prefix of a UUID-backed session ID.
+
+Exact names and IDs take precedence. Ambiguous prefixes report only authorized candidates and require the full UUID; other truncations are rejected. An isolated child can select its authorized supervisor by a unique UUID prefix without gaining access to unrelated groups.
+
+Workflow stages use the canonical `workflow:<rootRunId>/<segment>[/<segment>...]` path printed by `intercom list` and workflow status surfaces. An exact target works while the row is `PENDING` and after it becomes `RUNNING`. Each segment may be a stage name, run id, or glob: `*` matches one segment and may be embedded, while `**` matches any depth.
+
+Status surfaces label pending stages whose pre-start delivery capability is unavailable without presenting a usable target. They never advertise a retained pending stage after its run terminates. The `sessionId` shown by `workflow status` belongs to the workflow SDK and is **not** an Intercom target.
 
 Agent list rows put the copyable exact ID or canonical workflow path first, followed by status and working directory. Meaningful names remain secondary metadata; redundant generated aliases are hidden only in the list, not removed from lookup. Pending and future workflow rows retain lifecycle and queued counts. Copy the target rather than reconstructing it from a name.
 
@@ -88,7 +98,7 @@ Every session belongs to a non-empty set of intercom **groups**. Sessions with n
 
 A session's home group is resolved with this precedence: explicit stage/task/subagent group > runtime-owned workflow invocation group or inherited launching-session group > env `ATOMIC_INTERCOM_GROUP` (legacy `PI_INTERCOM_GROUP`) > Intercom `config.json` `"group"` > `"default"`. Workflow stage named groups and `group: true` are namespaced under `workflow:<rootRunId>/...`, preventing cross-run collisions while preserving sibling isolation. `group: "default"` remains the explicit non-owned escape. The invocation group has asymmetric exact-target control over its owned subgroups; ownership does not grant reverse or lateral access.
 
-The broker, not the client, marks validated supervisor traffic. Ordinary `send` frames remain membership-isolated even if a raw client forges a supervisor marker, and replies cross back only through an exact broker-recorded `replyTo` match. Parent-held authorization state is restored after reconnects. During child admission, the parent wrapper may lazy-load and connect the broker provider to mint that exact child's capability. The child still connects only when it uses an Intercom delivery path. Single-child claimed decisions or interviews terminally hand off before child send or waiter admission; parallel requests use the broker and correlated reply wait. A claimed provider failure aborts launch, while runtimes with no provider omit supervisor metadata and do not expose a broken channel.
+Supervisor coordination is granted by the launching parent and can cross groups only for that authorized relationship. Ordinary sends remain membership-isolated. Reconnects preserve authorized relationships; joining a group does not create one.
 
 ### send vs ask vs reply
 
@@ -132,7 +142,7 @@ Create `~/.atomic/agent/intercom/config.json`. The legacy `~/.pi/agent/intercom/
 | `status` | — | Optional custom status suffix shown after the automatic lifecycle status, for example `thinking · researching` |
 | `group` | `"default"` | Home intercom group for this session (see [Groups](/intercom/reference#groups)). Overridden by env `ATOMIC_INTERCOM_GROUP` / `PI_INTERCOM_GROUP` and by workflow/orchestrator per-session injection. |
 
-The default `npx --no-install tsx` pair is a compatibility sentinel: Intercom recognizes it and starts the broker through the current Atomic runtime (`process.execPath`). It never resolves or executes `tsx` — Node-based installs run the broker with Atomic's bundled `jiti` loader, which is dependency-free pure JavaScript; Bun source-checkout runs use the current Bun executable directly; standalone Atomic binaries re-enter the split launcher through a narrow internal broker handoff. Default startup therefore does not rely on `npx`, `tsx`, or `bun` being on `PATH`. Explicit custom broker commands still work — for example, to intentionally use Bun from `PATH`:
+The default `npx --no-install tsx` pair uses Atomic's own runtime and does not require `npx`, `tsx`, or `bun` on `PATH`. Explicit custom commands still work. For example, to use Bun from `PATH`:
 
 ```json
 {

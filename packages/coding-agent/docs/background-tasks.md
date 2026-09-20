@@ -51,7 +51,7 @@ If the task finishes during observation, the call returns its terminal result in
 
 Shell `budgetMs` accepts finite non-negative milliseconds; zero means no observation delay. On command launches it belongs inside a foreground `wait`; existing-task `action: "wait"` calls take it at the top level. A trusted SDK host can override the usual budgets or select `tasks.wait.kind: "until-settled"`; omitted foreground budgets then wait until settlement. Explicit per-call budgets still take precedence.
 
-Native observation timers run independently of JavaScript. A zero-budget wait can already be backgrounded by the time a caller reads the next task snapshot, even before JavaScript awaits the result. Synchronous wait registration does not guarantee a visible foreground interval. The elapsed result still identifies the same wait and task; execution continues.
+A zero-budget wait may return a background state immediately. It still refers to the same task; execution continues.
 
 ## Background subagents
 
@@ -120,11 +120,13 @@ Completion creates a shaded notification card in the owning chat without dependi
 /tasks to inspect
 ```
 
-The parent model also receives the result context. The internal receipt stays in structured message details, rather than becoming raw JSON in chat. The same persisted completion identity handles delivery retries without relaunching the child. Workflow completions remain in their owning stage chat, not the main conversation.
+The parent model also receives the result context. Delivery retries do not relaunch the child. Workflow completions stay in their owning stage chat, not the main conversation.
 
 Supervisor progress messages are labelled **Historical supervisor update** with their original `Sent:` timestamp. They describe the child's state when sent, not its current status, and can arrive after completion. Prefer a later correction or final result over an earlier progress hypothesis; use `/tasks` for the current task state.
 
-Stopping a subagent through `/tasks` (`x`, then `y`) also delivers a **stopped** card and stop context to the parent model. The notice arrives after termination is confirmed, not while the task is merely **Stopping**, and does not require a final response from the child. Cancelling queued work notifies without starting it. Repeated stop requests or late child results do not duplicate the notice or overwrite the recorded outcome; a task that finished before cancellation keeps its actual result. Closing the owning session or workflow stage still suppresses late notices.
+Stopping a subagent through `/tasks` (`x`, then `y`) delivers a **stopped** card and stop context to the parent model. The notice arrives only after termination is confirmed, not while the task is **Stopping**. It requires no final response from the child. Cancelling queued work sends the notice without starting it.
+
+Repeated stop requests or late child results do not duplicate the notice or overwrite the recorded outcome. A task that finished before cancellation keeps its actual result. Closing the owning session or workflow stage still suppresses late notices.
 
 Restored completions may have only an outcome and task identity if the original live task or transcript is unavailable. Atomic does not invent missing output. Excerpts are bounded; inspect retained history for more detail.
 
@@ -209,7 +211,7 @@ The response includes `taskId`, `decision`, `execution`, and `cleanup`. `cancell
 
 Shell completions use the same shaded card as subagents, with a retained output preview and available exit code. Nonzero shell exits are shown as failures even though the process itself reached a terminal state. Cancellation shows Stopped. The card and below-prompt count update in the owning main or workflow-stage chat.
 
-Native Windows owned shells use supervised pipes or ConPTY, with Job Object containment before execution resumes and confirmed cleanup. If containment cannot be established, launch is refused rather than falling back to unsupervised execution. The legacy Windows WSL `bash.exe` stdin transport remains unsupported for owned launch because Windows jobs cannot supervise Linux guest processes. Running Atomic inside WSL uses the normal POSIX/Bash path.
+Native Windows refuses owned shell launches it cannot supervise. Legacy Windows WSL `bash.exe` stdin transport is unsupported; run Atomic inside WSL for the normal POSIX/Bash path.
 
 Bash calls inside subagent sessions retain their existing execution paths. Without a supported task owner, explicit background requests are refused before execution; foreground calls wait for completion rather than automatically yielding. Custom operations adapters receive `wait` but must implement it themselves. External-terminal processes are not adopted into `/tasks`. A child's own tool use appears in that subagent's activity and transcript.
 
@@ -217,7 +219,7 @@ Bash calls inside subagent sessions retain their existing execution paths. Witho
 
 Background means independent of the current observation, not independent of its owner. **Pausing main chat** aborts the foreground turn only; its background agents and shells keep running. Detaching a workflow pane, ending a model turn, or closing `/tasks` also leaves owned background work alone.
 
-**Pausing a workflow stage** blocks new task launches immediately and cancels that stage generation's active and admitted queued agents and commands. Queued agents are cancelled before active cancellations free execution slots. Command setup already in flight may briefly start a shell during the pause transition; pause waits for those admissions, cancels the resulting shells, and confirms resource cleanup before completing. A successful pause leaves no owned active or queued executions. Cancellation or cleanup failures are reported instead of confirming pause. Main-chat tasks, sibling stages, and future stage generations are unaffected by a stage-scoped pause.
+**Pausing a workflow stage** blocks new launches and cancels its active and queued agents and shells. Pause completes only after confirming cleanup; failures are reported rather than treated as a successful pause. Main-chat tasks, sibling stages, and future stage generations are unaffected.
 
 Pause does not close the stage's message generation: queued user and Intercom messages remain held for resume. Resume permits fresh launches but never resurrects cancelled executions; retained task results remain inspectable. Closing a session or stage generation still cancels its remaining owned work. Explicit `/tasks` stop and declared execution timeouts remain separate controls.
 
@@ -225,15 +227,13 @@ On native Windows, Suspend opens a PowerShell subshell rather than freezing Atom
 
 Task inspection is owner-scoped. It is not a machine-wide process list. Switching sessions does not copy the previous session's task rows into the new one. Missing retained history is reported explicitly.
 
-Git branch watchers for alternate folders are shared by their chat footers and released when the last viewer closes or changes folders. Main chat and other open stage chats keep their live branch updates; closing `/tasks` alone leaves its chat footer active.
+Closing `/tasks` does not stop the chat footer's live Git branch updates.
 
 ## Task state and completion delivery
 
-Foreground and background describe observation, not different executions. Each admitted task keeps its identity and owning session as callers start or stop waiting. The native `wasBackground` field remains set after a designated wait yields, including after a later foreground wait or settlement.
+Foreground and background are observation modes for the same task. Stopping a wait does not create, stop, or restart execution.
 
-Execution outcome and resource cleanup are separate states. A terminal result does not by itself prove that resources were reaped. Cleanup failures remain explicit. Supervised shells retain output while running, and finish output draining as part of cleanup.
-
-Native integrations can use `TaskSupervisor.taskSettlement(task)` from `@bastani/atomic-natives` to retrieve an authentic terminal receipt without creating a new wait. This supports recovery when a bounded event journal no longer contains the completion event. Session-history completion intents and acknowledgements reuse the same identity when notification delivery is retried.
+A terminal result does not by itself confirm resource cleanup. Check the tool's cleanup status before treating a stop as complete.
 
 UI previews are bounded and are not a substitute for retained output. Gaps and truncation are labelled; unavailable history is reported rather than reconstructed from activity counters.
 

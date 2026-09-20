@@ -1,10 +1,9 @@
 # Containerization
 
-Atomic runs with all permissions by default, but in some cases, you will want to have more control over what directories Atomic can write to and which accesses it has.
+Atomic runs with all permissions by default. To restrict which directories it can write to and what it can access, choose one of two approaches:
 
-There are two general options. You can either
-1. run the whole `atomic` process inside an isolated environment, or
-2. run `atomic` on the host and route tool execution into an isolated environment.
+1. Run the whole `atomic` process inside an isolated environment.
+2. Run `atomic` on the host and route tool execution into an isolated environment.
 
 Containerization is the outer boundary, not the only one. [Security](/security) covers the project-trust prompt that gates which project-scoped extensions, skills, and settings load in the first place; read it alongside this page when you are deciding what an untrusted repository is allowed to do.
 
@@ -93,7 +92,7 @@ docker run --rm -it \
   atomic-sandbox
 ```
 
-The `-v "$PWD:/workspace"` mounts your current directory into the container at /workspace such that reads and writes in `/workspace` inside Docker directly affect your host files, like in the Gondolin example.
+The `-v "$PWD:/workspace"` option mounts your current directory at /workspace in the container. Reads and writes in `/workspace` directly affect your host files, as in the Gondolin example.
 
 Use a named volume for `/root/.atomic/agent` if you want container-local settings and sessions. Mounting your host `~/.atomic/agent` exposes host auth and session files to the container.
 

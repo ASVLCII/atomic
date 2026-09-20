@@ -30,7 +30,9 @@ For model-tool launches, the router owns all semantic selection from neutral sta
 
 ## Choose your path
 
-For deliberate definition authoring, start with battle-tested builtins. If no builtin fully fits the task, ask Atomic to design a dynamic, task-specific workflow. Hand-write and maintain custom workflow TypeScript after you are comfortable with Atomic, or when generated workflows do not meet the need. Generated and hand-written workflows use the same runtime definition; dynamic and custom describe the authoring progression, not incompatible runtime primitives. Model-tool launch selection remains router-owned.
+For deliberate definition authoring, start with the shipped builtins. If none fully fits, ask Atomic to design a task-specific workflow. Hand-write and maintain custom TypeScript once you are comfortable with Atomic, or when generated workflows do not meet the need.
+
+Generated and hand-written workflows use the same runtime definition. Dynamic and custom describe how you author them, not incompatible runtime types. Model-tool launch selection remains router-owned.
 
 Prefer composing builtin definitions with `ctx.workflow(...)` over copying or rebuilding their prompts, graphs, reducers, and gates.
 

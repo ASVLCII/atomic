@@ -309,7 +309,6 @@ Response:
 
 `models` preserves the refreshed catalog order. `scopedModels` is optional. If authentication remains through an environment variable, `authStatus.source` is `"environment"` and `authStatus.label` names the variable.
 
-
 ### Thinking
 
 #### set_thinking_level
@@ -339,7 +338,7 @@ Current engines include the effective level after capability clamping and, when 
 {"type": "response", "command": "set_thinking_level", "success": true, "data": {"level": "high", "provider": "anthropic", "modelId": "claude-sonnet-4-20250514"}}
 ```
 
-Isolated interactive hosts must apply a persisted thinking default using that ACK target, not the host session model at callback time. A later `model_changed` event must not re-key the saved override. A later `thinking_level_changed` event must keep the host session's effective level even if an older ACK settles afterward. `RpcClient.setThinkingLevel(level)` stays one-argument `Promise<void>`; isolated persist reads the ACK through an internal client path.
+Use the acknowledgement's provider/model when recording a persisted thinking override, not whichever model is active when your callback runs. Keep newer `thinking_level_changed` state if an older acknowledgement arrives later. `RpcClient.setThinkingLevel(level)` remains a one-argument `Promise<void>` method.
 
 #### cycle_thinking_level
 
@@ -417,7 +416,7 @@ Response:
 
 #### compact
 
-Run Atomic's verbatim line compactor. The selected session model receives the complete active numbered transcript except for exactly the newest `preserve_recent` context-visible messages and returns bare `start,end` deletion records; Atomic validates them and mechanically reconstructs retained lines with `(filtered N lines)` markers. The default tail is two messages, with no user-turn alignment. A value of zero sends the entire active transcript and persists `firstKeptEntryId: null`. The command appends a durable `compaction` entry with `details.strategy: "verbatim-lines"`.
+Run verbatim line compaction with the session model. It preserves exactly the newest `preserve_recent` context-visible messages, default two, without aligning to user turns. Zero compacts the whole active transcript and returns `firstKeptEntryId: null`. The resulting durable entry uses `details.strategy: "verbatim-lines"`; see [Compaction](/compaction) for behavior and settings.
 
 ```json
 {"type": "compact"}
@@ -529,7 +528,9 @@ While the command runs, Atomic emits ordered deltas correlated by the command `i
 {"type":"bash_execution_update","id":"req-1","channel":"stderr","delta":"warning\n"}
 ```
 
-`channel` is exactly `"stdout"` or `"stderr"`. Deltas preserve the order observed for that request; concurrent bash requests may interleave globally but never share IDs. Request ownership survives `new_session`, `switch_session`, `import_session`, fork, and clone while the command is running: later deltas still stream under the original ID, the replacement session is not contaminated, and exactly one ordinary `response` remains the terminal record for completion, cancellation, or error.
+`channel` is exactly `"stdout"` or `"stderr"`. Deltas preserve the observed order for each request. Concurrent bash requests may interleave globally but never share IDs.
+
+Request ownership survives `new_session`, `switch_session`, `import_session`, fork, and clone while the command runs. Later deltas keep the original ID and do not contaminate the replacement session. Exactly one ordinary `response` is the terminal record for completion, cancellation, or error.
 
 If output was truncated, includes `fullOutputPath`. Persisted bash output lives in the owner- and session-scoped temp tree (`<tmpdir>/atomic-<uid>/<session-id>/`), not at the temp root — see [Tools](/tools#persisted-tool-output) for the layout, permissions, size cap, and retention:
 ```json
@@ -551,9 +552,9 @@ If output was truncated, includes `fullOutputPath`. Persisted bash output lives 
 
 **How bash results reach the LLM:**
 
-The `bash` command executes immediately and returns a `BashResult`. Internally, a `BashExecutionMessage` is created and stored exactly once in the session where that request started, even if an RPC session replacement completes before the command. The message does NOT emit an event.
+The `bash` command returns a `BashResult` and saves output in the session where the request started, even if another session becomes active before completion. The saved `BashExecutionMessage` emits no event of its own.
 
-When the next `prompt` command is sent, all messages (including `BashExecutionMessage`) are transformed before being sent to the LLM. The `BashExecutionMessage` is converted to a `UserMessage` with this format:
+The initiating session's next prompt includes the output as user context in this format:
 
 ````
 Ran `ls -la`
@@ -748,7 +749,9 @@ Response:
 
 #### get_entries
 
-Get all session entries in append order (excluding the session header). The session is an append-only tree of entries with stable ids, so an entry id works as a durable cursor: pass the last entry id you have seen as `since` to get only entries strictly after it, even across client restarts. Unlike `get_messages`, this includes pre-compaction history and abandoned branches.
+Get all session entries in append order, excluding the session header. Unlike `get_messages`, this includes pre-compaction history and abandoned branches.
+
+Entry IDs are stable in the append-only tree. Use the last entry ID you have seen as `since` to get only entries strictly after it, even across client restarts.
 
 ```json
 {"type": "get_entries"}
@@ -961,11 +964,7 @@ Emitted when a message begins and completes. The `message` field contains an `Ag
 
 Emitted during streaming of assistant messages. Carries the streaming delta plus the latest cumulative usage.
 
-`message_update` deliberately omits the cumulative message snapshot: there is no `message`
-field, and `assistantMessageEvent` has no `partial`. `message_start` provides the
-initial message, the deltas build it, and `message_end` provides the final
-authoritative message. Repeating a snapshot on every frame would make the bytes
-written per assistant turn grow with the square of its length.
+`message_update` has no cumulative `message`, and `assistantMessageEvent` has no `partial`. Build your message from `message_start` and deltas, then use `message_end` as the final authoritative message.
 
 The top-level `usage` field carries the latest cumulative provider-reported usage; it may
 remain zero until completion when a provider does not report usage during streaming. When
@@ -1157,7 +1156,6 @@ On final failure (max retries exceeded):
   "finalError": "529 overloaded_error: Overloaded"
 }
 ```
-
 
 ### summarization_retry_scheduled / summarization_retry_attempt_start / summarization_retry_finished
 

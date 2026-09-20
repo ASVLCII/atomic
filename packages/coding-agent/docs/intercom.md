@@ -7,7 +7,9 @@ description: "Direct messaging between Atomic sessions on the same machine"
 
 # Intercom
 
-Atomic bundles `@bastani/intercom`, a first-party extension for direct 1:1 messaging between Atomic sessions on the same machine. Send context, findings, or requests from one session to another — whether you're driving the conversation or letting agents coordinate. Connections are lazy and tool-driven: the extension registers its commands and tools at startup, but a session does not connect until you or the model actually invoke Intercom. No separate install is needed.
+Atomic bundles `@bastani/intercom` for direct 1:1 messaging between sessions on the same machine. Send context, findings, or requests yourself, or let agents coordinate. No separate install is needed.
+
+The extension registers commands and tools at startup. Connections are lazy: a session connects when you or the model invoke Intercom.
 
 **Key capabilities:**
 - **Session messaging** - `send`, `ask` (blocking, 10-minute timeout), `reply`, `pending`, `list`, `groups`, and `status` via the `intercom` tool
@@ -29,7 +31,7 @@ Atomic bundles `@bastani/intercom`, a first-party extension for direct 1:1 messa
 
 Intercom coordinates several Atomic sessions on one machine. Read this page for the quick start and the coordination patterns, then continue:
 
-- [Intercom operations](/intercom/operations) — connection lifecycle, delivery behavior, notifications, shortcuts, internals, and limits.
+- [Intercom operations](/intercom/operations) covers connection states, delivery, notifications, shortcuts, and recovery.
 - [Intercom reference](/intercom/reference) — the `intercom` tool contract and every intercom setting.
 
 ## Table of Contents
@@ -126,7 +128,9 @@ See auth.ts:142-156.
 
 The reply hint (enabled by default) points to `intercom({ action: "reply", ... })`, so recipients never need raw sender or `replyTo` IDs. Idle recipients get a new turn immediately; busy interactive recipients receive the message once they go idle. Attachment content is included in the agent-visible body, and messages are rendered inline and stored in Atomic session history.
 
-Working subagents and live workflow stages treat `send` and `ask` as a priority interrupt queue. The recipient's current model call or cancellable tool is cancelled immediately, and the message is processed next within the same task, session, and stage generation; Intercom never launches another task or repeats the original prompt. A tool that ignores cancellation finishes first, and completed side effects are kept rather than undone or replayed. This works with foreground and background subagents. Messages received during startup join the original task, multiple messages retain arrival order, and an ask keeps its exact reply correlation after the cancelled turn. Explicit `interrupt`, owner cancellation, host stop, and terminal children or closed stages still win over later input. Use an exact connected child name or full session ID from `intercom list`; subagents are not workflow-stage paths.
+Working subagents and live workflow stages process `send` and `ask` as priority input. The current model call or cancellable tool is cancelled, then the message is handled in the same task and session. Tools that ignore cancellation finish first; completed side effects are not undone or replayed.
+
+This works for foreground and background children. Startup messages join the original task, multiple messages keep arrival order, and asks retain their reply thread. Explicit interrupt, owner cancellation, host stop, and terminal children or closed stages take precedence over later input. Use an exact child name or full session ID from `intercom list`, not a workflow-stage path.
 
 A busy non-interactive recipient that is neither an admitted subagent nor a workflow stage can still refuse a message without interrupting its task. A successful `send` receipt acknowledges transport delivery, not acceptance by the recipient's model. The refusal carries the original reply thread: a waiting `ask` returns an error; otherwise the sender sees **Intercom delivery failed** feedback with a `Sent:` timestamp. That feedback bypasses the ordinary idle queue and does not trigger a standalone agent turn. During an active turn, protected delivery makes it visible and reconciles it at a protocol-safe boundary. Its wording describes the refused send, not the recipient's later activity.
 
@@ -226,7 +230,7 @@ When Atomic's [subagent runtime](/subagents) admits a delegated child, the child
 
 ### When the Tool Appears
 
-`contact_supervisor` is registered from the typed admission record. The record binds the supervisor target, canonical child identity, child index, session name, and any broker-issued capability to that in-process child session; none of those values are inherited from environment variables. If the parent did not grant supervisor coordination, the session receives only the regular `intercom` tool.
+The tool appears only in a delegated child whose parent granted supervisor coordination. Otherwise the child receives only ordinary `intercom`. Supervisor identity is supplied by the runtime, not environment variables.
 
 In parallel runs, a parent-targeted blocking ask waits in its original child execution. Foreground observations may yield so the parent can reply, but active and queued siblings retain their identities and execution capacity. Sends and progress updates never wait for a reply. A single-child launch retains the terminal fresh-child handoff when its exact live owner claims a blocking parent request.
 
@@ -244,7 +248,7 @@ In parallel runs, a parent-targeted blocking ask waits in its original child exe
 | `interview_request` | In parallel, waits for structured supervisor answers in the same child; single-child launches retain the claimed fresh-child handoff | The subagent needs multiple machine-readable answers from the supervisor in one exchange |
 | `progress_update` | Fire-and-forget update to the supervisor; does not end the child | Meaningful progress or unexpected discoveries that change the plan |
 
-Do not use `contact_supervisor` for routine completion handoffs—return the final subagent result normally. Parallel requests use ordinary Intercom delivery and reply waiting without cancelling the batch. Single-child blocking reasons retain interception before broker connection or waiter admission when the exact live child claims them.
+Do not use `contact_supervisor` for routine completion handoffs; return the final subagent result normally. Parallel requests wait without cancelling the batch. A claimed single-child blocking request ends that child and gives the parent a fresh-start handoff.
 
 ```typescript
 // Blocked subagent asks for guidance

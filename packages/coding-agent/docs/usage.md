@@ -26,11 +26,11 @@ The editor can be replaced temporarily by built-in UI such as `/settings` or by 
 
 ### Startup and Working Identity
 
-On an interactive TTY, the startup ∀ assembles from two separated halves in whole-column steps, lands its shadow and session identity, then reveals the one-time manifesto beat. Any key—including Ctrl+C—completes the sequence immediately before normal input routing continues. Terminals narrower than the mark show compact textual identity throughout assembly instead of a blank startup area. Quiet startup suppresses the sequence; a mounted interactive UI without a TTY, or with `ATOMIC_REDUCED_MOTION=1`, starts in the complete settled state. `NO_COLOR` suppresses foreground color across the mark, metadata, and manifesto while retaining weight emphasis.
+The startup animation shows Atomic's identity. Press any key, including Ctrl+C, to finish it immediately and continue normal input. Quiet startup suppresses it; non-TTY sessions and `ATOMIC_REDUCED_MOTION=1` show the settled identity without animation. `NO_COLOR` removes foreground colors while retaining weight emphasis.
 
-Interactive startup lists loaded context files, skills, prompts, extensions, and themes by name. The Extensions section includes isolated engine extensions such as workflows, subagents, MCP, web access, and Intercom without loading them a second time in the terminal host. Its compact list uses builtin package names and adds parent path segments when a local extension would otherwise have the same label. If no parent segment is available, it shows the local extension's display path and adds a deterministic numeric suffix only when that path is also already taken. Expand the startup disclosure to view source paths.
+Startup lists loaded context files, skills, prompts, extensions, and themes by name. Duplicate local extension names include path information. Expand the startup disclosure to see source paths.
 
-While ordinary agent work is active, the exact one-cell `∀` remains visible and follows a pronounced ten-frame dark → accent → bright/bold → accent → dark luminance ramp at an 88ms cadence. Optional theme tone overrides control any terminal-supported foreground phase exactly, including palette indices 0–255; Atomic derives omitted tones from selected-surface, `accent`, and `text` roles. Dark, light, custom, and dynamically reloaded themes therefore remain correct without changing glyph shape or geometry. It occupies the same inline, one-row footprint as the standard spinner: one glyph immediately before the existing text. Main and workflow-stage chat preserve all 453 of Atomic's original randomized whimsical working verbs, selecting one message per turn; even the longest fits the tested 64-column surface. Every agent and SDK turn resets to the dark regular phase with a fresh lifecycle-relative cadence, while turn, terminal, error, replacement, and disposal paths stop the active timer cleanly. Restoring the ordinary indicator after an extension override also resets its phase and cadence; extension-provided frames and intervals remain unchanged and render verbatim. Under `NO_COLOR`, regular/bold weight preserves visible activity without foreground-color escapes. With `ATOMIC_REDUCED_MOTION=1`, `∀` remains static, regular, and accent-colored without an animation timer. Factual retry, fallback, error, cancellation, and compaction status suppresses the thematic indicator, while blocker and human-approval/prompt surfaces hide ordinary work chrome and factual receipts remain verbatim.
+While the agent works, `∀` pulses beside a working message. Retry, fallback, compaction, cancellation, and error messages take precedence; approval prompts hide ordinary activity. Set `ATOMIC_REDUCED_MOTION=1` for a static indicator or `NO_COLOR` for activity without foreground colors. Extensions can [customize the indicator](/tui#pattern-4b-working-indicator-customization).
 
 ### Editor Features
 
@@ -52,7 +52,13 @@ On Windows, ALT+Z lends the terminal to an interactive PowerShell subshell. Type
 
 ## Startup typing
 
-On normal interactive TTY startup, Atomic starts a short-lived raw keyboard capture before deferred resources finish loading and keeps it active until the TUI input handler is mounted. Text typed before the prompt box is fully mounted is replayed into the editor. Enter-submitted ordinary prompts are queued for the prompt loop once startup is ready; command-like submissions such as `/settings` or `!pwd` are replayed as standalone editor submissions through normal command routing. If a command-like submission is captured, later captured submissions wait behind it and replay in original input order after that command is routed, so a later ordinary prompt cannot run before the earlier command and commands are not merged with following prompts. Startup work that can affect correctness, such as project trust prompts, resume/session selectors, cross-project session confirmations, explicit resource flags, metadata commands, non-TTY input, or explicit provider/model selection, still stays on the synchronous path instead of using this pre-session capture.
+On normal interactive TTY startup, Atomic captures raw keyboard input before deferred resources finish loading and until the TUI input handler mounts. It replays text typed before the prompt box is ready into the editor.
+
+- Enter-submitted ordinary prompts wait for the prompt loop to become ready.
+- Command-like submissions such as `/settings` or `!pwd` replay as standalone editor submissions through normal command routing.
+- Later submissions wait behind a captured command and replay in input order. Ordinary prompts cannot overtake commands, and commands are not merged with following prompts.
+
+Startup work that can affect correctness stays synchronous and does not use this capture. This includes project trust prompts, resume/session selectors, cross-project session confirmations, explicit resource flags, metadata commands, non-TTY input, and explicit provider/model selection.
 
 ## Slash Commands
 
@@ -95,7 +101,11 @@ You can submit messages while the agent is still working:
 
 Both interrupts hold a queued message only while it is still waiting in the queue. A message the agent has already picked up is written into the transcript, and an interrupt that cancels its reply before any output appears no longer strands it: Atomic answers it instead of returning it to the editor. A reply that had already started printing is left as-is and is not restarted. Sending a message while that recovered reply is still streaming is safe — it is delivered as soon as the reply finishes.
 
-Both abort routes are cooperative: they ask the agent to stop and wait for it — Escape waits as long as the agent needs — and never terminate the engine that runs your tools. Ctrl+C additionally acts as an escape hatch: it always reaches Atomic when an extension's custom UI has taken over the screen — closing that UI if it does not handle the key itself — and it replaces the engine when it stops answering entirely, including a replacement that hangs before it finishes starting or one that failed to start. A message that could not be sent comes back to the editor rather than being lost: exactly as you typed it, with pasted content intact, placed above anything you typed while the send was pending and separated by a blank line, together with anything still queued behind it in the order you entered it. Atomic does not also show a red error for it. See [Keybindings](/keybindings#application).
+Both abort routes ask the agent to stop cooperatively. Escape waits as long as the agent needs, and neither route terminates the engine during normal cancellation.
+
+Ctrl+C also provides a recovery path. It reaches Atomic even when an extension's custom UI owns the screen, closing that UI if it does not handle the key. If the engine stops answering entirely, Ctrl+C replaces it. This also covers a replacement that hangs during startup or fails to start.
+
+If a message could not be sent, Atomic restores it to the editor exactly as typed, including pasted content. It appears above anything typed while the send was pending, separated by a blank line, together with later queued messages in their original order. Atomic does not also show a red error. See [Keybindings](/keybindings#application).
 
 On Windows Terminal, ALT+Enter is fullscreen by default. Remap it as described in [Terminal setup](/terminal-setup) if you want Atomic to receive the shortcut.
 

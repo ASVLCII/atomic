@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/Users/tonystark/Documents/projects/atomic-docs-human-readability/research/docs-human-readability/verify.py", line 158, in <module>
+    main()
+    ~~~~^^
+  File "/Users/tonystark/Documents/projects/atomic-docs-human-readability/research/docs-human-readability/verify.py", line 81, in main
+    check_post_mortem_guidance()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/tonystark/Documents/projects/atomic-docs-human-readability/research/docs-human-readability/verify.py", line 77, in check_post_mortem_guidance
+    assert not missing, "Post-mortem operator guidance: " + "; ".join(missing)
+           ^^^^^^^^^^^
+AssertionError: Post-mortem operator guidance: Escape aborts only the retained conversation; queued steering/follow-up text returns to the editor; the conversation queue stays held; clearing/restoring visible items does not release the hold; ordinary submission releases the queue before the new turn; neither action resumes terminal workflow execution; expected one host-invalidation explanation, found 2

@@ -12,7 +12,9 @@ Works out of the box.
 
 ## iTerm2
 
-Key reporting works out of the box. In the fullscreen TUI, Atomic owns the viewport, so iTerm2 sends mouse-wheel reports instead of scrolling its native scrollback. With iTerm2's default fast-trackpad behavior, those reports can lose most of an accelerated wheel delta, making fullscreen scrolling much slower than iTerm2's native scrolling.
+Key reporting works out of the box. In the fullscreen TUI, Atomic owns the viewport, so iTerm2 sends mouse-wheel reports instead of scrolling its native scrollback.
+
+iTerm2's default fast-trackpad behavior can lose most of an accelerated wheel delta in those reports. This makes fullscreen scrolling much slower than native scrolling.
 
 If fast mouse-wheel gestures move only about one line at a time in Atomic:
 
@@ -43,7 +45,7 @@ keybind = shift+enter=text:\n
 
 That mapping sends a raw linefeed byte. Inside Atomic, that is indistinguishable from `CTRL+J`, so tmux and Atomic no longer see a real `shift+enter` key event.
 
-If Claude Code 2.x or newer is the only reason you added that mapping, you can remove it, unless you want to use Claude Code in tmux, where it still requires that Ghostty mapping.
+If you added that mapping only for Claude Code, you can remove it with Claude Code 2.x or newer. Keep it if you use Claude Code in tmux, where the mapping is still required.
 
 If you want `SHIFT+Enter` to keep working in tmux via that remap, add `ctrl+j` to your Atomic `tui.input.newLine` keybinding in `~/.atomic/agent/keybindings.json`:
 

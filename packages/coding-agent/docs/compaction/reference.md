@@ -1,7 +1,7 @@
 ---
 title: Compaction reference
 sidebarTitle: "Compaction internals"
-description: Compaction parameters, persistence, extension hooks, formats, settings, and historical formats.
+description: Compaction parameters, saved results, extension hooks, formats, and settings.
 ---
 
 # Compaction reference
@@ -16,11 +16,13 @@ The effective parameters appear in extension events and successful results:
 | `preserve_recent` | `2` | Exact number of newest context-visible messages protected client-side |
 | `query` | Last visible user message | Relevance focus for deciding which older lines to retain |
 
-`preserve_recent` counts context-visible messages without aligning the boundary to a user turn. An assistant message or tool result may therefore begin the kept tail. Because such a tail can start or end mid-turn, the kept messages are not replayed as structured message blocks: they are serialized with the same transcript grammar as the compacted region and appended to the end of the boundary string, so the whole boundary reaches the provider as one message. Serialization of the kept tail is lossless — tool results keep their full text instead of being truncated at 16k characters, and images stay attached as image blocks rather than becoming `[image]` markers — so protected content is preserved, not merely summarized. A value of `0` protects no messages and makes the entire active transcript compactable. If `query` is absent, Atomic derives it from the last visible user message.
+`preserve_recent` counts context-visible messages without aligning to a user turn. An assistant message or tool result may begin the kept tail. A value of `0` protects no messages and makes the entire active transcript compactable.
 
-One consequence is worth stating for Claude models that sign their reasoning. Because the kept tail is serialized into the boundary string rather than replayed as structured assistant messages, no `thinking` or `redacted_thinking` block survives a compaction boundary. Compaction therefore **intentionally resets the signed reasoning chain**: reasoning produced before a boundary is not carried across it. This is deliberate, and it is the first of the two remedies Anthropic documents for keep-tail compaction — carry the text and tool calls across, leave the thinking blocks behind — reached structurally rather than by a stripping pass. The tail's own content is unaffected: text, tool calls, and tool results cross the boundary losslessly. See [Preserved thinking and model switches](/models/reference#preserved-thinking-and-model-switches) for how Atomic handles prefix changes *between* boundaries, which is a separate mechanism.
+Atomic carries the recent tail with the compaction boundary rather than replaying it as separate assistant and tool-result messages. Tail text, tool calls, and tool results remain lossless; images remain image blocks. If `query` is absent, Atomic uses the last visible user message.
 
-The query is used whole and is never truncated. This matters for structured prompts: a truncated query would make section order the retention policy, because only the leading section could influence what the planner kept, and a constraint stated later in the prompt could not. Long queries are safe — an oversized planner request surfaces as an explicit provider-overflow failure rather than silent truncation — but `keepContext` tags, not query length, are the way to guarantee a span survives.
+Compaction resets Claude's signed reasoning chain: `thinking` and `redacted_thinking` blocks do not survive the boundary. See [Preserved thinking and model switches](/models/reference#preserved-thinking-and-model-switches) for behavior between boundaries.
+
+The query is never truncated. An oversized planner request reports overflow rather than silently dropping part of it. Use `keepContext` tags, not a longer query, to guarantee protection.
 
 Configure defaults in `~/.atomic/agent/settings.json` or `.atomic/settings.json`:
 
@@ -56,7 +58,7 @@ Use `compaction.modelOverrides` to set `reserveTokens` and/or `preserve_recent` 
 
 Each field falls back independently to the ordinary setting, then its built-in default. Keys are case-sensitive and do not support wildcards or reasoning suffixes. Both fields require non-negative safe integers. The active session model selects the budgets for manual, automatic, overflow, and post-tool compaction; switching models changes the next resolution, while borrowing a fallback planner does not. Explicit manual parameters take precedence over resolved defaults.
 
-Atomic intentionally differs from upstream pi: the recent-history override is an exact message count (`preserve_recent`), not a token budget (`keepRecentTokens`). Verbatim line reconstruction, `compression_ratio`, and `query` are unchanged; the latter two and `enabled` remain ordinary settings. See [Settings](/settings#compaction) for merge and validation details.
+`preserve_recent` counts messages, not tokens. `compression_ratio`, `query`, and `enabled` remain ordinary settings, not per-model overrides. See [Settings](/settings#compaction) for merge and validation rules.
 
 ## Persistence and resume
 
@@ -94,11 +96,9 @@ The entry's `tokensBefore` is the provider-aware whole-context count used for bu
 }
 ```
 
-There is no format-version bump and no new entry type. Both `"fresh"` and `plannerModel` are additive: they are absent on every existing entry and on any compaction that used the session model, so old readers are unaffected. A `"fresh"` boundary that had to drop the `preserve_recent` tail persists `firstKeptEntryId: null`.
+A `"fresh"` boundary that drops the recent tail records `firstKeptEntryId: null`. Only entries with `details.strategy === "verbatim-lines"` affect active context.
 
-A `compaction` entry is active only when `details.strategy === "verbatim-lines"`. On rebuild, Atomic emits one visible custom-role boundary message: the durable `summary` with the kept tail—the entries from `firstKeptEntryId` up to the boundary—serialized and concatenated onto its end. The tail is never restored as separate assistant/tool-result blocks, so a tail that starts or ends mid-turn cannot produce out-of-order provider blocks; images inside the tail ride along as image blocks on that same boundary message. When no pre-boundary context-visible message is retained—such as with `preserve_recent: 0`—`firstKeptEntryId` is `null` and the boundary carries the `summary` alone. Messages appended after the boundary are always replayed as real messages. The boundary is converted to a user-role provider message and shown in the TUI as a collapsible compaction card.
-
-Resume does not rerun planning or re-derive deletions: the exact compacted string and nullable tail boundary are already in JSONL. Existing records with a string `firstKeptEntryId` keep their original resume behavior. Legacy `context_compaction` logical-deletion records and old `compaction` summary records without the discriminator are inert archival data. Their historical omissions are not reapplied when an old session resumes.
+Resume uses the saved compacted text without rerunning planning. The TUI shows a collapsible compaction card; new messages after it remain ordinary messages. Old inactive formats do not reapply their historical omissions, so content they once hid can return on resume.
 
 ## Extension hooks
 
@@ -190,7 +190,7 @@ path/to/changed.ts
 
 ### Message Serialization for Branch Summaries
 
-Before branch summarization, messages are serialized to text via [`serializeConversation()`](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/src/core/compaction/utils.ts):
+Branch-summary input uses role-labelled text:
 
 ```text
 [User]: What they said
@@ -265,5 +265,3 @@ Two old formats remain parseable but inactive:
 
 - `type:"context_compaction"` records store logical entry/content-block deletion targets from older versions. Those records are inert, so content they once hid can re-enter context when an old session resumes.
 - `type:"compaction"` without `details.strategy: "verbatim-lines"` stored generated summary prose. Those records also remain inert.
-
-Both are distinguished from active boundaries by the discriminated `details` on the shared `CompactionEntry` shape; the session format version is the same for all of them.

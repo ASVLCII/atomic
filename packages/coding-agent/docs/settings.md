@@ -19,7 +19,7 @@ This page is the exhaustive settings reference: every field, its default, and it
 
 On interactive startup, Atomic asks before trusting a project folder that contains trust-gated project inputs and has no saved decision for the folder or a parent folder in `~/.atomic/agent/trust.json`. Trusting a project allows Atomic to load project-local `.atomic/settings.json` and `.atomic` resources, legacy `.pi/settings.json` and `.pi` resources, project-local context files, install missing project packages, and execute project extensions.
 
-Before a startup trust dialog opens, Atomic binds permitted user/global and explicitly authorized CLI extensions to a trust-safe session. Their existing `ui_prompt_start` / `ui_prompt_end` handlers can observe the wait with a live session context. Project resources and borrowed project-local code remain blocked until authorized. Approval finishes startup in the same session without reloading those reporters; isolated interactive sessions ask through the engine's RPC-backed host UI. This requires no model request.
+Project resources and borrowed project-local code stay blocked until authorized. The trust dialog does not require a model request. Trusted global and explicitly authorized CLI extensions can report the wait.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore trust-gated project inputs, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
@@ -29,7 +29,13 @@ If no extension or saved decision applies, `defaultProjectTrust` controls the fa
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.atomic/agent/trust.json` only; the current session is not reloaded, so restart Atomic for changes to take effect.
 
-If a bare directory starts without trust-gated inputs, Atomic may run the interactive session as implicitly trusted. Inert state directories such as `.atomic/todos/` and `.atomic/sessions/` do not require trust and do not disable deferred resource startup. On the normal interactive TTY fast path, Atomic paints the shell and makes the input editor responsive before scanning bundled extension packages, skills, prompts, themes, context files, and system-prompt files. After the input handler is ready, Atomic starts extension/resource loading in the background. If the first submitted prompt arrives before that loading settles, Atomic keeps the prompt spinner visible and waits at the readiness gate before calling the model so extension tools, prompt templates, skills, resources, and extension-registered provider updates are available on that first turn. Deferred loading uses async discovery and cooperative yields around resource-loading work, so visible typing, Enter, Ctrl+C, rendering, and the normal prompt spinner remain responsive while the background work finishes. Startup does not show a resource-loading spinner before the user submits a prompt. Explicit provider/model selection, explicit resource flags, system-prompt inputs, metadata commands, and non-TTY modes normally use eager resource loading; interactive trust authorization instead uses the trust-safe session described above before completing approved resources and model selection. When resources finish loading, Atomic shows the normal resources disclosure so newly added skills, prompts, themes, and extensions are visible. If trust-requiring config appears later, Atomic prompts again on the next launch until you explicitly save a persistent trust decision; the only automatic persistence of implicit startup trust is the existing `/reload` flow after reload discovers trust-requiring resources in an already-trusted session.
+Atomic may treat a bare directory without trust-gated inputs as implicitly trusted. Inert state directories such as `.atomic/todos/` and `.atomic/sessions/` neither require trust nor disable deferred resource startup.
+
+Interactive startup makes the editor available while resources load. If you submit early, the prompt waits with a spinner until the tools, skills, templates, and provider updates are ready. You can still type or cancel. Newly loaded resources appear in the normal disclosure; there is no separate loading spinner before submission.
+
+Explicit provider/model choices, resource flags, system-prompt inputs, metadata commands, and non-TTY modes normally finish loading before becoming ready. Trust-requiring resources always wait for authorization.
+
+If trust-requiring config appears later, Atomic asks again on the next launch until you save a persistent decision. Implicit startup trust is persisted automatically only by the existing `/reload` flow, when reload discovers trust-requiring resources in an already-trusted session.
 
 Settings and trust JSON files may start with a UTF-8 BOM, as commonly written by older Windows tools; Atomic strips that leading marker before parsing.
 
@@ -57,7 +63,15 @@ See [Herdr](/herdr) for state aggregation, reporter conflicts, privacy, and Herd
 | `showCacheMissNotices` | boolean | `false` | Show transcript notices for significant prompt-cache misses, billed compaction or branch-summary usage, and provider recovery diagnostics such as dropped Anthropic thinking blocks, including when a persisted transcript is resumed |
 | `fallbackModels` | string[] | - | Ordered fallback models, written as `"provider/model"` with optional model-supported reasoning suffixes such as `:high`, `:xhigh`, or `:max`. Used by main-chat turns and, since compaction fallback rungs, borrowed for compaction planner requests |
 
-`defaultProvider` and `defaultModel` form one exact saved selection when both are present. Atomic waits for built-in, configured, and extension provider registration before classifying that provider. If it remains unsupported, Atomic does not silently switch providers: interactive mode stays live with a generic configuration warning; print and JSON modes write the warning to stderr and exit nonzero before prompting (with JSON stdout remaining JSONL-clean); and RPC rejects `prompt` until a successful explicit `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle does not clear the condition. If the provider is supported but its saved model is unknown or lacks configured authentication, normal automatic selection of an available authenticated model remains enabled; the same is true when either field is omitted. Valid extension-provider defaults can resolve after deferred extension loading. Update an unsupported pair or choose a model with `/model`.
+`defaultProvider` and `defaultModel` form one exact saved selection when both are present. Atomic waits for built-in, configured, and extension provider registration before classifying the provider.
+
+If it remains unsupported, Atomic does not silently switch providers:
+
+- Interactive mode stays live with a generic configuration warning.
+- Print and JSON modes write the warning to stderr and exit nonzero before prompting. JSON stdout stays JSONL-clean.
+- RPC rejects `prompt` until a successful explicit `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle does not clear the condition.
+
+Normal automatic selection of an available authenticated model remains enabled if the provider is supported but its saved model is unknown or lacks configured authentication. It also remains enabled when either field is omitted. Valid extension-provider defaults can resolve after deferred extension loading. Update an unsupported pair or choose a model with `/model`.
 
 #### routerModel
 
@@ -88,7 +102,11 @@ Remove secrets from routing tasks, inputs, and workflow descriptions/contracts b
 
 #### fallbackModels
 
-`fallbackModels` gives ordinary main-chat turns an ordered model fallback chain. Atomic starts with the selected/default model. If that model exhausts the normal same-model auto-retry loop for a retryable provider/model failure — including rate limits and quota/usage-limit exhaustion such as a provider reporting `The usage limit has been reached` — Atomic switches to the next configured fallback model and continues the same turn. If `retry.enabled` is `false`, Atomic skips same-model retries and moves directly to the next fallback for retryable failures. Non-retryable task failures and cancellations do not trigger model fallback. Once Atomic selects a fallback candidate, that model and its thinking level remain active for later turns in the same main-chat session until you explicitly choose another model with `/model` or model cycle.
+`fallbackModels` gives main-chat turns an ordered model fallback chain. Atomic starts with the selected/default model and advances to the next configured model after exhausting same-model retries for a retryable provider/model failure. It continues the same turn. This includes rate limits and quota/usage-limit exhaustion, such as `The usage limit has been reached`.
+
+If `retry.enabled` is `false`, Atomic skips same-model retries and moves directly to the next fallback for retryable failures. Non-retryable task failures and cancellations do not trigger fallback.
+
+The fallback model and its thinking level remain active for later turns in the same main-chat session. Choose another model explicitly with `/model` or model cycle to change them.
 
 A failure that another request to the same model cannot repair — a rejected credential, an unavailable model, a request that model cannot serve — takes that model out of the chain for the rest of the turn at **every** reasoning level, so a candidate that differs only by its `:low`/`:high` suffix is skipped rather than spent. Transient rate-limit and transport failures keep those reasoning variants, because retrying them can succeed.
 
@@ -145,8 +163,8 @@ See [Providers](/providers#fast-models) for which providers publish fast variant
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
 | `enableInstallTelemetry` | boolean | `true` | Send a version-adoption ping on the first interactive launch with fresh settings, and on the first interactive launch after an update whose version has changelog entries. This does not control update checks |
-| `firstRunOnboardingStartedVersion` | string | - | Internal first-run onboarding start marker used when no prior Atomic startup state identifies the user as returning |
-| `onboardedVersion` | string | - | Internal one-time first-run onboarding completion marker. Returning-user detection from prior startup state or displaying the first-run workflow-engine explanation sets it |
+| `firstRunOnboardingStartedVersion` | string | - | Managed onboarding state; leave unchanged |
+| `onboardedVersion` | string | - | Managed onboarding completion state; leave unchanged |
 | `enableAnalytics` | boolean | `false` | Opt in to analytics during first-run setup |
 | `trackingId` | string | - | Locally generated analytics identifier when analytics is enabled |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |
@@ -157,17 +175,17 @@ See [Providers](/providers#fast-models) for which providers publish fast variant
 | `autocompleteMaxVisible` | number | `5` | Max visible items in the default editor and custom editors installed through `ctx.ui.setEditorComponent()` (3-20) |
 | `showHardwareCursor` | boolean | `false` | Show the terminal cursor while TUI positions it for IME support |
 
-Interactive sessions always use the fullscreen renderer. The transcript scrolls in its own viewport while the editor, status line, usage meter, extension widgets, and footer stay docked at the bottom. Wheel and trackpad gestures go first to a focused workflow overlay, including workflow graphs and stage chats. Events that overlay does not consume fall through to the alternate-screen viewport; non-overlay focused components leave mouse input with pi-tui so transcript scrolling, scrollbar interaction, and drag selection remain available. A selection made over a workflow overlay never copies during a hierarchy transition and is cleared when that overlay hides and the main chat repaints.
+Interactive sessions use fullscreen, with the transcript above the docked editor and status area. Wheel and trackpad input scrolls the focused workflow graph or stage chat first, then the transcript when the overlay does not consume it. Transcript scrolling, scrollbar dragging, and text selection remain available outside overlays. Overlay selections clear when returning to main chat and are not copied during that transition.
 
-The fullscreen renderer keeps minimum sizes for nested layout stacks during resize, and transient fullscreen notices stack instead of replacing a notice that is still visible.
+Transient notices stack while visible.
 
 The alternate screen normally restores the terminal's prior contents on exit, so an interactive transcript does not remain in terminal scrollback. The `fullscreenExitOutput` setting changes what exiting prints: `"transcript"` (the default) paints the final transcript plus a session resume hint on the main screen, while `"resume-hint"` restores the previous screen and prints only the resume hint. Use `/export` before exit for an HTML copy, or resume the saved session later to review it in Atomic.
 
-Ctrl+G in main chat, embedded chat, and extension editor dialogs uses one shared asynchronous launcher. Atomic chooses `externalEditor`, then `$VISUAL`, then `$EDITOR`, then Notepad on Windows or `nano` elsewhere. Each edit uses a private `atomic-editor-*` directory containing only `prompt.md`, removes the directory recursively afterward, and never scans the system temporary directory. A successful empty edit is preserved; a failed editor leaves the original text unchanged, and the TUI always restarts and renders after the editor exits.
+Ctrl+G uses `externalEditor`, then `$VISUAL`, then `$EDITOR`, then Notepad on Windows or `nano` elsewhere. This applies in main chat, embedded chat, and extension editor dialogs. Saving an empty edit clears the text; editor failure leaves the original unchanged. Atomic restores its interface after the editor exits.
 
 ### Telemetry and update checks
 
-Version-adoption telemetry measures whether releases reach real interactive launches and which versions stay in use. The metric is version-adoption pings / first-interactive-launch pings, not installs, users, MAU, or retention. Repeated eligible launches on several machines overcount. Opt-outs, offline mode, and dropped best-effort requests undercount.
+Version-adoption telemetry reports the running version on eligible interactive launches. It is separate from opt-in analytics.
 
 `enableInstallTelemetry` controls this ping and Atomic's provider attribution headers; it does not control update checks. Atomic still fetches the npm registry latest package metadata at `https://registry.npmjs.org/@bastani/atomic/latest` unless update checks are disabled or offline mode is on.
 
@@ -185,7 +203,6 @@ Atomic stores only UTC date, version, and an aggregate count, retained as aggreg
 Opt out by setting `enableInstallTelemetry` to `false` in `settings.json`, or by setting `ATOMIC_TELEMETRY=0` (`PI_TELEMETRY=0` remains a legacy alias). `ATOMIC_TELEMETRY=1`/`true`/`yes` forces the ping on even when the setting is false. `ATOMIC_TELEMETRY` wins when both it and `PI_TELEMETRY` are set.
 
 Set `ATOMIC_SKIP_VERSION_CHECK=1` to disable the Atomic version update check. Use `--offline` or `ATOMIC_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry. Legacy `PI_*` aliases are also supported for app-specific environment variables.
-
 
 On a genuine first run, Atomic previews available themes and asks whether to opt into analytics. The choice and locally generated identifier are stored as `enableAnalytics` and `trackingId`; analytics remains off unless explicitly enabled.
 
@@ -356,7 +373,6 @@ Older settings with a boolean `websockets` value are migrated to `transport`: `t
 | `terminal.images` | `"kitty"`, `"iterm2"`, `"auto"`, or `false` | `"auto"` | JSON-only inline-image protocol override. `false` disables terminal images; `"auto"`, omitted, and invalid values preserve detection. Not shown in `/settings` |
 | `terminal.trueColor` | boolean or `"auto"` | `"auto"` | JSON-only truecolor capability override. `true`/`false` overrides detection; `"auto"`, omitted, and invalid values preserve detection. Not shown in `/settings` |
 
-
 The installed pi-tui 0.85.0 renderer owns the matching environment overrides: `PI_HYPERLINKS=1|0|auto`, `PI_IMAGE_PROTOCOL=kitty|iterm2|none|auto`, and `PI_TRUE_COLOR=1|0|auto`. Explicit JSON booleans/protocols take precedence over those environment values. Use `"auto"` or omit a JSON value to leave environment and terminal detection in control.
 When `images.autoResize` is enabled, Atomic normalizes images before sending them to the model. Tool-result images are normalized after `tool_result` extension handlers run, so images an extension inserts receive the same limit; if processing fails, Atomic keeps the original image. Set it to `false` to preserve source dimensions.
 
@@ -381,7 +397,7 @@ When `images.autoResize` is enabled, Atomic normalizes images before sending the
 
 `npmCommand` is used for all npm package-manager operations, including installs, uninstalls, and dependency installs inside git packages. Use argv-style entries exactly as the process should be launched. When `npmCommand` is configured, git package dependency installs use plain `install` to avoid npm-specific flags in wrappers or alternate package managers.
 
-Normally the package manager's global modules location is queried using `root -g`. As a special case, if the first element of `npmCommand` is `"bun"`, the modules location will instead be queried with `pm bin -g`.
+Package-manager wrapper commands must support Atomic's lookup operations.
 
 On Windows, JSON paths must use forward slashes or escaped backslashes:
 
@@ -458,7 +474,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 Mermaid code blocks render as themed Unicode diagrams in interactive transcripts when they fit the available width. `"off"` keeps the Markdown fence, `"final"` renders only finalized responses, and `"streaming"` also renders partial assistant responses. Invalid or too-wide diagrams remain as code, and rendering is display-only: stored messages and model context keep the original Markdown. LaTeX rendering is also display-only and converts supported expressions to terminal-friendly Unicode math; set `markdown.latex` to `false` to keep the source form.
 
-The installed pi-tui 0.85.0 LaTeX renderer also handles whitespace and matrix layouts correctly.
+LaTeX rendering supports whitespace and matrix layouts.
 
 ### Resources
 

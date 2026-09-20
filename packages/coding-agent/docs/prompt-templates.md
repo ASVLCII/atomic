@@ -4,9 +4,9 @@
 
 Prompt templates are Markdown snippets that expand into full prompts. Type `/name` in the editor to invoke a template, where `name` is the filename without `.md`.
 
-**Prerequisites:** Atomic installed and running in a project — see the [Quickstart](/quickstart). No code and no build step are required.
+**Prerequisites:** Atomic installed and running in a project. See the [Quickstart](/quickstart). No code or build step is required.
 
-**When to use this:** prompt templates are the lightest customization mechanism Atomic ships. Reach for them when you repeat the same instructions and want a slash command for them. If the agent should decide on its own when to load the instructions, use a [skill](/skills) instead; if you need to run code, use an [extension](/extensions).
+Use prompt templates when you repeat the same instructions and want a slash command for them. They are Atomic's lightest customization option. Use a [skill](/skills) if the agent should decide when to load the instructions, or an [extension](/extensions) if you need to run code.
 
 ## Locations
 

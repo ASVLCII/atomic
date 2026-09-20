@@ -13,7 +13,7 @@ The axes here are `pass@1` (accuracy) and `average dollars per task` (cost), tak
 Figures are a snapshot of DeepSWE v1.1 using the highest published thinking level for each of the 21 models displayed on the September 3, 2026 leaderboard. They include the August 21 pricing corrections for GPT-5.6 Sol and DeepSeek V4, and GPT-6 Astra's costs are DeepSWE's expected launch pricing rather than billed rates. DeepSWE's own default table view is **Best** — the best-scoring configuration per model — which picks a different row for four models; the frontier under that reading is stated below. DeepSWE publishes a live cost-vs-score scatter, so **read the frontier off the live chart** rather than trusting a static list. **Last compiled: 2026-09-03.**
 </Note>
 
-The [AA review](/models/evals) is separately dated **2026-09-08**. Intelligence Index v4.3, announced September 7, uses weighted intelligence and its own cost per task; Coding Agent Index v1.4 still uses agent-specific runs including Terminal-Bench v2.1 rather than v4.0. Neither defines the Datacurve frontier on this page. This refresh did not revalidate or recompute the September 3 DeepSWE snapshot. The earlier September 5 browser check confirmed its update date and Gemini 3.8 Flash's row.
+The [AA measurements](/models/evals) are separately dated **2026-09-08**. Intelligence Index v4.3, announced September 7, uses weighted intelligence and its own cost per task; Coding Agent Index v1.4 uses named-agent runs including Terminal-Bench v2.1 rather than v4.0. Neither defines or updates this September 3 Datacurve frontier.
 
 ## The frontier
 
@@ -23,25 +23,17 @@ Three displayed highest-effort model configurations sit on the frontier, from th
 - **gpt-5.6-luna [max]**: 67% for $0.61 with 102 average steps. This is the cheapest broadly-capable point.
 - **gemini-3.8-flash [high]**: 74% for $2.36 with 166 average steps and 143k output tokens. This is the current accuracy ceiling, and also the step-heaviest point on the frontier — weigh that before making it a worker default.
 
-Under DeepSWE's default **Best** view, which selects each model's best-scoring configuration instead of its highest effort, these three points still hold and `gpt-6-astra [xhigh]` joins as a fourth member and the accuracy ceiling, at 74.12% unrounded for \$6.52 with 29 average steps. That is a frontier position under that reading only: at its highest published effort (`max`, 73.23% for \$12.37) GPT-6 Astra is dominated by both Gemini 3.8 Flash and Claude Opus 5. The same view also shows `claude-fable-5 [xhigh]` at 70% for \$13.41, `grok-4.6 [medium]` at 67% for \$3.45, and `gemini-3.7-flash [medium]` at 65% for \$2.03, none of which reach the frontier.
+DeepSWE's default **Best** view selects each model's best-scoring configuration rather than its highest effort. The same three frontier points remain, and `gpt-6-astra [xhigh]` joins as the accuracy ceiling: 74.12% unrounded for \$6.52 with 29 average steps.
+
+That frontier position applies only to the Best view. At its highest published effort, `max`, GPT-6 Astra scores 73.23% for \$12.37 and is dominated by both Gemini 3.8 Flash and Claude Opus 5.
+
+The Best view also shows `claude-fable-5 [xhigh]` at 70% for \$13.41, `grok-4.6 [medium]` at 67% for \$3.45, and `gemini-3.7-flash [medium]` at 65% for \$2.03. None reaches the frontier.
 
 ## What changed
 
-The September 3 snapshot collapses the frontier from five members to three:
+In this September 3 snapshot, Gemini 3.8 Flash replaces Opus 5, Sol, and GLM-5.3 on the highest-effort frontier; GLM-5.3 Flash and Luna retain the budget end. Astra joins only in the Best view at `xhigh`, not at `max`.
 
-- **Gemini 3.8 Flash [high]**, added September 1, 2026, arrives at 74% for \$2.36 and takes the accuracy ceiling. Rounded scores cannot settle the top of this board: Gemini 3.8 Flash and Claude Opus 5 both display 74%, and only the unrounded rates — 73.83% against 73.65% — order them. The dominance holds either way, because the cheaper model is also \$9.48 less per task, about one fifth of Opus 5's cost.
-- **claude-opus-5 [max]**, **gpt-5.6-sol [max]**, and **glm-5.3 [max]** leave the frontier. None of their numbers moved; a cheaper and more accurate point simply appeared above all three.
-- **GPT-6 Astra**, added September 3, 2026 across low, medium, high, xhigh, and max effort, does not join at its highest published effort: `[max]` scores 73% for $12.37 and is dominated by both Gemini 3.8 Flash and Claude Opus 5. DeepSWE priced it at the expected launch rate card, so treat every Astra dollar figure as projected rather than billed.
-- **glm-5.3-flash [max]** and **gpt-5.6-luna [max]** are unchanged and keep the budget end of the frontier.
-
-The August pricing corrections still stand and still explain that budget end:
-
-- **GLM-5.3 Flash [max]** appears at 63% for $0.24 with 123 average steps. It replaced both DeepSeek V4 configurations on the budget frontier.
-- **DeepSeek V4 Pro [max]** costs $1.67 per task after DeepSeek's August 16 price change. GLM-5.3 Flash has a higher unrounded score (63.4% versus 62.8%), costs about one seventh as much, and averages 32 fewer steps.
-- **DeepSeek V4 Flash [max]** costs $0.46 per task. GLM-5.3 Flash is ten rounded points more accurate and costs about half as much.
-- **GPT-5.6 Sol [max]** costs $6.46 per task after OpenAI's August 20 promotional price cut, down from $8.39 in the earlier snapshot. The reduced input and output rates run through at least November 21, 2026.
-
-DeepSWE's August 21, 2026 changelog says these DeepSeek costs use peak rates and off-peak rates are half as much. DeepSeek V4 Pro remains dominated at either rate. At the off-peak rate, DeepSeek V4 Flash costs about $0.23, marginally less than GLM-5.3 Flash's $0.24, but remains ten rounded points less accurate; these pages report the frontier from DeepSWE's published peak-rate costs.
+The chart uses published peak-rate DeepSeek costs. Off-peak rates are half as much: V4 Pro remains dominated, while V4 Flash at about $0.23 becomes slightly cheaper than GLM-5.3 Flash's $0.24 but remains ten rounded points less accurate. Recheck current prices before choosing.
 
 ## Dominated models and why
 
@@ -82,7 +74,7 @@ Efficiency is not the only axis. A dominated model can still earn a slot when it
 
 1. Default to a frontier model for the role's accuracy needs (see [Model Selection](/models/model-selection)).
 2. Only reach for a dominated model when you have an explicit reason, such as provider diversity, a long-context or token-price niche, or an unbenchmarked domain like design.
-3. Re-read the frontier off the [DeepSWE live chart](https://deepswe.datacurve.ai/) when prices or benchmarks change, and update the timestamp on these pages.
+3. Re-read the frontier on the [DeepSWE live chart](https://deepswe.datacurve.ai/) when prices or benchmarks change.
 
 ## Related
 

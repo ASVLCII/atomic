@@ -50,7 +50,13 @@ Use relative file paths from the skill directory (these are bundled skill files,
 See the API reference at `references/api-reference.md` for details.
 ```
 
-Keep authored instructions outcome-first and concise. State observable completion and stop conditions, give a short reason for material constraints, and use decision rules for judgment calls instead of `ALWAYS`/`NEVER` language. Put detailed or model-specific material in `references/` so it loads only when needed. Do not ask models to reproduce private reasoning or repeatedly verify their own work; require evidence or validation results where correctness matters.
+Keep instructions concise and lead with the intended outcome:
+
+- State observable completion and stop conditions.
+- Give a short reason for material constraints.
+- Use decision rules for judgment calls instead of `ALWAYS`/`NEVER` language.
+- Put detailed or model-specific material in `references/` so it loads only when needed.
+- Require evidence or validation results where correctness matters. Do not ask models to reproduce private reasoning or repeatedly verify their own work.
 
 ## Example
 
