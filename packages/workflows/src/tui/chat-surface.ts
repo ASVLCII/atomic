@@ -3,7 +3,7 @@
  * progress strips for the post-dispatch confirmation, `/workflow status`
  * list, and `/workflow list` catalogue.
  *
- * Visual contract (ui/mockups.html · DESIGN.md §5):
+ * Visual contract (DESIGN.md §5):
  *  - **Flat band**: one full-width line with a `surface0` fill, a bold
  *    label in the accent / status colour, a muted subtitle, and
  *    right-aligned status badges.
@@ -24,7 +24,6 @@
  * tests.
  *
  * cross-ref:
- *  - ui/mockups.html (§1 dispatched, §2 status, §3 list, §4 truncation)
  *  - src/tui/header.ts renderBandHeader (3-row outline pill — kept for the
  *    above-editor widget, distinct surface)
  */
@@ -323,8 +322,7 @@ function renderTaggedCardThemed(opts: RenderTaggedCardOpts, theme: GraphTheme, w
 	// exactly the same column as every body row's leading character —
 	// `  ` (2 cells) + bg-pill leading pad (1 cell) lands tag text at col 4,
 	// and `   ` (3 cells) + body content also lands at col 4. The +1
-	// hanging indent on the body is what the mockup's §1 / §2 cards show
-	// (ui/mockups.html · `  [tag] title` over `   body`).
+	// hanging indent on the body places `  [tag] title` over `   body`.
 	const row1StripePrefixW = 2; // "  "
 	const bodyStripePrefixW = 3; // "   "
 	const trailingPad = 2;

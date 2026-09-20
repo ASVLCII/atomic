@@ -8,8 +8,7 @@
  * `ExtensionUiController.custom` REPLACES the editor component with the
  * mounted picker (`editorContainer.clear(); addChild(picker)`), so the
  * picker renders **inline** in the chat layout at the editor's natural
- * position. This is what gives us the target spacing in
- * `ui/workflows/Screenshot 2026-05-13 at 1.11.49 AM.png`: the picker
+ * position. The picker
  * sits just below the submitted `/workflow …` command at the picker's
  * natural ~9-row height, with no host `Working…` / widget / status bar
  * chrome wedged between command and picker (those rows are owned by

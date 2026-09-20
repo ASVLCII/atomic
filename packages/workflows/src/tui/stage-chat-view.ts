@@ -16,7 +16,6 @@
  *  - Workflow notices and prompt/custom UI panels keep workflow-specific chrome.
  *
  * cross-ref:
- *  - ui/stage-chat-mockup.html (canonical visual)
  *  - DESIGN.md §5 (Components — pill / box / banner vocabulary)
  *  - src/runs/foreground/stage-control-registry.ts (StageControlHandle)
  *  - src/shared/store-types.ts (StageSnapshot.notices, StageNotice)

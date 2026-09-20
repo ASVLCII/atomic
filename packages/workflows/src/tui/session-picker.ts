@@ -182,8 +182,7 @@ function renderBottomBorder(width: number, theme: GraphTheme): string {
 
 /**
  * Footer keyboard hints, rendered as a plain text line **below** the
- * picker's bottom border (no leading `╰` / trailing `╯`). Matches the
- * spacing in `ui/workflows/Screenshot 2026-05-13 at 1.11.49 AM.png`.
+ * picker's bottom border (no leading `╰` / trailing `╯`).
  */
 function renderHintsRow(width: number, theme: GraphTheme, state: SessionPickerState): string {
 	const dim = hexToAnsi(theme.dim);

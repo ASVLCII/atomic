@@ -17,8 +17,8 @@
  *   returns truthy). Same pattern used by {@link registerInlineFormRenderer}
  *   for the workflow input card.
  *
- * Visual contract: see ui/mockups.html §1 (dispatch), §2 (status list),
- * §3 (workflow list); per-run drill-down is the run-detail surface.
+ * Renders dispatch confirmations, status lists, and workflow lists;
+ * per-run drill-down is the run-detail surface.
  *
  * cross-ref:
  *  - src/tui/inline-form-overlay.ts (same pattern, different surface)

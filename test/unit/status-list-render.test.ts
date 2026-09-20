@@ -1,7 +1,7 @@
 /**
  * Unit tests for the canonical status-list renderer (`src/tui/status-list.ts`).
  *
- * Visual contract from ui/mockups.html §2:
+ * Visual contract:
  *   - one rounded `BACKGROUND` panel
  *   - one two-row card per run (replaces the indented per-stage rows)
  *   - per-card row 1: status glyph + full run id

@@ -23,9 +23,7 @@
  * picker in the bottom editor slot instead of a floating overlay. Suppressing
  * `Working…` while mounted keeps host chrome from being wedged between the
  * `/workflow …` command and the picker, avoiding the prior bottom-anchored
- * overlay regression captured in
- * `ui/workflows/Screenshot 2026-05-13 at 1.09.32 AM.png` without overlay
- * anchor/padding tricks — the host owns geometry.
+ * overlay regression without anchor/padding tricks. The host owns geometry.
  *
  * cross-ref:
  *   - src/tui/inputs-picker.ts (pure state + render)

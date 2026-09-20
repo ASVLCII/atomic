@@ -9,8 +9,6 @@ This document covers setup, the local dev loop, testing patterns, and project la
 - **[Node.js](https://nodejs.org) ≥ 22.13** — runs installs, checks, and the vitest suites (`node:sqlite` is unflagged from 22.13)
 - **[Bun](https://bun.sh) ≥ 1.4.2** — compiles release binaries, runs `scripts/*.ts`, and hosts the Bun-based test fixtures
 - **[Rust](https://rustup.rs)** (stable, with `cargo`) — builds the `@bastani/atomic-natives` N-API module
-- **[uv](https://docs.astral.sh/uv/)** — Python package/environment manager for the `evals/` harness
-- **Docker** — required for local Pier/DeepSWE sandbox runs
 
 This repo runs a hybrid toolchain matching upstream `earendil-works/pi`: **npm** installs, builds, checks, and runs the vitest suites; **Bun** compiles the release binaries, runs `scripts/*.ts`, and hosts the test fixtures that need it. `AGENTS.md` carries the full table. The `@bastani/workflows` workspace package ships raw `.ts` files with no build step; Atomic bundles it into `@bastani/atomic` during the coding-agent build.
 
@@ -19,7 +17,7 @@ This repo runs a hybrid toolchain matching upstream `earendil-works/pi`: **npm**
 ## Setup
 
 ```bash
-git clone --recurse-submodules git@github.com:bastani-inc/atomic.git
+git clone git@github.com:bastani-inc/atomic.git
 cd atomic
 npm ci --ignore-scripts
 npm run build
@@ -66,79 +64,6 @@ binding. `npm run build` (or `npm run build --workspace=@bastani/atomic-natives`
 
 The committed `.npmrc` applies a three-day minimum release age to anything you add with
 `npm install`, and pins exact versions. `package-lock.json` is the only lockfile.
-
-If you cloned without submodules, initialize them before running evals or touching vendored benchmark harnesses:
-
-```bash
-git submodule update --init --recursive
-```
-
-Current submodules include `evals/deep-swe` and `evals/vendor/pier`; the evals package points `datacurve-pier` at the local editable `evals/vendor/pier` checkout.
-
-The eval harness is Python-based and uses [`uv`](https://docs.astral.sh/uv/) from the `evals/` directory:
-
-```bash
-cd evals
-uv sync
-uv run python -c 'import pier, pathlib; print(pathlib.Path(pier.__file__).resolve())'
-uv run pier --help
-```
-
-The `pier` import should resolve to `evals/vendor/pier/src/pier/__init__.py`. After pulling submodule pointer changes or local Pier edits, refresh the editable install with:
-
-```bash
-cd evals
-uv sync --reinstall-package datacurve-pier
-```
-
-Example single-task DeepSWE run with Atomic and the local Pier checkout. See
-[`evals/README.md`](./evals/README.md) for the full runbook:
-
-```bash
-cd evals
-export OPENROUTER_API_KEY=...
-uv run pier run \
-  -p deep-swe/tasks \
-  --agent-import-path atomic_pier:Atomic \
-  --model openrouter/openai/gpt-5.5 \
-  --agent-kwarg thinking=xhigh \
-  --agent-kwarg version=0.9.13 \
-  --agent-env 'OPENROUTER_API_KEY=${OPENROUTER_API_KEY}' \
-  --n-tasks 1 \
-  --sample-seed 0 \
-  --n-concurrent 1 \
-  --force-build
-```
-
-Pin a concrete `version=`. A moving tag cannot be attributed to a build after
-the fact, and the adapters pass the task after `--`, which Atomic only accepts
-from 0.9.11 — an older build starts with no task at all and collects an empty
-patch.
-
-### The Pier pin is the benchmark's guarantee
-
-`evals/vendor/pier` points at [`bastani-inc/pier`](https://github.com/bastani-inc/pier)
-`main`: upstream plus Atomic commits that (a) set `extra="forbid"` on the
-task-config models, so a `task.toml` key Pier cannot model raises instead of
-being silently dropped, (b) honor verifier-scoped `network_mode`, which the
-corpus declares and upstream ignored, and (c) error a trial whose `model.patch`
-never arrived or arrived empty, instead of recording it as completed.
-
-A checkout that drifted off the pin, or is dirty, does not have those:
-
-```bash
-git submodule status        # a leading + means drifted, - means uninitialized
-git status --short evals/   # local edits inside a submodule
-```
-
-To change the fork: push to `bastani-inc/pier` `main`, then move the gitlink and
-refresh the editable install.
-
-```bash
-git -C evals/vendor/pier push origin HEAD:main
-git add evals/vendor/pier
-cd evals && uv sync --reinstall-package datacurve-pier
-```
 
 `npm install` runs the root `prepare` script, which installs Git hooks with [`prek`](https://prek.j178.dev/) from [`prek.toml`](./prek.toml). The hook shims installed by default come from `default_install_hook_types`; currently that is `pre-commit`. To reinstall hooks manually, run `npm run hooks:install`. Set `PREK_DISABLE_INSTALL=1` to skip hook installation for a local install; CI skips it automatically.
 

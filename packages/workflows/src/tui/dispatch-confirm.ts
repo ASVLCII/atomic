@@ -1,6 +1,5 @@
 /**
- * `/workflow <name> …` dispatch confirmation — chat surface from
- * ui/dispatch-mockup.html §1 (compact two-row redesign).
+ * `/workflow <name> …` dispatch confirmation, a compact chat surface.
  *
  * Visual contract:
  *  - One rounded `DISPATCHED` panel.
@@ -25,8 +24,6 @@
  * Plain mode drops ANSI; the rounded panel/card layout shape is preserved.
  *
  * cross-ref:
- *  - ui/dispatch-mockup.html (before / after side-by-side)
- *  - ui/mockups.html §1 (legacy 6-row layout, preserved for context)
  *  - src/tui/chat-surface.ts shared primitives (renderTaggedCard,
  *    renderHintRows, including the `titleSuffix` slot used here)
  */

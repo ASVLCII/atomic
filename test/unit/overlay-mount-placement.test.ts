@@ -6,9 +6,8 @@
  * `ctx.ui.custom(factory, { overlay: false })` — i.e. the **inline**
  * mount mode where the host's `ExtensionUiController.custom` REPLACES
  * the editor component with the mounted picker. Inline placement
- * eliminates the bottom-anchored chrome regression captured in
- * `ui/workflows/Screenshot 2026-05-13 at 1.09.32 AM.png` without any
- * overlay padding tricks — the host owns geometry.
+ * eliminates the bottom-anchored chrome regression without overlay padding
+ * tricks. The host owns geometry.
  *
  * cross-ref:
  *  - src/tui/session-overlays.ts
