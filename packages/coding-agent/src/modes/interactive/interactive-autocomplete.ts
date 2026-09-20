@@ -263,6 +263,12 @@ InteractiveModeBase.prototype.createBaseAutocompleteProvider = function (
 			getLoginProviderCompletions(this.getLoginProviderOptions(), prefix);
 	}
 
+	const logoutCommand = slashCommands.find((command) => command.name === "logout");
+	if (logoutCommand) {
+		logoutCommand.getArgumentCompletions = (prefix: string) =>
+			getLoginProviderCompletions(this.getLogoutProviderOptions(), prefix);
+	}
+
 	// Convert prompt templates to SlashCommand format for autocomplete
 	const templateCommands: SlashCommand[] = this.session.promptTemplates.map((cmd) => ({
 		name: cmd.name,

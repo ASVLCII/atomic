@@ -94,6 +94,7 @@
 - Prepared SDK services no longer reconstruct safe extensions or repeat their startup when project trust completes. Additional sessions borrowing those services keep independent extension lifetimes ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Jev structured decisions no longer reject responses solely because their probabilities do not sum to one.
 - Jev SDK decisions retain their original model, provider and credentials across tournament rounds when callers mutate their model selection during inference.
+- `/logout` now autocompletes providers with stored API-key or subscription credentials and opens a filtered selector when a provider is supplied, instead of sending the command as a prompt.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

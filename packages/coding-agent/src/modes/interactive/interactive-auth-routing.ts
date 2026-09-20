@@ -164,6 +164,7 @@ InteractiveModeBase.prototype.showLoginProviderSelector = function (
 InteractiveModeBase.prototype.showOAuthSelector = async function (
 	this: InteractiveModeBase,
 	mode: "login" | "logout",
+	initialSearchInput?: string,
 ): Promise<void> {
 	if (mode === "login") {
 		this.showLoginAuthTypeSelector();
@@ -205,6 +206,8 @@ InteractiveModeBase.prototype.showOAuthSelector = async function (
 				done();
 				this.ui.requestRender();
 			},
+			undefined,
+			initialSearchInput,
 		);
 		return { component: selector, focus: selector };
 	});
