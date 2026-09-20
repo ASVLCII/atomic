@@ -7,6 +7,7 @@ import {
 	inferRouterDecision,
 	inferStructuredOutput,
 } from "../../packages/coding-agent/src/core/structured-output/index.js";
+import { jevFixtureResponse } from "../helpers/jev-tournament.js";
 import { decisionRequest, jevResponse } from "../helpers/structured-output.js";
 
 const fullId = "openrouter/~typesafe/jev-latest" as const;
@@ -271,3 +272,90 @@ test("OpenRouter auth shares the explicit decision deadline", async () => {
 	assert.equal(signal?.aborted, true);
 	assert.equal(transport.mock.calls.length, 0);
 });
+
+for (const initialId of [fullId, "typesafe-ai/jev-latest"] as const) {
+	for (const count of [2, 256]) {
+		test(`${initialId} preserves selection during delayed auth with ${count} choices`, async () => {
+			const runtime = await ModelRuntime.create({
+				modelsPath: null,
+				credentials: AuthStorage.inMemory({
+					openrouter: { type: "api_key", key: "synthetic-openrouter" },
+					"typesafe-ai": { type: "api_key", key: "synthetic-typesafe" },
+				}),
+				allowModelNetwork: false,
+			});
+			const registry = new ModelRegistry(runtime);
+			const entered = Promise.withResolvers<void>();
+			const release = Promise.withResolvers<void>();
+			const authIds: string[] = [];
+			const destinations: { url: string; authorization: string | null; model: string }[] = [];
+			const transport = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+				const body = JSON.parse(String(init?.body));
+				destinations.push({
+					url: String(url),
+					authorization: new Headers(init?.headers).get("Authorization"),
+					model: body.model,
+				});
+				return Response.json(
+					jevFixtureResponse(body, (keys) =>
+						keys.includes("review") ? "review" : keys.includes("exact") ? "exact" : keys[0]!,
+					),
+				);
+			});
+			vi.stubGlobal("fetch", transport);
+			const request = decisionRequest();
+			const model: { kind: "jev"; fullId: typeof fullId | "typesafe-ai/jev-latest" } = {
+				kind: "jev",
+				fullId: initialId,
+			};
+			const pending = inferStructuredOutput({
+				...request,
+				model,
+				jev: {
+					...request.jev,
+					questions: {
+						...request.jev.questions,
+						route: {
+							...request.jev.questions.route,
+							criteria: {
+								...request.jev.questions.route.criteria,
+								...Object.fromEntries(Array.from({ length: count - 2 }, (_, i) => [`other${i}`, `Other ${i}`])),
+							},
+						},
+					},
+				},
+				modelRegistry: {
+					...request.modelRegistry,
+					getProviderAuth: async (provider, options) => {
+						authIds.push(provider);
+						if (authIds.length === 1) {
+							entered.resolve();
+							await release.promise;
+						}
+						return registry.getProviderAuth(provider, options);
+					},
+				},
+			});
+			await entered.promise;
+			model.fullId = initialId === fullId ? "typesafe-ai/jev-latest" : fullId;
+			release.resolve();
+			const result = await pending;
+			const calls = count === 2 ? 1 : 2;
+			const direct = initialId === "typesafe-ai/jev-latest";
+			assert.deepEqual(authIds, Array(calls).fill(direct ? "typesafe-ai" : "openrouter"));
+			assert.deepEqual(
+				destinations,
+				Array(calls).fill({
+					url: direct ? "https://api.typesafe.ai/v1/systemone" : "https://openrouter.ai/api/alpha/decisions",
+					authorization: `Bearer synthetic-${direct ? "typesafe" : "openrouter"}`,
+					model: direct ? "jev-latest" : "~typesafe/jev-latest",
+				}),
+			);
+			assert.equal(result.model, initialId);
+			assert.equal(result.responseModel, "jev-fixture");
+			assert.deepEqual(result.value, { route: "review", limit: 1.23456789 });
+			assert.deepEqual(result.usage, { inputTokens: 20 * calls, outputTokens: 10 * calls });
+			assert.equal(transport.mock.calls.length, calls);
+		});
+	}
+}

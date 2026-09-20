@@ -184,13 +184,14 @@ async function inferDecision<T extends TSchema>(
 		}
 	}
 	// Own immutable input data across awaits, including schema and candidates. The mapper is trusted code.
+	const selected = request.model ? structuredClone(request.model) : request.model;
 	const snapshot = {
 		...request,
+		model: selected,
 		state: jsonSnapshot(request.state),
 		schema: jsonSnapshot(request.schema),
 		jev: { questions, decode: request.jev.decode },
 	};
-	const selected = request.model ? structuredClone(request.model) : request.model;
 	if (!selected || (selected.kind !== "chat" && selected.kind !== "jev")) {
 		throw new Error("Structured output requires an explicit concrete inference model.");
 	}
