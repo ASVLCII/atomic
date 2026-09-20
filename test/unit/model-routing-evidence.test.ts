@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { readJson, readText } from "../helpers/runtime.js";
 
+interface AaSourceLabel {
+	readonly row: string;
+	readonly modelSlug: string;
+	readonly rowLabel: string;
+	readonly chartLabel: string;
+	readonly fullConfigLabel: string;
+	readonly sourceUrl: string;
+	readonly accessed: string;
+}
+
 interface SourceFidelityFixture {
 	readonly counts: {
 		readonly aaRows: number;
@@ -13,6 +23,7 @@ interface SourceFidelityFixture {
 		readonly frontierExtendedRows: number;
 	};
 	readonly aaRows: readonly string[];
+	readonly aaSourceLabels: readonly AaSourceLabel[];
 	readonly deepSweRows: readonly string[];
 	readonly frontierRows: readonly string[];
 	readonly sentinels: Record<string, string>;
@@ -45,6 +56,19 @@ function sourceValues(row: string, prefix: string): string[] {
 	assert.ok(metrics, row);
 	return prefix === "F" ? metrics.split("/") : metrics.split(" ");
 }
+
+function aaRowIdentities(document: string): string[] {
+	return sectionRows(document, "A").map((row) => {
+		const match = row.match(/^(A\d{2}) (.+)\|/u);
+		assert.ok(match, row);
+		return `${match[1]} ${match[2]}`;
+	});
+}
+
+function sourceLabelsBySlug(labels: readonly AaSourceLabel[]): Map<string, AaSourceLabel> {
+	return new Map(labels.map((label) => [label.modelSlug, label]));
+}
+
 function assertSourceRows(document: string, rows: readonly string[], prefix: string, expectedValues: number): void {
 	const actual = sectionRows(document, prefix);
 	assert.deepEqual(actual, rows, `${prefix} rows must preserve source order, identity, and displayed values`);
@@ -91,11 +115,35 @@ test("the factual evals document preserves source-shaped benchmark records and p
 	assert.match(evals, /Terminal-Bench 4\.0/);
 	assert.match(evals, /pass@1±95% run-to-run CI \(percent\)/);
 	assert.match(evals, /normalized Elo.*clamp/);
-	assert.match(evals, /6,000-question.*1−hallucination/);
+	assert.match(evals, /6,000-question ONH.*\(partial\+notattempted\)\/\(incorrect\+partial\+notattempted\)/);
 	assert.match(evals, new RegExp(`${fixture.counts.aaRows}-config default-chart union`));
 	assert.match(evals, new RegExp(`${fixture.counts.aaDisplayedConstituentRecords} displayed constituent records`));
 	assert.match(evals, /Best rows in source order/);
 	assertSourceRows(evals, fixture.aaRows, "A", fixture.shapeChecks.aaRows.values);
+	assert.equal(fixture.aaSourceLabels.length, fixture.counts.aaRows);
+	assert.deepEqual(
+		aaRowIdentities(evals),
+		fixture.aaSourceLabels.map((label) => `${label.row} ${label.rowLabel}`),
+		"AA row identities must come from source chart_label/full_config_label mapping",
+	);
+	for (const label of fixture.aaSourceLabels) {
+		assert.equal(label.sourceUrl, fixture.metadata.aa.url);
+		assert.equal(label.accessed, fixture.metadata.aa.accessed);
+		assert.ok(label.chartLabel.length > 0, label.row);
+		assert.ok(label.fullConfigLabel.length > 0, label.row);
+		assert.ok(label.rowLabel === label.chartLabel || label.rowLabel === label.fullConfigLabel, label.row);
+	}
+	const aaLabels = sourceLabelsBySlug(fixture.aaSourceLabels);
+	assert.equal(aaLabels.get("gemini-3-8-flash")?.rowLabel, "Gemini 3.8 Flash (high)");
+	assert.equal(aaLabels.get("gpt-5-5")?.rowLabel, "GPT-5.5 (xhigh)");
+	assert.equal(aaLabels.get("muse-spark-1-1")?.rowLabel, "Muse Spark 1.1 (xhigh)");
+	assert.equal(aaLabels.get("qwen3-8-27b")?.rowLabel, "Qwen3.8 27B (xhigh)");
+	assert.equal(aaLabels.get("muse-glimmer")?.rowLabel, "Muse Glimmer (high)");
+	assert.equal(aaLabels.get("step-5")?.rowLabel, "Step 5 Preview");
+	assert.equal(aaLabels.get("glm-5-3-flash")?.rowLabel, "GLM-5.3-Flash");
+	assert.equal(aaLabels.get("minimax-m3")?.rowLabel, "MiniMax-M3");
+	assert.equal(aaLabels.get("mistral-medium-3-5")?.rowLabel, "Mistral Medium 3.5");
+	assert.doesNotMatch(evals, /no suffix=`?max|slug model names are exact source labels/i);
 	assertSourceRows(evals, fixture.deepSweRows, "D", fixture.shapeChecks.deepSweRows.values - 1);
 	assertSourceRows(evals, fixture.frontierRows, "F", fixture.shapeChecks.frontierMainRows.values);
 	for (const [name, source] of Object.entries(fixture.metadata)) {

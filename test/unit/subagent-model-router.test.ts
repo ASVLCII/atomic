@@ -830,8 +830,8 @@ test("auto routing keeps exact benchmark identity and provenance distinctions", 
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		assert.match(state.evals, /Fable 5 fallback=Opus 4\.8/);
-		assert.match(state.evals, /Fable 5\.1 \(default fallback\)/);
-		assert.match(state.evals, /Inkling `0\.99` is unexplained/);
+		assert.match(state.evals, /Fable 5\.1 Default Fallback/);
+		assert.match(state.evals, /Inkling AA `xhigh` is distinct from Frontier `0\.99`/);
 		assert.match(state.evals, /Harness: cc=claude-code, gb=grok-build, msa=mini-swe-agent/);
 		assert.match(state.evals, /`—`=source null, not 0/);
 		assert.match(state.evals, /GPT-6 Astra\[max;codex\] 53\.3\/58\.8\/—\/4\.59\/30\.1/);
