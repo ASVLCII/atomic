@@ -41,7 +41,7 @@
 ### Changed
 
 - Install/update telemetry pings now go to the Atomic version-adoption endpoint instead of pi.dev. First-interactive-launch triggers, opt-outs, and the independent update check are unchanged ([#2498](https://github.com/bastani-inc/atomic/issues/2498)).
-- Pi runtime dependencies (`pi-agent-core`, `pi-client`, `pi-protocol`, `pi-tui`, `pi-telemetry`, and transitive `chord`) are pinned to 0.86.0. Workspace package versions remain `0.0.0`.
+- Pi runtime dependencies (`pi-agent-core`, `pi-client`, `pi-protocol`, `pi-tui`, `pi-telemetry`, and transitive `chord`) are pinned to 0.86.1. Workspace package versions remain `0.0.0`.
 - Automatic subagent and workflow-stage model selection no longer includes system prompts as agent metadata, reducing routing input. Execution prompts are unchanged; self-contained subagents still use their system prompt as the task when no task is supplied.
 - SDK session creation now includes shipped Atomic builtin extensions and resources, shares CLI defaults, and completes extension startup before returning. Supply startup host bindings through the extensionBindings option; rebinding no longer repeats startup. Failed startup rolls back the partial session, and missing shipped packages report `code: "BuiltinUnavailable"` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Main chat, workflow stages, and subagents now default to long prompt-cache retention where supported. Unset retention uses ordinary caching for OpenAI models without known extended-retention support, such as GPT-4o, and five-minute caching for older Bedrock Claude models, such as Claude 3.7. Explicit retention choices remain unchanged; use `PI_CACHE_RETENTION=short` to opt back into shorter caching. Anthropic one-hour cache writes cost more than five-minute writes, so savings depend on reuse.
@@ -59,6 +59,10 @@
 - Automatic compaction cancelled from a `compaction_start` listener now aborts the auto controller before `session_before_compact` or planner auth.
 - Anthropic thinking-drop notices are short, omit path details, and stay silent when the cumulative drop count is unchanged.
 - Isolated-engine prompts wait for the remote prompt RPC to settle, and stale kitty image conversions no longer replace a later tool result.
+- Fixed idle prompt-cache warming rebuilding expired caches when its timer or an extension decision is delayed.
+- Fixed clipboard copy failing in containers and WSL without WSLg by restoring the OSC 52 fallback when no display is available, and added a verified Windows clipboard backend for WSL ([earendil-works/pi#9688](https://github.com/earendil-works/pi/issues/9688)).
+- Fixed inherited z.ai `Prompt too long` errors not being recognized as context overflow ([earendil-works/pi#9805](https://github.com/earendil-works/pi/issues/9805)).
+- Fixed inherited Cerebras models advertising unsupported strict tool schemas, which caused HTTP 400 errors when strict and non-strict tools were mixed ([earendil-works/pi#9804](https://github.com/earendil-works/pi/pull/9804) by [@EdenGottlieb](https://github.com/EdenGottlieb)).
 
 - Skill invocation summaries expand and collapse on left-click, matching branch summaries and compaction boundaries.
 - Fireworks deferred-tool docs now describe chronological system-message tool additions and removals instead of the removed added-tool-names field from tool results.

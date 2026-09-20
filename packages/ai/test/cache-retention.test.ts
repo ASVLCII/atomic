@@ -22,6 +22,10 @@ interface OpenAIResponsesCachePayload extends OpenAICompletionsCachePayload {
 	prompt_cache_options?: { mode?: "explicit"; ttl?: "30m" };
 }
 
+interface OpenAICompletionsToolsPayload {
+	tools?: { function: Record<string, unknown> }[];
+}
+
 function stopAfterPayload<TPayload>(capture: (payload: TPayload) => void): (payload: unknown) => never {
 	return (payload: unknown): never => {
 		capture(payload as TPayload);
@@ -489,5 +493,64 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			expect(capturedPayload?.prompt_cache_key).toBeUndefined();
 			expect(capturedPayload?.prompt_cache_retention).toBeUndefined();
 		});
+
+		it.each([MODELS.cerebras["gpt-oss-120b"], MODELS.cerebras["qwen-3.8-27b"]] as const)(
+			"should omit strict field on tools for cerebras/$id",
+			async (metadata) => {
+				// Regression test for earendil-works/pi#9804: Cerebras rejects mixed strict and
+				// non-strict tools with HTTP 400, so strict must never be advertised.
+				const model = metadata as Model<"openai-completions">;
+				const contextWithTools = normalizeContext({
+					systemPrompt: "test",
+					tools: [
+						{
+							name: "t1",
+							description: "strict tool",
+							parameters: {
+								type: "object",
+								properties: { x: { type: "string" } },
+								required: ["x"],
+							},
+							constrainedSampling: { type: "json_schema", strict: "prefer" },
+						},
+						{
+							name: "t2",
+							description: "non-strict tool",
+							parameters: {
+								type: "object",
+								properties: { y: { type: "string" } },
+								required: ["y"],
+							},
+						},
+					],
+					messages: [{ role: "user", content: "hello", timestamp: 1 }],
+				});
+				let capturedPayload: OpenAICompletionsToolsPayload | undefined;
+
+				try {
+					const s = streamOpenAICompletions(model, contextWithTools, {
+						apiKey: "fake-key",
+						sessionId: "test",
+						onPayload: stopAfterPayload<OpenAICompletionsToolsPayload>((payload) => {
+							capturedPayload = payload;
+						}),
+					});
+
+					for await (const event of s) {
+						if (event.type === "error") break;
+					}
+				} catch {
+					// Expected to fail
+				}
+
+				expect(model.compat?.supportsStrictMode).toBe(false);
+				expect(capturedPayload).toBeDefined();
+				const tools = capturedPayload?.tools;
+				expect(tools).toBeDefined();
+				for (const tool of tools ?? []) {
+					expect(tool.function).not.toHaveProperty("strict");
+				}
+			},
+		);
 	});
 });

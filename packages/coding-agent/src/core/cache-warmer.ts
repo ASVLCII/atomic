@@ -95,8 +95,12 @@ export interface CacheWarmRequest {
 	options: ModelRuntimeSimpleStreamOptions;
 }
 interface ActiveRun extends CacheWarmRequest {
+	/** False once the session's model or messages no longer match the request. */
 	isCurrent: () => boolean;
+	ttlMs: number;
 	delayMs: number;
+	/** Latest safe time to send this refresh, leaving half the original expiry margin. */
+	refreshDeadlineAt: number;
 	startedAt: number;
 	controller: AbortController;
 	phase: "streaming" | "idle";
@@ -173,7 +177,9 @@ export class CacheWarmer {
 		this.run = {
 			...request,
 			isCurrent,
+			ttlMs,
 			delayMs,
+			refreshDeadlineAt: 0,
 			startedAt: Date.now(),
 			controller: new AbortController(),
 			phase: "streaming",
@@ -216,6 +222,10 @@ export class CacheWarmer {
 	private schedule(run: ActiveRun): void {
 		run.extensionOverride = false;
 		run.nextWarmAt = Date.now() + run.delayMs;
+		// A timer can run late after sleep or event-loop blockage. Keep half of
+		// the planned pre-expiry margin for that delay and request dispatch; a
+		// late refresh is likely a full-price cache write, not a cache warm.
+		run.refreshDeadlineAt = run.nextWarmAt + Math.floor((run.ttlMs - run.delayMs) / 2);
 		const deadline = run.startedAt + (run.phase === "idle" ? MAX_IDLE_WARMING_AGE_MS : MAX_WARMING_AGE_MS);
 		if (run.nextWarmAt > deadline || Date.now() >= deadline) {
 			this.stop(run.phase === "idle" ? "30-minute idle safety limit reached" : "one-hour safety limit reached");
@@ -234,6 +244,7 @@ export class CacheWarmer {
 	private async refresh(run: ActiveRun): Promise<void> {
 		run.timer = undefined;
 		if (!this.validateRun(run)) return;
+		if (this.refreshDeadlineMissed(run)) return;
 		const decision = this.evaluate(run);
 		const { warmCost, missCost, continuationProbability } = decision;
 		let action = decision.action;
@@ -248,7 +259,7 @@ export class CacheWarmer {
 		} catch {
 			/* Extension failure retains the default decision. */
 		}
-		if (!this.validateRun(run)) return;
+		if (!this.validateRun(run) || this.refreshDeadlineMissed(run)) return;
 		const extensionOverride = action !== decision.action;
 		if (action === "stop") {
 			this.stop(
@@ -286,6 +297,11 @@ export class CacheWarmer {
 			/* Best-effort replay must not fail the real agent run. */
 		}
 		if (this.run === run) this.schedule(run);
+	}
+	private refreshDeadlineMissed(run: ActiveRun): boolean {
+		if (Date.now() <= run.refreshDeadlineAt) return false;
+		this.stop("cache refresh deadline missed");
+		return true;
 	}
 	private validateRun(run: ActiveRun): boolean {
 		if (this.run !== run) return false;

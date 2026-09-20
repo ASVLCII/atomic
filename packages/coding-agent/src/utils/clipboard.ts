@@ -1,8 +1,12 @@
-import { execSync, spawn } from "child_process";
-import { platform } from "os";
+import { execFileSync, execSync, spawn } from "child_process";
+import { randomUUID } from "crypto";
+import { unlinkSync, writeFileSync } from "fs";
+import { platform, tmpdir } from "os";
+import { join } from "path";
 import { createChildProcessEnvironment } from "./child-process.ts";
 import { isWaylandSession } from "./clipboard-image.ts";
 import { clipboard } from "./clipboard-native.ts";
+import { isWSL } from "./wsl.ts";
 
 type NativeClipboardExecOptions = {
 	input: string;
@@ -21,7 +25,7 @@ function copyToX11Clipboard(options: NativeClipboardExecOptions): void {
 
 const MAX_OSC52_ENCODED_LENGTH = 100_000;
 
-function isRemoteSession(env: NodeJS.ProcessEnv = process.env): boolean {
+function isRemoteSession(env: NodeJS.ProcessEnv): boolean {
 	return Boolean(env.SSH_CONNECTION || env.SSH_CLIENT || env.MOSH_CONNECTION);
 }
 
@@ -32,6 +36,42 @@ function emitOsc52(text: string): boolean {
 	}
 	process.stdout.write(`\x1b]52;c;${encoded}\x07`);
 	return true;
+}
+
+/**
+ * WSL without WSLg has no Linux display, so the Windows clipboard is written through
+ * interop. PowerShell reads the text from a file because `clip.exe` and PowerShell stdin
+ * decode piped bytes with the console code page, which mangles non-ASCII UTF-8.
+ */
+function copyViaWindowsClipboard(text: string): boolean {
+	const tmpFile = join(tmpdir(), `pi-wsl-clip-${randomUUID()}.txt`);
+	const env = createChildProcessEnvironment();
+	try {
+		writeFileSync(tmpFile, text, { encoding: "utf8", mode: 0o600 });
+		const winPath = execFileSync("wslpath", ["-w", tmpFile], {
+			timeout: 1000,
+			stdio: ["ignore", "pipe", "ignore"],
+			env,
+		})
+			.toString("utf8")
+			.trim();
+		if (!winPath) return false;
+		const script = `Set-Clipboard -Value ([System.IO.File]::ReadAllText('${winPath.replaceAll("'", "''")}', [System.Text.Encoding]::UTF8))`;
+		execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+			timeout: 5000,
+			stdio: ["ignore", "ignore", "ignore"],
+			env,
+		});
+		return true;
+	} catch {
+		return false;
+	} finally {
+		try {
+			unlinkSync(tmpFile);
+		} catch {
+			// The file may not have been created.
+		}
+	}
 }
 
 export async function readClipboardText(
@@ -49,7 +89,7 @@ export async function copyToClipboard(text: string): Promise<void> {
 	let copied = false;
 
 	const p = platform();
-
+	const env = process.env;
 	// Prefer direct clipboard writes. Emitting OSC 52 first can make terminals
 	// write the same native clipboard concurrently with the addon, and very large
 	// OSC 52 payloads can desynchronize terminal rendering.
@@ -69,7 +109,7 @@ export async function copyToClipboard(text: string): Promise<void> {
 		// Fall through to platform-specific clipboard tools.
 	}
 
-	const remote = isRemoteSession();
+	const remote = isRemoteSession(env);
 	if (copied && !remote) {
 		return;
 	}
@@ -91,7 +131,7 @@ export async function copyToClipboard(text: string): Promise<void> {
 				copied = true;
 			} else {
 				// Linux. Try Termux, Wayland, or X11 clipboard tools.
-				if (process.env.TERMUX_VERSION) {
+				if (env.TERMUX_VERSION) {
 					try {
 						execSync("termux-clipboard-set", options);
 						copied = true;
@@ -101,8 +141,8 @@ export async function copyToClipboard(text: string): Promise<void> {
 				}
 
 				if (!copied) {
-					const hasWaylandDisplay = Boolean(process.env.WAYLAND_DISPLAY);
-					const hasX11Display = Boolean(process.env.DISPLAY);
+					const hasWaylandDisplay = Boolean(env.WAYLAND_DISPLAY);
+					const hasX11Display = Boolean(env.DISPLAY);
 					const isWayland = isWaylandSession();
 					if (isWayland && hasWaylandDisplay) {
 						try {
@@ -148,24 +188,33 @@ export async function copyToClipboard(text: string): Promise<void> {
 		}
 	}
 
-	if (remote) {
-		const osc52Copied = emitOsc52(text);
-		copied = copied || osc52Copied;
+	let osc52Emitted = false;
+	if (!copied && p === "linux" && isWSL(env)) {
+		// Windows Terminal supports OSC 52; prefer it over the slower PowerShell round trip.
+		if (env.WT_SESSION) osc52Emitted = emitOsc52(text);
+		copied = osc52Emitted || copyViaWindowsClipboard(text);
 	}
-
-	if (!copied) {
-		if (p === "linux") {
-			if (process.env.TERMUX_VERSION) {
-				throw new Error("Clipboard unavailable: install the Termux:API app and `termux-api` package");
-			}
-			if (process.env.WAYLAND_DISPLAY) {
-				throw new Error("Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access");
-			}
-			if (process.env.DISPLAY) {
-				throw new Error("Clipboard unavailable: install `xclip` or `xsel`, or check X11 access");
-			}
-			throw new Error("Clipboard unavailable: no Wayland or X11 display detected");
+	// OSC 52 cannot be verified, so a desktop session with a display reports the failure
+	// instead. Without a display the terminal is the only clipboard route (containers,
+	// WSL without WSLg), and remote sessions always emit it to reach the client clipboard.
+	const headless = p === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY && !env.TERMUX_VERSION;
+	let oversized = false;
+	if (!osc52Emitted && (remote || (!copied && headless))) {
+		if (emitOsc52(text)) copied = true;
+		else oversized = true;
+	}
+	if (copied) return;
+	if (oversized) throw new Error("Clipboard unavailable: text exceeds the OSC 52 size limit");
+	if (p === "linux") {
+		if (env.TERMUX_VERSION) {
+			throw new Error("Clipboard unavailable: install the Termux:API app and `termux-api` package");
 		}
-		throw new Error("Clipboard unavailable");
+		if (env.WAYLAND_DISPLAY) {
+			throw new Error("Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access");
+		}
+		if (env.DISPLAY) {
+			throw new Error("Clipboard unavailable: install `xclip` or `xsel`, or check X11 access");
+		}
 	}
+	throw new Error("Clipboard unavailable");
 }

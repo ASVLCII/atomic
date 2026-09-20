@@ -1,4 +1,6 @@
-import { execSync, spawn } from "child_process";
+import { execFileSync, execSync, spawn } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import type * as OsModule from "os";
 import { platform } from "os";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { copyToClipboard } from "../src/utils/clipboard.ts";
@@ -9,6 +11,7 @@ const mocks = vi.hoisted(() => {
 			setText: vi.fn<(text: string) => Promise<void>>(),
 		},
 		execSync: vi.fn(),
+		execFileSync: vi.fn<(file: string, args: string[], options?: object) => Buffer>(),
 		spawn: vi.fn(),
 		platform: vi.fn<() => NodeJS.Platform>(),
 		isWaylandSession: vi.fn<() => boolean>(),
@@ -24,12 +27,14 @@ vi.mock("../src/utils/clipboard-native.js", () => {
 vi.mock("child_process", () => {
 	return {
 		execSync: mocks.execSync,
+		execFileSync: mocks.execFileSync,
 		spawn: mocks.spawn,
 	};
 });
 
-vi.mock("os", () => {
+vi.mock("os", async () => {
 	return {
+		...(await vi.importActual<typeof OsModule>("os")),
 		platform: mocks.platform,
 	};
 });
@@ -41,6 +46,7 @@ vi.mock("../src/utils/clipboard-image.js", () => {
 });
 
 const mockedExecSync = vi.mocked(execSync);
+const mockedExecFileSync = vi.mocked(execFileSync);
 const mockedSpawn = vi.mocked(spawn);
 const mockedPlatform = vi.mocked(platform);
 
@@ -76,10 +82,14 @@ beforeEach(() => {
 	vi.stubEnv("TERMUX_VERSION", "");
 	vi.stubEnv("WAYLAND_DISPLAY", "");
 	vi.stubEnv("DISPLAY", "");
+	vi.stubEnv("WT_SESSION", "");
+	vi.stubEnv("WSL_DISTRO_NAME", "");
+	vi.stubEnv("WSLENV", "");
 	stdoutWrites = [];
 	nativeResolved = false;
 	mocks.clipboard.setText.mockReset();
 	mocks.execSync.mockReset();
+	mocks.execFileSync.mockReset();
 	mocks.spawn.mockReset();
 	mocks.platform.mockReset();
 	mocks.isWaylandSession.mockReset();
@@ -164,7 +174,9 @@ describe("copyToClipboard", () => {
 			throw new Error("pbcopy failed");
 		});
 
-		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Clipboard unavailable");
+		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow(
+			"Clipboard unavailable: text exceeds the OSC 52 size limit",
+		);
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
@@ -215,6 +227,105 @@ describe("copyToClipboard", () => {
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
+	test("display-less Linux falls back to OSC 52", async () => {
+		// Regression test for earendil-works/pi#9688: containers without X11/Wayland access.
+		mockedPlatform.mockReturnValue("linux");
+
+		await copyToClipboard("hello");
+
+		expect(mockedExecSync).not.toHaveBeenCalled();
+		expect(mockedExecFileSync).not.toHaveBeenCalled();
+		expect(osc52Writes()).toHaveLength(1);
+	});
+
+	test("WSL without a display writes the Windows clipboard through PowerShell", async () => {
+		// Regression test for earendil-works/pi#9688: WSL with WSLg disabled.
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		let written: string | undefined;
+		mockedExecFileSync.mockImplementation((file, args) => {
+			if (file !== "wslpath") return Buffer.alloc(0);
+			written = readFileSync(args[1]!, "utf8");
+			return Buffer.from("\\\\wsl.localhost\\Ubuntu\\tmp\\clip.txt\n");
+		});
+
+		await copyToClipboard("héllo");
+
+		expect(mockedExecFileSync.mock.calls.map(([file]) => file)).toEqual(["wslpath", "powershell.exe"]);
+		expect(written).toBe("héllo");
+		const [, wslpathArgs] = mockedExecFileSync.mock.calls[0]!;
+		expect(existsSync(wslpathArgs[1]!)).toBe(false);
+		const [, powershellArgs] = mockedExecFileSync.mock.calls[1]!;
+		expect(powershellArgs[2]).toContain("Set-Clipboard");
+		expect(powershellArgs[2]).toContain("'\\\\wsl.localhost\\Ubuntu\\tmp\\clip.txt'");
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("WSL falls back to OSC 52 when Windows interop is unavailable", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		mockedExecFileSync.mockImplementation(() => {
+			throw new Error("wslpath: not found");
+		});
+
+		await copyToClipboard("hello");
+
+		expect(mockedExecFileSync.mock.calls.map(([file]) => file)).toEqual(["wslpath"]);
+		expect(osc52Writes()).toHaveLength(1);
+	});
+
+	test("WSL in Windows Terminal prefers OSC 52 over PowerShell", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		vi.stubEnv("WT_SESSION", "session");
+
+		await copyToClipboard("hello");
+
+		expect(mockedExecFileSync).not.toHaveBeenCalled();
+		expect(osc52Writes()).toHaveLength(1);
+	});
+
+	test("WSL in Windows Terminal emits OSC 52 once in a remote session", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		vi.stubEnv("WT_SESSION", "session");
+		vi.stubEnv("SSH_CONNECTION", "client server");
+
+		await copyToClipboard("hello");
+
+		expect(mockedExecFileSync).not.toHaveBeenCalled();
+		expect(osc52Writes()).toHaveLength(1);
+	});
+
+	test("WSL in Windows Terminal uses PowerShell for oversized OSC 52 payloads", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		vi.stubEnv("WT_SESSION", "session");
+		mockedExecFileSync.mockImplementation((file) =>
+			file === "wslpath" ? Buffer.from("C:\\clip.txt") : Buffer.alloc(0),
+		);
+
+		await copyToClipboard("x".repeat(80_000));
+
+		expect(mockedExecFileSync.mock.calls.map(([file]) => file)).toEqual(["wslpath", "powershell.exe"]);
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("WSL with a display prefers the Linux clipboard tools", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		mocks.isWaylandSession.mockReturnValue(true);
+		mockWlCopyExit(0);
+		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+
+		await copyToClipboard("hello");
+
+		expect(mockedSpawn).toHaveBeenCalledWith("wl-copy", [], expect.anything());
+		expect(mockedExecFileSync).not.toHaveBeenCalled();
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
 	test.each([
 		["darwin", "", "", "", "Clipboard unavailable"],
 		["win32", "", "", "", "Clipboard unavailable"],
@@ -227,7 +338,6 @@ describe("copyToClipboard", () => {
 			"Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access",
 		],
 		["linux", "", "", ":0", "Clipboard unavailable: install `xclip` or `xsel`, or check X11 access"],
-		["linux", "", "", "", "Clipboard unavailable: no Wayland or X11 display detected"],
 	] as const)(
 		"local %s failure reports backend guidance (%s %s %s)",
 		async (os, termux, wayland, display, message) => {
