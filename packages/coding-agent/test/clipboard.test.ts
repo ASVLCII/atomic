@@ -366,6 +366,28 @@ describe("copyToClipboard", () => {
 		assert.equal(osc52Writes().length, 0);
 	});
 
+	test("remote WSLg session writes the display clipboard and still emits OSC 52 for the client", async () => {
+		// Deliberate: the wl-copy write serves the remote host's desktop, while the SSH user
+		// is at the client, which only OSC 52 reaches. Mirrors "remote native success emits
+		// OSC 52 after native write" for the Linux display backends.
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		vi.stubEnv("SSH_CONNECTION", "client server");
+		mocks.isWaylandSession.mockReturnValue(true);
+		mockWlCopyExit(0);
+		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+
+		await copyToClipboard("hello");
+
+		assert.deepEqual(
+			spawnCalls().map(({ command, args }) => ({ command, args })),
+			[{ command: "wl-copy", args: [] }],
+		);
+		assert.equal(mockedExecFileSync.mock.calls.length, 0);
+		assert.equal(osc52Writes().length, 1);
+	});
+
 	test.each([
 		["darwin", "", "", "", "Clipboard unavailable"],
 		["win32", "", "", "", "Clipboard unavailable"],
