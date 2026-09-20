@@ -66,6 +66,27 @@ function detailFromRun(run: RunSnapshot): RunDetail {
 	};
 }
 
+test("stage rows show execution duration without startup diagnostics", () => {
+	const stage = makeStage("s1", "worker", "completed", {
+		startedAt: 1_000,
+		endedAt: 66_000,
+		startup: {
+			phase: "first-dispatch",
+			startedAt: 1_000,
+			phaseStartedAt: 4_000,
+			state: "dispatched",
+			ownershipPending: false,
+		},
+	});
+	const detail = detailFromRun(makeRun({ status: "completed", stages: [stage], endedAt: 66_000 }));
+	for (const theme of [undefined, deriveGraphTheme({})]) {
+		const output = stripAnsi(renderRunDetail(detail, { theme, now: 66_000, width: 100 }));
+		assert.match(output, /worker.*completed.*1m 5s/);
+		assert.doesNotMatch(output, /startup|first-dispatch|current step/);
+	}
+	assert.equal(stage.startup?.state, "dispatched");
+});
+
 // ---------------------------------------------------------------------------
 // inspectRun
 // ---------------------------------------------------------------------------
