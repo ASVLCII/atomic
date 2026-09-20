@@ -46,8 +46,9 @@ afterEach(() => {
 
 for (const [setting, key, expected] of [
 	["test/alternate", "mock-key", "test/alternate"],
-	["typesafe-ai/jev", "", "typesafe-ai/jev"],
-	["", "mock-key", "typesafe-ai/jev"],
+	["openrouter/~typesafe/jev-latest", "", "openrouter/~typesafe/jev-latest"],
+	["typesafe-ai/jev-latest", "", "typesafe-ai/jev-latest"],
+	["", "mock-key", "typesafe-ai/jev-latest"],
 	["", "", "test/chat"],
 	["", "   ", "test/chat"],
 ] as const) {
@@ -71,13 +72,16 @@ test("Jev routing and direct requests use TYPESAFE_API_KEY without the old alias
 		return Response.json(jevResponse());
 	});
 	vi.stubGlobal("fetch", transport);
-	const request = { ...decisionRequest(), settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }) };
+	const request = {
+		...decisionRequest(),
+		settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
+	};
 	await assert.rejects(inferRouterDecision(request), {
-		message: "typesafe-ai/jev requires an API key. Use /login typesafe-ai or set TYPESAFE_API_KEY.",
+		message: "typesafe-ai/jev-latest requires an API key. Use /login typesafe-ai or set TYPESAFE_API_KEY.",
 	});
 	assert.equal(transport.mock.calls.length, 0);
 	vi.stubEnv("TYPESAFE_API_KEY", "  synthetic-current-key  ");
-	assert.equal(resolveRouterModel(options).fullId, "typesafe-ai/jev");
+	assert.equal(resolveRouterModel(options).fullId, "typesafe-ai/jev-latest");
 	assert.deepEqual((await inferRouterDecision(request)).value, { route: "review", limit: 1.23456789 });
 	assert.equal(transport.mock.calls.length, 1);
 });
@@ -90,7 +94,7 @@ test("empty default reads the current chat model on each invocation", () => {
 	assert.throws(() => resolveRouterModel({ settings, modelRegistry }), /selected chat model/);
 });
 
-for (const explicit of ["auto", "missing/model", "chat", "test/chat:high", " typesafe-ai/jev", " "]) {
+for (const explicit of ["auto", "missing/model", "chat", "test/chat:high", " typesafe-ai/jev-latest", " "]) {
 	test(`invalid explicit selection ${JSON.stringify(explicit)} never falls back to Jev or chat`, () => {
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const settings = SettingsManager.inMemory({ routerModel: explicit });
@@ -100,7 +104,7 @@ for (const explicit of ["auto", "missing/model", "chat", "test/chat:high", " typ
 
 test("Jev exposes only structured Choice capability, not a chat/tool model", () => {
 	const [provider] = getStructuredOutputProviders();
-	assert.equal(provider.fullId, "typesafe-ai/jev");
+	assert.equal(provider.fullId, "typesafe-ai/jev-latest");
 	assert.deepEqual(provider.capabilities, {
 		structuredDecisions: true,
 		choice: true,
@@ -250,7 +254,7 @@ test("Jev entrypoint sends both Choice judgments together and maps exact values 
 	const result = await inferRouterDecision(request);
 	assert.deepEqual(result, {
 		value: { route: "review", limit: 1.23456789 },
-		model: "typesafe-ai/jev",
+		model: "typesafe-ai/jev-latest",
 		responseModel: "jev-2026-09",
 		usage: { inputTokens: 20, outputTokens: 10 },
 	});

@@ -171,13 +171,13 @@ test("global/project settings honor trust, explicit empty override and reload wi
 			defaultProvider: "saved-provider",
 		}),
 	);
-	storage.withLock("project", () => JSON.stringify({ routerModel: "typesafe-ai/jev" }));
+	storage.withLock("project", () => JSON.stringify({ routerModel: "typesafe-ai/jev-latest" }));
 	const settings = SettingsManager.fromStorage(storage);
-	assert.equal(settings.getRouterModel(), "typesafe-ai/jev");
+	assert.equal(settings.getRouterModel(), "typesafe-ai/jev-latest");
 	const untrusted = SettingsManager.fromStorage(storage, { projectTrusted: false });
 	assert.equal(untrusted.getRouterModel(), "decision-test/chat");
 	untrusted.setProjectTrusted(true);
-	assert.equal(untrusted.getRouterModel(), "typesafe-ai/jev");
+	assert.equal(untrusted.getRouterModel(), "typesafe-ai/jev-latest");
 	storage.withLock("project", () => JSON.stringify({ routerModel: "" }));
 	await settings.reload();
 	assert.equal(settings.getRouterModel(), "");
@@ -213,7 +213,7 @@ test("explicit Jev without its key fails without falling back to chat", async ()
 	await assert.rejects(
 		inferRouterDecision({
 			...decisionRequest(),
-			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }),
+			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
 		}),
 		/requires an API key.*\/login typesafe-ai/,
 	);

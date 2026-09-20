@@ -109,7 +109,7 @@ test("Jev routes all 1997 original options through bounded batches and a shared 
 	});
 	const result = await inferRouterDecision({
 		...decisionRequest(),
-		settings: { getRouterModel: () => "typesafe-ai/jev" },
+		settings: { getRouterModel: () => "typesafe-ai/jev-latest" },
 		schema: Type.Object({ picked: Type.String() }),
 		jev: {
 			questions: { pick: { instructions: "Select a candidate", criteria } },
@@ -154,7 +154,7 @@ test("mixed named questions cannot collide with tournament IDs", async () => {
 	});
 	const result = await inferRouterDecision({
 		...decisionRequest(),
-		settings: { getRouterModel: () => "typesafe-ai/jev" },
+		settings: { getRouterModel: () => "typesafe-ai/jev-latest" },
 		schema: Type.Record(Type.String(), Type.String()),
 		jev: {
 			questions: {
@@ -198,7 +198,7 @@ test("retained final option participates originally but does not replace batch t
 	});
 	const result = await inferRouterDecision({
 		...decisionRequest(),
-		settings: { getRouterModel: () => "typesafe-ai/jev" },
+		settings: { getRouterModel: () => "typesafe-ai/jev-latest" },
 		schema: Type.Record(Type.String(), Type.String()),
 		jev: {
 			questions: { pick: { instructions: "Select", criteria, retainForFinal: "key_200" } },
@@ -214,7 +214,7 @@ function tournament(count: number) {
 	const criteria = Object.fromEntries(Array.from({ length: count }, (_, i) => [`key_${i}`, `Candidate ${i}`]));
 	return {
 		...decisionRequest(),
-		settings: { getRouterModel: () => "typesafe-ai/jev" },
+		settings: { getRouterModel: () => "typesafe-ai/jev-latest" },
 		schema: Type.Record(Type.String(), Type.String()),
 		jev: {
 			questions: { pick: { instructions: "Select", criteria } },

@@ -41,7 +41,7 @@ function fixture() {
 		},
 	);
 	const ctx = { ...workflowRouterContext("registered"), sessionId: "retry-owner" };
-	ctx.getRouterModel = () => "typesafe-ai/jev";
+	ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const attempts = Array.from({ length: 4 }, () => ({
 		entered: Promise.withResolvers<JevFixtureRequest>(),

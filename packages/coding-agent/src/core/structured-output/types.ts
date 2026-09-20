@@ -21,7 +21,7 @@ export interface RouterModelSelectionOptions {
 
 export type StructuredOutputModel =
 	| { readonly kind: "chat"; readonly fullId: string; readonly model: Model<Api> }
-	| { readonly kind: "jev"; readonly fullId: "typesafe-ai/jev" };
+	| { readonly kind: "jev"; readonly fullId: "typesafe-ai/jev-latest" | "openrouter/~typesafe/jev-latest" };
 
 export interface StructuredOutputRequest<T extends TSchema> {
 	/** Explicit inference model. General structured output never reads routerModel or the chat selection. */

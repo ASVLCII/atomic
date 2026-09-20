@@ -11,12 +11,12 @@ Use `inferStructuredOutput()` from `@bastani/atomic` when an SDK integration nee
 
 ## Select the inference model
 
-For a general structured-output call, pass `model: { kind: "chat", fullId, model }` with a concrete model from the current registry, or `model: { kind: "jev", fullId: "typesafe-ai/jev" }`. Setting `routerModel` or exporting a TypeSafe key does not change this explicit selection.
+For a general structured-output call, pass `model: { kind: "chat", fullId, model }` with a concrete model from the current registry, or `model: { kind: "jev", fullId: "typesafe-ai/jev-latest" }`. For OpenRouter Jev, use `model: { kind: "jev", fullId: "openrouter/~typesafe/jev-latest" }`. Setting `routerModel` or exporting a TypeSafe key does not change this explicit selection.
 
 `inferRouterDecision()` is the shared entrypoint for prerequisite workflow selection and automatic subagent/workflow-stage model selection. Only this entrypoint consults `routerModel` in [settings.json](/settings#routermodel). It takes `settings`, `modelRegistry` and the invocation-time `currentModel` instead of an explicit inference `model`. Resolution is:
 
 1. A nonempty explicit, exact `routerModel` value.
-2. Otherwise `typesafe-ai/jev` when Jev credentials are configured through `/login typesafe-ai` or `TYPESAFE_API_KEY`.
+2. Otherwise `typesafe-ai/jev-latest` when Jev credentials are configured through `/login typesafe-ai` or `TYPESAFE_API_KEY`.
 3. Otherwise the chat model supplied as `currentModel` at invocation time.
 
 An invalid explicit router selection fails instead of falling back. `auto`, model patterns, reasoning suffixes, and surrounding whitespace are not supported. Ordinary models must exist in the current configured catalog; their usual provider authentication applies. Catalog presence and an environment key do not prove live access, quota, or entitlement. The resolver never changes the chat model, the `structured_output` tool's model or saved defaults.
@@ -24,6 +24,8 @@ An invalid explicit router selection fails instead of falling back. `auto`, mode
 Extension tools can read the owning session's current routing setting with `ctx.getRouterModel()`. Pass `settings: { getRouterModel: () => ctx.getRouterModel() }`, `modelRegistry: ctx.modelRegistry` and `currentModel: ctx.model` to `inferRouterDecision()`. This preserves in-memory settings and project-trust behavior instead of loading a separate settings instance.
 
 Pass the full `ModelRegistry` to use saved Jev credentials with either decision API. Its provider-auth methods preserve normal credential resolution and logout behavior. Minimal custom adapters that omit `getProviderAuth` and `getProviderAuthStatus` retain environment-only Jev support. Never copy a resolved key into decision state.
+
+OpenRouter Jev reuses the registry's existing OpenRouter sign-in or saved API key and normal `OPENROUTER_API_KEY` fallback. It never uses TypeSafe credentials. Minimal adapters use `OPENROUTER_API_KEY` for this selection. The Atomic ID includes `openrouter/`; the wire model is only `~typesafe/jev-latest`, sent to `https://openrouter.ai/api/alpha/decisions`. Both Jev selections accept the same Choice questions and return the same structured result. OpenRouter is explicit-only and does not change automatic selection precedence.
 
 ### Router repair attempts
 
@@ -115,6 +117,6 @@ No result is returned for missing state, invalid configuration, unrepaired malfo
 
 Provider dispatch and response-reading failures return generic diagnostics rather than raw upstream errors, which may contain private input or credentials. Check provider configuration and connectivity before an explicit retry. Cancellation and timeout remain distinct errors.
 
-For Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_API_KEY`; 422 means check the state/question contract; 429 and 529 mean wait before an explicit retry. Error messages omit upstream response bodies because they may echo private input.
+For direct Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_API_KEY`; for OpenRouter Jev, check `/login openrouter` or `OPENROUTER_API_KEY`. HTTP 422 means check the state/question contract; 429 and 529 mean wait before an explicit retry. Error messages omit upstream response bodies because they may echo private input.
 
 Malformed Jev response errors include a static diagnostic code, without response values or routing context. For example, `probability_mass` means the returned probabilities failed the sum-to-one tolerance, `probability_keys` means the options did not match, and `choice_not_highest` means the selected option was not highest-probability. Include the code when reporting a failure. Router calls may repair these errors before returning a final failure; generic calls fail immediately. No invalid decision is accepted.

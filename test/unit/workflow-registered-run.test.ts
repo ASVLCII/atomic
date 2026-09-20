@@ -75,7 +75,7 @@ function fixture(
 	const ctx = { ...workflowRouterContext("registered"), sessionId: "owner" };
 	const inference = vi.spyOn(ctx.modelRegistry!, "streamSimple");
 	if (provider === "jev") {
-		ctx.getRouterModel = () => "typesafe-ai/jev";
+		ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 		vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 		vi.stubGlobal(
 			"fetch",

@@ -13,6 +13,7 @@
 - Closing preserves queued conversation events and persistence, drains current and superseded background summaries, and rolls back candidate acquisitions when reload discovery fails before startup. Reload cleanup failures retain every original and cleanup cause ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Workflow model-tool calls now use `workflow route` with actual request/message/document text, then `workflow run` with the registered execution ID and inputs. Reservations retain one identity through admission and supported lifecycle operations; invalid inputs can be corrected without rerouting. Old run-as-router calls and duration values are rejected. Estimates use canonical quarter-hour labels through `1d`, plus unknown and `>1d`; budgets and approval gates remain unchanged ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
 - Renamed the TypeSafe Jev environment variable from `TYPESAFE_AI_API_KEY` to `TYPESAFE_API_KEY`. Update shell and deployment configuration; the old name is no longer recognized. Saved `/login typesafe-ai` credentials are unchanged.
+- Renamed the direct Jev decision model from `typesafe-ai/jev` to `typesafe-ai/jev-latest`. Update `routerModel` settings and explicit SDK selections; saved TypeSafe credentials are unchanged.
 
 ### Added
 
@@ -28,6 +29,7 @@
 
 - SDK hosts can provide typed `HostInput` callbacks for confirmations, selection, text and questionnaires without a terminal. Replies are validated and carry session/request identity and cancellation; the onDiagnostic callback receives session-attributed operational messages ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - SDK human-input callbacks now answer durable workflow approvals and stage questionnaires, including nested workflows, with workflow/run identity. Withdrawing or replacing a host keeps unresolved approvals pending and rejects stale replies; the same definition can resume under a different host without repeating checkpointed tool effects ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Added `openrouter/~typesafe/jev-latest` for routing and SDK structured decisions through OpenRouter's Decisions API, reusing existing OpenRouter sign-in, saved API keys, and environment fallback without a TypeSafe key.
 
 ### Changed
 
@@ -91,6 +93,7 @@
 - Installed Node SDK consumers can now check the complete public declarations with strict NodeNext settings and `skipLibCheck: false`, including model catalogs and the find tool's path interface ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Prepared SDK services no longer reconstruct safe extensions or repeat their startup when project trust completes. Additional sessions borrowing those services keep independent extension lifetimes ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Jev structured decisions no longer reject responses solely because their probabilities do not sum to one.
+- Jev SDK decisions retain their original model, provider and credentials across tournament rounds when callers mutate their model selection during inference.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

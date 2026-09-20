@@ -166,7 +166,7 @@ async function inspectRoutes(f: RoutingHarness, _target: string) {
 			);
 		}),
 	);
-	ctx.getRouterModel = () => "typesafe-ai/jev";
+	ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 	const jevResult = await f.execute(args, ctx);
 	assert.equal(jevResult.action, "route");
 	assert.equal(jevResult.status, "not_launched", jevResult.error);

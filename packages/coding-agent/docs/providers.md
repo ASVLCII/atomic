@@ -480,9 +480,13 @@ For router-mode discovery, load/unload management, and Hugging Face downloads wi
 
 ## TypeSafe Jev
 
-`typesafe-ai/jev` is a built-in structured-decision provider, not a chat or tool-calling model. It is available for [workflow launch routing](/workflows/operations#model-invoked-launch-routing) and [SDK structured decisions](/sdk/structured-decisions), not `/model`, chat `--model`, or child execution model fields. SDK integrations can inspect its supported capabilities with `getStructuredOutputProviders()`.
+`typesafe-ai/jev-latest` and `openrouter/~typesafe/jev-latest` are built-in structured-decision models, not chat or tool-calling models. They are available for [workflow launch routing](/workflows/operations#model-invoked-launch-routing) and [SDK structured decisions](/sdk/structured-decisions), not `/model`, chat `--model`, or child execution model fields. SDK integrations can inspect their supported capabilities with `getStructuredOutputProviders()`.
 
 Use `/login typesafe-ai` to save an API key in `auth.json`, or set `TYPESAFE_API_KEY` in Atomic's process environment. Stored credentials take precedence over the environment key, just as for other API-key providers. `/logout` removes the saved key; an environment key remains active until you unset it. Jev appears in `/login` but not `/model`, because it only makes structured decisions. Do not put the key in prompts, decision state, or `settings.json`.
+
+For OpenRouter, select `openrouter/~typesafe/jev-latest` in `/settings` → **Router model**, or set `"routerModel": "openrouter/~typesafe/jev-latest"`. It uses your existing `/login openrouter` sign-in or saved API key, with the usual `OPENROUTER_API_KEY` fallback. No TypeSafe key or separate login is needed. Atomic sends wire model `~typesafe/jev-latest` to OpenRouter's Decisions API, not its chat endpoint. OpenRouter credentials alone do not change automatic router selection.
+
+Replace the former direct ID `typesafe-ai/jev` with `typesafe-ai/jev-latest` in saved router settings and SDK calls. Direct TypeSafe credentials and the wire model `jev-latest` are unchanged.
 
 With an empty `routerModel`, configured Jev credentials select Jev for prerequisite workflow and subagent-auto routing. An explicit router selection takes precedence. General SDK structured-output requests select their inference model explicitly. This does not change the `structured_output` tool's model. User-issued `/workflow` commands bypass launch routing.
 

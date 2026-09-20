@@ -32,7 +32,7 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 });
 
-for (const routerModel of ["typesafe-ai/jev", "auto", "missing/model"]) {
+for (const routerModel of ["typesafe-ai/jev-latest", "auto", "missing/model"]) {
 	test(`general structured-output inference ignores routerModel=${routerModel} and environment preference`, async () => {
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn(async () => Response.json(jevResponse()));
@@ -64,8 +64,8 @@ test("general structured-output can explicitly select Jev without reading router
 	const transport = vi.fn(async () => Response.json(jevResponse()));
 	vi.stubGlobal("fetch", transport);
 	const request = decisionRequest();
-	const result = await inferStructuredOutput({ ...request, model: { kind: "jev", fullId: "typesafe-ai/jev" } });
-	assert.equal(result.model, "typesafe-ai/jev");
+	const result = await inferStructuredOutput({ ...request, model: { kind: "jev", fullId: "typesafe-ai/jev-latest" } });
+	assert.equal(result.model, "typesafe-ai/jev-latest");
 	assert.equal(request.settings.getRouterModel(), "decision-test/chat");
 	assert.equal(transport.mock.calls.length, 1);
 });
@@ -110,13 +110,13 @@ test("routing entrypoint alone applies the routerModel setting", async () => {
 	vi.stubGlobal("fetch", transport);
 	const result = await inferRouterDecision({
 		...decisionRequest(),
-		settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }),
+		settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
 	});
-	assert.equal(result.model, "typesafe-ai/jev");
+	assert.equal(result.model, "typesafe-ai/jev-latest");
 	assert.equal(transport.mock.calls.length, 1);
 });
 
-for (const routerModel of ["typesafe-ai/jev", "auto"]) {
+for (const routerModel of ["typesafe-ai/jev-latest", "auto"]) {
 	test(`structured_output session tool keeps the chat model with routerModel=${routerModel}`, async () => {
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn(async () => Response.json(jevResponse()));
