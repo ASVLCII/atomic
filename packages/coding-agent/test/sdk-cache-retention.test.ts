@@ -68,9 +68,18 @@ it("session requests serialize long caching, retain overrides and obey provider 
 
 it("defaults only capable OpenAI and Bedrock models to extended retention", async () => {
 	vi.stubEnv("PI_CACHE_RETENTION", undefined);
+	vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "fixture");
+	vi.stubEnv("CLOUDFLARE_GATEWAY_ID", "fixture");
 	const cwd = mkdtempSync(join(tmpdir(), "atomic-cache-boundaries-"));
 	const credentials = AuthStorage.inMemory();
-	for (const provider of ["openai", "openrouter", "amazon-bedrock"]) {
+	for (const provider of [
+		"openai",
+		"openrouter",
+		"amazon-bedrock",
+		"cloudflare-ai-gateway",
+		"github-copilot",
+		"opencode",
+	]) {
 		await credentials.modify(provider, async () => ({ type: "api_key", key: "test-key" }));
 	}
 	const modelRuntime = await ModelRuntime.create({ credentials, modelsPath: null });
@@ -96,6 +105,16 @@ it("defaults only capable OpenAI and Bedrock models to extended retention", asyn
 				[getModel("openai", "gpt-4.1"), true],
 				[getModel("openai", "gpt-4.1-mini"), false],
 				[getModel("openai", "gpt-5-mini"), false],
+				...(api === "openai-responses"
+					? ([
+							[getModel("cloudflare-ai-gateway", "gpt-4o"), false],
+							[getModel("cloudflare-ai-gateway", "gpt-5"), true],
+							[getModel("github-copilot", "gpt-5-mini"), false],
+							[getModel("github-copilot", "gpt-5.4"), true],
+							[getModel("opencode", "gpt-5-nano"), false],
+							[getModel("opencode", "gpt-5"), true],
+						] as const)
+					: []),
 				// OpenRouter registers Completions, not Responses.
 				...(api === "openai-completions"
 					? ([
@@ -136,7 +155,7 @@ it("defaults only capable OpenAI and Bedrock models to extended retention", asyn
 					assert.equal(
 						payload.prompt_cache_retention,
 						retention === "long" || (retention === undefined && supported) ? "24h" : undefined,
-						`${api}/${base.id}/${retention}`,
+						`${base.provider}/${api}/${base.id}/${retention}`,
 					);
 				}
 			}

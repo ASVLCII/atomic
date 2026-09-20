@@ -28,7 +28,16 @@ function supportsOpenAILongCache(model: Model<"openai-responses" | "openai-compl
 	)
 		return true;
 	const upstreamId = model.fastRoute?.upstreamModelId ?? model.id;
-	if (model.provider !== "openai" && !model.baseUrl.includes("api.openai.com") && !upstreamId.startsWith("openai/"))
+	// Built-in gateways can route OpenAI models without an openai/ ID prefix.
+	const gatewayOpenAI =
+		["cloudflare-ai-gateway", "github-copilot", "opencode", "opencode-go"].includes(model.provider) &&
+		/^(?:gpt-|o\d)/.test(upstreamId);
+	if (
+		model.provider !== "openai" &&
+		!gatewayOpenAI &&
+		!model.baseUrl.includes("api.openai.com") &&
+		!upstreamId.startsWith("openai/")
+	)
 		return true;
 	// Accept gateway prefixes, pinned snapshots and fast routes, but not unsupported mini/nano variants.
 	const id = upstreamId.replace(/^openai\//, "").replace(/-\d{4}-\d{2}-\d{2}$/, "");

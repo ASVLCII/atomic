@@ -96,6 +96,7 @@
 - Jev structured decisions no longer reject responses solely because their probabilities do not sum to one.
 - Jev SDK decisions retain their original model, provider and credentials across tournament rounds when callers mutate their model selection during inference.
 - `/logout` now autocompletes providers with stored API-key or subscription credentials and opens a filtered selector when a provider is supplied, instead of sending the command as a prompt.
+- Built-in Cloudflare AI Gateway, GitHub Copilot, and OpenCode routes now respect OpenAI model limits when choosing default cache retention, avoiding unsupported extended retention on models such as GPT-4o. Explicit retention overrides remain unchanged.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 
