@@ -13,7 +13,7 @@ The axes here are `pass@1` (accuracy) and `average dollars per task` (cost), tak
 Figures are a snapshot of DeepSWE v1.1 using the highest published thinking level for each of the 21 models displayed on the September 3, 2026 leaderboard. They include the August 21 pricing corrections for GPT-5.6 Sol and DeepSeek V4, and GPT-6 Astra's costs are DeepSWE's expected launch pricing rather than billed rates. DeepSWE's own default table view is **Best** — the best-scoring configuration per model — which picks a different row for four models; the frontier under that reading is stated below. DeepSWE publishes a live cost-vs-score scatter, so **read the frontier off the live chart** rather than trusting a static list. **Last compiled: 2026-09-03.**
 </Note>
 
-The [AA measurements](/models/evals) are separately dated **2026-09-08**. Intelligence Index v4.3, announced September 7, uses weighted intelligence and its own cost per task; Coding Agent Index v1.4 uses named-agent runs including Terminal-Bench v2.1 rather than v4.0. Neither defines or updates this September 3 Datacurve frontier.
+The [AA measurements](/models/evals) are separately dated **2026-09-20**. Intelligence Index v4.3.2 uses weighted intelligence and its own cost per task. Those records do not define or update this September 3 Datacurve frontier.
 
 ## The frontier
 
