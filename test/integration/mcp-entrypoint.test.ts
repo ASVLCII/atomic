@@ -197,7 +197,7 @@ describe("MCP entrypoints — workflow tool execute", () => {
 			message: decisionMessage({
 				workflowType: "mcp-restricted",
 				maxBudget: {},
-				estimatedDuration: "unknown",
+				estimatedDuration: "15min",
 				interaction: "executable",
 				complexity: "workflow_beneficial",
 			}),

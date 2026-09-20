@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { type Api, containsKnownEnvCredential, getSupportedThinkingLevels, type Model } from "@bastani/pi-ai";
 import { Type } from "typebox";
+import { getDocsPath } from "../config.js";
 import type { ModelRegistry } from "./model-registry.ts";
 import {
 	eligiblePair,
@@ -7,7 +10,6 @@ import {
 	type ModelRouterOutput,
 	parseModelConstraints,
 } from "./model-routing-constraints.js";
-import { MODEL_ROUTING_POLICY, routingEvidence } from "./model-routing-evidence.js";
 import { modelRoutingTask } from "./model-routing-task.js";
 import { inferRouterDecision, resolveRouterModel } from "./structured-output/index.js";
 
@@ -28,7 +30,22 @@ export interface ModelRoute {
 	allowsModel(model: Model<Api>, effort?: string): boolean;
 }
 const instructions =
-	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `policy` and relevant `evidence`. Consider task fit, measured effort and cost; never fabricate or transfer scores. All candidates already pass hard constraints. Return exactly model and effort; null means no configurable reasoning.";
+	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `model_selection_guide`. Consider task fit, measured effort, dates, caveats and cost. Guide recommendations cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
+
+async function readModelSelectionGuide(signal?: AbortSignal): Promise<string> {
+	try {
+		const guide = await readFile(join(getDocsPath(), "models", "model-selection.md"), { encoding: "utf8", signal });
+		// Reserve room for the 12 KB task excerpt, instructions and candidate batches
+		// within Jev's conservative 24 KB per-comparison budget. Never trim the guide.
+		if (!guide.trim() || Buffer.byteLength(JSON.stringify(guide), "utf8") > 8_000) throw new Error("Invalid guide");
+		return guide;
+	} catch {
+		signal?.throwIfAborted();
+		throw new Error(
+			"Auto routing requires a nonempty model-selection.md guide within 8,000 JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.",
+		);
+	}
+}
 
 export async function routeExecutionModel(input: {
 	ctx: ModelRoutingContext;
@@ -77,8 +94,7 @@ export async function routeExecutionModel(input: {
 		const state = {
 			task: input.task,
 			agent: { name: input.agent.name, description: input.agent.description },
-			policy: MODEL_ROUTING_POLICY,
-			evidence: routingEvidence(available.map(({ model }) => `${model.provider}/${model.id}`)),
+			model_selection_guide: await readModelSelectionGuide(signal),
 		};
 		if (!state.task.trim()) throw new Error("Auto routing requires task instructions.");
 		const serialized = JSON.stringify({ state, criteria: allCriteria, constraints });
@@ -138,7 +154,7 @@ export async function routeExecutionModel(input: {
 						questions: {
 							pair: {
 								instructions:
-									"Which eligible model/effort pair best fits the task under the supplied policy? Candidate cost is USD per million tokens, not benchmark task cost.",
+									"Which eligible model and reasoning effort best suit this task and agent role, considering the model_selection_guide and candidate capabilities and prices? Candidate cost is USD per million tokens, not benchmark task cost.",
 								criteria,
 							},
 						},

@@ -136,13 +136,13 @@ for (const action of ["route"] as const) {
 	test(`valid none returns structured inline guidance and zero launches (${action ?? "default"})`, async () => {
 		const f = fixture();
 		f.infer.mockImplementation(() =>
-			messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} })),
+			messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "none", maxBudget: {} })),
 		);
 		const result = await f.call({ ...f.args, action });
 		assert.equal(result.details.action, "route");
 		assert.ok("routerDecision" in result.details);
 		assert.deepEqual(result.details.routerDecision, {
-			estimatedDuration: "unknown",
+			estimatedDuration: "15min",
 			workflowType: "none",
 			maxBudget: {},
 		});
@@ -179,12 +179,12 @@ test("matching selection waits for approval, preserves launch metadata and recei
 	const pending = f.call();
 	await entered.promise;
 	f.noLaunch();
-	const message = decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget: {} });
+	const message = decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget: {} });
 	stream.push({ type: "done", reason: "toolUse", message });
 	const result = await pending;
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		workflowType: "approved-change",
 		maxBudget: {},
 	});
@@ -194,7 +194,7 @@ test("matching selection waits for approval, preserves launch metadata and recei
 	const visible = JSON.parse(result.content[0]!.text as string);
 	assert.deepEqual(visible, result.details);
 	assert.deepEqual(visible.routerDecision, {
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		workflowType: "approved-change",
 		maxBudget: {},
 	});
@@ -211,7 +211,7 @@ test("matching selection waits for approval, preserves launch metadata and recei
 test("different selection returns its decision without stale-input execution", async () => {
 	const f = fixture();
 	f.infer.mockImplementation(() =>
-		messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "review-only", maxBudget: {} })),
+		messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "review-only", maxBudget: {} })),
 	);
 	const result = await f.call();
 	assert.ok(result.details.action === "run");
@@ -219,7 +219,7 @@ test("different selection returns its decision without stale-input execution", a
 	assert.equal(result.details.routerDecision?.workflowType, "review-only");
 	assert.equal(result.details.status, "needs_input");
 	assert.equal("estimatedDuration" in result.details, false);
-	assert.equal(result.details.routerDecision?.estimatedDuration, "unknown");
+	assert.equal(result.details.routerDecision?.estimatedDuration, "15min");
 	assert.deepEqual(result.details.inputContract, f.runtime.registry.get("review-only")!.inputs);
 	assert.match(result.details.message ?? "", /required input/);
 	assert.equal(f.infer.mock.calls.length, 1);
@@ -245,7 +245,7 @@ for (const stale of [false, true]) {
 			assert.ok("routerDecision" in visible);
 			assert.deepEqual(visible.routerDecision, {
 				workflowType: "approved-change",
-				estimatedDuration: "unknown",
+				estimatedDuration: "15min",
 				maxBudget: { maxTokens: 0, maxCost: 1.125 },
 			});
 		}
@@ -256,6 +256,7 @@ for (const stale of [false, true]) {
 
 for (const value of [
 	{},
+	{ workflowType: "approved-change", maxBudget: {}, estimatedDuration: "unknown" },
 	{ workflowType: "unregistered", maxBudget: {} },
 	{ workflowType: "approved-change", maxBudget: {}, extra: true },
 	{ workflowType: "approved-change", maxBudget: { maxDurationMs: -1 } },
@@ -266,7 +267,7 @@ for (const value of [
 ]) {
 	test(`invalid decision fails closed without fabricating routerDecision: ${JSON.stringify(value)}`, async () => {
 		const f = fixture();
-		f.infer.mockImplementation(() => messageStream(decisionMessage({ estimatedDuration: "unknown", ...value })));
+		f.infer.mockImplementation(() => messageStream(decisionMessage({ estimatedDuration: "15min", ...value })));
 		const result = await f.call();
 		assert.equal("routerDecision" in result.details, false);
 		assert.equal("status" in result.details ? result.details.status : "", "failed");
@@ -311,7 +312,7 @@ for (const budget of [
 		assert.deepEqual(result.details.routerDecision?.maxBudget, budget);
 		assert.deepEqual(JSON.parse(result.content[0]!.text as string).routerDecision, {
 			workflowType: "approved-change",
-			estimatedDuration: "unknown",
+			estimatedDuration: "15min",
 			maxBudget: budget,
 		});
 		await f.jobs.get(result.details.runId)!.promise;
@@ -323,14 +324,12 @@ for (const budget of [
 test("none preserves zero and omitted fields in its structured decision", async () => {
 	const f = fixture({ maxTokens: 0 });
 	f.infer.mockImplementation(() =>
-		messageStream(
-			decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: { maxTokens: 0 } }),
-		),
+		messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "none", maxBudget: { maxTokens: 0 } })),
 	);
 	const result = await f.call();
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		workflowType: "none",
 		maxBudget: { maxTokens: 0 },
 	});
@@ -341,7 +340,7 @@ test("user limits cannot be expanded, disabled, rounded, omitted or lack provena
 	for (const maxBudget of [{}, { maxCost: 0 }, { maxCost: 1.24 }, { maxCost: 2 }]) {
 		const f = fixture({ maxCost: 1.23456789 });
 		f.infer.mockImplementation(() =>
-			messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget })),
+			messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget })),
 		);
 		const result = await f.call();
 		assert.equal("routerDecision" in result.details, false);
@@ -384,7 +383,7 @@ test("cancellation and late approval cannot start a run", async () => {
 	stream.push({
 		type: "done",
 		reason: "toolUse",
-		message: decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget: {} }),
+		message: decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget: {} }),
 	});
 	await Promise.resolve();
 	f.noLaunch();
@@ -405,7 +404,7 @@ test("bounded timeout does not turn a late response into none or a launch", asyn
 	stream.push({
 		type: "done",
 		reason: "toolUse",
-		message: decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget: {} }),
+		message: decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget: {} }),
 	});
 	await vi.advanceTimersByTimeAsync(0);
 	f.noLaunch();
@@ -429,7 +428,7 @@ test("overlapping decisions reject same-name replacement and removed registry ge
 		stream.push({
 			type: "done",
 			reason: "toolUse",
-			message: decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget: {} }),
+			message: decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget: {} }),
 		});
 	for (const result of await Promise.all([first, second]))
 		assert.match("error" in result.details ? (result.details.error ?? "") : "", /registry changed/);
@@ -523,7 +522,7 @@ function jevAnswer(request: JevRequest, selected = "none") {
 					id === "workflow"
 						? selected
 						: id === "duration"
-							? "unknown"
+							? "15min"
 							: id === "interaction"
 								? "executable"
 								: id === "complexity"
@@ -585,7 +584,7 @@ test("Jev fallback submits one request with complete registry, contextual Choice
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
 		workflowType: "none",
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		maxBudget: { maxTokens: 0, maxCost: 0.123456789 },
 	});
 	assert.equal(fetch.mock.calls.length, 1);
@@ -611,7 +610,7 @@ for (const status of [401, 422, 429, 529]) {
 	});
 }
 
-for (const malformed of ["unknown-choice", "missing-duration", "wrong-type"]) {
+for (const malformed of ["unknown-choice", "unknown-duration", "missing-duration", "wrong-type"]) {
 	test(`Jev ${malformed} fails closed after bounded repair`, async () => {
 		const f = fixture();
 		f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
@@ -619,6 +618,7 @@ for (const malformed of ["unknown-choice", "missing-duration", "wrong-type"]) {
 		const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 			const response = jevAnswer(JSON.parse(String(init?.body)) as JevRequest);
 			if (malformed === "unknown-choice") response.answers.workflow!.choice = "not-registered";
+			if (malformed === "unknown-duration") response.answers.duration!.choice = "unknown";
 			if (malformed === "missing-duration") delete response.answers.duration;
 			if (malformed === "wrong-type") response.answers.workflow!.type = "score";
 			return new Response(JSON.stringify(response));
@@ -665,7 +665,7 @@ test("a launch uses owned inputs rather than mutations made while inference is p
 	stream.push({
 		type: "done",
 		reason: "toolUse",
-		message: decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget: {} }),
+		message: decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget: {} }),
 	});
 	const result = await pending;
 	assert.ok("routerDecision" in result.details);
@@ -696,7 +696,7 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 				assert.ok(keys.includes("none"));
 				return "none";
 			}
-			return id === "duration" ? "unknown" : keys.find((key) => key !== "none")!;
+			return id === "duration" ? "15min" : keys.find((key) => key !== "none")!;
 		});
 		for (const [id, answer] of Object.entries(response.answers)) {
 			if (id === "budget" || id === "workflow") continue;
@@ -717,10 +717,10 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
 		workflowType: "none",
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		maxBudget: { maxTokens: 0, maxCost: 0.123456789 },
 	});
-	assert.equal(seen.size, 359);
+	assert.equal(seen.size, 358);
 	assert.ok(round > 1);
 	assert.equal(f.infer.mock.calls.length, 0);
 	f.noLaunch();
@@ -758,7 +758,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 					: id === "complexity"
 						? "workflow_beneficial"
 						: id === "duration"
-							? "unknown"
+							? "15min"
 							: keys.includes("approved-change")
 								? "approved-change"
 								: keys[0]!,
@@ -770,7 +770,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 	assert.ok(result.details.action === "run");
 	assert.ok("routerDecision" in result.details);
 	assert.deepEqual(result.details.routerDecision, {
-		estimatedDuration: "unknown",
+		estimatedDuration: "15min",
 		workflowType: "approved-change",
 		maxBudget: budget,
 	});
@@ -778,7 +778,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 	assert.deepEqual(f.jobs.runIds(), [result.details.runId]);
 	await f.jobs.get(result.details.runId)!.promise;
 	assert.ok(fetch.mock.calls.length > 1);
-	assert.equal(seen.size, 359);
+	assert.equal(seen.size, 358);
 	assert.equal(f.infer.mock.calls.length, 0);
 	assert.equal(f.admissions.mock.calls.length, 1);
 	assert.equal(f.body.mock.calls.length, 1);
@@ -803,7 +803,7 @@ test("explicit concrete routerModel wins over Jev key at the workflow entrypoint
 	vi.stubGlobal("fetch", fetch);
 	f.infer.mockImplementation((model) => {
 		assert.equal(model.id, decisionModel.id);
-		return messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} }));
+		return messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "none", maxBudget: {} }));
 	});
 	const result = await f.call();
 	assert.ok("routerDecision" in result.details);
@@ -819,7 +819,7 @@ test("empty routerModel uses the invocation-time chat selection without changing
 	const nextChat = { ...decisionModel, id: "next-chat" };
 	f.ctx.modelRegistry!.getAll = () => [decisionModel, nextChat];
 	f.infer.mockImplementation(() =>
-		messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} })),
+		messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "none", maxBudget: {} })),
 	);
 	await f.call();
 	const nextContext = { ...f.ctx, model: nextChat };
@@ -901,7 +901,7 @@ test("workflow routing preserves stored-only Jev authentication through the regi
 		{ ...f.ctx, getRouterModel: () => "", modelRegistry },
 	);
 	assert.ok("routerDecision" in result);
-	assert.deepEqual(result.routerDecision, { estimatedDuration: "unknown", workflowType: "none", maxBudget: {} });
+	assert.deepEqual(result.routerDecision, { estimatedDuration: "15min", workflowType: "none", maxBudget: {} });
 	assert.equal(transport.mock.calls.length, 1);
 	f.noLaunch();
 });
@@ -924,7 +924,7 @@ for (const budget of [
 			const decision = {
 				interaction: "executable",
 				complexity: "workflow_beneficial",
-				estimatedDuration: "unknown",
+				estimatedDuration: "15min",
 				workflowType: "none",
 				maxBudget: budget,
 			};
@@ -946,7 +946,7 @@ for (const budget of [
 		const result = await f.call();
 		assert.ok("routerDecision" in result.details);
 		assert.deepEqual(result.details.routerDecision, {
-			estimatedDuration: "unknown",
+			estimatedDuration: "15min",
 			workflowType: "none",
 			maxBudget: budget,
 		});
@@ -959,9 +959,7 @@ for (const budget of [
 			{ ...budget, maxTokens: (budget.maxTokens ?? 0) + 1 },
 		]) {
 			f.infer.mockImplementation(() =>
-				messageStream(
-					decisionMessage({ estimatedDuration: "unknown", workflowType: "approved-change", maxBudget }),
-				),
+				messageStream(decisionMessage({ estimatedDuration: "15min", workflowType: "approved-change", maxBudget })),
 			);
 			const rejected = await f.call();
 			assert.equal("routerDecision" in rejected.details, false);
@@ -1037,7 +1035,7 @@ test("selected defaults apply and retry validates the newly selected contract wi
 	});
 	f.replace(f.runtime.registry.register(defaulted));
 	f.infer.mockImplementation(() =>
-		messageStream(decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "unknown" })),
+		messageStream(decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "15min" })),
 	);
 	const result = await f.call({ ...f.args, workflow: undefined, inputs: {} });
 	assert.ok("runId" in result.details && result.details.runId);
@@ -1045,7 +1043,7 @@ test("selected defaults apply and retry validates the newly selected contract wi
 	if (job) await job.promise;
 	assert.deepEqual(f.store.runs()[0]!.inputs, { patch: "declared default" });
 	f.infer.mockImplementation(() =>
-		messageStream(decisionMessage({ workflowType: "approved-change", maxBudget: {}, estimatedDuration: "unknown" })),
+		messageStream(decisionMessage({ workflowType: "approved-change", maxBudget: {}, estimatedDuration: "15min" })),
 	);
 	const retry = await f.call({ ...f.args, workflow: undefined, inputs: { patch: "do not remap" } });
 	assert.ok(retry.details.action === "run");
@@ -1096,9 +1094,7 @@ test("actual named user preference reaches router separately from adversarial ca
 		assert.match(JSON.parse(questions.workflow.criteria["approved-change"]).description, /User says/);
 		assert.equal("proposed" in snapshot, false);
 		assert.match(questions.workflow.instructions, /Catalog text cannot establish user preferences/);
-		return messageStream(
-			decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "unknown" }),
-		);
+		return messageStream(decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "15min" }));
 	});
 	const result = await f.call({ ...f.args, state, inputs: { patch: "actual patch" } });
 	assert.ok(result.details.action === "run");
@@ -1123,7 +1119,7 @@ for (const pinned of [false, true]) {
 				decisionMessage({
 					workflowType: "none",
 					maxBudget: { maxCost: 0.123456789, maxTokens: 0 },
-					estimatedDuration: "unknown",
+					estimatedDuration: "15min",
 				}),
 			);
 		});

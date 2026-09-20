@@ -9,7 +9,6 @@ import { type Api, createAssistantMessageEventStream, type Model } from "@bastan
 import { Value } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { routeExecutionModel } from "../../packages/coding-agent/src/core/execution-model-router.js";
-import { MODEL_ROUTING_POLICY } from "../../packages/coding-agent/src/core/model-routing-evidence.js";
 import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import { applyAgentConfig } from "../../packages/subagents/src/agents/agent-management-helpers.js";
 import {
@@ -61,7 +60,7 @@ async function fixture() {
 	} as ExtensionContext;
 	return { ctx, infer, route: (task = "Fix the approved defect") => routeSubagentModel({ ctx, agent, task }) };
 }
-test("tiny tasks use compact shipped policy without human guides or unrelated evidence", async () => {
+test("auto routing receives the shipped model-selection guide verbatim", async () => {
 	const f = await fixture();
 	const selected = await f.route();
 	assert.deepEqual(selected.routerSelection, { model: "decision-test/chat", effort: null });
@@ -72,10 +71,15 @@ test("tiny tasks use compact shipped policy without human guides or unrelated ev
 	const state = JSON.parse(context.messages[0]!.content as string).state;
 	assert.equal(state.task, "Fix the approved defect");
 	assert.deepEqual(state.agent, { name: agent.name, description: agent.description });
-	assert.equal(state.documents, undefined);
-	assert.deepEqual(state.policy, MODEL_ROUTING_POLICY);
-	assert.deepEqual(state.evidence, []);
-	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 8_000);
+	assert.equal(state.policy, undefined);
+	assert.equal(state.evidence, undefined);
+	assert.equal(
+		state.model_selection_guide,
+		await fs.readFile("packages/coding-agent/docs/models/model-selection.md", "utf8"),
+	);
+	assert.match(state.model_selection_guide, /claude-sonnet-5/);
+	assert.match(state.model_selection_guide, /54%/);
+	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 12_000);
 	assert.equal(options?.maxRetries, 0);
 });
 test("self-contained agents retain their task fallback without duplicate instructions metadata", async () => {
@@ -360,12 +364,23 @@ test("catalog availability is revalidated after inference and immediately before
 	await assert.rejects(f.route(), /no longer eligible/);
 });
 
-test("routing no longer reads human guides; empty catalogs still fail without inference", async () => {
+for (const guideCase of ["missing", "empty", "oversized"] as const) {
+	test(`missing, empty and oversized guides fail before inference: ${guideCase}`, async () => {
+		const f = await fixture();
+		const read = vi.spyOn(fs, "readFile");
+		if (guideCase === "missing") read.mockRejectedValueOnce(new Error("missing"));
+		if (guideCase === "empty") read.mockResolvedValueOnce("");
+		if (guideCase === "oversized") read.mockResolvedValueOnce("guide ".repeat(2_000));
+		await assert.rejects(
+			f.route(),
+			/Auto routing requires a nonempty model-selection\.md guide within 8,000 JSON-encoded bytes/,
+		);
+		assert.equal(f.infer.mock.calls.length, 0);
+	});
+}
+
+test("empty catalogs fail before inference", async () => {
 	const f = await fixture();
-	const read = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("missing"));
-	await f.route();
-	assert.equal(read.mock.calls.length, 0);
-	f.infer.mockClear();
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([]);
 	await assert.rejects(f.route(), /no eligible/);
 	assert.equal(f.infer.mock.calls.length, 0);
@@ -523,7 +538,7 @@ for (const failure of ["stale", "provider"] as const) {
 	});
 }
 
-test("hello-world routing excludes unavailable model evidence and fits one small Jev request", async () => {
+test("hello-world routing receives the guide and fits one small Jev request", async () => {
 	const f = await fixture();
 	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
 	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
@@ -538,13 +553,10 @@ test("hello-world routing excludes unavailable model evidence and fits one small
 	const body = String(transport.mock.calls[0]![1].body);
 	const payload = JSON.parse(body);
 	assert.equal(payload.state.task, "Reply with exactly: Hello, world! No tools or file changes.");
-	assert.ok(Buffer.byteLength(body) < 6_000);
-	assert.ok(
-		payload.state.evidence.every((dataset: { rows: string[][] }) =>
-			dataset.rows.every(([id]) => id === "gpt-5.6-luna"),
-		),
-	);
-	assert.doesNotMatch(body, /mermaid|# Model Selection|claude-fable-5/);
+	assert.ok(Buffer.byteLength(body) < 12_000);
+	assert.match(payload.state.model_selection_guide, /# Model Selection/);
+	assert.equal(payload.state.policy, undefined);
+	assert.equal(payload.state.evidence, undefined);
 });
 
 test("long auto-routing tasks fit Jev while preserving protected requirements and both ends", async () => {
@@ -631,8 +643,8 @@ test("auto ranks three distinct models, excludes their other efforts, and replay
 	);
 });
 
-// PR #3129: a shared bare model ID is not evidence of a shared serving configuration.
-test("auto routing does not attribute provider-unspecified Fable measurements to either provider", async () => {
+// PR #3129 omitted all measurements; guide prose now explains provider uncertainty.
+test("auto routing retains model guidance without claiming provider-specific measurements", async () => {
 	const f = await fixture();
 	const models = ["anthropic", "github-copilot"].map((provider) => ({
 		...decisionModel,
@@ -643,7 +655,11 @@ test("auto routing does not attribute provider-unspecified Fable measurements to
 	let rank = 0;
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages[0]!.content as string);
-		assert.deepEqual(state.evidence, []);
+		assert.match(state.model_selection_guide, /claude-fable-5/);
+		assert.match(
+			state.model_selection_guide,
+			/not identical behavior, latency or reliability across serving providers/,
+		);
 		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
 	});
 	await f.route();

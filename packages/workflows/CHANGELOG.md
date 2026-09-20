@@ -13,8 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Breaking Changes
 
 - Headless launches return an accepted run identity for status inspection, without input pickers. Required durable gates remain pending until an authorized host or answer arrives, including when no host was initially bound. Explicit runtime execution policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
-- Model-tool execution now requires `route` with content-bearing `state.task`, then `run` with the returned registered `workflowId` and validated inputs. Route returns the input schema without launching; input correction reuses the ID without rerouting. Old run-as-router calls and duration values are rejected. Estimates use 98 canonical quarter-hour labels through `1d`, plus `unknown` and `>1d`, without changing budgets ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
+- Model-tool execution now requires `route` with content-bearing `state.task`, then `run` with the returned registered `workflowId` and validated inputs. Route returns the input schema without launching; input correction reuses the ID without rerouting. Old run-as-router calls and duration values are rejected. Estimates use 97 canonical labels: quarter-hour increments through `1d`, plus `>1d`, without changing budgets ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
 - Workflow route and registered run results no longer repeat `estimatedDuration` at the top level. Route results also no longer repeat `workflowType`, including `none`. Read the canonical estimate and selection from `routerDecision.estimatedDuration` and `routerDecision.workflowType`.
+- Workflow duration estimates no longer accept `unknown`. Routers must give their best estimate using a quarter-hour bucket or `>1d`; estimates remain nonbinding.
 
 ### Added
 

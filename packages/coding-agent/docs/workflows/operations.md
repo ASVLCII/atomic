@@ -213,7 +213,7 @@ Reservations are not executing runs and do not appear in run listings. They expi
 
 Admitted instances retain caller/session ownership across tool recreation, reload, and restart. Model-tool inspection and control authorize the resolved target, including implicit active-run targets. Bulk controls reject mixed ownership before changing any run. Explicit user `/workflow` commands retain their direct-access exception.
 
-Duration labels are quarter-hour increments from `15min` through `1d`, plus `unknown` and `>1d`. Report the labels directly, for example `1hr15min`. Positive estimates round up, including work under 15 minutes; exactly 24 elapsed hours is `1d`, anything greater is `>1d`. `unknown` means insufficient evidence. Wall-clock estimates include overhead, critical path and estimable human waits, including inline work. Granularity does not imply accuracy; estimates are neither guarantees nor execution budgets.
+Duration labels are quarter-hour increments from `15min` through `1d`, plus `>1d`. Report the labels directly, for example `1hr15min`. Positive estimates round up, including work under 15 minutes; exactly 24 elapsed hours is `1d`, anything greater is `>1d`. The router gives its best estimate from available context. Wall-clock estimates include overhead, critical path and estimable human waits, including inline work. Granularity does not imply accuracy; estimates are neither guarantees nor execution budgets.
 
 | Decision | Result and next step |
 | --- | --- |

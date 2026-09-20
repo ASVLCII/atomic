@@ -7,7 +7,6 @@ export type WorkflowEstimatedDuration =
 	| `${Hour}hr`
 	| `${Hour}hr${QuarterMinute}min`
 	| "1d"
-	| "unknown"
 	| ">1d";
 
 /** Canonical wire labels. One day is 24 elapsed hours, not a working day. */
@@ -17,19 +16,17 @@ export const estimatedDurations: WorkflowEstimatedDuration[] = Array.from({ leng
 	const hours = Math.floor(minutes / 60);
 	return `${hours ? `${hours}hr` : ""}${minutes % 60 ? `${minutes % 60}min` : ""}` as WorkflowEstimatedDuration;
 });
-estimatedDurations.push("unknown", ">1d");
+estimatedDurations.push(">1d");
 
 export const WorkflowEstimatedDurationSchema = Type.Enum(estimatedDurations, { type: "string" });
 export const durationCriteria: Record<string, string> = Object.fromEntries(
 	estimatedDurations.map((label, index) => [
 		label,
-		label === "unknown"
-			? "There is insufficient evidence to estimate duration. This does not mean a long task."
-			: label === ">1d"
-				? "Estimated elapsed wall-clock duration is greater than 1440 minutes (24 hours). Never clamp to a finite bucket."
-				: `Estimated elapsed wall-clock duration is greater than ${index * 15} minutes and at most ${(index + 1) * 15} minutes. Round positive estimates up to this quarter-hour bucket.`,
+		label === ">1d"
+			? "Estimated elapsed wall-clock duration is greater than 1440 minutes (24 hours). Never clamp to a finite bucket."
+			: `Estimated elapsed wall-clock duration is greater than ${index * 15} minutes and at most ${(index + 1) * 15} minutes. Round positive estimates up to this quarter-hour bucket.`,
 	]),
 );
 
 export const durationInstructions =
-	"Estimate wall-clock duration for the user's task from actual context and catalog contracts, including critical path, overhead and human waits where estimable. Round positive estimates up to 15-minute increments; below or exactly 15 minutes uses 15min, exactly 24 elapsed hours uses 1d, anything greater uses >1d. Choose unknown when evidence is insufficient. Estimate inline work too when selecting none. These canonical labels improve granularity, not accuracy: this is an unmeasured estimate, not a guarantee or an execution budget. Never change budget limits.";
+	"Estimate wall-clock duration for the user's task from actual context and catalog contracts, including critical path, overhead and human waits where estimable. Round positive estimates up to 15-minute increments; below or exactly 15 minutes uses 15min, exactly 24 elapsed hours uses 1d, anything greater uses >1d. Give your best estimate from the available context. Estimate inline work too when selecting none. These canonical labels improve granularity, not accuracy: this is an unmeasured estimate, not a guarantee or an execution budget. Never change budget limits.";
