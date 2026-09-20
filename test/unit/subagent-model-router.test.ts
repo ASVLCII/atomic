@@ -10,7 +10,10 @@ import { Value } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import { applyAgentConfig } from "../../packages/subagents/src/agents/agent-management-helpers.js";
-import { applyBuiltinOverrides } from "../../packages/subagents/src/agents/agent-overrides.js";
+import {
+	applyBuiltinOverrides,
+	readMergedSubagentSettings,
+} from "../../packages/subagents/src/agents/agent-overrides.js";
 import { serializeAgent } from "../../packages/subagents/src/agents/agent-serializer.js";
 import type { AgentConfig } from "../../packages/subagents/src/agents/agents.js";
 import { parseFrontmatter } from "../../packages/subagents/src/agents/frontmatter.js";
@@ -174,6 +177,46 @@ test("explicit legacy effort constrains automatic selection and intersects hard 
 	);
 	assert.equal(f.infer.mock.calls.length, 1);
 });
+
+test.each(["", false])(
+	"saved builtin thinking %j clears inherited effort without weakening hard constraints",
+	async (thinking) => {
+		const f = await fixture();
+		const dir = mkdtempSync(join(tmpdir(), "atomic-empty-thinking-"));
+		try {
+			const settingsPath = join(dir, "settings.json");
+			writeFileSync(
+				settingsPath,
+				JSON.stringify({ subagents: { agentOverrides: { worker: { model: "auto", thinking } } } }),
+			);
+			const { settings } = readMergedSubagentSettings([settingsPath]);
+			const { agents } = loadAgentsFromDirWithDiagnostics(
+				join(process.cwd(), "packages/subagents/agents"),
+				"builtin",
+			);
+			const builtinAgent = applyBuiltinOverrides(
+				agents,
+				{ overrides: { worker: { thinking: "high" } } },
+				settings,
+				"user-settings.json",
+				settingsPath,
+			).find((candidate) => candidate.name === "worker");
+			assert.ok(builtinAgent);
+			assert.equal(builtinAgent.thinking, thinking === false ? undefined : thinking);
+			assert.equal(builtinAgent.model, "auto");
+			const route = await routeSubagentModel({ ctx: f.ctx, agent: builtinAgent });
+			assert.deepEqual(route.routerSelection, { model: "decision-test/chat", effort: null });
+			assert.equal(f.infer.mock.calls.length, 1);
+			await assert.rejects(
+				routeSubagentModel({ ctx: f.ctx, agent: builtinAgent, modelConstraints: { allowedEfforts: ["high"] } }),
+				/no eligible/,
+			);
+			assert.equal(f.infer.mock.calls.length, 1);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	},
+);
 
 test("builtin primary and fallback checks retain the same hard-constraint snapshot during inference", async () => {
 	const f = await fixture();

@@ -26,7 +26,7 @@ export async function routeSubagentModel(input: {
 			(c): c is ModelConstraints => c !== undefined,
 		),
 	);
-	const effortOverride = agent.source === "builtin" ? agent.thinking : undefined;
+	const effortOverride = agent.source === "builtin" && agent.thinking !== "" ? agent.thinking : undefined;
 	const route = await routeExecutionModel({
 		ctx,
 		task: input.task?.trim() ? input.task : agent.systemPrompt,

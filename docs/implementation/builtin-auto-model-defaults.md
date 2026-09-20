@@ -12,7 +12,7 @@ Make every builtin workflow and subagent default to `model: "auto"` through the 
 | All builtin subagents default to `model: "auto"` | Loader-based inventory asserts all nine shipped definitions, no fallback chains | Passed |
 | Defaults actually use the new router | `subagent-model-router-execution.test.ts` loads the shipped worker and exercises single/parallel execution without model arguments; `workflow-stage-auto.test.ts` runs a composed builtin child through the actual executor, structured router and artifact output | Passed, inference and child session responses are deterministic fixtures |
 | Explicit user model selections remain effective | Concrete per-call override bypasses inference; task/chain/parallel precedence and tournament explicit ordered assignments tested | Passed |
-| Explicit user effort selections remain effective | Actual builtin loader plus user/project override merge proves project thinking wins for primary selection; real dispatch retains explicit fallback suffixes, while agent/call hard constraints still filter them | Passed after review repair; earlier execution-wide legacy-effort restriction was incorrect |
+| Explicit user effort selections remain effective | Real settings loader and builtin override merge cover inherited effort clearing via `thinking: ""` and `false`; primary effort, explicit fallback suffixes and agent/call hard constraints retain coverage | Passed after empty-clearing repair; earlier readiness missed this accepted input |
 | Meaningful supported router safety/capability constraints remain | Existing cost/context/input/effort, empty eligibility, conflict, cancellation and fallback tests; preserved Goal/Ralph tool exclusions and reviewer schema identity | Passed |
 | No concrete fallback pins accidentally bypass auto | Removed chains from nine agents, Goal/Ralph role configurations and design; inventory rejects builtin fallback declarations; invalid routing admits no child | Passed |
 | Do not change main-chat defaults | No diff in main-chat model-default source; full unit run's main-chat fallback and router-isolation tests pass | Passed |
@@ -21,8 +21,8 @@ Make every builtin workflow and subagent default to `model: "auto"` through the 
 | Inspect instructions, history/contributor conventions and workflow/subagent/routing docs before implementation | Parent/initial worker inspected AGENTS, CLAUDE, DESIGN, PRODUCT, CONTRIBUTING, setup/manifests, recent Git signatures and merged PRs; guide reads covered workflows, subagents, authoring/operations/builtins/API/verification/reliable-design and model-selection/evaluation references | Recorded in worker transcripts; relevant routing references rechecked during implementation |
 | Add durable regression coverage | New inventory and default/override tests demonstrated failure on the old concrete/omitted defaults; effort test failed before constraint handling; existing integration wiring fixtures now supply the router rather than bypass it | Passed |
 | Actionable user docs and appropriate shipped changelogs consistent | Updated guides and Unreleased entries; review repair adds provider-guide consistency regression and clarifies fallback effort precedence | Passed after correcting provider-guide omissions |
-| Run appropriate repository checks and report truthful evidence/limitations | Repair check/build passed; full integration passed; final full unit has 9965 passes and only the six baseline documentation failures | Repair results below supersede initial results |
-| Verify and independently review | Initial independent review missed two defects subsequently found by workflow reviewers; both repaired with red/green regressions | Parent owns independent review of this correction |
+| Run appropriate repository checks and report truthful evidence/limitations | Latest narrow repair: check/build passed, 89 focused tests, 8 config-inheritance tests and 17 runtime-wiring integration tests passed | Earlier full-suite counts are historical, not rerun for this one-line repair |
+| Verify and independently review | Workflow reviewers identified accepted empty thinking after the earlier repairs; real-settings red/green regression now covers it | Parent owns independent review of this correction |
 | Local descriptive commit and clean tree, no PR | Signed conventional commit with `Assistant-model: GPT-6-Astra`; exact SHA and final porcelain result belong in the completion receipt | Commit performed after this note's final update |
 | Parent-owned TODO-05a15d29 | Not modified by implementation worker | Parent closes after completion |
 
@@ -105,6 +105,22 @@ Review observed `defaultTools setting > preserves explicit tool option precedenc
 - The full unit run now completes without the timeout. We classify the additional review failure as an existing session-loader load-sensitivity issue, not an auto-default behavior regression. The exact historical scheduler/filesystem pressure is not reconstructable and is not claimed proven. Optimizing unrelated Jiti loading is deferred; no timeout, concurrency or suite-serialization change was made.
 
 To repeat the diagnostic from this checkout, run `python3 <artifact-directory>/repair-evidence/auto-profile-default-tools.py`. The script copies only this one test into a temporary sibling, enables Node's inspector profiler around the exact precedence case, runs the normal Vitest command with its unchanged budget, and removes the scratch test in `finally`. It writes `/tmp/auto-default-tools-profile.json` and `/tmp/auto-default-tools-coverage.json`. The retained script, profile, coverage and logs make the diagnosis inspectable without editing production files or creating another checkout.
+
+## Empty legacy effort review repair
+
+The next consolidated batch contained the same empty-thinking defect from all three reviewers. Earlier readiness was incomplete: the settings loader accepts and preserves `thinking: ""`, but builtin routing converted it to invalid `allowedEfforts: [""]`. The one-line correction excludes exactly the empty clearing value from the legacy primary-effort restriction. It does not normalize settings, widen actual constraints, or change custom-agent behavior.
+
+The persistent regression in `subagent-model-router.test.ts` writes a real settings file, loads it with `readMergedSubagentSettings`, and applies it to the shipped worker over an inherited `thinking: "high"`. Empty and `false` clearing values both route successfully to a nonreasoning model with effort `null`, using one inference. An actual `allowedEfforts: ["high"]` restriction still rejects before another inference. The loader preserves the empty value; routing alone treats it as no legacy restriction.
+
+- Red: `npm run test:unit -- test/unit/subagent-model-router.test.ts`, exit 1, 1 failed and 29 passed. The new empty-setting case threw `Invalid modelConstraints` at `model-routing-constraints.ts:57` before inference. Log: `empty-repair-evidence/auto-empty-red.log`.
+- Green: same command, 30 passed before adding the already-supported `false` case.
+- Final focused command: `npm run test:unit -- test/unit/builtin-auto-model-defaults.test.ts test/unit/subagent-model-router.test.ts test/unit/subagent-model-router-execution.test.ts test/unit/subagent-routed-fallback-effort.test.ts test/unit/workflow-stage-auto.test.ts`, exit 0, 89 passed. Prior suffix, constraint-snapshot, cancellation and custom-agent scenarios remain covered.
+- `npm run test:unit -- test/unit/subagents-parent-config-inheritance.test.ts`, exit 0, 8 passed.
+- `npm run test:integration -- test/integration/runtime-wiring.test.ts`, exit 0, 17 passed.
+- `npm run check` and `npm run build`, exit 0. qlty smells and function metrics completed on the changed router with no smells. Existing qlty configuration has no formatter plugins; scoped repository Biome formatting and the check command supplied authoritative formatting/lint coverage.
+- No full unit/integration rerun for this narrow repair. Earlier baseline documentation failures and loader profiling remain historical evidence; no live-provider or Windows validation is claimed.
+
+Logs are retained under the workflow artifact directory's `empty-repair-evidence/`. User guidance explains how empty/false clears inherited legacy effort without clearing hard constraints; the existing Unreleased default-change entry now includes empty clearing compatibility. No contract amendments or deferred scope additions.
 
 ## Contract amendments received
 

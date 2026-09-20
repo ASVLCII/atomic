@@ -8,7 +8,7 @@
 
 ### Changed
 
-- All builtin agents now default to `model: "auto"` instead of pinned models and fallback chains. Explicit model overrides and builtin effort settings remain effective, including fallback suffixes that override legacy `thinking` defaults. Hard model constraints still apply to every candidate; main-chat and custom-agent defaults are unchanged.
+- All builtin agents now default to `model: "auto"` instead of pinned models and fallback chains. Explicit model overrides and builtin effort settings remain effective, including empty legacy `thinking` values that clear an inherited effort and fallback suffixes that override legacy defaults. Hard model constraints still apply to every candidate; main-chat and custom-agent defaults are unchanged.
 
 ### Fixed
 
