@@ -56,6 +56,13 @@ describe("extension loader pi-ai compat aliases", () => {
 		expect(target).not.toBe(aliases["@bastani/pi-ai"]);
 	});
 
+	it("registers provider environment helpers for binary extension imports", async () => {
+		// #3129: binaries use virtual modules instead of the filesystem aliases.
+		const modules = await extensionLoaderTestHooks.loadVirtualModules();
+		const providerEnv = await import("@bastani/pi-ai/utils/provider-env");
+		assert.equal(modules["@bastani/pi-ai/utils/provider-env"], providerEnv);
+	});
+
 	it(
 		"loads provider environment helpers through transformed extension imports",
 		async () => {

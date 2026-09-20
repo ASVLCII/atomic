@@ -41,6 +41,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		piAi,
 		piAiOauth,
 		piAiCloudflareGatewayBinding,
+		piAiProviderEnv,
 		properLockfile,
 		piCodingAgent,
 	] = await Promise.all([
@@ -56,6 +57,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		import("@bastani/pi-ai/compat"),
 		import("@bastani/pi-ai/oauth"),
 		import("@bastani/pi-ai/api/cloudflare-gateway-binding"),
+		import("@bastani/pi-ai/utils/provider-env"),
 		// Keep proper-lockfile in the compiled host so extensions share its live
 		// CommonJS module state instead of evaluating it through jiti.
 		import("proper-lockfile"),
@@ -78,6 +80,7 @@ export async function loadVirtualModules(): Promise<Record<string, object>> {
 		"@bastani/pi-ai/compat": piAi,
 		"@bastani/pi-ai/oauth": piAiOauth,
 		"@bastani/pi-ai/api/cloudflare-gateway-binding": piAiCloudflareGatewayBinding,
+		"@bastani/pi-ai/utils/provider-env": piAiProviderEnv,
 		"@earendil-works/pi-ai": piAi,
 		"@earendil-works/pi-ai/compat": piAi,
 		"@earendil-works/pi-ai/oauth": piAiOauth,
