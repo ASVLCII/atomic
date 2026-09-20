@@ -137,6 +137,7 @@ test("a finalist context overflow preserves spent Jev usage and original candida
 	assert.equal(chat.mock.calls.length, 1);
 	assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 20 });
 	assert.match(result.fallback?.reason ?? "", /conservative input budget/);
+	assert.doesNotMatch(result.fallback?.reason ?? "", /not sent|no .*request|not truncated/i);
 });
 
 test("automatic Jev with no current chat fails closed on oversized state", async () => {

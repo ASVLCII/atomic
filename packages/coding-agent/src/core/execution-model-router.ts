@@ -8,6 +8,7 @@ import {
 	parseModelConstraints,
 } from "./model-routing-constraints.js";
 import { MODEL_ROUTING_POLICY, routingEvidence } from "./model-routing-evidence.js";
+import { modelRoutingTask } from "./model-routing-task.js";
 import { inferRouterDecision, resolveRouterModel } from "./structured-output/index.js";
 
 export interface ModelRoutingContext {
@@ -95,6 +96,10 @@ export async function routeExecutionModel(input: {
 			)
 		)
 			throw new Error("Auto routing context contains credential material. Remove secrets before retrying.");
+		// Screen the full task first, even credentials in text the router will omit.
+		state.task = modelRoutingTask(state.task);
+		if (state.task !== input.task)
+			console.warn("Text was truncated to fit the input budget. Continuing with the shortened text.");
 		const ranked: ModelRouterOutput[] = [];
 		// Rank by repeated bounded choices, excluding all efforts of earlier models.
 		// Probabilities from separate tournament batches are not comparable.
