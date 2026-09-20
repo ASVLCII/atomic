@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/atomic-natives"]
-exclude = ["third_party/napi-derive-backend"]
 resolver = "3"
 
 [workspace.package]
@@ -13,11 +12,6 @@ repository = "https://github.com/bastani-inc/atomic"
 [profile.release]
 lto = true
 strip = "symbols"
-
-[patch.crates-io]
-# napi-derive-backend 6.1.4 checks null only inside a runtime borrow helper,
-# after macro expansion has exposed an unchecked raw-pointer dereference.
-napi-derive-backend = { path = "third_party/napi-derive-backend" }
 
 [workspace.dependencies]
 dashmap = "6.1"
