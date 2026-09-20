@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { workflow } from "../src/authoring/workflow.js";
-import { withSteeringPropagationContext } from "./steering-context.js";
+import { withBuiltinContext } from "./builtin-context.js";
 import { DEFAULT_CRITERIA, runAdversarialVerification } from "./adversarial-verification-runner.js";
 
 export default workflow({
@@ -30,5 +30,5 @@ export default workflow({
     review_report_path: Type.String({ description: "Path to the final consolidated findings or quorum report." }),
     remaining_work: Type.Array(Type.String(), { description: "Unresolved findings or quorum evidence when not approved." }),
   },
-  run: async (ctx) => await runAdversarialVerification(withSteeringPropagationContext(ctx)),
+  run: async (ctx) => await runAdversarialVerification(withBuiltinContext(ctx)),
 });

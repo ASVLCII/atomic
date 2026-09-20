@@ -21,18 +21,35 @@ export async function routeSubagentModel(input: {
 	signal?: AbortSignal;
 }): Promise<ModelRoute> {
 	const { ctx, agent } = input;
+	const constraints = structuredClone(
+		[parseModelConstraints(agent.modelConstraints), parseModelConstraints(input.modelConstraints)].filter(
+			(c): c is ModelConstraints => c !== undefined,
+		),
+	);
+	const effortOverride = agent.source === "builtin" && agent.thinking !== "" ? agent.thinking : undefined;
 	const route = await routeExecutionModel({
 		ctx,
 		task: input.task?.trim() ? input.task : agent.systemPrompt,
 		agent: { name: agent.name, description: agent.description },
-		constraints: [
-			parseModelConstraints(agent.modelConstraints),
-			parseModelConstraints(input.modelConstraints),
-		].filter((c): c is ModelConstraints => c !== undefined),
+		constraints: effortOverride === undefined ? constraints : [...constraints, { allowedEfforts: [effortOverride] }],
 		signal: input.signal,
 	});
+	// Legacy thinking selects the primary effort, not a hard limit on suffixed fallbacks.
+	// Restore the recorded selection against only real constraints, without another inference.
+	const fallbackRoute =
+		effortOverride === undefined
+			? route
+			: await routeExecutionModel({
+					ctx,
+					task: input.task?.trim() ? input.task : agent.systemPrompt,
+					agent: { name: agent.name, description: agent.description },
+					constraints,
+					signal: input.signal,
+					selection: route.routerSelection,
+				});
 	return {
 		...route,
+		allowsModel: fallbackRoute.allowsModel,
 		allowsCandidate: (candidate, defaultEffort) => {
 			const normalized = resolveModelCandidate(
 				candidate,
@@ -41,7 +58,7 @@ export async function routeSubagentModel(input: {
 			)!;
 			const { baseModel, thinkingSuffix } = splitKnownThinkingSuffix(normalized);
 			const model = ctx.modelRegistry.getAvailable().find((m) => `${m.provider}/${m.id}` === baseModel);
-			return model !== undefined && route.allowsModel(model, thinkingSuffix.slice(1) || defaultEffort);
+			return model !== undefined && fallbackRoute.allowsModel(model, thinkingSuffix.slice(1) || defaultEffort);
 		},
 	};
 }

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createAssistantMessageEventStream } from "@bastani/pi-ai";
 import { convertResponsesTools } from "@bastani/pi-ai/api/openai-responses-shared";
 import { Compile } from "typebox/compile";
 import { afterEach, test, vi } from "vitest";
+import classifyAndAct from "../../packages/workflows/builtin/classify-and-act.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { decodeToCheckpoint, encodeCheckpoint } from "../../packages/workflows/src/durable/dbos-envelope.js";
 import { setDurableBackend } from "../../packages/workflows/src/durable/factory.js";
@@ -19,7 +23,7 @@ import {
 	messageStream,
 	registeredDecisionRuntime,
 } from "../helpers/structured-output.js";
-import { createStore, run, Type, workflow } from "./executor-shared.js";
+import { createStore, run, structuredOutputMockSession, Type, workflow } from "./executor-shared.js";
 import { createStageContext, makeMockSession, makeOpts } from "./stage-runner-helpers.js";
 
 afterEach(() => {
@@ -59,6 +63,59 @@ async function fixture() {
 	};
 	return { infer, modelRegistry: registry, decisionRuntime, models, admissions, store, adapters };
 }
+
+test("builtin child workflow routes every default stage through the real executor and router", async () => {
+	const f = await fixture();
+	const cwd = mkdtempSync(join(tmpdir(), "atomic-builtin-auto-execution-"));
+	try {
+		const parent = workflow({
+			name: "builtin-auto-parent",
+			description: "Compose a builtin without choosing its models",
+			outputs: {},
+			run: async (ctx) => {
+				const child = await ctx.workflow(classifyAndAct, {
+					inputs: { prompt: "Inspect the parser", categories: ["analysis"], confidence_threshold: 0.75 },
+				});
+				assert.equal(child.exited, false);
+				assert.equal(child.outputs.category, "analysis");
+				assert.equal(
+					JSON.parse(readFileSync(child.outputs.classification_path!, "utf8")).selected_category,
+					"analysis",
+				);
+				return {};
+			},
+		});
+		const result = await run(
+			parent,
+			{},
+			{
+				...f,
+				cwd,
+				adapters: {
+					agentSession: {
+						async create(options) {
+							f.admissions.push(
+								typeof options.model === "string"
+									? options.model
+									: `${options.model?.provider}/${options.model?.id}`,
+							);
+							const session = structuredOutputMockSession(
+								{ customTools: options.customTools },
+								{ category: "analysis", confidence: 1, rationale: "Read-only inspection" },
+							);
+							return { ...session, model: options.model, thinkingLevel: "off" as const };
+						},
+					},
+				},
+			},
+		);
+		assert.equal(result.status, "completed", result.error);
+		assert.deepEqual(f.admissions, ["decision-test/chat", "decision-test/chat"]);
+		assert.equal(f.infer.mock.calls.length, 2);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
 
 test("public stage auto decides from actual prompt and shipped guides before admission", async () => {
 	const f = await fixture();

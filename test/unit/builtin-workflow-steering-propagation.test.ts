@@ -88,6 +88,13 @@ describe("builtin workflow steering propagation", () => {
 				// captured before that point are still real stage prompts.
 			}
 
+			for (const [stageName, entries] of Object.entries(ctx.calls.taskOptions)) {
+				for (const options of entries) {
+					assert.equal(options.model, "auto", `${builtin.module}: ${stageName}`);
+					assert.equal(options.fallbackModels, undefined, `${builtin.module}: ${stageName}`);
+				}
+			}
+
 			const prompts = Object.entries(ctx.calls.prompts) as [string, string[]][];
 			assert.ok(prompts.length > 0, `${builtin.module} produced no stage prompts to check`);
 			for (const [stageName, texts] of prompts) {

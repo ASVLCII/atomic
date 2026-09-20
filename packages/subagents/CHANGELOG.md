@@ -6,6 +6,10 @@
 
 - Added opt-in `model: "auto"` for single tasks, parallel tasks and agent defaults. One bounded routing decision uses the current available model/effort pairs and shipped evaluation guidance, with the shared `routerModel` setting selecting routing inference. Invalid or stale decisions stop before child execution, and routing selection remains distinct from execution fallback metadata ([#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 
+### Changed
+
+- All builtin agents now default to `model: "auto"` instead of pinned models and fallback chains. Explicit model overrides and builtin effort settings remain effective, including empty legacy `thinking` values that clear an inherited effort and fallback suffixes that override legacy defaults. Hard model constraints still apply to every candidate; main-chat and custom-agent defaults are unchanged.
+
 ### Fixed
 
 - Automatic model routing with Jev no longer rejects catalogs above 255 eligible model/effort pairs. Every pair participates in a bounded tournament before final selection; context remains unchanged and any routing failure still prevents child launch ([#3090](https://github.com/bastani-inc/atomic/issues/3090)).

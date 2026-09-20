@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { workflow } from "../src/authoring/workflow.js";
-import { withSteeringPropagationContext } from "./steering-context.js";
+import { withBuiltinContext } from "./builtin-context.js";
 import { runTournament } from "./tournament-runner.js";
 
 export default workflow({
@@ -69,5 +69,5 @@ export default workflow({
 		seed: Type.Integer({ description: "Seed used for the deterministic comparison schedule." }),
 		artifact_dir: Type.String({ description: "Run-specific directory containing tournament artifacts." }),
 	},
-	run: async (ctx) => await runTournament(withSteeringPropagationContext(ctx)),
+	run: async (ctx) => await runTournament(withBuiltinContext(ctx)),
 });

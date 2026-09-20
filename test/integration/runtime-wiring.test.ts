@@ -31,7 +31,25 @@ import factory, {
 import type { WorkflowToolResult } from "../../packages/workflows/src/extension/render-result.js";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
 import type { PiExecResult } from "../../packages/workflows/src/extension/wiring.js";
+import { workflowModelCatalogFromContext } from "../../packages/workflows/src/extension/workflow-model-catalog.js";
+import {
+	decisionMessage,
+	decisionModel,
+	messageStream,
+	registeredDecisionRuntime,
+} from "../helpers/structured-output.js";
 import { waitForRun } from "../support/helpers.ts";
+
+async function routingModels() {
+	const { registry } = await registeredDecisionRuntime(() =>
+		messageStream(decisionMessage({ model: "decision-test/chat", effort: null })),
+	);
+	return workflowModelCatalogFromContext({
+		model: decisionModel,
+		modelRegistry: registry,
+		getRouterModel: () => "decision-test/chat",
+	});
+}
 
 /**
  * Helper: dispatch a workflow run and wait for the background promise to
@@ -261,6 +279,7 @@ describe("runtime-wiring — pre-discovery: initial runtime carries adapters", (
 		const initialRuntime = createExtensionRuntime({
 			registry: discoverStartupWorkflowsSync().registry,
 			adapters,
+			models: await routingModels(),
 		});
 
 		await dispatchAndWait(initialRuntime, {
@@ -280,6 +299,7 @@ describe("runtime-wiring — pre-discovery: initial runtime carries adapters", (
 		const initialRuntime = createExtensionRuntime({
 			registry: discoverStartupWorkflowsSync().registry,
 			adapters,
+			models: await routingModels(),
 		});
 
 		await dispatchAndWait(initialRuntime, {
@@ -299,6 +319,7 @@ describe("runtime-wiring — pre-discovery: initial runtime carries adapters", (
 		const initialRuntime = createExtensionRuntime({
 			registry: discoverStartupWorkflowsSync().registry,
 			adapters,
+			models: await routingModels(),
 		});
 
 		await dispatchAndWait(initialRuntime, {
@@ -328,6 +349,7 @@ describe("runtime-wiring — post-discovery: swapped runtime preserves adapters"
 		const swappedRuntime = createExtensionRuntime({
 			registry: discoveredResult.registry,
 			adapters,
+			models: await routingModels(),
 		});
 
 		await dispatchAndWait(swappedRuntime, {
@@ -347,6 +369,7 @@ describe("runtime-wiring — post-discovery: swapped runtime preserves adapters"
 		const swappedRuntime = createExtensionRuntime({
 			registry: discoveredResult.registry,
 			adapters,
+			models: await routingModels(),
 		});
 
 		await dispatchAndWait(swappedRuntime, {
@@ -367,6 +390,7 @@ describe("runtime-wiring — post-discovery: swapped runtime preserves adapters"
 		const initialRuntime = createExtensionRuntime({
 			registry: discoverStartupWorkflowsSync().registry,
 			adapters,
+			models: await routingModels(),
 		});
 		await dispatchAndWait(initialRuntime, {
 			action: "run",
@@ -381,6 +405,7 @@ describe("runtime-wiring — post-discovery: swapped runtime preserves adapters"
 		const swappedRuntime = createExtensionRuntime({
 			registry: discoveredResult.registry,
 			adapters,
+			models: await routingModels(),
 		});
 		await dispatchAndWait(swappedRuntime, {
 			action: "run",

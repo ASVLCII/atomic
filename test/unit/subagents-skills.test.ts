@@ -206,7 +206,7 @@ describe("subagent skill resolution", () => {
 		assert.ok(builtinGuidance, "missing builtin agent guidance");
 		assert.doesNotMatch(builtinGuidance, /Default model|\| Thinking \||Astra|Fable|gpt-6-astra/);
 		assert.match(builtinGuidance, /subagent\(\{ action: "get", agent: "debugger" \}\)/);
-		assert.match(builtinGuidance, /model, reasoning level, and ordered fallback chain in its agent definition/);
+		assert.match(builtinGuidance, /defaults to `model: "auto"`, with no pinned fallback chain/);
 		for (const capability of ["intercom", "contact_supervisor", "todo"]) {
 			assert.match(debuggerRow, new RegExp(`\\b${capability}\\b`));
 		}
