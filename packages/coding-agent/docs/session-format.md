@@ -32,7 +32,7 @@ Source on GitHub ([atomic](https://github.com/bastani-inc/atomic)):
 - [`packages/coding-agent/src/core/session-manager.ts`](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/src/core/session-manager.ts) - Session entry types and SessionManager
 - [`packages/coding-agent/src/core/messages.ts`](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/src/core/messages.ts) - Extended message types (BashExecutionMessage, CustomMessage, etc.)
 
-Base message and agent event types are provided by Atomic's installed runtime dependencies (`@bastani/pi-ai` and `@earendil-works/pi-agent-core`), not by separate `packages/ai` or `packages/agent` directories in this monorepo. For TypeScript definitions in your project, inspect `node_modules/@bastani/atomic/dist/`, `node_modules/@bastani/pi-ai/dist/`, and `node_modules/@earendil-works/pi-agent-core/dist/`.
+For TypeScript definitions in your project, inspect the installed `@bastani/atomic`, `@bastani/pi-ai`, and `@earendil-works/pi-agent-core` packages under their `dist/` directories.
 
 ## Message Types
 
@@ -152,7 +152,7 @@ interface BranchSummaryMessage {
 }
 ```
 
-`compactionSummary` is a historical message role that appears only in older session files; Atomic never produces it and treats historical occurrences as inert. Active verbatim boundaries are synthesized at rebuild time as visible `custom` messages with `customType: "compaction"`; `convertToLlm()` maps them to provider-facing user messages.
+`compactionSummary` appears only in older session files and is inert. Active verbatim boundaries appear in rebuilt context as visible `custom` messages with `customType: "compaction"`.
 
 ### AgentMessage Union
 
@@ -240,7 +240,9 @@ An entry is active only when `details.strategy` is exactly `"verbatim-lines"`:
 {"type":"compaction","id":"c1","parentId":"m9","timestamp":"2026-07-13T10:00:00.000Z","summary":"[User]: fix the test\n(filtered 42 lines)\n[Assistant]: Fixed.","firstKeptEntryId":"m7","tokensBefore":51234,"details":{"strategy":"verbatim-lines","promptVersion":3,"rung":"planned","parameters":{"compression_ratio":0.5,"preserve_recent":2,"query":"fix the test"},"stats":{"linesBefore":812,"linesDeleted":417,"linesKept":395,"rangeCount":63,"tokensBefore":51234,"tokensAfter":24980,"percentReduction":51.2}}}
 ```
 
-On rebuild, Atomic emits one synthesized visible custom message: the durable `summary` with the kept tail—the original entries from a string `firstKeptEntryId` up to the boundary—serialized into the same transcript grammar and concatenated onto its end. Those entries are not re-emitted as separate messages, so a tail that starts or ends mid-turn cannot yield out-of-order provider blocks. The tail keeps full tool-result text and carries retained images as image blocks on the boundary message. When the field is `null`, the boundary carries the `summary` alone. In both cases, messages appended after the boundary are emitted as real messages. This exact state survives resume without rerunning a planner. `details.rung` is `"planned"` or `"extension"`, and `details.backupPath` is optional.
+The rebuilt context contains one visible `custom` message with `customType: "compaction"`, combining the durable `summary` and retained tail. Full tool-result text and retained images remain available. `firstKeptEntryId: null` means there is no retained pre-boundary tail. Post-boundary messages remain ordinary messages, and resume needs no new planning request.
+
+`details.rung` is `"planned"` or `"extension"`; `details.backupPath` is optional. For serialization and provider-block ordering, see [context reconstruction internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/session-lifecycle.md#compaction-reconstruction).
 
 Historical `compaction` records without `details.strategy: "verbatim-lines"` are retired summary-compaction records. They remain parseable and visible to audit/export tools but are inert in active LLM context.
 

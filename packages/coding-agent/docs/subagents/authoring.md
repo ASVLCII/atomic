@@ -7,7 +7,15 @@ description: Define, scope, and configure your own subagents.
 
 ## Custom agents
 
-Custom agents are Markdown files with YAML frontmatter and a system prompt body. Keep the body outcome-first and locally complete: state the role or goal, observable success criteria, constraints and context-dependent tool routes, required output shape, and stop conditions. Reserve absolute wording for true invariants, request evidence and conclusions rather than private reasoning, and avoid repeated self-check instructions. Common locations are:
+Custom agents are Markdown files with YAML frontmatter and a system prompt body. Make the body self-contained and lead with the outcome:
+
+- State the role or goal and observable success criteria.
+- Define constraints, context-dependent tool routes, and the required output shape.
+- Say when the agent should stop.
+
+Reserve absolute wording for true invariants. Request evidence and conclusions rather than private reasoning, and avoid repeated self-check instructions.
+
+Common locations are:
 
 | Scope | Path |
 |---|---|

@@ -1,6 +1,6 @@
 # Builtins and Dynamic Workflows
 
-Start with the battle-tested workflows Atomic ships. When no builtin fully fits, describe the task-specific workflow you need and let Atomic generate it. Generated workflows and hand-written workflows use the same TypeScript runtime definition.
+Start with Atomic's shipped workflows. When none fully fits, describe what you need and let Atomic generate a task-specific workflow. Generated and hand-written workflows use the same TypeScript runtime definition.
 
 When a builtin supplies part of your graph, import its definition and compose it with `ctx.workflow(...)`; do not copy or rebuild its prompts, graph, reducers, or gates.
 
@@ -62,7 +62,7 @@ Named workflow runs execute in the background. By default, after launch expect a
 
 Call `workflow route` with actual request/message/document text and constraints. If it returns `none`, continue inline; otherwise prepare inputs from its input contract and call `workflow run` with its registered ID. For deliberately authored multi-item graphs, see [Task queues and software factories](/workflows/reliable-design#task-queues-and-software-factories).
 
-While a workflow is running, the visible below-editor `BACKGROUND` panel advances its elapsed label every second from the moment the run starts; it does not require opening or switching to the orchestrator. Updates repaint the existing mounted panel in place, paused timers stay frozen, the panel renders every qualifying top-level run, and terminal or quit cards retain their brief recent-run expiry. At normal widths the panel names materialized pending stages with canonical stage IDs and exact Intercom targets when pre-start delivery is available; unavailable delivery is labeled instead of implying steerability. An exact target is never partially truncated: the panel uses only pending-stage forms that fit the metadata-row budget, and omits the pending label entirely when none fit so existing live-tool and elapsed/status metadata is not displaced. The narrow form remains aggregate-only. A zero-stage workflow whose work consists only of `ctx.tool(...)` calls mounts the same panel without a synthetic stage: at normal widths its run metadata reports the live-tool total when more than one is active, followed by pending and running durable tool-node names and statuses as space permits; the collapsed narrow form reports only the number of live tools. Quit cards remain resumable and discoverable with `/workflow status` after they leave the panel. A run waiting for human input uses the blue `？` indicator in the BACKGROUND panel, the `/workflow connect` picker, and the `/workflow status` listing; when that visible root has exactly one displayable pending question, the panel also shows a bounded preview and connect command. Answering or cancelling the prompt restores the run's current indicator.
+The below-editor `BACKGROUND` panel shows top-level runs, elapsed time, stage progress, and live tools. A blue `？` marks human-input waits; a single question may show a preview and connect command. Narrow terminals show counts only. Use `/workflow status` or `/workflow connect` for full details, including resumable quit runs that have left the panel. See [panel controls](/workflows/operations#reading-and-scrolling-the-panel).
 
 ## Atomic vs Claude Code Dynamic Workflows
 
@@ -98,7 +98,7 @@ All builtin workflows allow Intercom coordination, including stages with narrow 
 | `ralph` | Prompt refinement → codebase research → delegated implementation → multi-model review loop. | Research-first autonomous implementation with bounded review and repair. |
 | `open-claude-design` | Guided discovery and reference research → HTML generation → live review session → export and handoff. | UI, page, component, theme, or design-token work. |
 
-Across these builtins, model-facing stages use compact, outcome-first contracts tuned for GPT-5.6, Claude Opus 5, and Claude Fable 5. Long artifacts and receipts are rendered before the final instruction, reporting stages ground completion claims in current tool evidence, and user-facing or downstream reports have explicit shape and length bounds. Orchestrators delegate only genuinely independent work that is too large for a handful of tool calls, rather than spawning agents to recheck their own work.
+Builtin stages report evidence and bounded results. Give each run a concrete objective and acceptance criteria; do not treat a completion claim as proof that validation passed.
 
 The current `goal`, `ralph`, and `open-claude-design` defaults are:
 
@@ -154,7 +154,7 @@ All six can run by name or as nested definitions. Prefer composition over copyin
 
 ### `goal`
 
-Goal persists the literal objective and immutable acceptance criteria in a run ledger, delegates implementation through bounded orchestrator turns, records receipts, and asks independent reviewers to inspect the current delta. A TypeScript reducer returns `complete`, `blocked`, or `needs_human` rather than trusting free-form completion claims. Resume keeps the same run identity and reuses checkpointed ledger, receipts and review paths without replaying completed producer effects or duplicating their records. The model-visible `goal-ledger.json` omits internal turn numbers; a sibling `goal-ledger-state.json` preserves them for continuation.
+Goal keeps the literal objective and immutable acceptance criteria in a durable ledger, delegates implementation, and asks independent reviewers to inspect current changes. Its decision is `complete`, `blocked`, or `needs_human`. Resume retains the run identity and checkpointed progress without repeating completed effects.
 
 Goal reviewers derive checks from the literal objective before consulting implementation receipts, inspect the actual checkout delta, and report commands, observed output, and file:line evidence rather than internal reasoning. Shared contracts cover acceptance-matrix traceability, contract-fidelity risks, end-to-end and QA-video evidence, and independent verification. `stop_review_loop` is the authoritative convergence signal: it remains `false` for P0–P2 findings, any `required_by_objective` finding, or unproven implementation/validation requirements; it becomes `true` only when independent evidence proves the objective and only non-blocking or authorized post-approval work remains. The deterministic reducer consumes that signal without reinterpreting free-form prose.
 Goal and Ralph worker, reviewer and final handoff prompts share [verification and evidence guidance](/workflows/verification): browser, terminal and desktop/simulator routing; environment-aware setup and truthful fallback; qlty initialization or manual offline configuration selected from user/repository priorities; and authorized native GitHub media attachment with hosted-link confirmation. Existing config, read-only tasks and authoritative project checks remain protected. Explicit task-scoped inline/no-workflow steering overrides an existing execution plan and requires safe reconciliation of active work before continuing without duplicate execution.
@@ -183,7 +183,13 @@ Ralph starts from the raw task, refines it into a research question, runs codeba
 
 Ralph uses the same canonical reviewer evidence and convergence contracts as Goal. Its reviewer prompt receives artifacts first and the review objective last, requires independently derived probes before implementation-authored evidence, and preserves unresolved findings when the bounded loop ends. Forked continuation prompts send only changed state and artifact paths instead of repeating the full established contract.
 
-Goal and Ralph re-verify only an eligible consolidated finding: it must still be blocking, have exactly one reviewer, carry a finite `confidence_score` strictly below `DEFAULT_REVERIFY_THRESHOLD=0.7`, and not be aligned `beyond_objective` or `contradicts_objective`; missing confidence is not eligible. Eligible findings are rescored in fresh contexts with the primitive's default `DEFAULT_REPEATS=3`, and an invalid repeat is re-asked once before its audit entry records a null score.
+Goal and Ralph re-verify a consolidated finding only when it:
+
+- Is still blocking and has exactly one reviewer.
+- Has a finite `confidence_score` strictly below `DEFAULT_REVERIFY_THRESHOLD=0.7`.
+- Is not aligned `beyond_objective` or `contradicts_objective`.
+
+Missing confidence is not eligible. Eligible findings are rescored in fresh contexts with `DEFAULT_REPEATS=3`. An invalid repeat is re-asked once, then recorded with a null score if still invalid.
 
 Re-verification has two demotion bars. For an ordinary in-scope finding, demotion requires at least `ceil(repeatCount / 2)` valid scores and a mean below `STANDARD_CONFIRM_THRESHOLD=10`; for `required_by_objective`, every repeat must be valid and the mean must be below `REQUIRED_CONFIRM_THRESHOLD=6`. The original finding remains in the review record while the durable `reverification` audit records the verdict, mean, per-repeat scores, and evidence.
 
@@ -222,9 +228,9 @@ The workflow establishes or loads project design context, extracts user-provided
 
 **One live session, then export.** The `live` session is unbounded: the user picks elements, receives three on-brand variants, accepts edits that are written into `preview.html` in place, and steers the page until leaving. The workflow-owned loop ends on the helper's `exit` event, and the exporter receives the preview exactly as it stands. There is no second opinion, decision stage, or later review session.
 
-**The workflow owns the poll loop.** A `user-feedback-N-start` stage boots the session and prints the review URL, then durable `live-poll-N-M` tool nodes poll the helper. `live-generate-*`, `live-steer-*`, `live-manual_edit_apply-*`, and `live-variant_mount_failed-*` stages handle exactly the events that need a model; `live-reply-N-M` tool nodes acknowledge them with the event id followed by the reply status. Successful `variant_mounted` events are journal-only. `accept`, `discard`, and `prefetch` mint no model stage, and `timeout` is absorbed inside the poll node. A nonzero helper exit fails the workflow instead of being mistaken for a timeout. The loop ends only on `exit`; no summary stage runs afterward. The Impeccable skill ships inside Atomic and is always the copy used: the loop depends on `live-poll.mjs`'s CLI surface, reply ids and statuses, and event vocabulary, and the bundled scripts are versioned and tested with this workflow. A project-vendored copy is deliberately ignored. There is no model-driven fallback.
+The workflow uses Atomic's bundled live-review helper, not a project-vendored copy. Helper failures fail the run rather than silently ending review. Live injection supports SvelteKit, Nuxt, TanStack Start, Astro, Next.js, Vite, and static HTML. Keep configured files inside the real app root and outside symlinked parents; browser review URLs must use loopback HTTP(S).
 
-**Live roots, adapters, and local boundaries.** Impeccable 4.1.1 resolves the selected app root once and reuses its persisted root manifest across helpers. Live injection supports SvelteKit, Nuxt, TanStack Start, Astro, Next.js, Vite, and static HTML. Configured files and generated adapter paths must stay project-relative, inside the real app root, and outside symlinked parents; invalid persisted roots fail before a helper changes directory or writes. The system-browser helper accepts only loopback HTTP(S) review URLs.
+Helper events, adapter boundaries, and review-ledger mechanics are documented in [Builtin workflow maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-verification-and-design.md).
 
 **Ending the review is the user's job.** The session waits through any amount of silence — a poll timeout is not an ending — so the run advances only when the user clicks exit in the Impeccable overlay, closes the browser tab, or says `exit live`. The run-level gate says so before the session opens, and the session-start stage prints it again directly under the live review URL. Ending the session exports the design as it then stands: there is no further round and no confirmation step.
 

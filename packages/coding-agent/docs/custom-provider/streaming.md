@@ -121,7 +121,7 @@ The `partial` field in each event contains the current `AssistantMessage` state.
 
 `StopReason` is `"pending" | "stop" | "length" | "toolUse" | "error" | "aborted"`.
 
-Start the partial message at `"pending"`. It is the reason every in-flight message carries, and it says the terminal event has not arrived yet — it is not a default standing in for `"stop"`. Set the real reason when the provider says the turn ended, then push `done` with it.
+Start every in-flight partial message at `"pending"`. This means the terminal event has not arrived, not that the turn ended with `"stop"`. When the provider reports the end of the turn, set the real reason and push `done` with it.
 
 Two checks belong immediately before `done`:
 

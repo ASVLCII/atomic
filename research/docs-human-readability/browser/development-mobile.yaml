@@ -1,0 +1,188 @@
+- generic [active] [ref=e1]:
+  - blockquote [ref=e2]:
+    - heading [level=2] [ref=e3]: Documentation Index
+    - paragraph [ref=e4]:
+      - text: "Fetch the complete documentation index at:"
+      - link [ref=e5] [cursor=pointer]:
+        - /url: /llms.txt
+        - text: /llms.txt
+    - paragraph [ref=e6]: Use this file to discover all available pages before exploring further.
+  - status [ref=e7]:
+    - img [ref=e11]
+  - generic [ref=e17]:
+    - banner [ref=e18]:
+      - generic [ref=e22]:
+        - generic [ref=e24]:
+          - link "Atomic home page logo" [ref=e26] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e27]: Atomic home page
+            - img "logo" [ref=e28]
+          - generic [ref=e29]:
+            - button "Open search" [ref=e30] [cursor=pointer]:
+              - generic [ref=e31]: Search...
+              - img [ref=e32]
+            - button "More actions" [ref=e33] [cursor=pointer]:
+              - img [ref=e34]
+        - button "Navigation" [ref=e35] [cursor=pointer]:
+          - generic [ref=e36]:
+            - generic [ref=e37]: Navigation
+            - img [ref=e38]
+    - main [ref=e40]:
+      - generic [ref=e42]:
+        - generic [ref=e44]:
+          - generic [ref=e45]: Project
+          - heading "Development" [level=1] [ref=e47]
+        - generic [ref=e48]:
+          - heading "Navigate to header Development" [level=1] [ref=e49]:
+            - link "Navigate to header" [ref=e50] [cursor=pointer]:
+              - /url: "#development"
+              - img [ref=e52]
+            - generic [ref=e55] [cursor=pointer]: Development
+          - generic [ref=e56]:
+            - text: For extensions and SDK integrations, start with
+            - link "Build with Atomic" [ref=e57] [cursor=pointer]:
+              - /url: /build
+            - text: . Repository contribution instructions live in the
+            - link "maintainer development guide" [ref=e58] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md
+            - text: .
+          - heading "Navigate to header Setup" [level=2] [ref=e59]:
+            - link "Navigate to header" [ref=e60] [cursor=pointer]:
+              - /url: "#setup"
+              - img [ref=e62]
+            - generic [ref=e65] [cursor=pointer]: Setup
+          - generic [ref=e66]:
+            - text: To install the released CLI, follow
+            - link "Installation" [ref=e67] [cursor=pointer]:
+              - /url: /getting-started/installation
+            - text: . To run a source checkout, follow
+            - link "maintainer setup" [ref=e68] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#setup
+            - text: .
+          - heading "Navigate to header Forking / Rebranding" [level=2] [ref=e69]:
+            - link "Navigate to header" [ref=e70] [cursor=pointer]:
+              - /url: "#forking-/-rebranding"
+              - img [ref=e72]
+            - generic [ref=e75] [cursor=pointer]: Forking / Rebranding
+          - generic [ref=e76]:
+            - text: Fork configuration is covered in
+            - link "rebranding instructions" [ref=e77] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#forking--rebranding
+            - text: .
+          - heading "Navigate to header Path Resolution" [level=2] [ref=e78]:
+            - link "Navigate to header" [ref=e79] [cursor=pointer]:
+              - /url: "#path-resolution"
+              - img [ref=e81]
+            - generic [ref=e84] [cursor=pointer]: Path Resolution
+          - generic [ref=e85]:
+            - text: Atomic supports package-manager installs and standalone archives. Keep an archive’s complete payload together. Source asset resolution is covered in the
+            - link "maintainer guide" [ref=e86] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#path-resolution
+            - text: .
+          - heading "Navigate to header Debug Command" [level=2] [ref=e87]:
+            - link "Navigate to header" [ref=e88] [cursor=pointer]:
+              - /url: "#debug-command"
+              - img [ref=e90]
+            - generic [ref=e93] [cursor=pointer]: Debug Command
+          - generic [ref=e94]:
+            - code [ref=e95]: /debug
+            - text: (hidden) writes to
+            - code [ref=e96]: ~/.atomic/agent/atomic-debug.log
+            - text: ":"
+          - list [ref=e97]:
+            - listitem [ref=e98]: Rendered TUI lines with ANSI codes
+            - listitem [ref=e99]: Last messages sent to the LLM
+          - generic [ref=e100]: Review this log for sensitive conversation content before sharing it.
+          - heading "Navigate to header PDF and engine diagnostics" [level=2] [ref=e101]:
+            - link "Navigate to header" [ref=e102] [cursor=pointer]:
+              - /url: "#pdf-and-engine-diagnostics"
+              - img [ref=e104]
+            - generic [ref=e107] [cursor=pointer]: PDF and engine diagnostics
+          - generic [ref=e108]: PDF conversion and engine diagnostics appear as status messages in interactive sessions and console output otherwise. Conversion failures also include diagnostic details in their error result. Long or noisy diagnostics may be truncated. Interactive sessions keep only recent diagnostics; older diagnostics are discarded without removing normal chat.
+          - generic [ref=e109]:
+            - text: Diagnostics are displayed as text, not terminal commands. RPC clients receive diagnostics separately from JSON responses. No
+            - code [ref=e110]: atomic-engine-stderr.log
+            - text: file is written; include the displayed diagnostic and conversion error when reporting a PDF problem.
+          - heading "Navigate to header Startup timing probes" [level=2] [ref=e111]:
+            - link "Navigate to header" [ref=e112] [cursor=pointer]:
+              - /url: "#startup-timing-probes"
+              - img [ref=e114]
+            - generic [ref=e117] [cursor=pointer]: Startup timing probes
+          - generic [ref=e118]:
+            - text: For a startup problem, report your OS, terminal, installation method, and Atomic version. Benchmark procedures and internal timing interpretation live in
+            - link "startup measurement notes" [ref=e119] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#startup-timing-probes
+            - text: .
+          - heading "Navigate to header Testing" [level=2] [ref=e120]:
+            - link "Navigate to header" [ref=e121] [cursor=pointer]:
+              - /url: "#testing"
+              - img [ref=e123]
+            - generic [ref=e126] [cursor=pointer]: Testing
+          - generic [ref=e127]:
+            - text: Repository checks and test commands live in
+            - link "maintainer testing instructions" [ref=e128] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#testing
+            - text: .
+          - heading "Navigate to header Installed package smoke test" [level=3] [ref=e129]:
+            - link "Navigate to header" [ref=e130] [cursor=pointer]:
+              - /url: "#installed-package-smoke-test"
+              - img [ref=e132]
+            - generic [ref=e135] [cursor=pointer]: Installed package smoke test
+          - generic [ref=e136]:
+            - text: For release-package validation, use the
+            - link "installed-package smoke test" [ref=e137] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#installed-package-smoke-test
+            - text: .
+          - heading "Navigate to header Deterministic installs" [level=2] [ref=e138]:
+            - link "Navigate to header" [ref=e139] [cursor=pointer]:
+              - /url: "#deterministic-installs"
+              - img [ref=e141]
+            - generic [ref=e144] [cursor=pointer]: Deterministic installs
+          - generic [ref=e145]:
+            - text: Package-manager installs use Atomic’s published shrinkwrap. Contributor regeneration instructions live in
+            - link "deterministic installs" [ref=e146] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#deterministic-installs
+            - text: .
+          - heading "Navigate to header Release security boundary" [level=2] [ref=e147]:
+            - link "Navigate to header" [ref=e148] [cursor=pointer]:
+              - /url: "#release-security-boundary"
+              - img [ref=e150]
+            - generic [ref=e153] [cursor=pointer]: Release security boundary
+          - generic [ref=e154]:
+            - text: Download official releases through the
+            - link "installation instructions" [ref=e155] [cursor=pointer]:
+              - /url: /getting-started/installation
+            - text: . Maintainers should follow the
+            - link "release pipeline" [ref=e156] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/ci.md#direct-release-trigger-and-recovery
+            - text: .
+          - heading "Navigate to header Project Structure" [level=2] [ref=e157]:
+            - link "Navigate to header" [ref=e158] [cursor=pointer]:
+              - /url: "#project-structure"
+              - img [ref=e160]
+            - generic [ref=e163] [cursor=pointer]: Project Structure
+          - generic [ref=e164]:
+            - text: For the repository package map, see
+            - link "project structure" [ref=e165] [cursor=pointer]:
+              - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#project-structure
+            - text: .
+        - navigation "Pagination" [ref=e166]:
+          - 'link "Previous: Shell aliases" [ref=e167] [cursor=pointer]':
+            - /url: /shell-aliases
+            - img [ref=e168]
+            - generic [ref=e170]: Shell aliases
+          - 'link "Next: Changelog" [ref=e171] [cursor=pointer]':
+            - /url: /changelog
+            - generic [ref=e172]: Changelog
+            - img [ref=e173]
+        - generic [ref=e175]:
+          - link "github" [ref=e177] [cursor=pointer]:
+            - /url: https://github.com/bastani-inc/atomic
+            - generic [ref=e178]: github
+            - img [ref=e179]
+          - link "Powered by This documentation is built and hosted on Mintlify, a developer documentation platform" [ref=e182] [cursor=pointer]:
+            - /url: https://www.mintlify.com?utm_campaign=poweredBy&utm_medium=referral&utm_source=undefined
+            - generic [ref=e183]: Powered by
+            - img [ref=e184]
+            - generic [ref=e193]: This documentation is built and hosted on Mintlify, a developer documentation platform
+  - alert [ref=e194]

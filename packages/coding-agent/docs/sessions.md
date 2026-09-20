@@ -27,7 +27,11 @@ For UUID-backed sessions, `--session` and `--fork` accept either the full UUID o
 
 ### Custom session directories
 
-Use `--session-dir <dir>`, `ATOMIC_CODING_AGENT_SESSION_DIR`, or the matching settings override to save the active chat session outside the default `~/.atomic/agent/sessions/` store. When a workflow runs from a session that uses one of these non-default directories, Atomic also writes workflow stage transcripts to that same directory so a headless command such as `atomic --mode json --session-dir <dir> -p '/workflow <name> ...'` captures the main transcript and all stage transcripts together. Workflow definitions can still set a per-stage `sessionDir`; that explicit stage directory wins over the inherited host directory. If the host session uses the default session store, workflow stages keep the previous default behavior and write to the global store unless a stage explicitly sets `sessionDir`.
+Use `--session-dir <dir>`, `ATOMIC_CODING_AGENT_SESSION_DIR`, or the matching settings override to save the active chat outside `~/.atomic/agent/sessions/`.
+
+Workflows launched from a non-default session directory also save their stage transcripts there. A headless command such as `atomic --mode json --session-dir <dir> -p '/workflow <name> ...'` therefore captures the main and stage transcripts together. An explicit per-stage `sessionDir` overrides the inherited directory.
+
+When the host uses the default session store, stages keep the previous behavior: they write to the global store unless a stage explicitly sets `sessionDir`.
 
 For the JSONL file format and SessionManager API, see [Session Format](/session-format).
 
@@ -50,7 +54,7 @@ For the JSONL file format and SessionManager API, see [Session Format](/session-
 
 `/resume` opens an interactive session picker for the current project. `atomic -r` opens the same picker at startup.
 
-When Atomic reconstructs a resumed session, the latest active verbatim `compaction` entry supplies one boundary text message: the durable compacted transcript string with the kept tail serialized and appended to its end rather than replayed as separate message blocks. A zero-retention boundary stores `firstKeptEntryId: null` and replays no pre-boundary ordinary message. Resume does not rerun a planner or re-derive omissions. Legacy logical-deletion `context_compaction` entries are inert archival records, so previously hidden content can re-enter context in sessions created by older versions.
+Resuming restores saved verbatim compaction without another planning request. Older sessions with retired logical-deletion compaction can bring previously hidden content back into context. See [Session format](/session-format#compactionentry) for persisted fields and [context reconstruction internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/session-lifecycle.md#compaction-reconstruction) for rebuild mechanics.
 
 In the picker you can:
 
@@ -69,9 +73,9 @@ Each row shows a short generated description of what the session was about in it
 
 A summary describes the conversation up to a specific message. Once a newer message arrives it is considered stale and the summary column shows "No summary available." instead — the same placeholder you get when a summary has not been generated yet, could not be generated, or is still in flight. The session name and first message are never displaced by a summary, and the column only appears once at least one listed session has a summary. Summaries are also searchable along with the rest of the session text.
 
-Generation is best-effort and never blocks a turn: it is skipped for very short sessions, for workflow stage sessions, and in `--print` and JSON modes, it is cancelled when you send the next message or quit, and its failures are silent. Set `sessionSummary.enabled` to `false` to turn it off entirely.
+Generation is best-effort and never blocks a turn. Atomic skips very short sessions, workflow stage sessions, and `--print` and JSON modes. It cancels generation when you send the next message or quit; failures are silent. Set `sessionSummary.enabled` to `false` to disable it.
 
-The picker opens instantly: its header, search field, and loading indicator paint on the first frame, then sessions are discovered and parsed off the terminal's UI loop. Large session directories are scanned in cooperative batches and a single very large transcript is parsed in yielding chunks, so search, navigation, and cancel stay responsive and no individual session can freeze the picker while it loads. Closing the picker cancels any in-flight scan and discards stale results, so a slow load that finishes after you leave never updates the list.
+You can search, navigate, or cancel while the picker loads sessions. Closing it cancels the scan.
 
 ### Internal (workflow) sessions
 

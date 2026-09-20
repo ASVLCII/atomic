@@ -357,7 +357,7 @@ Absent these controls, preserve that absence in neutral state rather than fabric
 
 **A run's contract is its objective plus its acceptance criteria. Only the user may change it. Every stage that receives a change must hand it to the next stage.**
 
-This is the single most important rule for getting predictable results out of a multi-stage run, and it is the rule most often broken by accident.
+Keep this contract visible throughout the run so agents do not accidentally change it.
 
 ### Only the user may change the contract
 
@@ -413,7 +413,7 @@ At the end, report three things: what the contract was, evidence each criterion 
 
 ### Protect the contract from compaction
 
-A long-running stage gets compacted, and compaction ranks lines individually rather than preserving whole instructions. That ranking has a bias worth knowing: an objective is verbose and restated, while the constraint that bounds it is usually one line. Rank them independently and the constraint is the cheaper deletion — so what survives is coherent, actionable, and missing its boundary conditions. A prohibition removed from context reads as permission.
+Compaction ranks lines individually rather than preserving whole instructions. A repeated objective may survive while its one-line constraint is deleted. The remaining prompt can still read coherently, but no longer contain the prohibition that bounded the work.
 
 Wrap contract text in `keepContext` so it survives verbatim regardless of the compression ratio:
 
@@ -426,7 +426,9 @@ const prompt = [
 ].join("\n\n");
 ```
 
-Every line of the span is protected, tag lines included. The guarantee is mechanical rather than advisory: protected lines are removed from the planner's deletion ranges after it responds. Because the tag lines are protected too, the span is re-detected on each later boundary — which matters, since every compaction re-ranks the previous compaction's output, so a constraint must survive every cycle rather than only the first. Tags must sit on their own line, and a span is scoped to one message. User and assistant messages may both protect — stage prompts, run inputs, and steering arrive as user messages, and a stage may pin its own core information — while tags inside tool results are inert, so file, page, or command output a stage reads cannot mark itself unreclaimable.
+Every line in the span, including its tags, survives later compactions. Protect the constraint itself, not only a repeated objective.
+
+Put tags on their own lines within one message. Both user and assistant messages can protect text. Stage prompts, run inputs, and steering arrive as user messages; a stage may also pin its own core information. Tags in tool results are inert, so file, page, or command output cannot mark itself unreclaimable.
 
 `keepContext` is a pure string helper, not a `ctx.*` primitive: it creates no graph node and has no side effect, so call it anywhere a prompt is assembled. It is idempotent, so composing already-wrapped text will not nest.
 
@@ -960,7 +962,7 @@ Watch for these failure modes in long or multi-stage workflows:
 | Confusion | Similar instructions or duplicate facts conflict | Consolidate each shared contract into one canonical copy and name artifacts clearly |
 | Clash | User, system, or stage instructions disagree | Resolve conflicts before launching downstream stages |
 
-Use compaction, file references, and bounded loops before context fills with transcript noise. In attached workflow stage chat, manual compaction shows `Compacting context...`, threshold compaction shows `Auto-compacting...`, and overflow recovery shows `Context overflow detected. Auto-compacting...` in the same animated status row used for normal model work. That label is a fact about the stage session rather than about the pane, so detaching to the graph and reattaching while compaction is still running restores the same reason-specific label instead of falling back to the generic `Working...` row; it clears as soon as the compaction ends. A successful compaction leaves the normal expandable `✻ Context compacted` boundary in the transcript; the boundary is reconstructed from the durable session and has a typed live fallback if the refreshed session snapshot is temporarily unavailable.
+Use compaction, file references, and bounded loops before context fills. Attached stage chat shows `Compacting context...`, `Auto-compacting...`, or `Context overflow detected. Auto-compacting...` as appropriate. The label survives detaching and reattaching and clears when compaction ends. Successful compaction leaves an expandable `✻ Context compacted` transcript boundary.
 
 ### Compression and Artifact Handoffs
 
@@ -1048,7 +1050,7 @@ Build validation into the workflow instead of waiting for a final manual check. 
 - reviewer stages: fresh-context reviewers that inspect artifacts and current files
 - LLM-as-judge stages: direct scoring, pairwise comparison, or rubric-based grading for subjective outputs
 
-Prefer schema-enabled workflow items for model review and gate decisions. Atomic passes the schema directly to the final-answer tool and captures the tool arguments; it no longer adds separate structured-output parsing, object-root restrictions, or sidecar validation. Object-shaped decision schemas with explicit booleans/enums, findings arrays, confidence, evidence fields, and error reporting are usually easiest to consume, but array or primitive schemas are valid when they fit the handoff. Avoid brittle regular-expression matching against free-form prose such as “looks good”, “approved”, or “PASS”. Define each convergence field's derivation once and consume it deterministically rather than recomputing approval from narrative text.
+Use `schema` for review and gate decisions. Object schemas with explicit decisions, findings, confidence, and evidence are usually easiest to consume; arrays and primitives also work. Read `result.structured` rather than matching prose such as "approved" with a regular expression. Define each convergence field once and consume it deterministically.
 
 Use small dedicated model stages for adaptive gates when deterministic code alone cannot decide what to check. For example, a stage can read an artifact, inspect the repo, run a named tool or command, and then emit a structured decision by configuring `schema` on that workflow item. Keep that stage's prompt narrow: tell it the specific check to perform, the files/tools it may use, the evidence to report, and the structured decision it must return. Require progress and completion claims to map to current tool results; when evidence is unavailable, the stage should identify the unverified claim or blocker rather than infer success.
 
@@ -1125,11 +1127,7 @@ These mistakes cover workflow tool usage and authoring. For run-prompt anti-patt
 
 ## Workflow Best Practices
 
-This playbook helps coding agents and workflow systems produce better results.
-
-Treat an agent as a capable engineering partner that needs a clear objective, tight scope, explicit validation, and occasional steering.
-
-Most weak agent runs fail for predictable reasons: the goal is vague, the scope is too broad, validation is missing, or the agent keeps following the wrong signal. This playbook addresses these failure modes.
+Give agents a clear objective, tight scope, explicit validation, and occasional steering. Vague goals, broad scope, missing validation, and misleading signals are common causes of weak runs.
 
 The examples below are synthetic and intentionally generic. Replace placeholders like `[component]`, `[test command]`, and `[workflow]` with your own project details.
 
@@ -1426,14 +1424,11 @@ Best practices:
 - Separate adversarial probe design from authoritative execution. Require a structured verifier plan with each exact probe, inputs, command/assertion, expected success condition, and covered requirement/risk; then run selected compile, test, schema generation/validation, runtime, or artifact checks through durable workflow-owned `ctx.tool(...)` calls. Actual tool results—not model self-report—feed judgment and consolidated repair.
 - Known contracts may use direct task-specific `ctx.tool(...)` gates designed before launch; uncertain risks may use model-selected probes executed by those deterministic tools. Rerun the tools after repair until the declared pass condition or iteration limit.
 - Ask verifiers to find blockers and not rewrite the candidate unless you explicitly assign them to repair it. Keep pure transformations as ordinary TypeScript rather than wrapping every model-stage action in `ctx.tool`.
-- Decompose the rubric into named criteria and score each in its own call. Compound rubrics can latch onto one salient factor; the reference scan reports 76.4% for the best single criterion versus 78.3% for a three-criterion ensemble (§4.3).
-- Aggregate by mean plus an explicit veto for genuinely disqualifying findings, never a unanimity AND across verifiers: unanimity makes false-reject grow as 1−(1−p)^K while the false-accept it buys only decays as (1−p)^K. See [Verification scaling](#verification-scaling).
+- Split the rubric into named criteria and score them separately. Combine scores with an explicit veto for disqualifying findings rather than requiring every verifier to approve. See [Verification scaling](#verification-scaling) for cost trade-offs.
 - The shipped `adversarial-verification` builtin accepts `criteria` as a record of criterion names to descriptions or as a `criteria.md` Markdown string; the shared `verification-criteria` module also canonicalizes string lists and `CriterionInput` lists. Its public doors are `parse_rubric`, `normalize_criteria`, `select_criteria`, and `decide_verification`, using the `Criterion`, `CriterionInput`, `CriterionScore`, and `Finding` shapes; `NoCriteria` and `EmptyCriterion` are explicit rubric errors.
 - A `criteria.md` rubric may have a `#` title, an optional `##` section whose heading contains `ground truth` (normally `## Ground Truth Note`; the first such section wins), and must include a `##` section whose heading contains `criteri` (normally `## Criteria`) whose `### Name {#id}` headings own non-empty criterion bodies. HTML comments are ignored; an omitted `{#id}` is slugged to lowercase alphanumeric/underscore text (up to 40 characters), with a fallback `criterion` id and encounter-order `_2`/`_3` deduplication. `parse_rubric` rejects a rubric with no criterion headings or an empty criterion body.
 - `VERIFICATION_SCALE` anchors integer scores from 1 (certainly fails) through 20 (verified correct). `select_criteria` preserves the requested id order and rejects unknown ids; `decide_verification` accepts only with quorum, a mean at or above the policy threshold, and no `veto` finding, while an invalid report remains metadata rather than a score.
-- Keep a scoring family in the `SHARED HEAD ‖ VARYING TAIL` layout from `verification-prompts`: the byte-identical head contains the task, ground-truth note, candidate bodies (or caller-provided read paths), and scale anchors in that order; the tail contains only the criterion name and description plus the output-format instruction. Candidate-specific bodies stay in the shared head, not the varying tail, so sibling criteria can reuse the cached prefix.
-- Inline the whole candidate family only while every body is at most `32 * 1024` UTF-8 bytes (`MAX_INLINE_CANDIDATE_BYTES`). If any body is larger, switch the whole family to caller-bound paths, preserving path order and duplicates; an oversized pathless family is rejected rather than guessed.
-- `warm_first_fan_out` schedules the first-seen step for each prefix before releasing the remaining steps, establishing the provider's warm prefix before sibling criteria or pair slots vary. Warm failures are observed without fail-fast, the remaining phase is still attempted before the error is rethrown, and successful results return in input order.
+- Put large candidate bodies in files and pass paths. Keep the rubric and output contract consistent across comparisons. Builtin prefix caching and warm-first scheduling are covered in [Verification maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-verification-and-design.md).
 - The builtin input defaults are `verifier_count=3`, `max_repairs=2`, `accept_mean=14` on the 1–20 scale, and `reask_limit=1`; omitted `criteria` uses the `task_fit`, `evidence`, and `completeness` record. A round expects one schema-valid score for every criterion/verifier cell, and the normal call shape is criteria length multiplied by verifier count.
 - Invalid criterion reports are written as invalid artifacts and re-asked in bounded waves up to `reask_limit`; an invalid or missing report is counted in `invalidCount` only and is never converted into a fail vote or included in the mean. If the required quorum is still missing after the re-asks, the round is `indeterminate` rather than silently narrowing the decision.
 - `score_table_path` names the durable `verification-summary-<round>.json` for the final round. Its object contains `scores` (`criterion_id`, integer `score`, `evidence`, and `findings` with `finding` plus `severity`), `mean`, `invalidCount`, the `decision` (`accept`, `repair`, or `indeterminate` with its corresponding mean/findings or missing count), and folded `usage`; `review_report_path` carries repair guidance or quorum evidence.
@@ -1498,7 +1493,7 @@ Best practices:
 - Randomize or balance presentation order where possible to reduce order bias.
 - Keep the judge rubric short and require rationale tied to observable criteria.
 - Have judges emit graded per-criterion integer scores rather than a binary winner, then derive a Bradley–Terry preference from the score gap so near-ties stay near-ties.
-- Repeat each pair K times with the candidates swapped between the A and B slots; the swap cancels positional bias within the pair and variance falls as O(1/K). In the reference scan's discrete-judge study, 26.7% of pairs tied at K=1; with slot swaps, the reported K=1→16 result moved from 74.7% to 77.5%.
+- Repeat comparisons with candidates swapped between A and B to reduce order bias. Repeats cost additional model calls; set their count deliberately.
 - See [Verification scaling](#verification-scaling) for score granularity and call-budget trade-offs.
 - The shipped tournament inputs use `num_attempts=4` and `max_concurrency=4`; `n_evaluations=2` repeats each criterion/directed pair, `pivots=1` selects the second comparison phase's pivot candidates, and `seed=0` drives the deterministic schedule. `criteria` is optional and accepts a markdown rubric, a string-to-description record, a string list, or a `CriterionInput` list; omission uses the shipped three-criterion Correctness, Completeness, and Evidence and task fit rubric. Optional ordered `models` ids are assigned round-robin to attempt slots.
 - `comparisons_path` points to `comparisons.json`, whose ledger records the task and seed, `params` (`n`, `pivots`, `n_evaluations`, and normalized `criteria`), per-job `comparisons` rows (`a`, `b`, phase, criterion id, repeat, slot-swap flag, scores or an `invalid` marker, preference, and judge artifact path), aggregate `pairs`, weights/counts, the complete `ranking`, and optional model assignment. Its `budget` records planned versus executed judge stages, including re-asks; invalid reports remain auditable rows and an all-invalid pair remains marked invalid rather than becoming a score.
@@ -1532,7 +1527,7 @@ Best practices:
 - Record a progress magnitude in the ledger beside the boolean stop bit; a flat or decreasing series is the stall signal that the loop is burning iterations without moving.
 - Treat the trend as a monitoring and escalate-to-human signal, never a kill switch: the explicit stop condition remains authoritative. See [Verification scaling](#verification-scaling).
 - The builtin defaults `max_iterations=5`, `progress_scoring=true`, and `progress_repeats=1`; set `progress_scoring` false to omit advisory scoring, while `progress_repeats` is the repeat count passed to the scoring primitive. Each scored iteration adds a `progress` entry to `progress-ledger.json` with `score`, `perRepeat` (null for an invalid repeat), `trend`, and the classifier `window`; the ledger also emits `progress_curve`, `final_trend`, and `progress_disclaimer`.
-- Progress scores use the anchored 1–20 scale and average valid repeat scores per checkpoint. `classify_trend` uses `window=3`, `riseDelta=1.5`, and `fallDelta=-1.5`; it compares equal leading/trailing halves of the trailing two windows, drops an odd middle sample, and classifies inclusive threshold crossings as `rising`, `flat`, or `regressing`. A short series is `flat` evidence.
+- Progress scores average valid repeats on a 1–20 scale. Treat `rising`, `flat`, and `regressing` as advisory evidence; a short series can be reported as `flat`.
 - The trend is monitoring and escalation evidence only: it never kills, terminates, or approves a loop, and the explicit evaluator stop condition remains authoritative. `progress_curve`, `final_trend`, and `progress_disclaimer` are advisory outputs, not alternate closure signals.
 
 <a id="7-constructive-quorum"></a>
@@ -1716,14 +1711,9 @@ Use `ralph` or a task-specific child in the same positions when its input contra
 
 #### Verification scaling
 
-This is authoring guidance for custom workflows, not a description of shipped builtin inputs:
+Use an anchored integer scale and repeat comparisons only when the extra confidence justifies the model-call cost. Sixteen repeats cost roughly sixteen times one comparison. Test the judge on known examples before widening the candidate pool; more candidates do not help an unreliable selector.
 
-- Use an anchored 1–20 integer scale as the default score granularity.
-- Providers expose no token logprobs, so a K-sample average is the substitute; K=16 parity costs roughly 16× the call cost, making K a budget decision.
-- Treat pool diversity as a bet on the selector's oracle ceiling. In the reference scan's pivot tournament, best-of-3 selection reached 86.5% ±1.1 against 79.4% pass@1 with a 92.1% oracle ceiling, while best-of-5 reached 88.0% ±0.6 against 78.7% pass@1 with a 96.6% oracle ceiling. A chance-level selector can make a more diverse pool worse, so widen the pool only once the judge beats chance.
-- Self-verification—having the same model judge its own rollouts—still gained +7.1 over pass@1 in the best-of-3 comparison (86.5% versus 79.4%) and +9.3 in the best-of-5 comparison (88.0% versus 78.7%).
-- For a cheap operating point, an author can use one pivot and K=2 repeats for a best-of-3-shaped comparison budget; this is an authoring recipe, not a shipped default.
-- For the shipped primitive references, see [Adversarial verification](#3-adversarial-verification) for criteria parsing, warm-first scoring, re-asks, and score summaries; [Tournament](#5-tournament) for inputs and `comparisons.json`; [Loop until done](#6-loop-until-done) for progress ledger/trend outputs; and [Goal](/workflows/builtins#goal)/[Ralph](/workflows/builtins#ralph) for re-verification and convergence evidence.
+The builtin inputs and artifacts are documented under [Adversarial verification](#3-adversarial-verification), [Tournament](#5-tournament), [Loop until done](#6-loop-until-done), and [Goal/Ralph](/workflows/builtins). Research figures and reducer rationale moved to [Verification maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-verification-and-design.md); they are not performance guarantees for your workflow.
 
 #### Choosing a common workflow pattern
 
@@ -2089,4 +2079,4 @@ Before accepting a workflow result, ask:
 - [ ] What still might be risky?
 - [ ] Is anything blocked or unresolved?
 
-Clearer prompts help agents produce better results.
+Use the answers to decide whether to accept the result, request a repair, or record a blocker.

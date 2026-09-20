@@ -33,7 +33,11 @@ bun add -g @bastani/atomic
 
 Atomic does not require package install scripts. Add `--ignore-scripts` if you want to disable dependency lifecycle scripts during a package install.
 
-Embedded PostgreSQL is available without install scripts or a first-run download on Linux x64/ARM64 (glibc and musl), macOS x64/ARM64, and Windows x64/ARM64. npm-compatible package managers select the matching `@bastani/atomic-natives` leaf containing the runtime; standalone archives carry a target-selected runtime and resolve its binaries directly from the extracted installation. Keep the complete archive directory, including `node_modules`, libraries and licenses. Older upstream optional packages may also remain in npm installations for compatibility, but the native leaf takes precedence. Windows ARM64 uses Windows x64 PostgreSQL under Windows 11's x64 emulation, not native PostgreSQL ARM64, and requires the Microsoft Visual C++ x64 v14 Redistributable. Windows 10 on ARM cannot run this x64 runtime; Windows ARM64 execution still needs hardware validation.
+Embedded PostgreSQL is available without install scripts or a first-run download on Linux x64/ARM64, both glibc and musl, macOS x64/ARM64, and Windows x64/ARM64.
+
+Keep a standalone archive's complete directory, including `node_modules`, libraries, and licenses. Package managers select the runtime for your platform automatically.
+
+Windows ARM64 uses Windows x64 PostgreSQL under Windows 11's x64 emulation, not native PostgreSQL ARM64. It requires the Microsoft Visual C++ x64 v14 Redistributable. Windows 10 on ARM cannot run this x64 runtime, and Windows ARM64 execution still needs hardware validation.
 
 ### Release archive
 
@@ -93,12 +97,14 @@ How you install Atomic decides which runtime hosts it: a package-manager install
 
 ### Alpine and musl Linux archives
 
-The shell installer detects Alpine and selects `atomic-linux-x64-musl.tar.gz` or `atomic-linux-arm64-musl.tar.gz`. Each archive includes its matching native search and PTY bindings plus payload-local `libgcc` and `libstdc++` runtimes, so stock Alpine needs no runtime package install.
+The shell installer detects Alpine and selects `atomic-linux-x64-musl.tar.gz` or `atomic-linux-arm64-musl.tar.gz`. Stock Alpine needs no extra runtime package installation.
 
 Two features work differently on musl:
 
-- **Clipboard:** the musl archives omit a clipboard native binding because `@mariozechner/clipboard` 0.3.9 publishes metadata-only musl stubs without a `.node` payload. Atomic uses Linux clipboard commands locally and permits OSC 52 only in SSH or Mosh sessions. Install `wl-clipboard` on Wayland, `xclip` or `xsel` on X11, or the Termux:API app and `termux-api` package on Termux. A failed local write reports the unavailable backend instead of claiming success through OSC 52.
-- **Durable workflows:** the archives omit the glibc-linked `@embedded-postgres/*` binary packages and instead carry a checksum-pinned Alpine/musl PostgreSQL 18.6 runtime, so durable workflows provision offline without external Postgres or Docker. If no durable backend can be provisioned at all, Atomic still uses a loud non-durable in-memory fallback.
+- **Clipboard:** install `wl-clipboard` on Wayland, `xclip` or `xsel` on X11, or the Termux:API app and `termux-api` package on Termux. OSC 52 is available only over SSH or Mosh, not as a substitute for a failed local clipboard backend.
+- **Durable workflows:** PostgreSQL is included and provisions offline without Docker or external Postgres. If no durable backend can be provisioned, Atomic warns and uses non-durable in-memory storage.
+
+Payload selection and dependency constraints live in [maintainer packaging notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/provider-auth-and-packaging.md#runtime-payload-selection).
 
 Then start Atomic in the project directory you want it to work on:
 

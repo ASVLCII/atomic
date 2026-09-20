@@ -1,0 +1,395 @@
+- generic [active] [ref=e1]:
+  - blockquote [ref=e2]:
+    - heading [level=2] [ref=e3]: Documentation Index
+    - paragraph [ref=e4]:
+      - text: "Fetch the complete documentation index at:"
+      - link [ref=e5] [cursor=pointer]:
+        - /url: /llms.txt
+        - text: /llms.txt
+    - paragraph [ref=e6]: Use this file to discover all available pages before exploring further.
+  - status [ref=e7]:
+    - img [ref=e11]
+  - generic [ref=e17]:
+    - banner [ref=e18]:
+      - generic [ref=e21]:
+        - generic [ref=e24]:
+          - link "Atomic home page logo" [ref=e26] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e27]: Atomic home page
+            - img "logo" [ref=e28]
+          - button "Open search" [ref=e30] [cursor=pointer]:
+            - generic [ref=e31]:
+              - img [ref=e32]
+              - generic [ref=e35]: Search...
+            - generic [ref=e36]: ⌘K
+          - generic [ref=e37]:
+            - navigation "Main" [ref=e38]:
+              - list [ref=e39]:
+                - listitem [ref=e40]:
+                  - link "GitHub" [ref=e41] [cursor=pointer]:
+                    - /url: https://github.com/bastani-inc/atomic
+                    - generic [ref=e42]: GitHub
+                - listitem [ref=e43]:
+                  - link "Get started" [ref=e44] [cursor=pointer]:
+                    - /url: /quickstart
+                    - generic [ref=e46]:
+                      - generic [ref=e47]: Get started
+                      - img [ref=e48]
+            - button "Change theme preference" [ref=e51] [cursor=pointer]:
+              - img [ref=e53]
+        - generic [ref=e57]:
+          - link "Learn" [ref=e58] [cursor=pointer]:
+            - /url: /
+            - text: Learn
+          - link "Build" [ref=e60] [cursor=pointer]:
+            - /url: /build
+            - text: Build
+          - link "Reference" [ref=e62] [cursor=pointer]:
+            - /url: /reference
+            - text: Reference
+    - generic [ref=e64]:
+      - navigation "Pages" [ref=e65]:
+        - generic [ref=e68]:
+          - generic [ref=e69]:
+            - heading "Reference" [level=3] [ref=e71]
+            - list [ref=e72]:
+              - listitem [ref=e73]:
+                - link "Reference index" [ref=e74] [cursor=pointer]:
+                  - /url: /reference
+                  - generic [ref=e77]: Reference index
+              - listitem [ref=e78]:
+                - link "CLI reference" [ref=e79] [cursor=pointer]:
+                  - /url: /reference/cli
+                  - generic [ref=e82]: CLI reference
+              - listitem [ref=e83]:
+                - link "Settings" [ref=e84] [cursor=pointer]:
+                  - /url: /settings
+                  - generic [ref=e87]: Settings
+              - listitem [ref=e88]:
+                - link "Environment variables" [ref=e89] [cursor=pointer]:
+                  - /url: /environment-variables
+                  - generic [ref=e92]: Environment variables
+              - listitem [ref=e93]:
+                - link "Keybindings" [ref=e94] [cursor=pointer]:
+                  - /url: /keybindings
+                  - generic [ref=e97]: Keybindings
+              - listitem [ref=e98]:
+                - link "Built-in tools" [ref=e99] [cursor=pointer]:
+                  - /url: /tools
+                  - generic [ref=e102]: Built-in tools
+              - listitem [ref=e103]:
+                - link "MCP Servers" [ref=e104] [cursor=pointer]:
+                  - /url: /mcp-servers
+                  - generic [ref=e107]: MCP Servers
+              - listitem [ref=e108]:
+                - link "Web access" [ref=e109] [cursor=pointer]:
+                  - /url: /web-access
+                  - generic [ref=e112]: Web access
+              - listitem [ref=e113]:
+                - link "Session format" [ref=e114] [cursor=pointer]:
+                  - /url: /session-format
+                  - generic [ref=e117]: Session format
+          - generic [ref=e118]:
+            - heading "Domain reference" [level=3] [ref=e120]
+            - list [ref=e121]:
+              - listitem [ref=e122]:
+                - link "Provider reference" [ref=e123] [cursor=pointer]:
+                  - /url: /providers/reference
+                  - generic [ref=e126]: Provider reference
+              - listitem [ref=e127]:
+                - link "Model configuration" [ref=e128] [cursor=pointer]:
+                  - /url: /models/reference
+                  - generic [ref=e131]: Model configuration
+              - listitem [ref=e132]:
+                - link "Compaction internals" [ref=e133] [cursor=pointer]:
+                  - /url: /compaction/reference
+                  - generic [ref=e136]: Compaction internals
+              - listitem [ref=e137]:
+                - link "Skill reference" [ref=e138] [cursor=pointer]:
+                  - /url: /skills/reference
+                  - generic [ref=e141]: Skill reference
+              - listitem [ref=e142]:
+                - link "Subagent reference" [ref=e143] [cursor=pointer]:
+                  - /url: /subagents/reference
+                  - generic [ref=e146]: Subagent reference
+              - listitem [ref=e147]:
+                - link "Intercom reference" [ref=e148] [cursor=pointer]:
+                  - /url: /intercom/reference
+                  - generic [ref=e151]: Intercom reference
+              - listitem [ref=e152]:
+                - link "Package reference" [ref=e153] [cursor=pointer]:
+                  - /url: /packages/reference
+                  - generic [ref=e156]: Package reference
+              - listitem [ref=e157]:
+                - link "Theme reference" [ref=e158] [cursor=pointer]:
+                  - /url: /themes/reference
+                  - generic [ref=e161]: Theme reference
+              - listitem [ref=e162]:
+                - link "Extension API" [ref=e163] [cursor=pointer]:
+                  - /url: /extensions/api-reference
+                  - generic [ref=e166]: Extension API
+              - listitem [ref=e167]:
+                - link "Provider API reference" [ref=e168] [cursor=pointer]:
+                  - /url: /custom-provider/api-reference
+                  - generic [ref=e171]: Provider API reference
+              - listitem [ref=e172]:
+                - link "SDK API" [ref=e173] [cursor=pointer]:
+                  - /url: /sdk/reference
+                  - generic [ref=e176]: SDK API
+              - listitem [ref=e177]:
+                - link "Structured decisions" [ref=e178] [cursor=pointer]:
+                  - /url: /sdk/structured-decisions
+                  - generic [ref=e181]: Structured decisions
+              - listitem [ref=e182]:
+                - link "RPC protocol" [ref=e183] [cursor=pointer]:
+                  - /url: /rpc/protocol
+                  - generic [ref=e186]: RPC protocol
+              - listitem [ref=e187]:
+                - link "TUI API" [ref=e188] [cursor=pointer]:
+                  - /url: /tui/reference
+                  - generic [ref=e191]: TUI API
+          - generic [ref=e192]:
+            - heading "Platform setup" [level=3] [ref=e194]
+            - list [ref=e195]:
+              - listitem [ref=e196]:
+                - link "Windows" [ref=e197] [cursor=pointer]:
+                  - /url: /windows
+                  - generic [ref=e200]: Windows
+              - listitem [ref=e201]:
+                - link "Termux" [ref=e202] [cursor=pointer]:
+                  - /url: /termux
+                  - generic [ref=e205]: Termux
+              - listitem [ref=e206]:
+                - link "Terminal setup" [ref=e207] [cursor=pointer]:
+                  - /url: /terminal-setup
+                  - generic [ref=e210]: Terminal setup
+              - listitem [ref=e211]:
+                - link "tmux" [ref=e212] [cursor=pointer]:
+                  - /url: /tmux
+                  - generic [ref=e215]: tmux
+              - listitem [ref=e216]:
+                - link "Herdr" [ref=e217] [cursor=pointer]:
+                  - /url: /herdr
+                  - generic [ref=e220]: Herdr
+              - listitem [ref=e221]:
+                - link "Shell aliases" [ref=e222] [cursor=pointer]:
+                  - /url: /shell-aliases
+                  - generic [ref=e225]: Shell aliases
+          - generic [ref=e226]:
+            - heading "Project" [level=3] [ref=e228]
+            - list [ref=e229]:
+              - listitem [ref=e230]:
+                - link "Development" [ref=e231] [cursor=pointer]:
+                  - /url: /development
+                  - generic [ref=e234]: Development
+              - listitem [ref=e235]:
+                - link "Changelog" [ref=e236] [cursor=pointer]:
+                  - /url: /changelog
+                  - generic [ref=e239]: Changelog
+              - listitem [ref=e240]:
+                - link "Benchmark Sources" [ref=e241] [cursor=pointer]:
+                  - /url: /models/artificial-analysis-index
+                  - generic [ref=e244]: Benchmark Sources
+      - main [ref=e245]:
+        - generic [ref=e246]:
+          - navigation "On this page" [ref=e250]:
+            - heading "On this page" [level=2] [ref=e251]:
+              - button "On this page" [ref=e252] [cursor=pointer]:
+                - img [ref=e253]
+                - generic [ref=e254]: On this page
+            - list [ref=e256]:
+              - listitem [ref=e257]:
+                - link "Development" [ref=e258] [cursor=pointer]:
+                  - /url: "#development"
+              - listitem [ref=e259]:
+                - link "Setup" [ref=e260] [cursor=pointer]:
+                  - /url: "#setup"
+              - listitem [ref=e261]:
+                - link "Forking / Rebranding" [ref=e262] [cursor=pointer]:
+                  - /url: "#forking-%2F-rebranding"
+              - listitem [ref=e263]:
+                - link "Path Resolution" [ref=e264] [cursor=pointer]:
+                  - /url: "#path-resolution"
+              - listitem [ref=e265]:
+                - link "Debug Command" [ref=e266] [cursor=pointer]:
+                  - /url: "#debug-command"
+              - listitem [ref=e267]:
+                - link "PDF and engine diagnostics" [ref=e268] [cursor=pointer]:
+                  - /url: "#pdf-and-engine-diagnostics"
+              - listitem [ref=e269]:
+                - link "Startup timing probes" [ref=e270] [cursor=pointer]:
+                  - /url: "#startup-timing-probes"
+              - listitem [ref=e271]:
+                - link "Testing" [ref=e272] [cursor=pointer]:
+                  - /url: "#testing"
+                - list [ref=e273]:
+                  - listitem [ref=e274]:
+                    - link "Installed package smoke test" [ref=e275] [cursor=pointer]:
+                      - /url: "#installed-package-smoke-test"
+              - listitem [ref=e276]:
+                - link "Deterministic installs" [ref=e277] [cursor=pointer]:
+                  - /url: "#deterministic-installs"
+              - listitem [ref=e278]:
+                - link "Release security boundary" [ref=e279] [cursor=pointer]:
+                  - /url: "#release-security-boundary"
+              - listitem [ref=e280]:
+                - link "Project Structure" [ref=e281] [cursor=pointer]:
+                  - /url: "#project-structure"
+          - generic [ref=e282]:
+            - generic [ref=e284]:
+              - generic [ref=e285]: Project
+              - heading "Development" [level=1] [ref=e287]
+            - generic [ref=e288]:
+              - heading "Navigate to header Development" [level=1] [ref=e289]:
+                - link "Navigate to header" [ref=e290] [cursor=pointer]:
+                  - /url: "#development"
+                  - img [ref=e292]
+                - generic [ref=e295] [cursor=pointer]: Development
+              - generic [ref=e296]:
+                - text: For extensions and SDK integrations, start with
+                - link "Build with Atomic" [ref=e297] [cursor=pointer]:
+                  - /url: /build
+                - text: . Repository contribution instructions live in the
+                - link "maintainer development guide" [ref=e298] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md
+                - text: .
+              - heading "Navigate to header Setup" [level=2] [ref=e299]:
+                - link "Navigate to header" [ref=e300] [cursor=pointer]:
+                  - /url: "#setup"
+                  - img [ref=e302]
+                - generic [ref=e305] [cursor=pointer]: Setup
+              - generic [ref=e306]:
+                - text: To install the released CLI, follow
+                - link "Installation" [ref=e307] [cursor=pointer]:
+                  - /url: /getting-started/installation
+                - text: . To run a source checkout, follow
+                - link "maintainer setup" [ref=e308] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#setup
+                - text: .
+              - heading "Navigate to header Forking / Rebranding" [level=2] [ref=e309]:
+                - link "Navigate to header" [ref=e310] [cursor=pointer]:
+                  - /url: "#forking-/-rebranding"
+                  - img [ref=e312]
+                - generic [ref=e315] [cursor=pointer]: Forking / Rebranding
+              - generic [ref=e316]:
+                - text: Fork configuration is covered in
+                - link "rebranding instructions" [ref=e317] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#forking--rebranding
+                - text: .
+              - heading "Navigate to header Path Resolution" [level=2] [ref=e318]:
+                - link "Navigate to header" [ref=e319] [cursor=pointer]:
+                  - /url: "#path-resolution"
+                  - img [ref=e321]
+                - generic [ref=e324] [cursor=pointer]: Path Resolution
+              - generic [ref=e325]:
+                - text: Atomic supports package-manager installs and standalone archives. Keep an archive’s complete payload together. Source asset resolution is covered in the
+                - link "maintainer guide" [ref=e326] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#path-resolution
+                - text: .
+              - heading "Navigate to header Debug Command" [level=2] [ref=e327]:
+                - link "Navigate to header" [ref=e328] [cursor=pointer]:
+                  - /url: "#debug-command"
+                  - img [ref=e330]
+                - generic [ref=e333] [cursor=pointer]: Debug Command
+              - generic [ref=e334]:
+                - code [ref=e335]: /debug
+                - text: (hidden) writes to
+                - code [ref=e336]: ~/.atomic/agent/atomic-debug.log
+                - text: ":"
+              - list [ref=e337]:
+                - listitem [ref=e338]: Rendered TUI lines with ANSI codes
+                - listitem [ref=e339]: Last messages sent to the LLM
+              - generic [ref=e340]: Review this log for sensitive conversation content before sharing it.
+              - heading "Navigate to header PDF and engine diagnostics" [level=2] [ref=e341]:
+                - link "Navigate to header" [ref=e342] [cursor=pointer]:
+                  - /url: "#pdf-and-engine-diagnostics"
+                  - img [ref=e344]
+                - generic [ref=e347] [cursor=pointer]: PDF and engine diagnostics
+              - generic [ref=e348]: PDF conversion and engine diagnostics appear as status messages in interactive sessions and console output otherwise. Conversion failures also include diagnostic details in their error result. Long or noisy diagnostics may be truncated. Interactive sessions keep only recent diagnostics; older diagnostics are discarded without removing normal chat.
+              - generic [ref=e349]:
+                - text: Diagnostics are displayed as text, not terminal commands. RPC clients receive diagnostics separately from JSON responses. No
+                - code [ref=e350]: atomic-engine-stderr.log
+                - text: file is written; include the displayed diagnostic and conversion error when reporting a PDF problem.
+              - heading "Navigate to header Startup timing probes" [level=2] [ref=e351]:
+                - link "Navigate to header" [ref=e352] [cursor=pointer]:
+                  - /url: "#startup-timing-probes"
+                  - img [ref=e354]
+                - generic [ref=e357] [cursor=pointer]: Startup timing probes
+              - generic [ref=e358]:
+                - text: For a startup problem, report your OS, terminal, installation method, and Atomic version. Benchmark procedures and internal timing interpretation live in
+                - link "startup measurement notes" [ref=e359] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#startup-timing-probes
+                - text: .
+              - heading "Navigate to header Testing" [level=2] [ref=e360]:
+                - link "Navigate to header" [ref=e361] [cursor=pointer]:
+                  - /url: "#testing"
+                  - img [ref=e363]
+                - generic [ref=e366] [cursor=pointer]: Testing
+              - generic [ref=e367]:
+                - text: Repository checks and test commands live in
+                - link "maintainer testing instructions" [ref=e368] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#testing
+                - text: .
+              - heading "Navigate to header Installed package smoke test" [level=3] [ref=e369]:
+                - link "Navigate to header" [ref=e370] [cursor=pointer]:
+                  - /url: "#installed-package-smoke-test"
+                  - img [ref=e372]
+                - generic [ref=e375] [cursor=pointer]: Installed package smoke test
+              - generic [ref=e376]:
+                - text: For release-package validation, use the
+                - link "installed-package smoke test" [ref=e377] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#installed-package-smoke-test
+                - text: .
+              - heading "Navigate to header Deterministic installs" [level=2] [ref=e378]:
+                - link "Navigate to header" [ref=e379] [cursor=pointer]:
+                  - /url: "#deterministic-installs"
+                  - img [ref=e381]
+                - generic [ref=e384] [cursor=pointer]: Deterministic installs
+              - generic [ref=e385]:
+                - text: Package-manager installs use Atomic’s published shrinkwrap. Contributor regeneration instructions live in
+                - link "deterministic installs" [ref=e386] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#deterministic-installs
+                - text: .
+              - heading "Navigate to header Release security boundary" [level=2] [ref=e387]:
+                - link "Navigate to header" [ref=e388] [cursor=pointer]:
+                  - /url: "#release-security-boundary"
+                  - img [ref=e390]
+                - generic [ref=e393] [cursor=pointer]: Release security boundary
+              - generic [ref=e394]:
+                - text: Download official releases through the
+                - link "installation instructions" [ref=e395] [cursor=pointer]:
+                  - /url: /getting-started/installation
+                - text: . Maintainers should follow the
+                - link "release pipeline" [ref=e396] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/ci.md#direct-release-trigger-and-recovery
+                - text: .
+              - heading "Navigate to header Project Structure" [level=2] [ref=e397]:
+                - link "Navigate to header" [ref=e398] [cursor=pointer]:
+                  - /url: "#project-structure"
+                  - img [ref=e400]
+                - generic [ref=e403] [cursor=pointer]: Project Structure
+              - generic [ref=e404]:
+                - text: For the repository package map, see
+                - link "project structure" [ref=e405] [cursor=pointer]:
+                  - /url: https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#project-structure
+                - text: .
+            - navigation "Pagination" [ref=e406]:
+              - 'link "Previous: Shell aliases" [ref=e407] [cursor=pointer]':
+                - /url: /shell-aliases
+                - img [ref=e408]
+                - generic [ref=e410]: Shell aliases
+              - 'link "Next: Changelog" [ref=e411] [cursor=pointer]':
+                - /url: /changelog
+                - generic [ref=e412]: Changelog
+                - img [ref=e413]
+            - generic [ref=e415]:
+              - link "github" [ref=e417] [cursor=pointer]:
+                - /url: https://github.com/bastani-inc/atomic
+                - generic [ref=e418]: github
+                - img [ref=e419]
+              - link "Powered by This documentation is built and hosted on Mintlify, a developer documentation platform" [ref=e422] [cursor=pointer]:
+                - /url: https://www.mintlify.com?utm_campaign=poweredBy&utm_medium=referral&utm_source=undefined
+                - generic [ref=e423]: Powered by
+                - img [ref=e424]
+                - generic [ref=e433]: This documentation is built and hosted on Mintlify, a developer documentation platform
+  - alert [ref=e434]

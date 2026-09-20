@@ -5,7 +5,7 @@ description: "Orientation for running Atomic without the interactive TUI: print 
 
 # Non-interactive use
 
-Atomic does not need a terminal UI. The same session engine backs three non-interactive entry points, and each one is documented in full elsewhere — this page only helps you pick.
+Atomic's session engine supports three non-interactive entry points. Use the table below to choose one, or embed the engine with the SDK.
 
 | You want | Use | Read |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ When you need to observe a run rather than read it, the JSON event stream emits 
 
 ## RPC
 
-RPC keeps a session alive and lets another process send prompts, answer prompts, and receive events over a protocol. Use it when a single request/response is not enough — editors, bots, and long-running services. Start at [RPC](/rpc) and the [RPC protocol](/rpc/protocol).
+RPC keeps a session alive so another process can send prompts, answer prompts, and receive events. Use it for editors, bots, and long-running services that need more than a single request/response. Start at [RPC](/rpc) and the [RPC protocol](/rpc/protocol).
 
 ## Next steps
 

@@ -2,9 +2,9 @@
 
 **Outcome:** Atomic is installed, authenticated, and has completed one useful task in your repository.
 
-This page gets you from install to a useful first Atomic session. Atomic is the loop engine for all engineering work: it runs reliable coding-agent loops with stages, tools, artifacts, verification, subagents, review gates, checkpoints, and human approvals.
+Follow the steps below to install Atomic and complete your first useful session. Atomic runs coding-agent loops with stages, tools, artifacts, verification, subagents, review gates, checkpoints, and human approvals for engineering work.
 
-It is the ordered onboarding hub: each step below links to a focused page that carries the full detail. Work through them in order.
+Work through the steps in order. Each links to a focused page with full instructions.
 
 ## Onboarding path
 
@@ -126,7 +126,11 @@ atomic @README.md "Summarize this"
 atomic @src/app.ts @src/app.test.ts "Review these together"
 ```
 
-Images can be pasted with native macOS Cmd+V, Ctrl+V (Alt+V on Windows), or dragged into supported terminals. Inside tmux on macOS, use `Ctrl+V` for reliable image paste; native `Cmd+V` depends on terminal forwarding. VS Code's terminal may forward the empty bracketed-paste route through tmux, while Ghostty may not forward its Kitty `super+v` route through tmux. When the clipboard has both text and an image, Ctrl+V prefers the image; Cmd+V may paste text or the image depending on how the terminal delivers the gesture.
+Paste images with native macOS Cmd+V or Ctrl+V. On Windows, use Alt+V instead of Ctrl+V. You can also drag images into supported terminals.
+
+Inside tmux on macOS, use `Ctrl+V` for reliable image paste. Native `Cmd+V` depends on your terminal and may not work through tmux.
+
+When the clipboard contains both text and an image, Ctrl+V prefers the image. Cmd+V may paste either, depending on how the terminal delivers the gesture.
 
 ### Run shell commands
 

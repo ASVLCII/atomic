@@ -9,9 +9,9 @@ description: Provider stop reasons and credential resolution order.
 
 Every provider reports why it ended a turn. Atomic stores one of `stop`, `length`, `toolUse`, `error`, or `aborted`; the provider's own string (`end_turn`, `MAX_TOKENS`, `tool_calls`, and so on) is mapped onto it.
 
-A terminal reason the mapping does not recognise is now reported as a **provider error** naming the raw value, instead of being reported as an ordinary successful stop. The turn fails visibly rather than looking like a model that chose to stop early, which matters most for a truncation or safety stop a new provider version invents. Reasons that already mapped to a successful stop are unchanged, and a provider that stops on its own safety or refusal signal still surfaces the raw reason in the error text (for example `Provider stopped with: SAFETY`).
+An unrecognized terminal reason becomes a **provider error** that names the raw value, not an ordinary successful stop. This makes new truncation or safety reasons visible rather than making the model appear to stop early. Existing successful-stop mappings are unchanged. Provider safety or refusal errors retain the raw reason, for example `Provider stopped with: SAFETY`.
 
-While a response is still streaming the partial message carries the reason `pending`. It is replaced by the terminal reason before the message is finished, so `pending` is not a state a completed turn can be left in: a stream that ends while still `pending` is a provider error. See [Custom providers](/custom-provider) for what this requires of a provider you implement yourself.
+A streaming partial message carries `pending` until a terminal reason replaces it. A completed turn cannot remain `pending`: a stream that ends in that state is a provider error. See [Custom providers](/custom-provider) for the requirements when implementing a provider.
 
 ## Resolution Order
 

@@ -21,7 +21,11 @@ Trusting a project allows Atomic to load trust-gated project inputs, including:
 - missing project packages configured through project settings
 - project-local extensions and project package-managed extensions
 
-Declining trust skips protected resources. Atomic also skips project-local `AGENTS.override.md`, `AGENTS.md`, and `CLAUDE.md` context-file discovery while the project is untrusted; global context and explicitly supplied CLI resources remain available. Before trust is resolved, Atomic only loads user/global extensions and explicit CLI `-e` package-level extensions so those trusted extensions can handle the `project_trust` event; the first extension that returns a yes/no decision owns the decision. When `-e <dir>` discovers project-local resources borrowed from that directory's `.atomic` or legacy `.pi` config, or from `.agents/skills`, Atomic resolves trust for that extension source before loading those borrowed resources, because borrowed extensions and workflows can execute code with the Atomic process permissions.
+Declining trust skips protected resources, including project-local discovery of `AGENTS.override.md`, `AGENTS.md`, and `CLAUDE.md`. Global context and explicitly supplied CLI resources remain available.
+
+Before resolving trust, Atomic loads only user/global extensions and explicit CLI `-e` package-level extensions. Those trusted extensions can handle the `project_trust` event; the first to return a yes/no decision owns it.
+
+If `-e <dir>` discovers resources borrowed from that directory's `.atomic`, legacy `.pi`, or `.agents/skills`, Atomic resolves trust for that source before loading them. Borrowed extensions and workflows can execute code with the Atomic process permissions.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, `defaultProjectTrust: "ask"` and `"never"` ignore such resources, while `"always"` trusts them. Use `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
@@ -29,7 +33,7 @@ Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trus
 
 Atomic does not include a built-in sandbox. Built-in tools can read files, write files, edit files, and run shell commands with the permissions of the Atomic process. Extensions are TypeScript modules that run with the same permissions. Package installs, shell commands, language servers, test commands, and other developer tools behave as ordinary local processes.
 
-This is intentional. Atomic is designed to operate on local source trees, invoke project toolchains, and integrate with the user's existing development environment. A partial in-process sandbox would be easy to misunderstand as a security boundary while still depending on the host shell, filesystem, package managers, credentials, and extension code. Real isolation needs to come from the operating system or a virtualization/container boundary.
+Use operating-system isolation or a container when you need a security boundary.
 
 Project trust is only an input-loading guard. It prevents a repository from silently changing Atomic's settings or extensions before you approve it. It does not make untrusted code, untrusted prompts, or untrusted model output safe. Prompt injection from repository files, comments, documentation, context files, or build output is expected local-agent risk and cannot be reliably prevented by Atomic.
 
@@ -61,8 +65,9 @@ What credential-export forms guarantee:
 - **No file or clipboard sink.** There is no `--output` flag. The print subcommands allow only `--provider` and `--model`; an auth check must name a provider or exact model before `--credentials` can emit anything. A fuzzy model match cannot select a credential for export. If you want the value in a file, you redirect it yourself and own that decision.
 - **No ambient target.** The print subcommands require `--model`; an exporting auth check requires `--provider` or an exact `--model`, so no export can use an unnamed current session model.
 - **Useful OAuth lifetime.** An auth-check export needs an OAuth token with at least 30 minutes remaining. Its normal path can refresh the token; `--no-refresh` makes no auth-file mutation and refuses a shorter-lived token. `print-bearer-token` applies the same floor and uses exit `5` only for a refresh failure that leaves the stored credential untouched.
-- **The value is not loggable in transit.** Internally the credential is carried in a wrapper that throws if anything tries to interpolate, serialize, or inspect it, so it cannot reach a log line, a session transcript, or an error message. The wrapper is tested under both Node and Bun, since the published binary is Bun-compiled and `Bun.inspect` is a different formatter.
-- **One egress, enumerated.** `credentialPayload` is the only source function that opens the wrapper, and it returns one payload only to `emitCredential`, which performs the guarded real-stdout write. Tests enumerate both allowed `Secret.take()` call sites and *every* call that puts a non-literal value on real stdout, so a new one has to be added to the list and reviewed. The tests carry negative controls for a planted third `take()` call and two planted egress modules. No RPC response type carries a credential either — that is asserted against `src/modes/rpc/rpc-types.ts` directly, because the RPC login reply once echoed the API key the host had just typed in.
+- Atomic does not include exported credentials in its logs, session transcripts, error messages, or RPC responses. This does not protect text after it reaches your shell or another program.
+
+Maintainer details are in [Credential export safeguards](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/authentication.md#credential-export-safeguards).
 
 What they do **not** do: once the credential is on stdout it is ordinary text in your shell, your pipeline, and possibly your shell history and process listing. Prefer `print-bearer-token`, whose output expires, over a long-lived API key. Do not embed any credential-export form in a script that logs its own output.
 

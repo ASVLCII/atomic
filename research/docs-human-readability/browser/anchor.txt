@@ -1,0 +1,12 @@
+### Result
+{"hash":"#3-adversarial-verification","id":"3-adversarial-verification","followingHeading":"3. Adversarial verification","linkCount":2}
+### Ran Playwright code
+```js
+await (async page => {await page.waitForFunction(()=>!!document.getElementById("3-adversarial-verification")); return await page.evaluate(()=>{const a=document.getElementById("3-adversarial-verification");a.scrollIntoView();location.hash="3-adversarial-verification";return {hash:location.hash,id:a.id,followingHeading:a.nextElementSibling?.textContent,linkCount:document.querySelectorAll("a[href=\"#3-adversarial-verification\"]").length};});})(page);
+```
+### Page
+- Page URL: http://localhost:3333/workflows/reliable-design#3-adversarial-verification
+- Page Title: Reliable design - Atomic
+- Console: 0 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-20T00-44-18-274Z.log#L1

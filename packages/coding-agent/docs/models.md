@@ -5,9 +5,15 @@ description: "Add model entries for a supported provider API with minimal and fu
 
 # Custom Models
 
-Add custom providers and models (Ollama, vLLM, LM Studio, proxies) via the single `models.json` in the active Atomic agent directory, normally `~/.atomic/agent/models.json`, or the directory selected by `ATOMIC_CODING_AGENT_DIR`/`PI_CODING_AGENT_DIR`. Atomic reads only that file: it does not read project-scoped `.atomic/models.json`, fall back to `~/.pi/agent/models.json`, or merge `.pi` and `.atomic` model configuration files. The legacy `.pi` read fallback remains available for configuration surfaces that explicitly use layered config paths, such as `auth.json`; it does not apply to `models.json`.
+Add custom providers and models such as Ollama, vLLM, LM Studio, and proxies through `models.json`. Atomic reads one file from the active agent directory, normally `~/.atomic/agent/models.json`. Set `ATOMIC_CODING_AGENT_DIR`/`PI_CODING_AGENT_DIR` to use another directory.
 
-The interactive `/model` selector and `/scoped-models` render the current authenticated snapshot immediately and refresh network-backed catalogs in the background for up to 15 seconds. A direct `/model <model_name>` checks an exact cached match first; only a miss waits for the same bounded refresh, then falls back to the current cache when refresh stalls or fails. Closing either selector cancels its background refresh. The terminal owns that deadline: it stops waiting and replaces `Refreshing model catalogs…` with a cached-model timeout or error status even when lower-level work rejects or ignores cancellation. In isolated-engine sessions the same deadline covers both credential reload and catalog work inside the engine, and model selection does not queue behind the refresh. Login and logout publish credential changes independently of catalog refresh, and a refresh that started against an older credential generation is discarded instead of restoring stale provider availability. A slow catalog therefore falls back to cached models without requiring an `auth.json` or `~/.atomic` reset.
+Atomic does not read project-scoped `.atomic/models.json`, fall back to `~/.pi/agent/models.json`, or merge `.pi` and `.atomic` model configuration files. The legacy `.pi` fallback applies only to configuration that explicitly uses layered paths, such as `auth.json`.
+
+The interactive `/model` selector and `/scoped-models` show the current authenticated snapshot immediately. They refresh network-backed catalogs in the background for up to 15 seconds. A direct `/model <model_name>` first checks for an exact cached match. Only a miss waits for the bounded refresh, then falls back to the cache if refresh stalls or fails. Closing either selector cancels its refresh.
+
+If refresh times out or fails, the selector reports that it is using cached models. You do not need to reset `auth.json` or `~/.atomic` for a slow catalog. Login and logout remain effective even if an older refresh finishes later.
+
+Refresh scheduling and cache validation are documented in [Catalog refresh internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/provider-runtime.md#catalog-refresh).
 
 A complete `defaultProvider`/`defaultModel` pair in `settings.json` is resolved after built-in, configured, and extension providers register. If the provider remains unsupported, interactive mode reports a generic saved-configuration warning and leaves model selection open instead of routing the session to a different provider. Print and JSON modes write that diagnostic to stderr and exit nonzero before prompting, keeping JSON stdout JSONL-clean. RPC rejects `prompt` with the same correlated diagnostic until an explicit successful `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle result does not clear the condition. If the provider is supported but the model is unknown or lacks authentication, normal automatic selection of an available authenticated model continues. Valid custom- and extension-provider defaults resolve once their provider registration is available. See [Settings](/settings#model-&-thinking).
 
@@ -108,7 +114,7 @@ Override defaults when you need specific values:
 }
 ```
 
-Atomic reloads the active agent directory's single `models.json` each time you open `/model`. Provider definitions, per-model overrides, dynamic catalogs, and isolated-engine model state are rebuilt from that fresh configuration, so edits take effect without restarting. Invalid edits report an error.
+Open `/model` after editing the active agent directory's `models.json` to apply changes without restarting. Invalid edits report an error.
 
 ## Google AI Studio Example
 

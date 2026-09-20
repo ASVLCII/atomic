@@ -86,7 +86,9 @@ OpenRouter Chat Completions and Anthropic Messages requests send `x-session-id` 
 
 The value is resolved at access time, so it tracks session replacement. Under the isolated interactive engine it reflects the engine's catalogue rather than a stale host snapshot.
 
-It reports the scope and cannot change it. `ctx.scopedModels` is a getter with no setter, typed `readonly ScopedModel[]`, so assigning to it or pushing an entry is a compile error. The guarantee also holds at runtime, where the type does not reach: each read returns a fresh copy — of the array, of every `{ model, thinkingLevel }` entry in it, and of each entry's model — and all three are frozen. A JavaScript extension, or one that asserts the `readonly` away, therefore cannot widen the set of models the session may use by pushing an entry, nor change which model it selects by swapping one in place; the attempt throws rather than quietly working. Read it, and change scope through the commands and settings that own it.
+`ctx.scopedModels` reports scope but cannot change it. It is a getter with no setter, typed `readonly ScopedModel[]`, so assigning to it or pushing an entry is a compile error.
+
+Each read also returns fresh, frozen copies of the array, every `{ model, thinkingLevel }` entry, and each entry's model. Even JavaScript extensions or code that casts away `readonly` cannot widen the scope or replace a selected model. Those mutations throw. Change scope through the commands and settings that own it.
 
 ```typescript
 for (const { model, thinkingLevel } of ctx.scopedModels) {

@@ -15,7 +15,9 @@ Atomic exposes three integration modes plus a component API for interactive exte
 | A long-lived process you drive with commands and read events from | [RPC mode](/rpc) | `atomic --mode rpc` |
 | Atomic embedded inside a Node.js application, with its resources and lifecycle in-process | [SDK](/sdk) | `@bastani/atomic` |
 
-JSON mode is the smallest surface: one process, one prompt, a stream of newline-delimited events, then exit. RPC mode keeps the process alive so you can send more input, interrupt, switch models, and answer tool permission prompts. The SDK gives you the same engine as a library, with programmatic control over extensions, skills, tools, and session storage.
+- JSON mode runs one process with one prompt, streams newline-delimited events, then exits.
+- RPC mode keeps the process alive so you can send more input, interrupt, switch models, and answer tool permission prompts.
+- The SDK provides the same engine as a library, with programmatic control over extensions, skills, tools, and session storage.
 
 ## Then continue to the contracts
 

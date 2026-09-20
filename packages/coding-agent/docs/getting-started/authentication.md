@@ -44,7 +44,10 @@ Start Atomic in any directory and run:
 /model
 ```
 
-Expected result: the model picker opens and lists selectable models for the provider you just configured, with the active one marked. If it opens empty, or Atomic reports that no provider is configured, re-run `/login`, or confirm the API-key environment variable is exported in the same shell you launched Atomic from.
+The model picker should list selectable models for the provider you configured, with the active one marked. If it is empty or Atomic reports no configured provider:
+
+- Re-run `/login`.
+- If using an API key, confirm its environment variable is exported in the shell that launched Atomic.
 
 `/login` opens **Select authentication method:**. Choose **Use a subscription** or **Use an API key** to see the corresponding provider picker and credential-configuration status. That status can reflect stored, environment, runtime, or configuration credentials; it does not test connectivity or prove that a provider will accept a request.
 

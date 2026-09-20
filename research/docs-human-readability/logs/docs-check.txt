@@ -1,0 +1,5 @@
+
+> @bastani/atomic@0.0.0 docs:check
+> bun run scripts/validate-docs-links.ts
+
+Docs link validation passed (92 Markdown/MDX files, 92 docs pages).

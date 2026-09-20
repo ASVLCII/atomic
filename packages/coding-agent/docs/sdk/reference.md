@@ -233,9 +233,8 @@ Do not mix wait arguments with launch fields. Unknown or foreign IDs and unbound
 PowerShell tools and local operations accept a trusted `taskOwner` binding and the same
 `wait` observation policy as bash. Owned native Windows execution automatically yields
 after the owner's command budget (normally 10000 ms); explicit per-call budgets override it,
-and execution timeout remains separate. Commands use encoded PowerShell transport internally,
-while task descriptions retain the original command text. Without a supported owner,
-explicit background requests are refused and foreground execution waits for completion.
+and execution timeout remains separate. Task descriptions retain the original command text.
+Without a supported owner, explicit background requests are refused and foreground execution waits for completion.
 
 ```typescript
 import { createPowerShellTool } from "@bastani/atomic";
@@ -339,7 +338,16 @@ const { session } = await createAgentSession({
 });
 ```
 
-The tool parameters are exactly the supplied schema: with `DecisionSchema`, the model calls `structured_output({ approved, findings })`. Array and primitive schemas are also accepted by the factory when the target provider/tool runtime supports them; the captured value is whatever JSON value matches the schema. A successful call stores the params in `capture.value`, returns them as pretty-printed JSON tool-result text for text print mode, keeps the flat value in tool `details`, writes the same JSON to the configured `output.outputPath` when an `output` file sink is configured, and sets `terminate: true` so there is no extra follow-up assistant turn. Atomic relies on the tool schema instead of extra structured-output parsing or sidecar validation. Structured-output tool definitions opt out of oversized-result persistence.
+The tool parameters are exactly the supplied schema. With `DecisionSchema`, the model calls `structured_output({ approved, findings })`. The factory also accepts array and primitive schemas when the target provider/tool runtime supports them; the captured value is whatever JSON value matches the schema.
+
+A successful call:
+
+- Stores the parameters in `capture.value`.
+- Returns pretty-printed JSON tool-result text for text print mode and keeps the flat value in tool `details`.
+- Writes the same JSON to `output.outputPath` when an `output` file sink is configured.
+- Sets `terminate: true`, preventing an extra follow-up assistant turn.
+
+Atomic relies on the tool schema, not extra structured-output parsing or sidecar validation. Structured-output tool definitions opt out of oversized-result persistence.
 
 Custom tool names are supported, and the prompt metadata follows the configured name. If you use a custom name such as `final_decision`, include that name in any explicit `tools` allowlist. If the standard `structured_output` name is required, register the factory with its default name:
 
@@ -396,11 +404,9 @@ Use `await session.dispose()` rather than fire-and-forget cleanup. It seals admi
 
 `AgentSessionRuntime` uses the same awaited close when replacing sessions and transfers configured host bindings before the replacement starts. Reload invalidates old input requests and extension subscriptions while retaining host configuration. Live durable workflows retain their existing runtime ownership across reload and session replacement; final owner disposal waits for their shutdown. A late answer from an old generation cannot authorize replacement work.
 
-Concurrent replacement factories remain supported. Publication and rebinding retire any displaced successor; failed candidates unwind without terminating a live successor's retained workflows. Factory rollback includes pre-constructor resource/context setup, preserves cleanup causes and leaves borrowed discovery untouched.
+Settings persistence failures can make disposal reject. Repair storage and repeat the write before closing; disposal does not consume the caller's `SettingsManager.drainErrors()` channel. Duplicate `executeBash()` IDs remain correlation IDs, and `abortBash(id)` cancels every active call with that ID.
 
-Session-attributed settings persistence faults are reported by disposal without draining `SettingsManager.drainErrors()` or blaming an idle borrower. `flush()` retains its normal resolving/error-channel behavior. Repair storage and repeat the write before close to recover. Duplicate `executeBash()` correlation IDs in `options.id` are preserved; `abortBash(id)` cancels all active calls with that exact ID, while disposal cancels all owned calls.
-
-Terminal runtime disposal also drains admitted replacement preflight, factory and startup work; it never publishes a late successor. Session disposal drains admitted compaction work and prevents retired hooks/providers from writing new compaction results. Noncooperative callbacks must settle before disposal can finish. Independent sessions can borrow one `DefaultResourceLoader` and event bus: ownership belongs to each session, not the borrowed discovery object.
+Ensure callbacks settle independently of disposal. For reload, replacement, and resource ownership guidance, see [SDK lifecycle](/sdk#finishing-admitted-work).
 
 Extensions can register tools, subscribe to events, add commands, and more. See [Extensions](/extensions) for the full API.
 
@@ -888,235 +894,22 @@ For extension types, see [Extensions](/extensions) for the full API.
 
 ## Owner-bound task supervisor (S1)
 
-S1 adds an SDK-only task foundation in `src/core/tasks/contracts.ts` and
-`src/core/tasks/supervisor.ts`, backed by the native `TaskSupervisor`. It is an
-internal trusted-host integration surface, not a new CLI command. The package root
-exports the narrow `AgentTaskHost` adapter and its integration types, not the raw
-supervisor. Runtime-created subagent contexts use it; bash/PTY and task UI integration are separate slices.
+For trusted custom hosts, the package exports `AgentTaskHost` and its integration types, not the raw native supervisor. Bind the actual host scope and a mandatory `authorizeLaunch` guard. Never accept ownership or authorization from model-supplied input or reconstruct a lease from a task ID or saved history.
 
-`AgentTaskHost` binds an actual trusted scope and mandatory `authorizeLaunch` guard.
-Its `startAgentTask(intent, operation, runnerFactory)` returns a Result containing
-`{taskId, lease}` after setup. Each launch supplies its own factory receiving the
-original `AbortSignal`, reference and `reportActivity` context. Return separate
-`result` and `cleanup` promises; yielding never replaces either promise, and only
-confirmed cleanup may report `reaped`. Exact operation replay never calls another factory.
-`observeAgentLaunch(taskId, policy?)` delegates to S1 initial observation; `waitForTask`,
-`resolveTask`, `cancelTask`, `watchOwnerTasks` and `close` remain owner-scoped S1 doors.
-Observation returns the exact Result/WaitOutcome DTO, not a new model response shape.
-These APIs are for trusted first-party hosts, never model-supplied ownership or permission.
+`startAgentTask(intent, operation, runnerFactory)` returns a Result containing `{taskId, lease}` after setup. The factory receives the original `AbortSignal`, reference, and `reportActivity` context. Return separate `result` and `cleanup` promises; report cleanup only when it is confirmed. Replaying the same operation reuses execution without calling another factory.
 
-For already-admitted in-process tasks, the optional `taskExecution` runner hooks
-retain the original execution and cleanup promises. An exact Intercom commit
-yields the registered observation. In an explicit foreground group it also yields
-active sibling observations through the existing group signal, once per child;
-neither path detaches or completes those executions. Public launches in actual sessions use this bridge by default.
+Use `observeAgentLaunch(taskId, policy?)`, `waitForTask`, `resolveTask`, `cancelTask`, `watchOwnerTasks`, and `close` within the bound owner. Observation returns Result/WaitOutcome. Yielding or cancelling an observation does not stop execution. Cancellation and cleanup failures remain observable; owner close may remain pending until your runner acknowledges cleanup.
 
-Each workflow admission boundary allocates one process-private stage attempt identity.
-The actual stage session binds its original session/run/stage identity; fallback session
-replacement keeps that identity and the same lazily bound `bindAgentTaskHost` owner.
-Replacement disposal does not close tasks. Boundary sealing fences task admission and
-starts owner closure; generation close awaits independent cleanup and surfaces failure.
-Fresh boundaries have fresh identities, including restoration; history is not a restart
-capability. Public producers, durable callback joins and nonvisual completion intent/admission use this owner binding.
-
-When a task completion outbox is created from session history, it immediately retries
-unacknowledged terminal completion intents through the current admission boundary.
-It does not wait for another task to settle or recreate execution capabilities.
-Acknowledged intents are not redelivered. Failed admission keeps the original completion
-identity pending for retry; a closed boundary prevents admission.
-Top-level session initialization restores admission keys from persisted custom messages,
-so a crash after delivery is persisted but before its outbox acknowledgement does not
-deliver the same completion again.
-
-A host binds its actual session or workflow-stage scope with `bindHostSession`,
-provides launch authorization and a runner factory, then calls `openTaskOwner`.
-Authorization runs before native admission. `startAgentTask` registers an agent
-task before runner setup and returns its lease without waiting for completion.
-Exact operation replay reuses that task and execution; a fresh operation creates
-a distinct task. Leases are environment-local capabilities, cannot be serialized,
-and cannot be reconstructed from task IDs or historical records.
-
-`initialObservation` applies launch policy: omitted policy yields
-`default-background`, explicit background yields `explicit`, and foreground
-registers a wait with its requested budget. A ready terminal result wins.
-`await waitForTask(task, budgetMs?, designation?)` and
-`await foregroundTask(task, budgetMs?)` return a Result containing a WaitOutcome,
-not a lease. Native registration and the WaitId registry are populated synchronously
-before either door awaits. Host lifecycle actions can use `findWait(waitId)` to
-yield or dispose a registered observation; ordinary callers need no extra observe call.
-SDK waits do not replace the host designation unless given a matching HostSession.
-An elapsed/explicit yield or observer disposal never stops or relaunches execution;
-a later yield of a disposed wait replays its ObserverCancelled Result.
-
-Requested agent waits default to 30000 ms. Supply owner-host settings through
-`bindHostSession({ scope, tasks: { wait: { kind: "automatic", agentBudgetMs: 5000 } },
-authorizeLaunch, createRunner })`; `{ kind: "until-settled" }` disables timed yielding.
-Per-call budgets override settings, including zero for immediate yield. These settings
-apply to explicit foreground-first launch, live foregrounding and task-ID waits,
-never to a default independent launch. Wide numeric budgets are not narrowed to u32.
-Accepted `NaN` budgets (including configured `agentBudgetMs`) do not panic native
-scheduling. The implementation leaves such observations pending until explicit yield,
-settlement, observer disposal or owner closure: the elapsed comparison never reaches
-`NaN`. It uses bounded sleep chunks without rewriting the caller's budget. This is
-scheduling behavior, not a new finite-only input restriction or an RFC-mandated deadline;
-other numeric budgets and per-call precedence are unchanged.
-
-`await cancelTask(task, cause)` returns a Result containing a cancellation receipt
-and preserves the first accepted cause. `closeTaskOwner` seals admission before
-draining and succeeds only after independent cleanup acknowledgement. The trusted
-runner supplies separate result and cleanup promises: confirmed reaping after
-cancellation can close even if no result arrives. Natural cleanup-first delivery
-waits for its outcome before acknowledging reaping. External native owner closure
-also aborts resources attached to already-settled results without rewriting them.
-Failed cleanup remains observable; absent acknowledgement can leave close pending.
-User cancellation retains pending input attention until settlement or owner closure;
-event-reduced and reattached snapshots report the same native facts. Runner result
-rejections become failed `RunnerFailed` results; cleanup rejections become diagnostic
-`CleanupFailed` resources, never successful reaping. Setup throws retain `SpawnFailed`
-and unconfirmed cleanup. Strings and Error messages are preserved verbatim; other JS
-values use safe string conversion, with `Unprintable JavaScript rejection` if conversion
-throws. Cancelled cleanup still does not depend on the result promise settling.
-This slice exercises fake runners, not force-stop or real-process cleanup guarantees.
+Implementation, native contracts, and regression constraints are in [Task supervision](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/task-supervision.md).
 
 ### Supervised command SDK
 
-`startCommandTask(owner, intent, operation)` starts an owned Unix pipe/PTY or Windows pipe/ConPTY command.
-The command intent keeps execution timeout separate from observation: `waitForTask`
-defaults to 10000 ms for commands, and expiry returns a yielded observation without
-terminating the process. On Unix, owner closure sends TERM, allows 250 ms grace, then KILL,
-reaps the leader and confirms process-group exit and reader drain. A cleanup failure
-retains diagnostics instead of claiming a closed owner. This is normal owner/host
-shutdown cleanup, not a guarantee for forced host death or a blocked JavaScript loop.
+For shell integration, use the exported Bash and PowerShell factories with a trusted `taskOwner` binding. Execution timeout and observation budget are separate. The automatic command wait is normally 10000 ms; `until-settled` waits for completion. A yielded command remains owned, and later waits can read retained output with explicit omission markers.
 
-Both native and facade `CommandIntent` accept optional `shell: { program, args }`:
-the executable is launched directly with `command` appended as one final argv argument.
-Omitting `shell` preserves the default native pipe shell. `inheritEnv` defaults to
-`true`; `false` uses exactly the supplied environment rather than inheriting the host's.
-Both fields participate in operation replay identity.
-
-`taskStdin(task)` returns a non-serializable stdin capability. `writeTaskInput` takes
-an operation ID and `{kind:"bytes", bytes:Uint8Array}` or `{kind:"eof"}`. Empty bytes
-are a no-op. Input has 65536 byte credits, refuses excess input before admission,
-and replays recorded receipts without resending bytes. Ambiguous partial delivery
-returns `InputDeliveryUnknown`, including operation ID and known accepted-byte count.
-
-`readTaskOutput(task, {start, maximumBytes})` returns owned byte chunks at decimal
-offsets, requested bounds, omitted ranges and an optional next offset. Requests
-are clamped to the 1 MiB live-preview bound before allocating or reading a page;
-use `nextOffset` to continue. It does not sanitize or normalize bytes. Retention
-uses a 1 MiB live head/tail, 8 MiB foreground spill threshold and 5 GiB disk cap.
-Retained output is not conversation history. File-spool policy uses supervised
-pipe drains, never inherited direct file writers. Stdout, stderr and descendants
-share one serialized disk budget; crossing writes retain only the permitted prefix.
-The file remains within the cap during foreground collection and termination.
-After foreground collection yields, rejected overflow kills the group and settles
-`OutputLimitExceeded` after confirmed cleanup. Spool setup failure refuses launch
-with `SpawnFailed`. Drained pipe/PTY output instead keeps running with bounded
-retained bytes and omissions.
-Unix PTY resize uses the retained portable-pty master; Windows PTY uses ConPTY.
-Windows pipe and ConPTY commands start suspended and enter a kill-on-close Job Object
-before resume. Failed containment refuses execution, with no unsupervised spawn fallback.
-Cleanup must be confirmed; failures retain diagnostic resources rather than reporting reaping.
-Native Windows legacy WSL `bash.exe` stdin transport remains refused for owned launch:
-Windows jobs cannot supervise the Linux guest process tree. Atomic running inside WSL
-uses the normal POSIX/Bash path instead.
-
-Bash tools and `createLocalBashOperations` accept a trusted `taskOwner` binding.
-On Unix and native Windows, that binding obtains pipe/PTY processes through supervised admission,
-preserving configured shell arguments, cwd, environment and existing authorization.
-Foreground collection honors the owner's command wait configuration, including
-`until-settled`; the automatic default is 10000 ms. A yielded process stays owned
-and its retained output remains readable. Bash output inserts explicit
-`[Output omitted: bytes start-end]` markers, with an exclusive end offset, between
-retained chunks rather than silently joining gaps. Without that binding, existing
-bash and native PTY execution are unchanged. No UI is added.
-
-`watchOwnerTasks(owner, cursor?)` provides an opaque `lease`, snapshot,
-decimal-string cursor and disposable `AsyncIterable<NativeEvent>`. Each iterator
-observes one contiguous delivery epoch. On local backlog overflow or native journal
-reset, the subscription updates its authoritative `snapshot` and `cursor`, discards
-stale queued deltas, and completes the old iterator (`next()` returns `done:true`,
-including an already-pending read). This also works when an oversized final settlement
-leaves no retained event, without later activity or cleanup. No synthetic reset event
-is inserted and the `NativeEvent` and subscription types are unchanged.
-
-After any iterator completion, reconcile `subscription.snapshot` at
-`subscription.cursor`. If the owner is still live and observation is still wanted,
-obtain another iterator from the **same** `subscription.events`; the old iterator stays
-done. Reset does not dispose the subscription or close the owner. Subsequent deltas
-are authentic and ordered; ignore events at or below an already-applied snapshot
-cursor. Explicit `dispose()` (idempotent) or breaking out of a live iterator ends
-observation, not the owner. Owner closure also ends delivery. Track your own disposal
-when deciding whether to resume. New subscriptions are refused once owner closing
-begins; existing subscriptions continue through cleanup/closure.
-Calling `dispose()` from `onReconcile` also stops the active drain from publishing
-its retained events. Pending and newly created iterators finish without those events;
-the reconciled snapshot remains available.
-
-The optional `subscription.onReconcile` callback is a convenience, not required for
-correctness; callback exceptions remain visible as `subscription.failure`. Raw strings
-and Error messages are preserved; unprintable values (including hostile conversion or
-revoked proxies) use `Unprintable JavaScript rejection`. Diagnostic conversion cannot
-interrupt event delivery or rearming the fallback poll. Native callbacks are wake hints;
-journal drains and reset snapshots are authoritative. Each live subscription has one
-fallback poll, stopped on disposal or observed closure.
-The native byte journal and facade delivery backlog are bounded. Each task separately
-retains its most recent 256 accepted activity report IDs, SHA-256 payload hashes and
-receipts (`TASK_REPORT_IDENTITY_WINDOW`). Within that window, identical payloads return
-`duplicate` with the original cursor; conflicting payloads return `ReportConflict`.
-Neither check emits events or refreshes retention order. An evicted ID is fresh: while
-the task is live it is `accepted`, applies its activity again and gets a new cursor;
-existing terminal and owner-close guards still apply. Terminal outcome reports and
-their recorded receipts are retained separately for the task record's lifetime and
-never evicted by activity churn. This bounds identity entry count, not caller ID length,
-task count, terminal payloads or total task-history memory. S1 adds no persistence layer.
-
-Activity IDs have no reserved spellings, including `runner-outcome`, empty strings
-and isolated surrogates. The facade submits its own result through private trusted
-runner support: the actor selects a free terminal identity and accepts the outcome
-under the same lock. With at most 256 retained activity IDs, at most 257 distinct
-candidates suffice; selection emits no events and retains no extra ID history.
-Caller-supplied reports still use the unchanged `reportTaskOutcome` contract:
-same-ID cross-kind reports conflict, and terminal replay retains its original receipt.
-The internal support also reuses an accepted terminal identity, so a different result
-cannot replace it; cancellation-first still rejects late natural outcomes. Normal,
-rejected and setup-failure results all use this path without bypassing cleanup evidence.
-
-Caller-provided strings retain their exact JavaScript UTF-16 code units, including
-isolated surrogates, valid pairs and embedded NUL, across scopes, intent, operation/report
-identity, activity, results and nested output/cleanup metadata. They remain ordinary
-`string` fields, not encoded wrappers. Replacing a surrogate with U+FFFD is a changed
-payload or identity, never an exact replay. Nonempty descriptions supply the title;
-otherwise the first nonblank task line is copied without rewriting its code units,
-falling back to the agent name. Absent optional fields, empty strings, known zero metrics
-and ordered duplicate data remain distinct. The optional `elapsedMs`, `toolCount` and `tokenCount` metrics and
-completed/failed `exitCode` preserve JavaScript numbers without narrowing or normalization,
-including fractional and extreme values. Within the retained activity window (and for
-terminal reports throughout the task record's lifetime), exact replay distinguishes
-omission, zero and negative zero; repeated NaN and infinite values acknowledge once.
-Changed numeric payloads return `ReportConflict` without earning another event. `OutputRef` is
-metadata, not proof of retained bytes: output
-storage, `readTaskOutput`, command input, persistence, completion delivery and
-real agent/Intercom integration belong to later slices. The credential-free
-repository fixture `test/fixtures/task-s1-demo.ts` exercises this real facade and
-native actor with one fake runner.
+Without a supported owner, explicit background execution is refused. Native Windows legacy WSL `bash.exe` is not supported for owned commands; run Atomic inside WSL instead. See [waiting for shell tasks](#waiting-for-existing-shell-tasks) and [Background tasks](/background-tasks) for caller usage. Raw command admission, stdin, output storage, and platform cleanup contracts are in [Task supervision](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/task-supervision.md#supervised-commands).
 
 ### Task transcript references
 
-An admitted runner can call `context.bindTranscript(sessionManager)` with its existing
-child session history. `readTaskTranscript(task, cursor?)` in `core/tasks/transcript.ts`
-reads that binding through the task capability. It returns message and content-block
-references, not copied text: `id`, `kind`, `source`, and `toolCallId` when applicable.
-Kinds are `prompt`, `assistant`, `tool-call`, `tool-result`, and `response`.
-Thinking blocks and non-conversation entries are excluded. Repeated source IDs are
-deduplicated; repeated messages with different IDs remain distinct.
+Task inspectors show references to the bound child conversation, excluding thinking and non-conversation entries. An unbound or empty history reports `Transcript unavailable`. Saved history is not authority to restart or control a task.
 
-The first page contains up to 100 recent references in source order. Pass the opaque
-`nextCursor` to read earlier references; `omittedEarlier` identifies remaining older
-content. Cursors belong to one task and bound session. An unknown task returns
-`UnknownTask`, a cursor from another task/session returns `ScopeMismatch`, and an
-unbound or empty history returns `TranscriptUnavailable` with `Transcript unavailable`.
-This adapter does not launch work or reconstruct live capabilities from history.
-Production subagent runners bind their child history, and main and attached workflow
-chat hosts mount the shared inspector. Command detail reads are scoped to the current
-selection and view lifetime: late results and errors cannot overwrite another view.
+The trusted runner binding, pagination, and view-lifetime rules are in [Transcript adapter](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/task-supervision.md#transcript-adapter).

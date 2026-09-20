@@ -103,13 +103,16 @@ Local copy operations require a working native clipboard or platform command. On
 
 ### TUI Fullscreen Viewport
 
-Interactive sessions always use this fullscreen viewport for the primary transcript scroll region. Mouse-wheel input scrolls the region under the pointer, falling back to the transcript over the fixed editor/status/footer dock. While the main transcript is scrolled up, a clickable "Jump to latest message" label on its bottom row shows the `tui.altScreen.bottom` shortcut; clicking it returns that transcript to its live end. An attached workflow stage chat keeps its own "Jump to latest message" OSC 8 link with the same shortcut, which returns the stage chat to its live end. Clicking other OSC 8 hyperlinks opens them in the default handler. Dragging with the primary mouse button selects text and, by default, copies it to the clipboard. Set `fullscreenCopyOnSelect` to `false` to highlight text without copying. See [Terminal setup](/terminal-setup) for terminal-specific mouse and trackpad behavior.
+Interactive sessions use a fullscreen transcript. The wheel scrolls the region under the pointer; over the fixed editor, status, or footer it scrolls the transcript. When scrolled up, click "Jump to latest message" or use `tui.altScreen.bottom` to return to live output. Attached workflow chats have their own jump link; other OSC 8 links open in the default handler.
+
+Dragging selects and copies text by default. Set `fullscreenCopyOnSelect: false` to highlight without copying. See [Terminal setup](/terminal-setup) for mouse and trackpad behavior.
 
 Hold Alt while using the mouse wheel to scroll five times as far in fullscreen mode. This requires the terminal to forward the Alt modifier in mouse events; focused components may still consume the wheel input themselves.
 
 
-Fullscreen text selection comes from the installed pi-tui 0.85.1 renderer. Drag with the primary button to select characters; double-click selects a word, including complete slash-delimited paths and kebab-case names, and triple-click selects a line. Focus changes and non-drag clicks clear transient selection state, preventing a stale highlight from appearing. A drag release reported with the generic SGR button code also ends the selection. The renderer also reduces mouse tracking in tmux, Zellij, and GNU Screen.
-Fullscreen transcript bindings take precedence over editor bindings while the main editor has focus. The default unmodified navigation keys therefore control the transcript, while their `ctrl` variants continue to control the editor. When a fullscreen overlay or inline custom component has focus, Atomic sends matching viewport bindings to that component first. Returning `true` keeps the key local. For an in-process component, returning `false`, `undefined`, or `void` lets transcript scrolling handle it. A remote component's correlated reply falls through on `false`, failure, or timeout; `undefined` after disposal is dropped because that component no longer owns focus.
+Drag with the primary button to select characters, double-click for a word or path, and triple-click for a line. Changing focus or clicking elsewhere clears the selection.
+
+While the main editor has focus, fullscreen transcript bindings take precedence. Unmodified navigation keys control the transcript; their `ctrl` variants control the editor.
 
 | Key | Editor action | Fullscreen action |
 |-----|---------------|------------------|
@@ -119,8 +122,13 @@ Fullscreen transcript bindings take precedence over editor bindings while the ma
 | `ctrl+pageUp`, `ctrl+pageDown` | Editor | Editor |
 
 This routing remains configurable through the ordinary action bindings. For example, `"tui.altScreen.pageUp": "ctrl+pageUp"` makes `pageUp` control the editor and `ctrl+pageUp` control the transcript in fullscreen mode. Bind `tui.altScreen.halfPageUp` and `tui.altScreen.halfPageDown` for half-page steps, or `tui.altScreen.lineUp` and `tui.altScreen.lineDown` for single-line steps, while keeping the full-page bindings. Setting `"tui.altScreen.pageUp": []` disables that transcript shortcut entirely. User bindings replace the defaults for that action.
-When a fullscreen overlay or inline custom component owns focus, it receives matching `pageUp`, `pageDown`, `home`, `end`, and custom `tui.altScreen.*` bindings before transcript scrolling. Its handler returns `true` when it consumes the key; an unhandled result lets transcript scrolling proceed. Remote components receive a correlated reply and have a bounded fallback if the engine stalls. Mouse-wheel and click sequences follow the same focused-component route, so workflow graphs and stage chats can consume them before unhandled events fall through to the fullscreen viewport.
-The blocking `ask_user_question` dialog is pinned to the bottom of the screen as an overlay rather than measured into the layout, so opening it does not shrink the transcript viewport or the page step: `pageUp`, `pageDown`, `home`, `end`, and the wheel move by the same amount and reach every line of the scrollback, including the newest ones, in the strip that stays visible above the dialog. Those transcript actions still work while the Notes editor is open. Notes keeps ordinary text and edit actions, including the default `ctrl+home` and `ctrl+end`; a key moves the transcript instead only when configured for a `tui.altScreen.*` action. The dialog is bounded so the visible strip survives on a short terminal, and the active questionnaire row stays visible inside the bound as you move through single-select choices, multi-select choices, Next, Submit, Cancel, and inline inputs. It keeps its own arrow, `enter`, `tab`, `space`, `esc`, click, and selection input.
+A focused custom component may consume viewport keys and mouse input before the transcript. Extension authors should follow the [input handling contract](/extensions/ui#custom-components). Renderer routing details live in [maintainer notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/task-supervision.md#focused-viewport-routing).
+
+The blocking `ask_user_question` dialog is a bottom-pinned overlay. Opening it does not shrink the transcript viewport or change the page step. `pageUp`, `pageDown`, `home`, `end`, and the wheel still reach every scrollback line, including the newest ones, in the visible strip above the dialog.
+
+These transcript actions also work while Notes is open. Notes keeps ordinary text and edit actions, including the default `ctrl+home` and `ctrl+end`. A key moves the transcript instead only when configured for a `tui.altScreen.*` action.
+
+On short terminals, the dialog is bounded to preserve that visible strip. The active questionnaire row stays visible as you move through single-select and multi-select choices, Next, Submit, Cancel, and inline inputs. The dialog keeps its own arrow, `enter`, `tab`, `space`, `esc`, click, and selection input.
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
@@ -211,9 +219,7 @@ Interactive model and thinking choices automatically become startup defaults. Th
 
 ### Task inspector actions
 
-These action names are reserved for focused task inspection. They do not replace
-global Ctrl+O expansion, F2 graph navigation, or editor input. Host mounting is a
-separate integration gate; defining a key does not make an unavailable inspector open.
+These actions apply only while inspecting tasks. They do not replace global Ctrl+O, F2, or editor input. Open the inspector with `/tasks`.
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|

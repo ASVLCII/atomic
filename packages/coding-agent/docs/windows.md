@@ -14,13 +14,25 @@ This path does not require Node.js or a package manager. To pin an exact release
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/bastani-inc/atomic/main/install.ps1))) -Ref 0.9.11
 ```
 
-The installer verifies `SHA256SUMS` before changing an existing install. It stores versioned payloads under `%LOCALAPPDATA%\atomic` and places an ASCII-only `atomic.cmd` plus an `atomic-current` junction in `%LOCALAPPDATA%\atomic\bin` by default. The relative shim remains safe when the install path contains Unicode text or the bin directory is elsewhere. Set `ATOMIC_INSTALL_DIR`, `ATOMIC_BIN_DIR`, or `ATOMIC_VERSION` to override those values. `GITHUB_TOKEN` or `GH_TOKEN` is optional for higher GitHub API limits. Exact pins use Atomic's `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-alpha.REVISION` release tag form.
+The installer verifies `SHA256SUMS` before changing an existing install. By default, it stores versioned payloads under `%LOCALAPPDATA%\atomic` and places an ASCII-only `atomic.cmd` plus an `atomic-current` junction in `%LOCALAPPDATA%\atomic\bin`. The relative shim supports Unicode install paths and a bin directory elsewhere.
 
-Every attempt removes its own `atomic-install-*` staging directory under the Windows temp path before it finishes. Windows can hold a file or an executable image open briefly after the process that used it exits, so the installer clears read-only attributes, retries the removal a bounded number of times, and verifies the directory is gone after each try. If it still cannot remove the directory, it reports the exact path, the number of attempts, and the last Windows error instead of leaving the residue unmentioned. A cleanup failure never replaces the original error: when an install fails for another reason, that error is still the one you see and the incomplete cleanup is reported as a warning.
+Set `ATOMIC_INSTALL_DIR`, `ATOMIC_BIN_DIR`, or `ATOMIC_VERSION` to override those values. `GITHUB_TOKEN` or `GH_TOKEN` is optional for higher GitHub API limits. Exact pins use Atomic's `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-alpha.REVISION` release tag form.
+
+The installer removes its `atomic-install-*` staging directory before finishing. If cleanup fails, it reports the path and Windows error. An installation failure remains the primary error; incomplete cleanup appears as a warning.
 
 After the script is fetched, it enables TLS 1.2 for its own GitHub requests and restores the caller's prior protocol setting. A downloaded script cannot repair the connection used to fetch itself: on a legacy Windows PowerShell 5.1 host where the literal `irm` command cannot reach GitHub, enable TLS 1.2 in that shell before rerunning the same one-liner.
 
-The installer adds the bin directory to the User PATH and the current PowerShell process. Restart the terminal when it finishes so other processes see the new PATH. A custom `ATOMIC_BIN_DIR` containing `;` cannot be one Windows PATH entry, so the installer leaves PATH untouched and prints a direct-run command for `atomic.cmd` instead. If the bin directory already holds a same-stem launcher that `PATHEXT` resolves before `atomic.cmd`, such as a stale `atomic.exe` from an older Node-based install, the installer reports it and stops before downloading anything; remove that entry and rerun. Because the shim is `atomic.cmd`, `PATHEXT` must include `.CMD` for bare `atomic` to resolve; if it does not, the installer says so and stops rather than reporting a success you could not use. An unexpected regular `current` entry under `ATOMIC_INSTALL_DIR`, or a regular `atomic-current` entry under `ATOMIC_BIN_DIR`, is reported and left untouched instead of being moved or deleted. A pinned `-Ref` is honored literally: if GitHub answers with a different release tag, the install stops before downloading anything. Package-manager installation remains available but requires Node.js; see the [Quickstart](/getting-started/installation#package-managers).
+The installer adds the bin directory to the User PATH and the current PowerShell process. Restart the terminal afterward so other processes see the new PATH.
+
+Check these installation constraints:
+
+- A custom `ATOMIC_BIN_DIR` containing `;` cannot be one Windows PATH entry. The installer leaves PATH untouched and prints a direct-run command for `atomic.cmd` instead.
+- A same-stem launcher that `PATHEXT` resolves before `atomic.cmd`, such as a stale `atomic.exe`, stops installation before download. Remove that entry and rerun.
+- `PATHEXT` must include `.CMD` for bare `atomic` to resolve. Otherwise, the installer reports the problem and stops.
+- An unexpected regular `current` entry under `ATOMIC_INSTALL_DIR`, or regular `atomic-current` entry under `ATOMIC_BIN_DIR`, is reported and left untouched, not moved or deleted.
+- A pinned `-Ref` is honored literally. If GitHub returns a different release tag, installation stops before download.
+
+Package-manager installation remains available but requires Node.js; see the [Quickstart](/getting-started/installation#package-managers).
 
 Atomic uses a Bash shell for the `bash` tool. For that tool, Atomic checks these locations in order:
 
@@ -43,21 +55,19 @@ Paths copied from Git Bash, MSYS2, Cygwin, or WSL are accepted anywhere Atomic r
 
 ## Interactive Startup
 
-Atomic mounts the themed startup identity and focused editor before waiting for the isolated engine to finish binding. You can type immediately; submitting a prompt shows the working indicator while startup finishes. Escape cancels a submission that is still blocked on optional-resource readiness, so it cannot dispatch later. If resource loading fails before admission, Atomic restores the exact draft, sends no provider request, and reports the generation failure once. An older engine generation cannot release or reject its replacement's submission.
+You can type while Atomic finishes startup. Submitting shows the working indicator; Escape cancels a submission still waiting for resources. If loading fails before the prompt is sent, Atomic restores your exact draft and sends no provider request. Use `/reload` to retry resource loading.
 
-The isolated engine binds a mandatory minimal runtime first, with Intercom available, then stages bundled workflows, subagents, MCP, web access, optional tools, provider overrides, skills, prompts, and themes. Prompt dispatch, extension commands, model/resource commands, session replacement, and tool-aware RPC operations wait for a generation-scoped resource-ready gate. After a failure, `/reload` starts a fresh transactional resource attempt instead of waiting forever on the rejected gate. `session_start` messages wait too. A failed transactional candidate does not publish host-managed settings, providers, tools, resources, event subscriptions, or system-prompt state. Extension-owned session-scoped objects remain shared by design and are not rolled back.
-
-The same source path is used for package-manager and release-archive builds. Node installs retain Node's persistent compile cache and its `NODE_DISABLE_COMPILE_CACHE=1` coverage opt-out. Release builds syntax-minify the shared application sidecar without shortening identifiers and compile the launcher with bytecode on Windows x64 and ARM64, matching Linux and macOS — but Windows bytecode launchers must still be compiled on a Windows host, preserving the safeguard from Bun 1.4.0. Despite the embedded-bytecode alignment fix ([#26299](https://github.com/oven-sh/bun/pull/26299)) and integrity fallback ([#31961](https://github.com/oven-sh/bun/pull/31961)), the same compile cross-run from a non-Windows host produced an executable that segfaulted before user code ran, even on `--version`: the 0.9.18-alpha.1 payload was built on Linux, so the shipped Windows launcher crashed while the Windows-hosted smoke build passed. `publish.yml` therefore builds both Windows archives on the Windows runner and the Linux release-payload job runs `build-binaries.sh --skip-windows`. The pinned Bun 1.4.2 probe cross-compiles `bun-windows-x64-baseline` and `bun-windows-arm64` launchers and verifies their PE machine types. Cross-compilation does not prove runtime compatibility, so release validation must still exercise the full archive, TUI, workflows, tools, extensions, workers, and native add-ons on Windows x64 and real Windows ARM64 hardware. No measured Windows speedup is claimed yet.
+Release-build constraints and startup internals are documented in [Windows maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/windows-runtime.md).
 
 ## Filesystem Watchers
 
-On Windows, Atomic canonicalizes paths before starting native filesystem watchers. If a watcher target cannot be canonicalized or still contains an unsafe 8.3 short-name component such as `USERNA~1`, Atomic avoids native `fs.watch` for that target and uses polling where the feature supports it. This protects long-running sessions, footer git status refreshes, and custom theme reloads from Windows/libuv path-prefix assertion crashes.
+Atomic uses polling where supported when a Windows path cannot be watched safely. Theme reloads and Git status updates may therefore arrive through polling rather than native filesystem notifications.
 
 ## Self-Update Behavior
 
 `atomic update --self` can update Windows installations that Atomic can identify as writable global package-manager installs. `atomic update` includes the same self-update step before updating packages unless you pass `--extensions`.
 
-When self-update starts on Windows, Atomic first cleans any previous `.atomic-native-quarantine` directory under the global package root. If native add-ons from the current install are loaded by the running process, Atomic moves those files into a per-run quarantine directory and copies them back into place before invoking the package manager. This lets the package manager replace native dependency files that Windows would otherwise keep locked.
+Atomic handles loaded native add-ons during package-manager self-update so Windows file locks do not prevent their replacement.
 
 If Atomic cannot safely self-update the current installation, it exits with a clear message instead of guessing. The message explains that the install is unsupported, unmanaged, or not writable; prints the detected executable path when available; and tells you to update Atomic with the package manager, wrapper, source checkout, or release artifact that originally installed it. Archive installs are not managed by `atomic update`; rerun the PowerShell installer to replace `current` with the requested release. Standalone Bun binaries direct users to the current [Atomic releases](https://github.com/bastani-inc/atomic/releases/latest), never upstream Pi artifacts.
 

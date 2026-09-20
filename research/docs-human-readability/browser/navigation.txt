@@ -1,0 +1,12 @@
+### Result
+{"navigation":"http://localhost:3333/getting-started/installation"}
+### Ran Playwright code
+```js
+await (async page => {await page.goto("http://localhost:3333/development"); await page.getByRole("link",{name:"Installation",exact:true}).click(); await page.waitForURL("**/getting-started/installation"); return {navigation:page.url()};})(page);
+```
+### Page
+- Page URL: http://localhost:3333/getting-started/installation
+- Page Title: Installation - Atomic
+- Console: 0 errors, 2 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-20T00-41-23-724Z.log#L23-L24

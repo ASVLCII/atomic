@@ -290,7 +290,7 @@ pi.on("before_agent_start", async (event, ctx) => {
 });
 ```
 
-The `systemPromptOptions` field gives extensions access to the same structured data Atomic uses to build the system prompt. This lets you inspect what Atomic has loaded — custom prompts, guidelines, tool snippets, context files, skills — without re-discovering resources or re-parsing flags. Use it when your extension needs to make deep, informed changes to the system prompt while respecting user-provided configuration.
+The `systemPromptOptions` field exposes the structured data Atomic uses to build the system prompt. Inspect loaded custom prompts, guidelines, tool snippets, context files, and skills without rediscovering resources or parsing flags. Use this data to change the prompt while respecting user-provided configuration.
 
 Inside `before_agent_start`, `event.systemPrompt` and `ctx.getSystemPrompt()` both reflect the chained system prompt as of the current handler. Later `before_agent_start` handlers can still modify it again.
 
@@ -314,17 +314,11 @@ These notification-only events wrap blocking user-facing prompts. Each event has
 
 - `ui_prompt`: extension prompts opened through `ctx.ui.select()`, `ctx.ui.confirm()`, `ctx.ui.input()`, `ctx.ui.editor()`, and `ctx.ui.custom()`.
   Custom inspection/navigation components can pass `{ purpose: "navigation" }` to omit their own prompt span. The default remains `"prompt"`. Nested approval calls still emit events; mounting or hiding the workflow graph is not itself an approval.
-- `project_trust`: interactive startup and resume trust dialogs (including trust-hook `select`, `confirm`, and `input` dialogs and borrowed extension-source authorization), plus the built-in `/trust` selector. In isolated interactive mode, the engine owns startup/resume decisions and uses the host UI; host-owned `/trust` notifications are forwarded to the engine. If the current engine has not bound yet, the transport retains the start and end in order until it binds, even if the selector closes first. Separate completed dialogs retain separate lifecycle pairs when delivered together. This does not delay the trust decision; retiring that engine discards its pending notifications.
+- `project_trust`: interactive startup/resume trust dialogs, trust-hook dialogs, borrowed extension-source authorization, and the built-in `/trust` selector. Silent saved/default/CLI decisions and noninteractive startup do not emit artificial waits.
 
-Startup first loads only permitted user/global, builtin, and explicitly authorized CLI extensions, and binds them to a real session before asking for trust. Existing handlers receive the live `ExtensionContext` while the dialog is waiting: `ctx.cwd`, `ctx.sessionManager`, and other session APIs are available. Approval completes resources in that same session without rerunning safe extension factories or their `session_start` handlers. Newly authorized project extensions receive `session_start` only after loading; they do not receive historical prompt events. Untrusted project and borrowed project-local code is never loaded just to observe a prompt. Silent saved/default/CLI policy decisions and noninteractive startup emit no artificial waits.
+Trust-safe extensions receive a live context before the trust prompt. Newly authorized project extensions load afterward and do not receive historical prompt events. Resume trust dialogs use the outgoing session context; failed preparation leaves that session active.
 
-Interactive resume trust dialogs use the outgoing session's live extension context. Destination validation and `session_before_switch` cancellation precede trust preparation; failed preparation leaves that session active. Project resources load only when the prepared replacement continues after shutdown. Attaching subscribers does not replay earlier notifications.
-
-Atomic coalesces nested or overlapping prompts, including mixed reasons, into one shared outer span. The end event retains the original outer prompt's reason, kind, and title and fires after every prompt in the span settles, including rejected promises and synchronous failures. Cancelling or disposing the `/trust` selector ends its wait. Rebinding the host UI context closes an active span before a prompt from the new context can begin. Notifications are not replayed to a replacement engine if the engine exits while a host selector is open.
-
-At session replacement, Atomic waits up to 1,000 ms for a snapshot of pending prompt notification deliveries before shutdown. Prompt display and answers never await observers. Start and end dispatch independently, invoking each observer in notification order without awaiting other observers; an earlier slow observer cannot make later subscribers receive an end before its start. An observer's own asynchronous start and end work can overlap, so update lifecycle state before awaiting unrelated work. If an observer hangs, Atomic warns and continues replacement; its context is not guaranteed to remain valid after that finite boundary.
-
-Handlers run best-effort from the microtask queue. Atomic does not await them before opening or closing the prompt, so notifications do not block the UI.
+Nested or overlapping prompts share one outer span. Its end retains the original reason, kind, and title and fires after all nested prompts settle. Prompt display and answers never wait for observers. An observer's asynchronous start and end work can overlap, so update lifecycle state before awaiting unrelated work. During session replacement, pending notification delivery has a 1,000 ms limit; do not assume an old context remains valid beyond it. See [delivery mechanics](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#prompt-notification-delivery).
 
 ```typescript
 pi.on("ui_prompt_start", (event) => {
@@ -523,7 +517,6 @@ Behavior guarantees:
 - No re-validation is performed after your mutation
 - Return values from `tool_call` control blocking via `{ block: true, reason?: string, terminate?: boolean }`
 - `terminate` only applies to a blocked call; the agent stops early only when every finalized result in the batch is terminating
-- `terminate` applies only to a blocked call; the agent stops early only when every finalized result in the batch is terminating
 
 ```typescript
 import { isToolCallEventType } from "@bastani/atomic";
@@ -713,17 +706,7 @@ Transforms chain across handlers. See [input-transform.ts](https://github.com/ba
 
 The host exposes typed workflow observation contracts. A workflow provider must register and publish activity; these APIs alone do not connect the workflow scheduler. Without a publisher snapshot, availability is `unavailable`, not an empty ready state.
 
-The workflows package also contains a pure root-activity projector. It combines a store snapshot with runtime ownership of executing stages and tools, retries, stopping runs, and acknowledged failures. Nested runs fold into one root summary; historical `running` status alone never counts as execution. Runnable stage handoffs remain `working`, while a stage parked on its own prompt contributes attention rather than execution. Independent work keeps the root `working` with `needsAttention: true`. With no work progressing, human waits and unresolved failures are `blocked`; paused runs are `idle` with reason `paused`, and completed or intentionally stopped runs are `idle` with reason `quiescent`.
-
-Live executor ownership also keeps a running root `working` with reason `automatic_continuation` after its nodes settle and before author code admits the next node. This requires all stages to be completed or skipped and all tools completed, with no prompt, active block, or stop. It does not add to the execution count. Historical snapshots without live ownership, paused runs, and parked nodes do not qualify.
-
-Stopping a child suppresses handoffs only in that child's subtree, not in its parent or sibling runs. With no other active waits, a paused stage keeps the root `idle` with reason `paused` after independent execution finishes, even when the stored run status remains `running`. Its retained prompt does not request attention until the stage resumes; independent active waits still do. The projector does not change stored run or stage outcomes.
-
-Stopping ownership follows each run's `parentRunId` chain and then its root identity, even when a named ancestor's snapshot is absent. The root reports `working` with reason `stopping` only when all executing contributions are draining under a stop and no unaffected retry or handoff can progress. Independent work retains the usual `retrying`, `executing`, or `automatic_continuation` reason; a stopped run with no execution left does not select the reason. Removing history does not release runtime execution or stop ownership.
-
-The projection module's `workflowActivityNodeKey(runId, nodeId)` helper builds `${runId}:${nodeId}` keys for `executingStageIds`, `executingToolNodeIds`, and `retryingStageIds`. The first colon separates the runtime UUID run ID from the node ID, which may contain colons. Bare node IDs do not establish ownership: two runs can contain the same tool hash. `stoppingRunIds` and `acknowledgedFailureRunIds` use plain run IDs.
-
-The projector and its ownership-key helper are internal to the workflows package, not exports of the supported `@bastani/atomic/workflows` SDK. Extension consumers use `ctx.observeWorkflowActivity` rather than importing the projector.
+Use `ctx.observeWorkflowActivity` rather than importing internal workflow helpers. Root summaries distinguish live work from stored history: independent work remains `working` even when another stage needs attention; paused roots are `idle`, and unresolved waits without progressing work are `blocked`. A control event does not prove execution has stopped. The internal aggregation rules live in [workflow activity projection notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#workflow-activity-projection).
 
 The workflows extension registers a publisher on activation and publishes this activity stream for its owning session: root snapshots and changes, plus `workflow_lifecycle`, `workflow_stage_completed`, and `workflow_heartbeat` hooks (the runtime state table is in [`workflows/operations.md`](/workflows/operations#workflow-activity-for-extensions)). It does not change chat notifications. The built-in [Herdr reporter](/herdr) consumes this stream to reflect workflow execution and human-input waits in the owning pane.
 

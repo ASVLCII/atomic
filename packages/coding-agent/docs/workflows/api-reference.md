@@ -30,7 +30,12 @@ interface WorkflowBudget {
 
 State carries evidence, not pointers to evidence. Preserve attributed messages, exact constraints, unresolved questions and uncertainty. Document `source` is metadata; `content` supplies excerpts or clearly labeled faithful summaries. Empty arrays are valid. State an unavailable-source limitation explicitly rather than inventing contents. Remove secrets before transmitting text. Quoted document instructions do not grant user authorization.
 
-`route` returns a code-generated `workflowId`, `routerDecision`, and the selected definition's actual `inputSchema`, including defaults. It does not launch. Read the selection from `routerDecision.workflowType`; `none` returns an empty ID and reserves nothing. Route results have no top-level `workflowType`. Read the estimate from `routerDecision.estimatedDuration`; route and registered run results have no top-level `estimatedDuration`. The nested decision also contains the preserved `maxBudget` override declaration; omitted budget fields inherit their limits at execution. Routing failures have no `routerDecision`; inspect the error instead.
+`route` returns a code-generated `workflowId`, `routerDecision`, and the selected definition's actual `inputSchema`, including defaults. It does not launch.
+
+- Read the selection from `routerDecision.workflowType`. `none` returns an empty ID and reserves nothing; there is no top-level `workflowType`.
+- Read the estimate from `routerDecision.estimatedDuration`. Neither route nor registered run results have a top-level `estimatedDuration`.
+- The nested decision contains the preserved `maxBudget` override declaration. Omitted budget fields inherit their limits at execution.
+- Routing failures have no `routerDecision`; inspect the error instead.
 
 `run` requires the reserved `workflowId` and explicit `inputs`; it neither routes again nor accepts a workflow-name override, routing state or budget. Missing/invalid inputs return actionable `needs_input` feedback and the same ID. Correct inputs and retry that ID. A fresh task, selection or budget requires a fresh route. IDs are bound to their owner/session and definition/schema; unknown, foreign, expired, invalidated and stale IDs are rejected, never silently remapped. Reservations expire with their owning tool/session. Duplicate admission cannot create a second instance.
 
@@ -108,46 +113,23 @@ Each heartbeat arrives in main chat as a `workflows:workflow-heartbeat` card. It
 
 Only one heartbeat per run can be outstanding. Its slot stays occupied until the card is consumed into the conversation, even if the parent's turn ends or its queue is paused. Boundaries reached while that slot is occupied are skipped, not stacked. Delivery resumes at the first future boundary.
 
-Consumption releases only the typed `workflows:workflow-heartbeat` entry's exact `runId + scheduledAt` identity. Copying the card text into another custom message cannot release it. On hosts that report consumption, including Atomic's chat host, at most one unread heartbeat per run waits for the parent.
-
-All runs in a session share a delivery queue. Each send has a two-minute watchdog so an unresponsive host cannot block every run's heartbeats:
-
-- If the host does not answer, Atomic abandons the attempt, records it as undelivered, releases the run's slot, and moves to the next run. The abandoned run re-arms at its next future boundary.
-- A late answer cannot settle the abandoned attempt again, restart its retries, or disturb another send.
-- An outright send failure still retries with the existing backoff.
-
-The watchdog covers sending only. Once the parent admits a card, consumption has no deadline ([#2557](https://github.com/bastani-inc/atomic/issues/2557)).
+An unresponsive host does not block other runs indefinitely: a heartbeat send times out after two minutes. Once accepted, a card can remain unread without a consumption deadline. Delivery failures retry; missed boundaries do not accumulate.
 
 #### Pause, resume, and cadence limits
 
 Paused runs emit nothing. Resume and restart pick up at the first future boundary on the original cadence; missed boundaries are never backfilled. Only top-level runs send heartbeats to parent chat.
 
-Durable resume keeps the original run id but records a fresh start time. To preserve cadence, a run writes one reserved durable anchor as soon as it has durable progress, before its first boundary. Atomic uses the earlier of that anchor and the current start time. The anchor also stores the launch cadence, so editing, renaming, deleting, or reloading a definition affects later launches, not existing runs or their durable resumes.
+Existing runs and durable resumes retain their launch cadence despite later definition edits, renames, deletion, or reload.
 
 There is one exception: a run launched with heartbeats disabled writes no anchor. If resumed in a new process, it adopts the definition's current cadence.
 
-When several runs are due together, delivery follows `scheduledAt` order, with run id as the stable tie-break. A retry retains its place rather than allowing later heartbeats to overtake it.
-
-Very small and very large positive intervals remain valid:
-
-- Below a millisecond, the next boundary uses the finest instant the clock can represent. The one-outstanding rule still bounds delivery to one card per parent turn.
-- Above roughly 3 × 10^303 minutes, `startedAt + interval` exceeds the largest finite double timestamp. No first boundary or durable record is created, and `ATOMIC_WORKFLOW_DEBUG=1` reports this. The authored interval is still reported, but delivers no heartbeat.
-
-`0` is the only value that declares heartbeats off.
+When several runs are due together, older scheduled heartbeats arrive first. Use a practical interval in minutes; submillisecond values cannot exceed the one-outstanding-card limit, and intervals above roughly 3 × 10^303 minutes cannot produce a first heartbeat. Set `0` to disable heartbeats explicitly.
 
 #### Terminal cleanup and stale cards
 
-Atomic checks for terminal state before queueing a heartbeat, before processing it, and before each delivery attempt, including retries. A run that finishes during delivery therefore stays silent unless the host has already accepted its card.
+Terminal runs stop producing heartbeats. A recoverable provider or rate-limit block also suppresses new heartbeats but retains the cadence for resume.
 
-Completed, failed, blocked, skipped, cancelled, and killed runs receive one idempotent cleanup pass. It removes their wake-up, next boundary, outstanding slot, queued heartbeat and retry timer, cadence, and durable-anchor memos. Repeating cleanup creates no state or schedule and reports nothing left to clear.
-
-The same cleanup runs at startup and on store changes. Already-terminal or missing runs lose stale anchors and queued records without replaying them or reading or rewriting their anchors. Other active runs remain untouched; recovery still selects the first future boundary ([#1975](https://github.com/bastani-inc/atomic/issues/1975)).
-
-A recoverable provider or rate-limit block is different from terminal `blocked`. It remains stored as `running` and resumable. It emits no new heartbeat while blocked, but keeps its cadence and any card waiting with the parent until the run itself becomes terminal.
-
-Already-admitted cards cannot be withdrawn from the parent's queue. Instead, when the parent reads one, its exact `runId + scheduledAt` identity must still be pending for a current nonterminal run. Atomic excludes the old heartbeat from model context if the run ended, is unknown to this process, or resumed under the same ID with a later pending boundary. This covers cards held through long turns, recovered at startup, or admitted before durable resume.
-
-The rendered transcript card remains as a record that the heartbeat was raised. Only its model-facing steer is invalidated.
+An already-visible card remains in the transcript. Its stale instruction is excluded from model context if the run has ended or the card no longer belongs to the current run state. Scheduler cleanup and recovery details are in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md).
 
 ### `budget`
 
@@ -606,7 +588,16 @@ readonly fallbackModels?: readonly string[];
 readonly fallbackThinkingLevels?: readonly string[];
 ```
 
-`fallbackModels` tries the primary first, each fallback in order, and then the current Atomic-selected model when available. It advances for rate limits and quota or usage-limit exhaustion, including messages such as `The usage limit has been reached` and codes such as `usage_limit_reached` or `insufficient_quota`. Auth/provider outages, unavailable models, network timeouts, generic transport errors such as `Connection error.` or `fetch failed`, and 5xx responses also advance the chain. A thrown failure that another request to the same candidate can plausibly repair — a rate limit, provider outage, network timeout, or transport error — is retried on that candidate with exponential backoff from `settings.retry` before the chain advances; `retry.enabled: false` keeps immediate advancement. A failure the same candidate has already definitively rejected — a rejected credential, an unavailable model, or an incompatible request — skips the same-candidate retry and advances immediately, exactly as in main chat. A same-candidate retry resumes the existing turn when the stage transcript still ends in a message the agent can continue from, and otherwise re-sends the stage prompt; either way the failed provider error is dropped from the live transcript and the prompt is delivered exactly once.
+`fallbackModels` tries the primary, each fallback in order, then the current Atomic-selected model when available. The chain advances for:
+
+- Rate limits and quota or usage-limit exhaustion, including `The usage limit has been reached`, `usage_limit_reached`, and `insufficient_quota`.
+- Auth/provider outages, unavailable models, network timeouts, generic transport errors such as `Connection error.` or `fetch failed`, and 5xx responses.
+
+Before advancing, Atomic retries a thrown failure on the same candidate when another request could plausibly repair it. Rate limits, provider outages, network timeouts, and transport errors use exponential backoff from `settings.retry`. Set `retry.enabled: false` for immediate advancement.
+
+Rejected credentials, unavailable models, and incompatible requests advance immediately, as in main chat. Retrying the same candidate cannot repair these failures.
+
+A same-candidate retry resumes the existing turn when the transcript ends in a message the agent can continue from. Otherwise, it re-sends the stage prompt. In either case, Atomic removes the failed provider error from the live transcript and delivers the prompt exactly once.
 
 Request/context incompatibility also advances it, including HTTP 400/413/422 bad, unprocessable, or payload-too-large requests; unsupported tools or parameters; context-length or context-window overflow; and `too large`, `invalid_request`, or `bad_request` errors. This lets the chain reach the current selected user model when no configured candidate can serve the request.
 
@@ -614,13 +605,12 @@ If extension initialization fails and its session cannot be cleaned up, the stag
 
 A context overflow that the stage session's compaction has already failed to resolve is terminal for its candidate: it skips the same-candidate retry, because re-sending an identical request cannot fit a context compaction could not shrink, and advances straight to the next candidate.
 
-A schema-backed stage advances the chain for one more reason. Each candidate gets the stage prompt plus up to three corrective follow-ups to produce a valid `structured_output` call. A candidate that spends that whole budget without one has failed the stage even though every turn returned cleanly, so it fails over exactly like a rate-limited candidate: its attempts are recorded as failures carrying the structured-output error, a `[fallback]` warning is recorded, its session is disposed, and the next candidate receives the original stage prompt with a fresh correction budget. A capture that already succeeded is never retried on another model. When no candidate remains, the stage still fails with the structured-output contract error and every exhausted candidate's attempts are recorded as failures.
+A schema-backed candidate gets the original prompt plus up to three corrective follow-ups to produce valid `structured_output`. Exhaustion records a failed attempt and advances to the next candidate with a fresh correction budget. Successful capture is never retried. If the chain runs out, the stage fails with its structured-output contract error.
 
-The chain also covers session creation. A stage session created eagerly — by `ctx.__ensureSession()`, an eager stage call, or a control attach — retries transient creation failures on its candidate under `settings.retry` and then walks to the next configured candidate, so a provider that cannot even open a session does not strand the stage. Creation failures that same-candidate retry cannot repair — auth, unavailable model, incompatible request — advance immediately. A creation failure that exhausts the whole chain is not cached: the next call starts a fresh attempt.
+Session creation uses the same retry and fallback policy. Transient failures retry; rejected credentials, unavailable models, and incompatible requests advance immediately. If all candidates fail, a later call may try again. Concurrent callers share creation rather than starting duplicate sessions.
 
-That walk runs behind a single creation gate. A concurrent `ctx.__ensureSession()` or a first `ctx.prompt()` joins the creation already in flight rather than starting a second walk, so the stage never has two live sessions competing for the same generation.
-
-Controlled pauses are honored throughout. A pause that starts and finishes while a session is still being created keeps its replacement objective, which the next prompt sends exactly once; a pause during a same-candidate continuation is settled as a pause rather than a model failure, so resuming recovers the stage instead of spending a fallback candidate.
+Pause remains effective during creation or retry. Resume continues the paused objective without consuming a fallback candidate solely because of the pause.
+Resume sends a replacement objective exactly once, including when pause occurred during session creation.
 
 Workflow-code errors, tool failures, validation failures, refusals, content-filter or safety blocks, cancellations, and task failures do not advance the chain. A reattached finished stage starts on the model that last succeeded; if that model fails retryably, the full chain restarts from the primary.
 
@@ -656,7 +646,7 @@ readonly excludedTools?: readonly string[];
 
 `tools` is an allowlist across coding and bundled extension tools, including Intercom. `excludedTools` and `noTools: "all"` win for every tool. Include `intercom` explicitly when a restricted stage needs peer coordination.
 
-The bundled `subagent` tool is available by default on the same terms as main chat. A workflow stage is a top-level session, so it may delegate once; the children it launches may not delegate or control another child. Delegation is exactly one level deep and nothing configures it: there is no config option, agent frontmatter field, or tool parameter for the level. The in-process admission door carries each child's issued depth in its typed child policy, the executor refuses any launch or `kill` from a session that was itself admitted as a child, and the Rust `SubagentControl` admission door refuses a child deeper than the single permitted level. That depth is never carried through process environment. Bundled subagent definitions from `@bastani/subagents` are available to that tool. Explicitly list tools such as `subagent`, `web_search`, `fetch_content`, or `intercom` when using an allowlist; in-process child sessions load the bundled resources while suppressing the workflow extension lifecycle.
+The bundled `subagent` tool is available by default, subject to the same restrictions as other tools. Workflow stages may delegate one level; their children cannot delegate or control another child. This depth is not configurable. Explicitly include `subagent`, `web_search`, `fetch_content`, or `intercom` when a restricted stage needs them. Child sessions do not expose the workflow extension's tool.
 
 Workflow stages use the same upstream-compatible `bash` tool as normal Atomic sessions. Enabled commands run through the configured shell with the stage process permissions. There is no command-text allow/deny option: expose or hide shell access with these tool fields, prefer narrow custom tools for repeatable operations, and use a container, VM, or other sandbox for stronger isolation.
 
@@ -689,7 +679,7 @@ Enables a schema-specific, single-use final-answer tool for that item. `ctx.stag
 
 A schema-backed `StageContext` supports one `prompt()` call, so create another stage for another structured prompt. Missing or invalid `structured_output` calls receive up to three corrective follow-ups quoting the contract error and reminding the model to call `structured_output` instead of replying with plain JSON. That budget is per model candidate: a candidate that spends the initial prompt and all three follow-ups without a valid call is treated as a failed candidate and the stage advances to the next entry in [`fallbackModels`](#fallbackmodels-/-fallbackthinkinglevels), which receives the original stage prompt and its own fresh budget. The recorded attempt error names what the turn actually looked like — no assistant message after the prompt, an assistant message with empty text, or the `structured_output` validation error — so a repeated external cause is attributable. With no fallback candidate left, the stage fails with the contract error rather than completing. An explicit tool allowlist automatically receives the final-answer tool, while items without `schema` do not.
 
-When `schema` and `output` are both configured, the successful `structured_output` turn carries two separate results. All ordinary assistant text blocks from that exact message, in order, are written to the artifact; the successful tool arguments become the typed schema-backed workflow value. The runtime snapshots both sides against the exact successful tool-call id rather than searching by tool name, so corrective attempts and later admitted turns cannot replace either result, and it never serializes the tool arguments into the artifact. When the successful message carries no ordinary text — including when a model-fallback session recreation leaves the live session without that message — the artifact falls back to the most recent earlier assistant text that made no `structured_output` call; if no such text exists the artifact is empty and its receipt includes the standard empty-artifact warning. Stages with `schema` but no `output` keep their existing result-text behavior. Builtin pattern workflows that hand structured decisions to later stages (`adversarial-verification`, `generate-and-filter`, `tournament`, `loop-until-done`) persist those decisions themselves, so their `*.json` inter-stage artifacts remain machine-readable JSON.
+With both `schema` and `output`, ordinary text from the successful `structured_output` message goes to the artifact; tool arguments become the typed result. Corrective attempts and later turns cannot replace that pair. If the successful message has no ordinary text, the artifact uses the most recent earlier assistant text without a `structured_output` call, or stays empty with a warning. The pattern builtins save their inter-stage decisions as JSON separately.
 
 ### `output` / `outputMode`
 
@@ -702,15 +692,25 @@ Writes stage/task output to a path or disables output persistence with `false`. 
 
 The runner owns `output`. For an ordinary stage, it saves the completed assistant answers from the current prompt generation in order. The first answer is unchanged; later answers are appended after `## Supplement 1`, `## Supplement 2`, and so on. Text blocks retain their original text, including whitespace and repeated answers. Tool-call progress, reasoning, user input, tool results and earlier session history remain transcript-only. A single answer therefore keeps its existing artifact format. A schema-backed stage retains its separate contract: the ordinary text paired with the successful `structured_output` call owns the artifact, not the tool arguments.
 
-Follow-ups admitted before generation close, including executor continuations and work drained during close, supplement the artifact rather than silently replacing its report. Corrections should explicitly say what they correct; the runner does not infer revision intent from wording or text length. After completion, retained-session chat and unrelated messages cannot replace the saved artifact or receipt. Repeated finalization does not append content again. For an intentional replacement, author a new tracked stage with its own output path; a completed tracked stage still rejects a second `prompt()`. A direct internal context's new authored prompt starts a fresh generation, while executor continuations stay in the active generation. Stages without `output` retain their existing last-response behavior.
+Follow-ups accepted before the stage closes append numbered supplements. Corrections must say what they correct; Atomic does not infer replacement intent. Later retained-session chat cannot overwrite a completed artifact. Use a new tracked stage and output path for replacement. Compaction, branch navigation, and model fallback do not discard already accepted answers; historical branch text is not appended as new output. Stages without `output` retain their last-response behavior.
 
-Accepted answers are captured independently of the session's compactable context. Compaction cannot remove them from the handoff. Navigating to an existing session-tree branch restores context, not output: its historical answers are not appended, while newly generated continuations still supplement the current report. If a continuation falls back to another model, earlier successful answers remain; only the failed attempt's provisional answers are discarded before the successful continuation is appended. Capture stops after generation close drains admitted work, so later retained-session chat does not accumulate in the completed output generation.
+A stage declaring `output` also gets a rendered companion transcript. Describe the deliverable in the prompt rather than asking the model to write the runner-owned artifact.
 
-A stage declaring `output` also gets a rendered, line-oriented companion transcript and an instruction explaining its output contract. Workflow prompts should describe the deliverable, not reimplement artifact writing.
+The companion transcript lives under the durable Atomic config root at `~/.atomic/workflows/runs/<runId>/transcripts/`, or the equivalent configured agent root. `ATOMIC_WORKFLOW_ARTIFACT_DIR` overrides that root. It refreshes when newly admitted answers update the artifact before close.
 
-The companion transcript is saved under the durable Atomic config root at `~/.atomic/workflows/runs/<runId>/transcripts/` (or the equivalent configured agent root; `ATOMIC_WORKFLOW_ARTIFACT_DIR` overrides that root). It is refreshed when newly admitted answers update the artifact before close. It is never placed inside the repository tree or OS temporary storage: a home-scoped durable location survives both worktree deletion and OS temp purges, and staying outside the repo keeps full tool output — which may contain secrets — from being committed accidentally. Run-scoped artifact directories are pruned only when their durable/live run record is terminal (or the directory is an unowned orphan) and older than the exported `WORKFLOW_ARTIFACT_RETENTION_MS` policy. Running, paused, quit, blocked, and awaiting-input runs are exempt indefinitely because their artifacts are live resume dependencies. A live continuation transitively protects the original run directory in its `resumedFromRunId` chain, even when intermediate continuations have different run IDs; merely quoting another run's artifact path does not protect that unrelated owner or make the quoting run depend on it. A **failed** run with no live continuation is terminal and does age out: it stays retryable, but the retention window is the grace period it gets, otherwise repeated recoverable failures would accumulate artifacts forever. When a terminal durable owner is aged out, the durable entry is deleted first; if authoritative deletion is unavailable or refuses, the artifact directory is preserved. Goal ledgers, Ralph implementation notes, and QA video paths share that same durable root and retention policy. The receipt names both absolute paths. Search the transcript with `rg`, then read only the narrow line ranges you need; do not read the whole transcript into a downstream prompt. The transcript is a secondary searchable record; the output artifact remains the curated handoff.
+The transcript never lives in the repository or OS temporary storage. Its home-scoped location survives worktree deletion and temp purges, and keeps full tool output, which may contain secrets, out of accidental commits.
 
-The receipt reports facts only. An empty artifact produces `WARNING: the stage artifact is empty; search the companion transcript for this stage's work.` A non-empty artifact is never classified, however short and even if it only names its own output path: deciding whether such text is a pointer or a deliverable requires knowing what the author meant, and the regex bank that previously attempted it produced false alarms on genuine short output. The transcript named in every receipt is the recovery path for anything that looks wrong to a reader.
+Retention follows the exported `WORKFLOW_ARTIFACT_RETENTION_MS` policy:
+
+- Run-scoped directories are pruned only when their durable/live run record is terminal, or they are unowned orphans, and they exceed the retention age.
+- Running, paused, quit, blocked, and awaiting-input runs are exempt indefinitely because their artifacts are resume dependencies.
+- A live continuation protects every original run directory in its `resumedFromRunId` chain, even across different continuation IDs. Merely quoting another run's artifact path does not protect that unrelated owner or create a dependency.
+- A **failed** run without a live continuation ages out. It remains retryable during the retention grace period; failures do not preserve artifacts forever.
+- Atomic deletes an aged-out terminal owner's durable entry first. If authoritative deletion is unavailable or refused, it preserves the artifact directory.
+
+Goal ledgers, Ralph implementation notes, and QA video paths use the same durable root and retention policy. The receipt names both absolute paths. Search the transcript with `rg`, then read only the needed line ranges. Do not load the whole transcript into a downstream prompt. It is a secondary searchable record; the output artifact remains the curated handoff.
+
+An empty artifact produces `WARNING: the stage artifact is empty; search the companion transcript for this stage's work.` Non-empty artifacts are not quality-checked automatically. Inspect the deliverable and search its companion transcript when something appears missing.
 
 ### `reads`
 
@@ -720,7 +720,11 @@ readonly reads?: readonly string[] | false;
 
 Names files for the stage to read before running, or disables inherited reads with `false`. Paths are supplied as readonly strings.
 
-`reads` passes **paths, not content**. It prepends a `[Read from: <paths>]` directive to the prompt and the stage reads those files itself with its own read tool, so a stage sees whatever is on disk when it runs — not a snapshot taken when the path was passed. Any stage that rewrites an artifact between producer and consumer changes what the consumer reads. The runtime fails the stage loudly before the model turn when a referenced path is missing, rather than allowing an empty read to look like valid context. Goal preserves that as a reviewer execution failure attributed to the `reads` contract; it does not misreport the missing file as a malformed reviewer decision. This keeps large artifacts out of the prompt; state the expectation in the prompt too, for example `Read the file at ${artifactPath} before continuing.`
+`reads` passes **paths, not content**. It prepends a `[Read from: <paths>]` directive; the stage uses its own read tool to inspect those files. It sees the file when it runs, not a snapshot from when you supplied the path. Rewriting an artifact between producer and consumer changes what the consumer reads.
+
+A missing referenced path fails the stage before the model turn. Goal reports this as a reviewer execution failure attributed to `reads`, not a malformed reviewer decision.
+
+This keeps large artifacts out of the prompt. State the reading requirement in the prompt too, for example `Read the file at ${artifactPath} before continuing.`
 
 ### `maxOutput`
 
@@ -1476,7 +1480,7 @@ interface Store {
 
 This is the stable core exposed by the standalone authoring declaration. Atomic's runtime store also has graph, prompt, session, pause/resume, snapshot, and subscription methods used by embedded integrations; those richer runtime controls are not part of the lean workflow-package `Store` contract shown here.
 
-The embedded runtime's `graphSnapshot()` returns one deeply frozen, payload-bounded projection for each store version; repeated reads at the same version return the same object. Runtime code must change graph-visible state through a version-bumping store method before another task can observe it. `subscribeInvalidation()` reports those changes synchronously without creating a full snapshot. Legacy `subscribe(snapshot)` consumers still receive a full cloned snapshot; this includes status-file output when `statusFile: true`, while the default `statusFile: false` path avoids that payload traversal. Authored stage results remain omitted; a failed author-exit result may retain a bounded JSON output object for status inspection, and oversized output falls back to the existing bounded string fields without adding synthetic output keys.
+Embedded graph snapshot and invalidation mechanics are documented in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md), not the standalone authoring contract.
 
 ### `createCancellationRegistry()` / `cancellationRegistry`
 

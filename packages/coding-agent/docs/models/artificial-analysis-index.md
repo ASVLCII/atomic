@@ -9,7 +9,7 @@ description: "The external benchmarks that inform Atomic model selection — Art
 This is the historical benchmark snapshot retained from the September 3, 2026 documentation baseline. It is not current model-selection guidance. For the latest dated measurements, methodology, and task-specific recommendations, use [Evals](/models/evals) and [Model selection](/models/model-selection).
 </Note>
 
-Atomic's model-selection docs are keyed to two live external benchmark sources rather than a hand-maintained table of scores. This page lists each benchmark, what it measures, and **when to reference it** for a given workflow role — so the docs stay useful as new models ship without a manual rewrite every time.
+Atomic's model-selection docs use two live external benchmark sources. This page explains what each benchmark measures and when to use it for a workflow role, rather than maintaining a score table that needs rewriting whenever models ship.
 
 <Warning>
 No single benchmark is the source of truth. Use these as inputs and validate against Atomic's own workflow evals — public suites test different task distributions than real engineering loops. When Atomic's numbers disagree with a public index, Atomic's evals win. The DeepSWE snapshot used by the linked model-selection pages was updated September 3, 2026 and was re-read from the live source on **2026-09-03**. The Artificial Analysis sections below were **last reviewed 2026-09-01** and were not re-fetched in that pass.
@@ -76,12 +76,7 @@ A quick lookup for which benchmark to weight per role:
 
 ## Keeping the docs fresh
 
-flora131's guidance on this issue: point the model at the live benchmark URLs and describe what each measures and when to reference it, rather than hardcoding scores that go stale on every release.
-
-1. Treat the model-selection pages as timestamped snapshots that read *from* the live sources above.
-2. When a new model appears on DeepSWE or Artificial Analysis, add it by pulling its numbers from the source — the frontier may move (as the gpt-5.6 family did).
-3. Mark a model **unmeasured** only if it is absent from both sources; unmeasured models may still be operational defaults.
-4. Prefer generating the docs and any future routing policy from the same underlying data, so documentation and routing cannot drift apart.
+Check the live sources before choosing a model; this page is a dated snapshot. Do not give an unmeasured model its predecessor's score. Documentation refresh instructions are in [Benchmark maintenance](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md).
 
 ## Related
 

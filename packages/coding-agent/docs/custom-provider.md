@@ -148,7 +148,7 @@ Moved to [Provider streaming API](/custom-provider/streaming#registration).
 
 ## Testing Your Implementation
 
-Test your provider against focused tests that mirror Atomic's provider contract. If you are working from the source checkout, note that provider internals come from `@bastani/pi-ai`; this monorepo does not contain a `packages/ai/test` directory to copy from directly:
+Test your provider/model pairs against these behaviors. The filenames below are suggested test names, not a required test suite:
 
 | Test | Purpose |
 |------|---------|

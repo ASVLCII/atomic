@@ -33,7 +33,9 @@ The shared [`routerModel`](/settings#routermodel) setting chooses the model maki
 
 Neither routing nor child fallback changes the parent chat model or the `structured_output` tool.
 
-Routing has one 30-second deadline for an initial attempt and up to three repair retries for malformed or schema-invalid answers. A valid answer stops repairs. The result is exactly `{ model, effort }`: an eligible provider/model ID and one supported effort, or `null` for a model with no configurable reasoning. A supported `"off"` is distinct from `null`. The catalog reflects configured authentication, not proof of valid credentials, quota, or entitlement.
+Routing has one 30-second deadline for the initial attempt and up to three repair retries for malformed or schema-invalid answers. A valid answer stops repairs.
+
+The result is exactly `{ model, effort }`: an eligible provider/model ID and one supported effort, or `null` for a model with no configurable reasoning. A supported `"off"` is distinct from `null`. The catalog reflects configured authentication, not proof of valid credentials, quota, or entitlement.
 
 The child does not start if guides are missing, no candidates are eligible, model/effort pairs remain invalid, availability changes, or authentication/provider errors, timeout, or cancellation occur. Input, provider, cancellation, and stale-catalog failures are not repaired. Routing never falls back to another provider or launches a duplicate child. Correct the reported problem and retry explicitly, or select a concrete model.
 
@@ -71,7 +73,7 @@ A request-incompatible candidate also advances the sequence. Examples include HT
 
 Fallback does not retry safety refusals, ordinary task or tool failures, validation failures, cancellations, or workflow-code errors.
 
-Decisions use structured provider and attempt causes, not numeric process exit codes or timeout-regex classification. There is no per-attempt idle watchdog or child wall-clock kill cap. A quiet provider response can finish; only an explicit termination or provider failure supplies a retryable cause.
+There is no per-attempt idle watchdog or child wall-clock kill cap. Quiet provider responses may finish; only explicit termination or a provider failure supplies a retryable cause.
 
 For concrete-model calls, a known provider without configured auth is recorded as a skipped attempt. Unknown/custom providers are still attempted, and this pre-admission check never filters out the final current user-selected model. Automatic routing additionally applies its eligible-model constraints to every fallback, including that model.
 
@@ -79,7 +81,7 @@ A fallback may send the same prompt and context to a different provider. Choose 
 
 ## Reasoning levels
 
-Set the reasoning (thinking) effort for each model candidate with a `model_name:thinking_effort` suffix on `model` and on every `fallbackModels` entry. Valid efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` — the same shorthand used by `atomic --model sonnet:high`. `xhigh` and `max` are used only when the selected model's capability map supports them.
+Set the reasoning effort for each candidate with a `model_name:thinking_effort` suffix on `model` and every `fallbackModels` entry. Valid efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`, as in `atomic --model sonnet:high`. `xhigh` and `max` require support from the selected model.
 
 ```markdown
 ---
@@ -91,7 +93,7 @@ fallbackModels: openai/gpt-5:medium, anthropic/claude-haiku-4-5:off
 ---
 ```
 
-Because the effort travels with each model string, every primary and fallback candidate is self-contained: a fallback can run at a different effort than the primary, so a high-effort primary degrades gracefully to a cheaper, lower-effort fallback.
+Each primary and fallback model string carries its own effort. A high-effort primary can therefore fall back to a cheaper model at a lower effort.
 
 **Migrate off the legacy `thinking` field.** The separate `thinking:` frontmatter field is deprecated. It still works as a default for any candidate that has no suffix, and a suffix always wins, but new agents should encode the effort directly on `model` and `fallbackModels`:
 
@@ -107,9 +109,15 @@ Because the effort travels with each model string, every primary and fallback ca
 
 ## Owner-bound task projection
 
-Host adapters can construct an `OwnerTaskStore` from their existing supervisor and owner lease, check the `store.connect()` result, then call `bindOwnerTaskStore(session, store)` for that exact live session. Binding does not create or connect an owner. The store observes snapshot/cursor reconciliation and notifies already-mounted chats even when the producer binds lazily. Disposing the view does not cancel the owner. Reattachment uses existing identities rather than replaying launch tools.
+Host adapters can bind task observation to an exact live session:
 
-Native task snapshots retain `wasBackground` once a designated observation yields, so a fresh projection can distinguish completed background work from foreground-only commands. Trusted hosts recover authentic command settlement receipts independently of the bounded event journal. Neither recovery path registers a new wait or restarts execution.
+1. Construct an `OwnerTaskStore` from the existing supervisor and owner lease.
+2. Check the `store.connect()` result.
+3. Call `bindOwnerTaskStore(session, store)`.
+
+Binding does not create or connect an owner. The store reconciles snapshots and cursors and notifies already-mounted chats even when the producer binds lazily. Disposing the view does not cancel the owner. Reattachment uses existing identities rather than replaying launch tools.
+
+Completed background tasks remain distinguishable from foreground-only work after reattachment. Reattachment does not restart execution or register another wait.
 
 Main and workflow-stage chats use below-prompt background counts instead of persistent task rows in the transcript. Session replacement clears the previous owner's status before a replacement store binds. A workflow question retains the background count below its input area. Completion notifications use the same shared renderer in both chats.
 

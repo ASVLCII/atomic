@@ -17,13 +17,13 @@ Atomic accepts environment variables for configuration, provider credentials, an
 
 `PI_CACHE_RETENTION=long` is a provider/upstream prompt-cache option and intentionally has no Atomic-prefixed alias. `VISUAL` and `EDITOR` select the Ctrl+G external editor when `externalEditor` is unset.
 
-`PI_TUI_ESC_TIMEOUT` belongs to the installed pi-tui renderer and also keeps its upstream name: it sets how long the renderer waits after a lone `ESC` before treating it as the Escape key, in milliseconds. The default is `100` over SSH and `10` otherwise; increase it if Alt-key input is misread as Escape.
+`PI_TUI_ESC_TIMEOUT` sets how many milliseconds the renderer waits after a lone `ESC` before treating it as Escape. It belongs to the installed pi-tui renderer and keeps its upstream name. The default is `100` over SSH and `10` otherwise. Increase it if Alt-key input is misread as Escape.
 
 The renderer also owns `PI_HYPERLINKS`, `PI_IMAGE_PROTOCOL`, and `PI_TRUE_COLOR`. `PI_HYPERLINKS=1|0|auto` and `PI_TRUE_COLOR=1|0|auto` override or preserve detection; `PI_IMAGE_PROTOCOL=kitty|iterm2|none|auto` selects, disables, or preserves image-protocol detection. Explicit JSON values under `terminal.hyperlinks`, `terminal.images`, and `terminal.trueColor` take precedence. These renderer-owned names intentionally have no `ATOMIC_*` aliases.
 
 ## Subprocess attribution
 
-`AI_AGENT=atomic` is set by the CLI, RPC, and compiled binary entry points and forced into every Atomic-owned child-process environment, including bash/tool commands, isolated RPC children, subagent and workflow runners, MCP servers, web-access subprocesses, and the intercom broker. This follows upstream's overwrite policy: a caller-supplied `AI_AGENT` is replaced in the Atomic process and child environment, but the caller's environment object is never mutated.
+Atomic sets `AI_AGENT=atomic` for itself and every subprocess it launches, replacing a caller-supplied value. Scripts can use it to identify an Atomic-owned invocation. The caller's environment object is not mutated.
 
 ## Provider credentials
 

@@ -36,7 +36,11 @@ Filter what a package loads using the object form in settings:
 
 ## Scope and Deduplication
 
-Packages can appear in both global and project settings. The project entry normally wins. A project entry with `autoload: false` instead acts as a delta over the global entry: it starts with no newly auto-discovered resources while explicit include/exclude patterns adjust the inherited package resources. Identity is determined by:
+Packages can appear in both global and project settings. The project entry normally wins.
+
+A project entry with `autoload: false` instead adjusts the inherited global resources. It adds no newly auto-discovered resources; explicit include/exclude patterns control what loads.
+
+Package identity is determined by:
 
 - npm: package name
 - git: repository URL without ref

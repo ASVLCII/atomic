@@ -7,7 +7,7 @@ description: "Embed Atomic in a Node.js application."
 
 # SDK
 
-The SDK provides programmatic access to atomic's agent capabilities. Use it to embed atomic in other applications, build custom interfaces, or integrate with automated workflows.
+Use the SDK to embed Atomic in an application, build a custom interface, or integrate agent capabilities into an automated workflow.
 
 **Example use cases:**
 - Build a custom UI (web, desktop, mobile)
@@ -162,7 +162,9 @@ const { session } = await createAgentSession({
 
 Pass `extensionBindings.humanInput` to answer extension dialogs and `ask_user_question` in a Node host. `HostInput` requires all five methods: `confirm`, `select`, `input`, `editor` and `questionnaire`. `QuestionParams` and `QuestionnaireResult` are exported from `@bastani/atomic`; questionnaire answers retain their question indices, answer kinds, selections, previews and notes.
 
-Each callback receives a `HostInputOptions` argument with a runtime-generated `requestId`, the originating `sessionId`, and an `AbortSignal`. Stop presenting the question when the signal aborts. Return an actual boolean from `confirm`, a supplied choice or `undefined` from `select`, and a string or `undefined` from text dialogs. Empty strings, whitespace and choice order are preserved. Malformed replies reject with `InvalidHostInput`; false, cancellation and rejected callbacks never approve an action.
+Each callback receives a `HostInputOptions` argument with a runtime-generated `requestId`, the originating `sessionId`, and an `AbortSignal`. Stop presenting the question when the signal aborts.
+
+Return an actual boolean from `confirm`, a supplied choice or `undefined` from `select`, and a string or `undefined` from text dialogs. Atomic preserves empty strings, whitespace and choice order. Malformed replies reject with `InvalidHostInput`; false, cancellation and rejected callbacks never approve an action.
 
 ```typescript
 import { createAgentSession, type HostInput } from "@bastani/atomic";
@@ -301,59 +303,39 @@ interface AgentSession {
 }
 ```
 
-Always `await session.dispose()` in `finally`. Disposal immediately refuses new work, cancels and drains owned operations, settles questions, shuts down extensions and releases session leases. Repeated calls await the same outcome. A `ShutdownFailed` error contains component failures in `errors`; cleanup still attempts the remaining components. Caller-supplied managers and model runtimes remain borrowed, and other sessions remain usable. `abort()` cancels current work without destroying the session.
+Always `await session.dispose()` in `finally`. Disposal immediately refuses new work, cancels and drains owned operations, settles questions, shuts down extensions and releases session leases. Repeated calls await the same outcome.
+
+A `ShutdownFailed` error contains component failures in `errors`; cleanup still attempts the remaining components. Caller-supplied managers and model runtimes remain borrowed, and other sessions remain usable. Use `abort()` to cancel current work without destroying the session.
 
 Captured extension APIs also refuse new execution, mutations and registrations as soon as close or reload begins. Already-admitted `pi.exec()` calls remain part of the awaited drain; provide `signal` or `timeout` when invoking subprocesses that might not finish on their own. `abort()` alone does not retire the API. A rejected transactional reload restores the surviving generation's action admission.
 
 #### Finishing admitted work
 
-Already-admitted `pi.refreshWorkflowResources()` calls also settle before shutdown, reload retirement or factory rollback cleanup. Await refresh to handle provider failures, register cleanup before starting resource acquisition, and let a suspended custom refresh finish independently of disposal. New refresh calls are refused once that owner starts closing.
+Disposal and reload wait for admitted callbacks, resource refreshes, and subprocesses. Ensure callbacks can settle independently of disposal, including work started by cleanup handlers. Give `pi.exec()` calls a timeout or cancellation signal, and await them in the handler so you can inspect failures. Never make cleanup wait for disposal itself.
 
-Disposal waits for already-admitted initial extension binding, prompt/steering/follow-up/compaction hooks, compaction providers, and reload preparation. This includes `new AgentSession(...)` followed by `bindExtensions()`. Ensure extension and `beforeSessionStart` callbacks settle; a pending callback is not completed cleanup.
+Register cleanup before acquiring resources or starting asynchronous callbacks. Call the unsubscribe returned by `pi.events.on()` or a workflow publisher's `dispose()` when you no longer need it; both are idempotent. Generation cleanup releases remaining handles and reports failures.
 
-A callback released after shutdown begins cannot append to a retired queue, start a provider turn, append compaction results, or publish a reload candidate. Independent sessions can borrow the same resource loader, including subclasses and forwarding loaders, settings, or `eventBus` without sharing workflow ownership. The supplied loader still controls custom resource policies and raw prompt text.
-
-Asynchronous extension notifications, event-bus handlers, shortcuts and workflow activity observers also finish before their shutdown hooks run. This includes notifications from synchronous methods such as `setThinkingLevel()` and `setSessionName()`; their return types are unchanged. Release suspended callbacks independently rather than waiting for disposal to finish first.
-
-Shutdown and rollback also wait for tracked `pi.exec()` calls launched by cleanup handlers, even if the handler returns first. Prefer awaiting those calls in the handler so you can inspect their results, and give them a timeout or cancellation signal. Do not make a cleanup subprocess wait for disposal itself to finish. Fresh calls through captured APIs remain refused while cleanup drains, including failed or omitted factories.
-
-Call the unsubscribe returned by `pi.events.on()` or a workflow publisher's `dispose()` as soon as you no longer need that handle. Release is idempotent and removes the callback's retained data; you do not need to wait for session disposal. Automatic generation cleanup releases remaining handles and reports release failures.
+The full admission and drain rules are in [Session lifecycle internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/session-lifecycle.md).
 
 #### Reload failures and resource ownership
 
-Closing still delivers queued completion events and persists completed conversation messages in order. Background session-summary requests, including superseded requests that ignored cancellation, must settle before disposal finishes; cancelled summaries cannot write stale results. Failed reload preparation rolls back resources acquired by candidate factories even when discovery rejects before a candidate runner exists. The original generation remains usable after a rejected transaction; cleanup failures remain visible through `ShutdownFailed`.
+Strict transactional reload failure leaves the original generation usable. Ordinary reload failure does not restore the retired generation. Both attempt cleanup of newly acquired resources and report cleanup failures through `ShutdownFailed` without hiding the original error.
 
-Already-running tools also retain their completed results, details and `tool_result` hooks during close. Ordinary nontransactional reloads unwind their newly acquired resources on discovery failure while leaving caller-owned discovery resources alone; unlike a rejected transaction, an ordinary reload does not restore the retired generation.
+Prefer acquiring extension resources in `session_start`. If a factory acquires them earlier, register `session_shutdown` immediately, even if `extensionsOverride` may later omit that factory. Capture cleanup handles when acquiring resources rather than rereading loader getters during cleanup.
 
-Custom-loader failures do not prevent acquisition rollback when `getExtensions()` itself is unavailable. Keep cleanup independent of rereading discovery results: capture the resources you own when acquiring them. Creation and reload preserve the original failure and report additional cleanup failures rather than replacing it with another getter error.
+Do not cache dialog functions across reload attempts. Retiring functions refuse new questions; after a rejected transaction, use the surviving session's current `ctx.ui`.
 
-Reload refuses new questions through retiring dialog functions as soon as it begins. If transactional reload fails, the surviving session can request input again through its current `ctx.ui`, but previously captured dialog functions remain closed. Do not cache dialog functions across reload attempts.
-
-Sharing a `SessionManager` shares persisted conversation identity, not live shell/task ownership. Closing one session does not close the other's commands.
-
-You may copy and edit custom `extensionsOverride` registrations without retaining private metadata. Callbacks bind to the invoking session, and caller registration edits remain effective. Prefer acquiring resources in `session_start`. If a factory acquires them earlier, register `session_shutdown` cleanup immediately. Failed creation attempts that cleanup even when a later factory fails, without releasing borrowed discovery resources.
-
-Filtering a factory out with `extensionsOverride` does not undo acquisitions it already made. SDK-owned omitted factories receive shutdown cleanup before creation returns, even when the selection is empty; their captured APIs are retired and their subscriptions released independently of selected extensions. The same rule applies during reload, without removing selected extensions' subscriptions. Register cleanup at acquisition time, and handle creation or reload rejection if that cleanup fails.
-
-Failed or omitted factories finish their already-admitted event callbacks before shutdown, including resources acquired after an asynchronous wait. Register cleanup before starting such callbacks, and let them settle independently of creation or reload completion. Once rollback starts, every factory being closed refuses fresh API work, even while another factory's cleanup is suspended. Selected extensions remain usable and their pending callbacks do not block omitted-factory cleanup.
+Shared loaders, event buses, settings, and `SessionManager` instances do not share live task ownership. Closing one session leaves another session's commands and borrowed discovery resources alone.
 
 #### Session replacement and deferred cleanup
 
-`await runtime.dispose()` also seals replacement admission and drains any pending new-session, resume, fork or import operation, including its factory/startup and candidate cleanup. A successor cannot be published after runtime closure. Release suspended host callbacks independently of disposal rather than waiting for disposal before releasing them.
+`await runtime.dispose()` refuses new replacements and waits for pending factories, startup, and cleanup. No successor is published after closure. Host callbacks must settle independently of disposal.
 
-An extension command may await `ctx.newSession()`, `ctx.fork()` or `ctx.switchSession()` through your runtime-backed host actions. Replacement seals the old session and drains unrelated work before handing control to the successor. The invoking command may then finish, but the old session's shutdown hooks wait for that continuation. Both `await oldSession.dispose()` and `await runtime.dispose()` still await its full cleanup; do not wait for either inside the continuation that they must drain. Deferred cleanup failures remain visible through disposal.
+An extension command may await `ctx.newSession()`, `ctx.fork()`, `ctx.switchSession()`, or `session.reload()`. Its old generation remains owned until the command continuation finishes, and final disposal waits for that cleanup. Do not await disposal inside the continuation it must drain. Concurrent replacements are supported, and deferred cleanup failures remain visible.
 
-Concurrent command replacements also register their handoff before waiting for publication. They do not block one another's retirement, but final disposal still waits for every command continuation and reports deferred cleanup failures. Reload candidate cleanup covers settings commit, resource activation and resource commit failures as well as preparation/startup failures.
+After replacement or self-reload, use the new generation's APIs. Captured old `pi` and `ctx` actions cannot mutate the successor or acquire its resources. Old shutdown handlers may release captured resources, but cannot authorize successor work.
 
-After a reload commits, runtime reconstruction can still fail in a custom loader. The retiring generation's shutdown and invalidation are attempted even then, and the installed candidate remains owned by the session for final disposal. If cleanup also fails, `ShutdownFailed` retains the reconstruction and cleanup causes rather than replacing the original error.
-
-Reload also owns preparation factories that are later re-instantiated, releasing unused discovery acquisitions without closing borrowed resources. Failed candidate startup seals and drains that candidate's callbacks before shutdown. If an extension command awaits `session.reload()`, its old generation stays owned until the command continuation finishes; `await session.dispose()` joins that deferred cleanup and reports failures. Do not await disposal from the continuation it must drain.
-
-Retained cleanup is not retained authority: after self-reload or command-initiated replacement hands off, neither the invoking command nor another holder may use captured old `pi` or `ctx` actions to mutate the successor or obtain a task host. Use capabilities delivered to the new generation. Old shutdown handlers may inspect their cleanup context and release captured resources, subscriptions and publishers, but may not acquire successor resources. Events emitted by retired shutdown handlers are not delivered into the successor.
-
-For replacement initiated outside the retiring session's work, outgoing extension shutdown completes before successor creation. If it fails, no successor is created and retained workflow cleanup is still attempted. The operation rejects with its original failure and any additional cleanup causes; repeated runtime disposal retains the failed outcome.
-
-Overlapping replacement factories may finish out of order. Runtime retirement, publication and host rebinding are coordinated; displaced successors are closed, and a failed candidate cannot shut down a surviving successor's workflows. If every replacement fails, retained workflow cleanup still runs. Creation also rolls back owned extension acquisitions when context transforms or resource setup fail before the session constructor completes; borrowed discovery is not shut down.
+For replacement initiated outside the retiring session's work, outgoing shutdown finishes before successor creation. If it fails, replacement rejects without creating a successor. Handle creation, reload, replacement, and disposal failures rather than continuing as though cleanup succeeded.
 
 #### Settings failures and operation IDs
 
@@ -363,7 +345,7 @@ Caller-supplied `executeBash()` IDs remain correlation IDs, not unique operation
 
 #### Compaction and tree navigation
 
-`compact()` serializes older context to numbered lines, asks the session model for JSON deleted ranges, validates them, and mechanically reconstructs a durable verbatim transcript string. It appends a `compaction` entry with `details.strategy: "verbatim-lines"`; the recent tail remains ordinary messages. The model never authors replacement context text.
+`compact()` removes selected older transcript lines without asking the model to rewrite retained text. It appends a durable `compaction` entry with `details.strategy: "verbatim-lines"` and respects the configured recent-message count. See [Compaction](/compaction) for controls and [Session format](/session-format#compactionentry) for persisted fields.
 
 `session.navigateTree()` rejects during streaming, compaction, or branch summarization rather than queueing the navigation. The active branch stays unchanged. Wait for the operation to finish before retrying.
 
@@ -489,9 +471,13 @@ await session.followUp("After you're done, also do this");
 
 Both `steer()` and `followUp()` expand file-based prompt templates but error on extension commands (extension commands cannot be queued).
 
-`pauseQueuedMessages()` is a synchronous admission gate. It moves existing raw steering/follow-up entries into a hold before an abort boundary and keeps later context-bearing arrivals—including trigger-turn custom messages, batches, interrupts, `sendUserMessage()`, and ordinary `prompt()` calls—queued without starting a provider turn. Content blocks, optional data, duplicate identities, raw text, message types, and the existing order within each queue kind are retained. Non-trigger custom messages remain history-only and do not invent a turn.
+`pauseQueuedMessages()` synchronously holds existing raw steering/follow-up entries before an abort boundary. Later context-bearing arrivals also stay queued without starting a provider turn. These include trigger-turn custom messages, batches, interrupts, `sendUserMessage()`, and ordinary `prompt()` calls.
 
-`resumeQueuedMessages()` releases that hold exactly once but does **not** itself start or continue a model turn. Its promise resolves to `true` only when raw held steering/follow-up work was released, and to `false` when no held raw work existed. The caller must use its existing explicit resume action (for example, the interactive chat submission or workflow resume boundary) to drive execution. `clearQueue()` clears the paused flag when it explicitly removes the final unowned held item; if a protected or interrupt-owned item remains, the gate stays paused.
+The hold preserves content blocks, optional data, duplicate identities, raw text, message types, and order within each queue kind. Non-trigger custom messages remain history-only and do not start a turn.
+
+`resumeQueuedMessages()` releases the hold exactly once but does **not** start or continue a model turn. Its promise resolves to `true` only when it released raw held steering/follow-up work, or `false` when none existed. The caller must use its explicit resume action, such as interactive chat submission or workflow resume, to drive execution.
+
+`clearQueue()` clears the paused flag when it explicitly removes the final unowned held item. If a protected or interrupt-owned item remains, the gate stays paused.
 
 ### Agent and AgentState
 
@@ -587,15 +573,9 @@ session.subscribe((event) => {
 });
 ```
 
-A subscriber that rebuilds the assistant message from these deltas must
-accumulate them into its own message object. `message_start` reports the
-message the model is about to stream, but an in-process subscriber receives the
-provider's live partial rather than a snapshot of it, and the provider keeps
-appending to that same object as the stream runs. Appending a delta to it adds
-text the provider already added. A subscriber that attaches part-way through a
-turn missed the deltas that came before it and can seed itself from
-`session.agent.state.streamingMessage`, which holds the message currently being
-streamed, if any.
+To rebuild an assistant message from deltas, accumulate them in your own message object. In-process subscribers receive the provider's live partial in `message_start`, not a snapshot. The provider keeps appending to that object, so appending deltas yourself would duplicate text.
+
+If you subscribe part-way through a turn, seed your object from `session.agent.state.streamingMessage`, if present, to include the deltas you missed.
 
 ## Options Reference
 

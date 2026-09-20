@@ -48,7 +48,11 @@ type AgentSessionEvent =
 
 `queue_update` emits the full pending steering and follow-up queues whenever they change. `session_info_changed`, `model_changed`, and `thinking_level_changed` report interactive session metadata changes. `compaction_start` and `compaction_end` cover manual and automatic verbatim line compaction: the model emits deleted ranges and Atomic mechanically reconstructs retained text.
 
-For automatic compaction, `compaction_end.willRetry === true` means the agent is retrying the interrupted turn after compaction; `AgentSession.prompt()` waits for that continuation before resolving. This includes overflow recovery and live threshold compaction for retry-worthy interrupted work such as output-token truncation or OpenAI Responses output-budget underflow errors. Generic provider `invalid_request_body` failures still compact with `willRetry: false` when threshold compaction is warranted. If the same-model compact-and-retry overflow path is exhausted, `compaction_end` includes `unresolvedOverflow: true` plus an `errorMessage` so orchestration layers can fall back to another model instead of treating the prompt as successful. `result` and `errorMessage` are independent fields: a mid-turn compaction that commits a boundary and then fails the provider hard-input-limit gate emits both at once, so a non-null `result` alongside an `errorMessage` means the boundary is durable and only the follow-up request failed.
+For automatic compaction, `compaction_end.willRetry === true` means the interrupted turn will retry; `AgentSession.prompt()` waits for that continuation. This includes overflow and retry-worthy threshold recovery, such as output-token truncation or OpenAI Responses output-budget underflow. Generic `invalid_request_body` failures still use `willRetry: false` when threshold compaction is warranted.
+
+If same-model compact-and-retry recovery is exhausted, `unresolvedOverflow: true` and `errorMessage` let integrations choose another model rather than treating the prompt as successful.
+
+Check `result` and `errorMessage` independently. Both can be present when the boundary was saved but the follow-up request exceeded the provider's hard input limit.
 
 Compaction planning and branch summaries reuse the configured retry policy for transient provider failures. Their `summarization_retry_*` events expose scheduling, each restarted request (including whether it belongs to branch summarization or a compaction reason), and retry-loop completion to JSON, RPC, SDK, and interactive consumers.
 
@@ -72,7 +76,13 @@ type AgentEvent =
   | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean };
 ```
 
-On the wire, Atomic narrows `message_update`: every record carries the streaming delta in `assistantMessageEvent` (with its cumulative `partial` field stripped), the latest cumulative provider-reported `usage`, and — only when the provider reported one — `endTurn`, the provider's explicit end-of-turn signal (pi-ai's `AssistantMessage.endTurn`, for example OpenAI Codex `end_turn`). The `usage` object may remain zero until completion when a provider only reports usage at the end. A non-assistant message on this event is a protocol violation and throws rather than emitting an invented zeroed usage.
+On the wire, each `message_update` record carries:
+
+- The streaming delta in `assistantMessageEvent`, with its cumulative `partial` field stripped.
+- The latest cumulative provider-reported `usage`. This may remain zero until completion if the provider reports usage only at the end.
+- `endTurn`, only when the provider reported it. This is the provider's explicit end-of-turn signal, pi-ai's `AssistantMessage.endTurn`, for example OpenAI Codex `end_turn`.
+
+A non-assistant message on this event is a protocol violation. Atomic throws rather than emitting invented zeroed usage.
 
 ## Message Types
 

@@ -1,0 +1,3328 @@
+{
+  "baseline": "2175058c1e1dfd5850a61914566ab45110a65ef4",
+  "pages": [
+    {
+      "page": "background-tasks.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Split stop-notification timing from duplicate/outcome handling. Kept termination confirmation, queued cancellation, and owner-close suppression.",
+      "audience_reason": "Relocate/shorten Keep launch/wait/kill examples, task ownership, stop confirmation, states, and inspection. Move native timers, receipts/journal recovery, Windows containment, pause sequencing, and footer watcher lifetime.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "build.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Shortened the opening quickstart/reference choice. Kept navigation destinations and mechanism order.",
+      "audience_reason": "Retain Customization choices and navigation serve users; no internal mechanics.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "changelog.mdx",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Historical release updates are dense but were left intact under the no-changelog-change constraint. Preserved all Update markup and release claims.",
+      "audience_reason": "Immutable Byte-identical to HEAD and amendment baseline, including historical implementation claims.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "compaction/reference.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Separated recent-message counting, serialization, and lossless-tail guarantees. Kept zero behavior, image marker, and absent-query default.",
+      "audience_reason": "Relocate/shorten Keep exact settings, overrides, hook examples, entry/result shapes, lossless-tail and signed-reasoning behavior. Move serialization rationale, upstream comparison, format migration mechanics, and implementation locator. Keep historical resume consequences.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "compaction.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Split planner fallback behavior from the transcript-disclosure warning. Kept every failure category and model/thinking invariants. Existing ordinary-message wording needs separate technical review.",
+      "audience_reason": "Relocate/shorten Keep triggers, loss warnings, keepContext, fallback disclosure, cancellation, hooks, entry schema, and branch before/after example. Move range normalization, outcome algorithm, retry arithmetic, sidecar internals, request isolation, and branch algorithm diagram.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "computer-use.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Removed repeated script-preparation instructions while keeping app-specific version/object checks and the change record. Authorization, scratch-copy, and output checks remain in the preceding paragraph.",
+      "audience_reason": "Retain App recipes, platform setup, consent boundaries, capture checks, and recovery are operator actions on users' applications, not Atomic repository testing infrastructure. All examples remain.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "containerization.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Replaced a hesitant opening with two direct isolation choices; shortened bind-mount explanation. Kept host-write and credential warnings.",
+      "audience_reason": "Retain Isolation choices, Dockerfiles, host-access and credential warnings, and transfers are deployment guidance.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "custom-provider/api-reference.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Made thinking-format choices a list rather than one dense paragraph. Kept each exact request shape, alias, condition, and all interface examples.",
+      "audience_reason": "Retain Interfaces, request shapes, compatibility flags, cost tiers, and capability enforcement are public provider contracts.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "custom-provider/oauth.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Separated process isolation from login-label/callback behavior. Kept credential/function transport prohibitions and callback correlation.",
+      "audience_reason": "Relocate/shorten Keep callback examples, cancellation/errors, catalog APIs, credential schema. Move descriptor transport and engine transaction/publication mechanics.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "custom-provider/override.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Short example-led page already states the critical no-models preservation rule plainly.",
+      "audience_reason": "Retain Proxy examples and no-models preservation rule are public API usage.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "custom-provider/registration.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Registration and unregister instructions already use focused paragraphs around examples. Kept replacement warning and auth-header conditions.",
+      "audience_reason": "Retain Registration, unregister, model replacement, API selection, and auth headers are provider-author guidance.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "custom-provider/streaming.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Shortened pending-stop explanation without weakening terminal-event requirements. Kept error checks and stream examples verbatim.",
+      "audience_reason": "Retain Event order, stop reasons, block/tool assembly, cost accounting, and installed reference implementations support public provider authoring.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "custom-provider.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Provider choice, example links, and next-page map already guide readers directly. Preserved compatibility headings and moved-section links.",
+      "audience_reason": "Clarify/relocate Keep provider registration and behavior checklist. Move repository test-directory context; identify listed test names as suggestions rather than an existing required suite.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "development.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Turned the startup benchmark's four measurements into a list. Kept timing arithmetic, nonce/tool checks, and accepted-sample requirements. Maintainer-content relocation deferred.",
+      "audience_reason": "Relocate Keep diagnostic reporting and concise anchor destinations. Move source setup, rebranding, asset resolution, benchmark methodology, timing internals, tests, smoke test, shrinkwrap, release boundary, and package maps.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "environment-variables.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Put ESC timeout behavior before renderer ownership and separated defaults from troubleshooting. Kept exact names and values.",
+      "audience_reason": "Relocate/shorten Keep names, defaults, precedence, credentials, and session metadata/opt-out contract. Move attribution entrypoint/child inventory and upstream-policy explanation.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "extensions/api-reference.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Shortened the scoped-model immutability explanation and separated compile-time from runtime guarantees. Kept fresh frozen array, entries, models, and throwing mutations.",
+      "audience_reason": "Retain Context methods, frozen-copy guarantees, lifecycle hazards, embedded-host obligations, and examples are supported extension/SDK contracts, not maintainer optimization notes.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "extensions/authoring.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Removed an insult and filler from path-normalization guidance. Kept the leading-@ requirement and all authoring examples.",
+      "audience_reason": "Relocate/shorten Keep state lifetimes, reload behavior, tools, rendering, all examples. Move graph hashing/native builtin bridge optimization; split terminating-tool contract for readability.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "extensions/events.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Shortened system-prompt inspection guidance and removed the duplicated terminate guarantee. Kept one complete guarantee and all event examples.",
+      "audience_reason": "Relocate/shorten Keep event order, payloads, examples, observer obligations, and public diagnostic outcomes. Move internal root projector/ownership keys and prompt transport/dispatch mechanics.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "extensions/examples.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Categorized lookup table is already compact and specific. Kept example filenames, API names, and links.",
+      "audience_reason": "Retain Runnable example lookup, including extension-author overlay QA examples, serves consumers rather than documenting the repository test runner.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "extensions/ui.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Removed repeated handleInput paragraph, retaining the more complete version and separating it from abort guidance. Kept fallback, async, and Ctrl+C caveats.",
+      "audience_reason": "Relocate/shorten Keep all code examples, options/restrictions, input behavior, marker usage, and rendering contracts. Move row-intersection composition, APC stripping, and default animation mechanics.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "extensions.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Split lazy-startup explanation and listed operation-specific discovery behavior. Kept resource waits, prefix misses, retry/resume distinctions, and legacy-anchor sections.",
+      "audience_reason": "Relocate/shorten Keep readiness waits, commands, recovery actions, safety keys, isolated restrictions, host picker/form APIs, and examples. Move initializer leases, watchdog teardown, ownership protocol, bootstrap mechanics, and startup implementation.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "getting-started/authentication.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Turned empty-picker troubleshooting into two actions. Kept the separate warning that configured credentials do not prove access.",
+      "audience_reason": "Retain Login, model selection, and access verification are operator actions; credential presence does not prove access.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "getting-started/first-session.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Shortened and split first-run explanation into display behavior and immediate actions. Kept prior-state versus credential distinction.",
+      "audience_reason": "Retain Workflow/skill choices, launch contracts, monitoring, and cost/privacy warnings explain usage, not Atomic maintainer implementation.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "getting-started/installation.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Separated platform support, package/archive layout, and Windows ARM caveats. Kept the complete-payload warning, redistribution prerequisite, and unvalidated hardware status.",
+      "audience_reason": "Relocate/shorten Keep install/uninstall examples, platforms, Windows ARM caveat, full-payload warning, Node/Bun workflow compatibility, clipboard setup, and durability fallback. Move native-leaf selection and musl dependency rationale.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "getting-started/project-instructions.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Made missing-instructions checks a short list. Kept filename, ancestor discovery, and override precedence.",
+      "audience_reason": "Retain File discovery, precedence, reload, and troubleshooting are user configuration.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "guides/configuration.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Focused settings examples and two merge-rule bullets are already clear; kept all JSON verbatim.",
+      "audience_reason": "Retain Settings examples and merge rules serve users.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "guides/intercom.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Brief definition, concrete coordination cases, and three benefits need no rewrite.",
+      "audience_reason": "Retain Short coordination orientation and operator/reference destinations.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "guides/non-interactive.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Removed self-referential orientation prose and simplified RPC use cases. Kept all mode choices and reference destinations.",
+      "audience_reason": "Retain Integration-mode choice, stdout usage, and RPC lifecycle are consumer guidance.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "guides/subagents.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Concise delegation criteria already explain when to keep work local. Kept independent-context and background distinctions.",
+      "audience_reason": "Retain Delegation criteria, context, and background choices are user decisions.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "guides/workflows.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Short orientation gives concrete workflow cases and the normal-chat alternative. Kept command literals and durable-run claims.",
+      "audience_reason": "Retain Workflow choice and inspect/resume commands are user operations.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "guides.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Short navigation page already separates recommended order from additional references.",
+      "audience_reason": "Retain Task-oriented navigation only.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "herdr.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Status table, opt-out example, and troubleshooting are already action-oriented. Kept privacy and no-reconnect-polling limitations.",
+      "audience_reason": "Retain Eligibility, status interpretation, opt-out, privacy, and recovery describe observable integration behavior.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "index.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Removed broad promotional positioning and redundant navigation explanation. Kept extensibility mechanisms and installation examples.",
+      "audience_reason": "Retain Installation and navigation only.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "intercom/operations.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Split transport framing from client-side ask behavior. Kept platform transports, byte count, and protocol failure handling.",
+      "audience_reason": "Relocate/shorten Keep states, retry/outcome actions, notifications, controls, limits. Move topology, framing, HMAC/SQLite identity authority, log implementation/history, process launch, completion handshake. Recovery table now honors existing unknown-outcome no-resend warning.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "intercom/reference.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Listed live target forms and separated precedence, workflow paths, and visibility caveats. Kept exact-target warnings and wildcard meanings.",
+      "audience_reason": "Relocate/shorten Keep targeting, memberships, queue limits, authorization boundaries, reply selection, and config examples. Move capability minting and launcher-sentinel execution mechanics.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "intercom.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Split bundled messaging purpose from lazy connection behavior. Kept local-only scope and startup registration distinction.",
+      "audience_reason": "Relocate/shorten Keep messaging, escalation, interview, and handoff examples. Move typed child-admission/interception mechanics; shorten priority input without dropping side-effect warnings.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "json.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Listed message-update fields with their individual conditions. Kept partial stripping, optional endTurn, zero usage, and protocol-error behavior.",
+      "audience_reason": "Shorten Keep public event fields and retry/result/error semantics; split dense compaction-event paragraph. No maintainer content to relocate.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "keybindings.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Split question-overlay scrolling into viewport, Notes, and short-terminal behavior. Kept every key literal and local-input exception.",
+      "audience_reason": "Relocate/shorten Keep action/default tables, config examples, physical recovery keys, clipboard actions, and viewport behavior. Move renderer version/SGR/focus-routing mechanics; link author input contract.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "llama-cpp.md",
+      "status": "revised",
+      "batch": "a",
+      "reason": "Revised Separated unload safety, persisted catalog behavior, and reconnect action. Kept stale-catalog fallback, surfaced router error, and no-replay guarantee.",
+      "audience_reason": "Retain Router setup, persisted-catalog fallback, limits, and reconnect actions help diagnose local models.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "mcp-servers.md",
+      "status": "unchanged",
+      "batch": "a",
+      "reason": "Reviewed/unchanged Already concise setup examples, ordered config precedence, and actionable troubleshooting. Kept sensitive-login URL warning and inactivity-not-total-timeout distinction.",
+      "audience_reason": "Retain Setup, discovery, auth, precedence, inactivity limit, and troubleshooting serve operators.",
+      "audience_review": "batch-a.md"
+    },
+    {
+      "page": "models/artificial-analysis-index.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Replaced the abstract introduction with a direct explanation of benchmark purpose. Kept the historical-status note, dates, source weighting, and all benchmark claims. No live refresh implied.",
+      "audience_reason": "Revised maintainer refresh section to a dated-source warning and link. Issue attribution, refresh policy, and shared-data suggestion \u2192 `benchmark-maintenance.md#refresh-procedure`. Historical benchmark definitions and role table remain useful source interpretation.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "models/evals.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Shortened the introduction and separated retrieval provenance, normalized Elo, and non-hallucination definitions. All measured values, tables, Mermaid fences, dates, formulas, and significance caveats remain.",
+      "audience_reason": "Revised chart-refresh procedure and obsolete-index history. Browser/Recharts extraction \u2192 `benchmark-maintenance.md#refresh-procedure`; naming history \u2192 `#retrieval-history-and-naming`. Retained all measurement tables, Mermaid charts, formulas, units, confidence caveats, and external experiment methodology. These explain model-choice evidence, not Atomic test infrastructure.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "models/model-selection.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Broke the long snapshot note into pricing, uncertainty, effort, and historical-selection bullets. Retained all four alternate Best-view configurations, seven excluded configurations, prices, access warning, and dated evidence.",
+      "audience_reason": "Revised retrieval-history and provider-generation walls into dated limits, catalog checks, and selection guidance. Browser verification scope and generation observations \u2192 `benchmark-maintenance.md#retrieval-history-and-naming` and `#provider-generation-observations`. Kept measurement/production-effort separation, account caveats, all recommendation rows, and exact model identities.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "models/pareto-efficiency.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Separated Best-view membership from highest-effort dominance and other non-frontier rows. Retained exact unrounded rates, costs, effort identities, and view-specific qualification.",
+      "audience_reason": "Revised historical frontier narrative to current dated disposition and pricing caveat. Earlier frontier membership and price corrections \u2192 `benchmark-maintenance.md#frontier-history`. Kept Best versus highest-effort distinction, unrounded dominance values elsewhere on page, off-peak exception, and role/diversity guidance.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "models/reference.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split PDF support into capability, transport, and media-type rules; shortened the sampling-parameter merge explanation. Kept placeholder behavior, Bedrock citation requirement, PDF-only validation, last-wins ordering, and the exact three stripped keys.",
+      "audience_reason": "Revised PDF builder detail, preserved-thinking serialization narrative, and ETag mechanics. \u2192 `provider-runtime.md#pdf-transport`, `#preserved-thinking`, `#catalog-refresh`. Kept public compatibility fields, payload controls needed by custom-provider authors, override precedence, fallback marker warning, provider restrictions, and every example.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "models.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Separated the single-file configuration rule, catalog refresh, deadline, and credential-generation behavior into readable paragraphs. Kept path precedence exclusions, the 15-second bound, cached fallback, and the unsupported-default diagnostic contract.",
+      "audience_reason": "Revised refresh and reload prose to observable status, cached fallback, and operator action. Deadline enforcement, credential generations, and rebuild mechanics \u2192 `provider-runtime.md#catalog-refresh`. Kept every configuration example, 15-second bound, source precedence, and unsupported-default behavior.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "packages/authoring.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Removed runtime-resolution detail from the directory-list bullet and gave it separate paragraphs. Kept all supported suffixes, singular alias, import specifiers, host-module resolution, and manifest exception.",
+      "audience_reason": "Revised in-memory host resolution into supported imports. \u2192 `resources-and-ui.md#package-loading`. Kept public manifest examples, dependencies, suffixes, aliases, and workflow discovery exception.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "packages/reference.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Explained inherited-resource adjustment separately from ordinary project precedence. Kept `autoload: false`, include/exclude behavior, identity rules, and filtering example. Does not imply rewriting global settings.",
+      "audience_reason": "Retained. Filtering syntax, inherited-resource adjustment, and npm/git/local identity rules are concise operator configuration contracts; no maintainer-only passage found.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "packages.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Removed a repeated package definition and split self-update behavior from installation eligibility. Kept exact-version pinning, release-note timing, manual fallback, Windows quarantine cleanup, and security warning.",
+      "audience_reason": "Revised Windows update mechanics and stage-loader construction. \u2192 `resources-and-ui.md#package-loading`. Kept exact-version installs, manual fallback, trust, resource inheritance, explicit loader override, package sources, destructive git reconciliation warning, and filters.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "programmatic.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Turned the three integration-mode descriptions into a scan-friendly list. Kept process lifetimes, structured-event behavior, permission prompts, and SDK control scope.",
+      "audience_reason": "Retained. Short integration-mode comparison and reference links are public entry guidance; no implementation relocation needed.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "prompt-templates.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Shortened prerequisites and the choice between templates, skills, and extensions. Kept discovery paths, argument syntax, all fenced templates, and linked alternatives.",
+      "audience_reason": "Retained. Locations, format, expansion, arguments, and loading rules are all actionable template usage. Examples stay intact.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "providers/reference.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Shortened unknown-stop and pending-stream rules without hiding failures. Kept raw reason reporting, existing successful mappings, terminal-state requirement, and credential order.",
+      "audience_reason": "Retained. Pending/terminal reasons, failure visibility, and credential order are public provider/client contracts, not debugging history.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "providers.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split login instructions by flow and separated refresh timing from shared-file locking. Kept remote paste fallback, extension callback support, engine credential boundary, five-minute threshold, and concurrency behavior.",
+      "audience_reason": "Revised OAuth ownership/lock prose, auth projections, Codex socket/header mechanics, source-map note, and Jev transport overview. \u2192 `authentication.md#oauth-ownership-and-refresh`, `#provider-source-map`; `provider-runtime.md#codex-fast-routing`, `#catalog-refresh`, `#structured-decision-transport`. Kept auth variables, endpoints and headers users configure, subscription constraints, credential lifetimes, cancellation, cloud examples, and Workers binding SDK example.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "quickstart.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Replaced onboarding meta-prose and split image-paste instructions by platform and clipboard behavior. Kept onboarding order, runtime prerequisites, every redirect heading, Alt+V on Windows, and tmux/terminal caveats.",
+      "audience_reason": "Revised tmux image-paste explanation to the reliable key and caveat. Terminal protocol/forwarding differences \u2192 `resources-and-ui.md#terminal-input-and-layout`. Kept onboarding path, install/runtime prerequisites, all examples and redirect anchors.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "reference/cli.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Put partial-secret output, completed output, and JSON status into separate paragraphs. Kept exit 9 discard requirement, exit 0 drain behavior, stderr diagnostics, and all command/flag tables.",
+      "audience_reason": "Revised fullscreen wall into input, selection, and exit actions. Mouse-dispatch implementation \u2192 `resources-and-ui.md#terminal-input-and-layout`. All flags, exits, credential-discard/drain distinctions, environment snapshot contracts, and examples remain public.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "reference.md",
+      "status": "unchanged",
+      "batch": "b",
+      "reason": "Reviewed unchanged. This is already a concise, grouped index of exact references and platform setup links. All labels, routes, headings, and inline contract names remain untouched.",
+      "audience_reason": "Retained. A concise navigation index; source/maintainer destinations are links, not embedded internal prose.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "rpc/examples.md",
+      "status": "unchanged",
+      "batch": "b",
+      "reason": "Reviewed unchanged. Two short source pointers lead directly to a complete client example; rewriting would add churn. Complete Node client fence and source destinations untouched.",
+      "audience_reason": "Retained. The Node client is a public usage example even though one linked complete example resides under `test/`; no test-harness discussion or runtime mechanics to relocate.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "rpc/extension-ui.md",
+      "status": "unchanged",
+      "batch": "b",
+      "reason": "Reviewed unchanged. Method-by-method request/response structure is easy to scan, with concise limitations and defaults. Kept timeout/cancellation rules, no-op methods, expansion-state exception, and all JSON examples.",
+      "audience_reason": "Retained. Dialog request/response JSON, no-op methods, timeout defaults, and state limitations are needed by RPC client and extension authors.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "rpc/protocol.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split bash ordering from session ownership; separated entry retrieval from durable cursor instructions. Kept request IDs, exactly one terminal response, replacement isolation, strict-after cursor semantics, and every wire example.",
+      "audience_reason": "Revised isolated ACK plumbing, compaction implementation, Bash conversion prose, and streaming complexity rationale. \u2192 `rpc-transport.md`; planner mechanics \u2192 `session-lifecycle.md#compaction-reconstruction`. Kept ACK-target ordering guidance, acceptance versus completion, correlation, exactly one terminal response, cursor semantics, all wire examples/types and errors.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "rpc.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split unsupported-default failure, recovery, and ordinary fallback into separate paragraphs. Kept correlated errors before user/model events, non-prompt availability, null-cycle exception, framing rules, and all compatibility headings.",
+      "audience_reason": "Retained. Starting, framing, saved-default recovery, Python example, and compatibility redirects are public client guidance. No internal algorithm wall remains here.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "sdk/reference.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Converted the successful structured-output call's effects into bullets. Kept schema/runtime support conditions, capture/details/file sinks, termination, and persistence opt-out. Full task-supervisor reference was read and retained.",
+      "audience_reason": "Revised raw native-supervisor material and repeated lifecycle mechanics. Native admission, journals, report identity, cleanup/platform internals, transcript adapter, S1 history and fake-runner evidence \u2192 `task-supervision.md`. Lifecycle mechanics \u2192 `session-lifecycle.md`. Retained exported `AgentTaskHost` usage, authorization boundary, observation versus execution, cleanup obligations, all SDK examples, tool options, and public loader/model APIs.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "sdk/structured-decisions.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Separated Jev context estimates, overflow recovery instructions, and response validation. Kept 32k/64k limits, estimate-not-guarantee caveat, no trimming/retry, HTTP 422, 1 MiB limit, and no confidence threshold.",
+      "audience_reason": "Revised the token-estimation formula into a limit caveat and link. Formula \u2192 `provider-runtime.md#structured-decision-transport`. Kept public tournament behavior because candidate grouping affects results/costs; kept schemas, `retainForFinal`, one-shot versus repair policy, context/deadline/response limits, cancellation, and diagnostic actions.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "sdk.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised again after the prior pass. Shortened introduction and live-partial warning; split host input, disposal, reload rollback, replacement continuation, and queue-pause contracts. Kept permission semantics, cleanup failures, borrowed ownership, deadlock warning, pause data/order guarantees, explicit resume requirement, and all code fences.",
+      "audience_reason": "Revised full lifecycle subsections, not just introductory paragraphs. Drain coverage, rollback permutations, re-instantiation, and replacement publication mechanics \u2192 `session-lifecycle.md`. Kept awaited disposal, shutdown errors, cleanup registration, deadlock warning, old-capability restrictions, strict/ordinary reload distinction, ownership, host input, child inheritance, queue contracts, and every public example.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "security.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Separated declined trust, pre-trust extensions, and borrowed-resource trust. Kept all protected paths, first-decision ownership, arbitrary-code warning, no-sandbox boundary, and credential-export guarantees.",
+      "audience_reason": "Revised sandbox design rationale and credential wrapper/test history. \u2192 `authentication.md#sandbox-rationale` and `#credential-export-safeguards`. Retained trust paths, pre-trust extension authority, no-sandbox warning, containment actions, export guarantees and downstream-secret risk.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "session-format.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split compaction rebuild into boundary construction, tail representation, and resumed state. Kept full tool text, retained images, null-tail behavior, post-boundary messages, planner-free resume, and all JSONL/type examples.",
+      "audience_reason": "Revised repository-layout aside and compaction reconstruction explanation. \u2192 `session-lifecycle.md#compaction-reconstruction`. Kept public persisted schemas, archival record examples needed by parsers, null-tail behavior, context results, workflow classification, SessionManager methods, and all examples.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "sessions.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split custom-directory inheritance and overrides; shortened the summary-generation exclusions. Kept explicit stage-directory precedence, default global-store behavior, silent failures, cancellation, and opt-out.",
+      "audience_reason": "Revised resumed-context implementation and cooperative picker scheduling. \u2192 `session-lifecycle.md#compaction-reconstruction` and `#resume-picker-scheduling`. Kept resume/summary behavior, old-session caveat, storage precedence, workflow recovery, keyboard actions, and branch semantics.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "settings.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Split deferred startup by phase, list unsupported-default behavior by mode, and separate fallback retries from persistent session selection. Kept trust persistence exception, readiness gate, eager-loading cases, model default exceptions, same-turn fallback, and every settings table/example.",
+      "audience_reason": "Revised trust-safe startup, cooperative scheduling, managed onboarding markers, renderer/editor mechanics, telemetry measurement interpretation, wrapper lookup, and renderer-version attribution. \u2192 `resources-and-ui.md`. Kept every settings key, supported values, privacy data/destinations/opt-outs, configuration precedence, prompts/readiness behavior, editor failure semantics, and all examples.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "shell-aliases.md",
+      "status": "unchanged",
+      "batch": "b",
+      "reason": "Reviewed unchanged. The page already gives one cause, one configuration example, and one path-adjustment instruction. Alias execution snippet and legacy path untouched.",
+      "audience_reason": "Retained. The short `bash -c` explanation directly explains why aliases need the supplied configuration. Not an internal implementation wall.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "skills/authoring.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Converted dense writing guidance into actionable bullets. Kept completion/stop rules, references directory, reasoning privacy, validation guidance, and nested fences verbatim.",
+      "audience_reason": "Retained. Consumer skill structure, frontmatter, concise instruction rules, and worked examples belong in public authoring docs. Protected `bun install` examples remain untouched.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "skills/reference.md",
+      "status": "unchanged",
+      "batch": "b",
+      "reason": "Reviewed unchanged. Compact field table and validation lists already distinguish warnings, ignored files, and rejected skills. Kept specification link, limits, frontmatter examples, and collision precedence.",
+      "audience_reason": "Retained. Validation rules, frontmatter limits, warning versus rejection, and collision precedence are public author contracts.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "skills.md",
+      "status": "revised",
+      "batch": "b",
+      "reason": "Revised. Removed a repeated definition and separated qlty commands, skill behavior, installation, and offline limits. Kept executable-content warning, commands and install literals, first-use network requirement, feedback privacy caveats, and stage-chat rules.",
+      "audience_reason": "Revised bundled source location and stage attachment/pause mechanics. \u2192 `resources-and-ui.md#stage-chat-skills`. Kept discovery, commands, qualified selection, permissions, input ownership, literal-queue recovery, host admission requirement, feedback privacy, and qlty installation/offline behavior.",
+      "audience_review": "batch-b.md"
+    },
+    {
+      "page": "subagents/authoring.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revised the dense agent-body checklist into actionable bullets. Kept frontmatter example, discovery paths, auto-model and constraints guidance.",
+      "audience_reason": "Retained after review. Discovery paths, complete frontmatter/body example, scope and auto-model guidance are instructions for custom-agent authors. No internal history or test infrastructure to relocate.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "subagents/reference.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revisited routing deadline/result paragraph, effort explanation, and host-binding sequence. Kept routing failure/privacy caveats, compatibility fields, fallback behavior, exact binding APIs, and the warning that binding does not create an owner.",
+      "audience_reason": "Revised classification/projection explanation. Keeps effort/fallback constraints and host-binding APIs; moves native snapshot/journal recovery and classifier internals to `subagent-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "subagents.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revised delegation introduction, catalog navigation, observation modes, and parallel limits into shorter prose and lists. Kept local-versus-delegated work caveats, background/foreground distinctions, permission and child-lifetime boundaries, model policies, examples, and all default limits.",
+      "audience_reason": "Revised throughout lifecycle/control sections. Retains delegation, catalog, model/group choices, burst constraints, task inspection, cancellation and handoff actions. Moves capability issuance, admission enforcement, receipt identities, cancellation recovery mechanics to `subagent-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "terminal-setup.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revised iTerm2 scrolling explanation and Ghostty's nested Claude Code/tmux exception. All terminal configuration fences unchanged; retained global-workaround warning, version requirements, macOS-only fallback, SSH limitation, and modified-key behavior.",
+      "audience_reason": "Retained after review. Terminal escape sequences, versions, local-macOS/SSH limits, wheel workaround and modifier mappings directly explain configuration and troubleshooting.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "termux.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Split libc/install warning from native-addon limitation. Preserved npm installation and nested AGENTS example verbatim, Android target warning, clipboard/storage limits, and separately installed Bun caveat.",
+      "audience_reason": "Retained after review. bionic versus musl explains why installers differ; Android native limitations, clipboard/storage remedies and nested AGENTS example remain actionable.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "themes/reference.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Split `workingIndicator` rules into a main bullet and numeric/hot-reload sub-bullets. Retained six-tone derivation, explicit indices, ANSI approximation caveat, token tables, counts, and fences.",
+      "audience_reason": "Retained after review. Six tones, ANSI approximations, indices, fallbacks and tokens define the public theme format; removing them would hide how a custom theme renders.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "themes.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Shortened hot-reload instruction and removed redundant bold label. Theme JSON, token redirects, compatibility paths, automatic selection, and all example destinations unchanged.",
+      "audience_reason": "Retained after review. Theme selection, transparency, custom JSON, token redirects and hot reload are observable behavior and authoring instructions.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "tmux.md",
+      "status": "unchanged",
+      "batch": "c",
+      "reason": "Reviewed unchanged: short setup steps, explicit version requirements, and side-by-side key sequences already scan well. Kept restart commands verbatim, CSI-u recommendation, xterm fallback, and Herdr tool-selection link.",
+      "audience_reason": "Retained after review. Version gates and CSI-u/xterm byte examples diagnose key forwarding; no Atomic implementation mechanics.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "tools.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revised persisted-output introduction and age/cleanup policy into separate location, scheduling, and safety paragraphs. Kept all hashline syntax/errors/warnings and examples verbatim, byte caps, permissions, cleanup exclusions, retention timing, and exact path/config literals.",
+      "audience_reason": "Revised editing, writes, search, URL protection and output storage. Keeps canonical syntax, active diagnostics, all examples, conflicts, adapter obligations, caps and retention actions. Moves parser constants/inactive messages, native backend choices, ACL cache/cleanup locks and trusted-test escape hatch to `tool-storage-and-editing.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "tui/reference.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Clarified asynchronous input fallthrough, shortened invalidation instruction, and separated host-native picker mechanics from availability. Kept interfaces/examples, focus behavior, IME/width requirements, host isolation distinction, semantic events, and headless refusal.",
+      "audience_reason": "Revised logging and host integration prose. Keeps component/focus signatures, width/invalidation examples, actionable ANSI capture and host picker/form APIs. Moves transport, dependency naming and builtin implementation rationale to `tui-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "tui.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Reorganized the very long Working-indicator and compaction paragraphs by lifecycle, animation, overrides, and failure behavior. Kept every component example verbatim, 453 verbs, ten frames, 88ms, width bounds, color/reduced-motion settings, custom-frame fidelity, and compaction event ownership.",
+      "audience_reason": "Revised isolated input, indicator lifecycle and footer explanation. Keeps every component/example, input-return requirements, frame customization, reduced motion, widget and footer ownership. Moves bridge/cache and animation/compaction mechanics to `tui-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "usage.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Split startup replay into ordered behavior bullets and separated cooperative cancellation, stuck-engine recovery, and draft restoration. Kept synchronous-startup exceptions, command ordering, exact draft/queue retention, shell differences, sharing warnings, and CLI examples.",
+      "audience_reason": "Revised startup/Working description. Keeps immediate input, settings, commands, queues and interruption behavior; moves startup-label collision algorithm and animation timing/cleanup to `tui-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "web-access.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Split batch-error interpretation from retry instructions. Kept plural-field migration, scalar normalization caveat, video-only options, frame requirements, and missing-content limitation.",
+      "audience_reason": "Retained after review. Argument migration, video flags, partial-error interpretation, retry and stored-content retrieval are operator guidance.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "windows.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Split installer locations/options and turn PATH/launcher/pin constraints into a checklist. All PowerShell/JSON fences unchanged; retained checksum, Unicode, PATH, PATHEXT, unexpected-entry, release-pin, and package-manager constraints.",
+      "audience_reason": "Revised install cleanup, startup, watchers and self-update. Keeps installer constraints, drafts/reload, shell behavior and public factories; moves transaction mechanics, launcher/build incident, watcher crash rationale and quarantine procedure to `windows-runtime.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows/api-reference.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revisited route fields, retry/fallback policy, transcript retention, and `reads` contract. Lists distinguish conditions previously embedded in long paragraphs. Every signature/example unchanged; preserved nested result locations, shared deadlines, immediate-versus-retry failures, transcript privacy and retention exemptions, deletion-first ordering, and missing-read failures.",
+      "audience_reason": "Revised heartbeat, fallback, child restriction, schema/artifact and store sections. Keeps all 95 signature/example fences, observable delivery/replay limits and SDK contracts. Moves scheduler cleanup, capture history and graph projection mechanics to `workflow-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows/authoring.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revised dual-host guidance, source layout, and precise-schema rationale. Preserved Node/Bun APIs, all runnable examples, dynamic DAG restrictions, exit/replay contracts, and child-output validation.",
+      "audience_reason": "Revised topology, repository example, adapter queue, exit and composition sections. Keeps all public authoring examples and runtime obligations; moves topology implementation to `workflow-durability.md`, exit/admission arbitration to `workflow-lifecycle.md`, repository/fixture examples to `workflow-verification-and-design.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows/builtins.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Removed promotional introduction and made re-verification eligibility a checklist. Kept all builtin contracts/model chains, threshold values, missing-confidence exclusion, retry count, and convergence authority.",
+      "audience_reason": "Revised panel summary, prompt rationale, Goal ledger and live-design protocol. Keeps builtin inputs, models, thresholds, approval authority, outputs and user review controls. Moves ledger split and helper events/adapters to `workflow-verification-and-design.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows/operations.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Revisited routing/decision density and split embedded-Postgres setup into requirements, targets, discovery, versions, and lifetime. Kept all command fences, reservation/ownership restrictions, non-retried failures, no forced launch, database versions/paths, and shared-server lifetime. Deferred technical contradictions and internal histories below.",
+      "audience_reason": "Revised across UI, pause/quit, notices, durability, recovery, DB packaging, reload and budget tails. Keeps commands, uncertainty warnings, same-ID recovery, privacy and no-duplicate-effect boundaries. Moves lifecycle to `workflow-lifecycle.md`, checkpoint/database internals to `workflow-durability.md`, build/tests and live-release incident to `workflow-recovery.md`, UI timing to `tui-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows/reliable-design.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Shortened contract/compaction explanation, removed repeated best-practices preamble, and replaced generic closing prose with an acceptance decision. Kept every graph, code/template fence, requirement, score/threshold, scope boundary, and user-authorization rule.",
+      "audience_reason": "Revised compaction, schema gates, score caching/trends and research rationale. Keeps every graph, complete custom-workflow example, scope/approval contract and supported rubric API. Moves cache scheduling, reducer math and uncited research measurements to `workflow-verification-and-design.md`; TUI reconstruction to `tui-lifecycle.md`.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows/verification.md",
+      "status": "unchanged",
+      "batch": "c",
+      "reason": "Reviewed unchanged: scenario/check/evidence sections already give direct steps, concrete limitations, and short lists. Retained environment distinctions, permission/secret checks, no simulated-coverage claims, GitHub media requirements, and verbatim commands.",
+      "audience_reason": "Retained after review. This teaches users to author verification stages for their own projects, collect evidence safely, and upload only when authorized. It contains no Atomic-specific regression suite or incident history. Keeping its public examples is intentional.",
+      "audience_review": "batch-c.md"
+    },
+    {
+      "page": "workflows.md",
+      "status": "revised",
+      "batch": "c",
+      "reason": "Shortened authoring progression and removed \u201cbattle-tested\u201d marketing wording. Retained generated/handwritten runtime equivalence, router ownership, authorization, budgets, and composition links.",
+      "audience_reason": "Retained after review. Navigation, selection/authoring boundaries, router authorization and budgets explain use of workflows. No Atomic-only tests or internals to relocate.",
+      "audience_review": "batch-c.md"
+    }
+  ],
+  "ordered_public_fences": 889,
+  "relocated_fences": 16,
+  "maintainer_links_checked": 74,
+  "inline_literal_review": [
+    {
+      "page": "background-tasks.md",
+      "removed_from_public_prose": {
+        "@bastani/atomic-natives": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "TaskSupervisor.taskSettlement(task)": [
+          "docs/maintainer/readability-a/task-supervision.md"
+        ],
+        "wasBackground": [
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "compaction/reference.md",
+      "removed_from_public_prose": {
+        "CompactionEntry": [],
+        "[image]": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "compaction": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "context_compaction": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "details": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "firstKeptEntryId": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "keepRecentTokens": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "null": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "plannerModel": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "preserve_recent: 0": [],
+        "serializeConversation()": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "summary": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "compaction.md",
+      "removed_from_public_prose": {
+        "\"fresh\"": [],
+        "0.5": [],
+        "120,180": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "300,": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "300,30": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "300,305": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "429": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "5xx": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "6,40": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "<session>-compaction-success-<timestamp>-<id>.json": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "ANTHROPIC_AUTH_TOKEN": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "The usage limit has been reached": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "agent.continue()": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "agent.state.model": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "agent_start": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "category": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "collectEntriesForBranchSummary()": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "compaction_start": [
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "compression_ratio": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "context_overflow": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "details.rung": [],
+        "exhausted": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "exhausted: false": [],
+        "false": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "firstKeptEntryId: null": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "generateBranchSummary()": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "input": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "load_bearing": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "maxTokens": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "max_tokens": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "model:level": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "model_changed": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/rpc-transport.md"
+        ],
+        "model_fallback_start": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "model_select": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "none": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "percentReduction": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "prepareBranchEntries()": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "preserve_recent": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "provider/model:thinkingLevel": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "quota": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "rateLimitExhausted": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "rate_limited": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "rung: \"planned\"": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "session.model": [],
+        "startNewContextWindow": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "starved": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "stats.tokensAfter": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "stats.tokensBefore": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "stop": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "stopReason: \"length\"": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "tokensBefore": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "toolChoice: \"none\"": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "unusable": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ],
+        "usage.reasoning": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "custom-provider/oauth.md",
+      "removed_from_public_prose": {
+        "id": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "name": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "usesCallbackServer": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "custom-provider.md",
+      "removed_from_public_prose": {
+        "@bastani/pi-ai": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "packages/ai/test": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "development.md",
+      "removed_from_public_prose": {
+        "--no-extensions": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "--no-tools": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        ".atomic": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "/reload": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "/workflow list": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "0.0.0": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "<appName>Config": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "@bastani/atomic": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "@xterm/headless": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "ATOMIC_STARTUP_BENCHMARK=1": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "ATOMIC_TIMING=1": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "Atomic v<version>": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "NODE_COMPILE_CACHE": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "NODE_DISABLE_COMPILE_CACHE": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "__dirname": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "atomic": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "bin": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "bun install": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "configDir": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "dispatchMs": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "engine-bound": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "engine-resources-ready": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "interactiveMode.run()": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "launchToProviderFirstByteMs": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "name": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "npm run check": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "npm run shrinkwrap:coding-agent": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "package.json": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "packages/coding-agent/npm-shrinkwrap.json": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "piConfig": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "process.hrtime.bigint()": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "scripts/cut-release.ts": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "scripts/perf/windows-startup/benchmark.ts": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "sessionScopedExtensionState": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "session_start": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "spawnToDispatchMs": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "src/config.ts": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "startup-coherent": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "startup-complete": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "startupCompleteMs + dispatchMs": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "time-to-first-frame": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ],
+        "\u276f ": [
+          "docs/maintainer/readability-a/development-and-startup.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "environment-variables.md",
+      "removed_from_public_prose": {
+        "AI_AGENT": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "extensions/authoring.md",
+      "removed_from_public_prose": {
+        "atomic -p": [],
+        "tools": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "extensions/events.md",
+      "removed_from_public_prose": {
+        "${runId}:${nodeId}": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "@bastani/atomic/workflows": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "ExtensionContext": [],
+        "acknowledgedFailureRunIds": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "automatic_continuation": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "confirm": [
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "ctx.cwd": [],
+        "executing": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "executingStageIds": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "executingToolNodeIds": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "needsAttention: true": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "parentRunId": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "paused": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "quiescent": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "retrying": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "retryingStageIds": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "running": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "select": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "session_before_switch": [],
+        "stopping": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "stoppingRunIds": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "workflowActivityNodeKey(runId, nodeId)": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "extensions/ui.md",
+      "removed_from_public_prose": {
+        "OverlayHandle.setHidden(true)": [],
+        "OverlayOptions.visible": [],
+        "accent": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "text": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "visibleWidth": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "workingIndicator": []
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "extensions.md",
+      "removed_from_public_prose": {
+        "!touch marker && sleep 400": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "--api-key": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "2": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "Bun.spawn()": [],
+        "Bun.spawnSync()": [],
+        "EPIPE": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "ERR_STREAM_DESTROYED": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "ERR_STREAM_WRITE_AFTER_END": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "Interactive engine is not responding; restarting.": [],
+        "Interactive engine stopped unexpectedly; restarting. Cause (<kind>): <summary>.": [],
+        "agent_start": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "code": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "confirm": [
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "editor": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "engine_ready": [],
+        "errno": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "fetch_content": [],
+        "input": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "node:child_process": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "session_start": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "syscall": [
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "web_search": []
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "getting-started/installation.md",
+      "removed_from_public_prose": {
+        ".node": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ],
+        "@bastani/atomic-natives": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "@embedded-postgres/*": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ],
+        "@mariozechner/clipboard": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ],
+        "libgcc": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ],
+        "libstdc++": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "intercom/operations.md",
+      "removed_from_public_prose": {
+        "0600": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "0700": [
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "ECONNRESET": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "EPIPE": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "Intercom protocol error: \u2026": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "WorkflowPendingStageDelivery": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "[fallback]": [],
+        "broker-launch.vbs": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "broker.pid": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "broker.sock": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "broker.spawn.lock": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "cat ~/.atomic/agent/intercom/broker.log": [],
+        "cause": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "console.error": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "console.warn": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "contact_supervisor": [],
+        "delivered-messages.key": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "delivered-messages.sqlite": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "extensions": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "fail": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "fail(reason)": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "pendingStageDelivery.ready()": [],
+        "process.stderr.write": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "ready()": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "reason": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "requirePendingReply": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ],
+        "session_start": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "to": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "intercom/reference.md",
+      "removed_from_public_prose": {
+        "jiti": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "process.execPath": [
+          "docs/maintainer/readability-a/intercom-broker.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "intercom.md",
+      "removed_from_public_prose": {
+        "interrupt": [
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "keybindings.md",
+      "removed_from_public_prose": {
+        "false": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "fullscreenCopyOnSelect": [],
+        "true": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "void": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ]
+      },
+      "review": "batch-a.md authoritative audience amendment"
+    },
+    {
+      "page": "models/evals.md",
+      "removed_from_public_prose": {
+        "foreignObject": [
+          "docs/maintainer/readability-b/benchmark-maintenance.md"
+        ],
+        "svg text": [
+          "docs/maintainer/readability-b/benchmark-maintenance.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "models/model-selection.md",
+      "removed_from_public_prose": {
+        "provider: \"anthropic\"": []
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "models/pareto-efficiency.md",
+      "removed_from_public_prose": {
+        "[max]": []
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "models/reference.md",
+      "removed_from_public_prose": {
+        "\"error\"": [],
+        "304 Not Modified": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "If-None-Match": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "prefix_mismatch_behavior": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "preserve_recent": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "redacted_thinking": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "text": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "thinking": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "thinking.block_binding.prefix_mismatch_behavior: \"drop_block\"": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "tool_use": [],
+        "tools": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "models.md",
+      "removed_from_public_prose": {
+        "Refreshing model catalogs\u2026": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "providers.md",
+      "removed_from_public_prose": {
+        "304": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "@bastani/pi-ai": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "Copilot-Integration-Id": [],
+        "If-None-Match": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "POST https://api.typesafe.ai/v1/systemone": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "api: \"openai-codex-responses\"": [],
+        "complete()": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "completeSimple()": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "fastRoute": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "findEnvKeys()": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "getEnvApiKey()": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "jev-latest": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "modelRuntime.stream()": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "node_modules/@bastani/pi-ai/dist/env-api-keys.d.ts": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "node_modules/@bastani/pi-ai/dist/env-api-keys.js": [],
+        "originator: codex_cli_rs": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "originator: pi": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "packages/ai": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "streamSimple()": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ],
+        "x-codex-routing-hint: model=<base-upstream-model>;tier=priority": [
+          "docs/maintainer/readability-b/provider-runtime.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "quickstart.md",
+      "removed_from_public_prose": {
+        "super+v": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "reference/cli.md",
+      "removed_from_public_prose": {
+        "\"transcript\"": [],
+        "fullscreenExitOutput": []
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "rpc/protocol.md",
+      "removed_from_public_prose": {
+        "(filtered N lines)": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "compaction": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "model_changed": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/rpc-transport.md"
+        ],
+        "start,end": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "sdk/reference.md",
+      "removed_from_public_prose": {
+        "; ": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "AsyncIterable<NativeEvent>": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "CleanupFailed": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "CommandIntent": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "InputDeliveryUnknown": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "NaN": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "NativeEvent": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "OutputLimitExceeded": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "OutputRef": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "ReportConflict": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "RunnerFailed": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "ScopeMismatch": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "SpawnFailed": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "TASK_REPORT_IDENTITY_WINDOW": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "TaskSupervisor": [
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "TranscriptUnavailable": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "UnknownTask": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "Unprintable JavaScript rejection": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "[Output omitted: bytes start-end]": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "accepted": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "agentBudgetMs": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "assistant": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "await cancelTask(task, cause)": [],
+        "await foregroundTask(task, budgetMs?)": [],
+        "await waitForTask(task, budgetMs?, designation?)": [],
+        "bindAgentTaskHost": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "bindHostSession": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "closeTaskOwner": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "context.bindTranscript(sessionManager)": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "core/tasks/transcript.ts": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "createLocalBashOperations": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "cursor": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ],
+        "default-background": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "dispose()": [],
+        "done:true": [],
+        "duplicate": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "elapsedMs": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "exitCode": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "explicit": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "findWait(waitId)": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "flush()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "inheritEnv": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "initialObservation": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "kind": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "lease": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "next()": [],
+        "nextCursor": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "nextOffset": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "omittedEarlier": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "onReconcile": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "openTaskOwner": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "options.id": [],
+        "prompt": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "readTaskOutput": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "readTaskOutput(task, {start, maximumBytes})": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "readTaskTranscript(task, cursor?)": [],
+        "reaped": [],
+        "reportTaskOutcome": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "response": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "runner-outcome": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "shell": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "shell: { program, args }": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "snapshot": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "source": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "src/core/tasks/contracts.ts": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "src/core/tasks/supervisor.ts": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "startAgentTask": [],
+        "startCommandTask(owner, intent, operation)": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "string": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "subscription.cursor": [],
+        "subscription.events": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "subscription.failure": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "subscription.onReconcile": [],
+        "subscription.snapshot": [],
+        "taskExecution": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "taskStdin(task)": [],
+        "test/fixtures/task-s1-demo.ts": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "tokenCount": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "tool-call": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "tool-result": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "toolCallId": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "toolCount": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "watchOwnerTasks(owner, cursor?)": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "writeTaskInput": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "{kind:\"bytes\", bytes:Uint8Array}": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "{kind:\"eof\"}": [
+          "docs/maintainer/readability-b/task-supervision.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "sdk.md",
+      "removed_from_public_prose": {
+        "await oldSession.dispose()": [],
+        "beforeSessionStart": [],
+        "bindExtensions()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "eventBus": [],
+        "getExtensions()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "new AgentSession(...)": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "pi.refreshWorkflowResources()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "setSessionName()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "setThinkingLevel()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "tool_result": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "security.md",
+      "removed_from_public_prose": {
+        "Bun.inspect": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "Secret.take()": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "credentialPayload": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "emitCredential": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "src/modes/rpc/rpc-types.ts": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "take()": [
+          "docs/maintainer/readability-b/authentication.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "session-format.md",
+      "removed_from_public_prose": {
+        "convertToLlm()": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "node_modules/@bastani/atomic/dist/": [],
+        "node_modules/@bastani/pi-ai/dist/": [
+          "docs/maintainer/readability-b/authentication.md"
+        ],
+        "node_modules/@earendil-works/pi-agent-core/dist/": [],
+        "packages/agent": [],
+        "packages/ai": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "sessions.md",
+      "removed_from_public_prose": {
+        "firstKeptEntryId: null": [
+          "docs/maintainer/readability-a/compaction-engine.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "settings.md",
+      "removed_from_public_prose": {
+        "\"bun\"": [],
+        "atomic-editor-*": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "pm bin -g": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "prompt.md": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "root -g": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "ui_prompt_end": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "ui_prompt_start": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "skills.md",
+      "removed_from_public_prose": {
+        "followUp": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "packages/subagents/skills/herdr/SKILL.md": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "prompt": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "steer": [
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-b.md authoritative audience amendment"
+    },
+    {
+      "page": "subagents/reference.md",
+      "removed_from_public_prose": {
+        "wasBackground": [
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "subagents.md",
+      "removed_from_public_prose": {
+        "AgentSession": [
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ],
+        "interrupted": [
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ],
+        "task-completion": [
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ],
+        "\u2200 debugger_1 \u00b7 Running": []
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "tools.md",
+      "removed_from_public_prose": {
+        " `replace N..M:` needs at least one `+TEXT` body row. To delete lines, use `delete N..M`. ": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        " for <path>": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "..": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        ".cleanup.lock": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        ".last-cleanup": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "127.1": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "2130706433": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "3": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "@bastani/atomic-natives": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "ATOMIC_ALLOW_PRIVATE_URL_READS=1": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "CONTOSO\\Alice": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Dropped a bare hunk overlapped by the concrete hunk after it. One `replace N..M:` hunk per range \u2014 the body is the final content, never old+new.": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "EMPTY_REPLACE": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Edits to <path> resulted in no changes being made.": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "FABRIKAM\\Alice": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Full output saved to:": [],
+        "Get-Acl": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "HL_FILE_HASH_LENGTH = 4": [],
+        "HL_FILE_HASH_RE_RAW = [0-9A-F]{4}": [],
+        "HL_FILE_HASH_SEP = \"#\"": [],
+        "HL_FILE_PREFIX = \"[\"": [],
+        "HL_FILE_SUFFIX = \"]\"": [],
+        "HL_HEADER_COLON = \":\"": [],
+        "HL_MAX_EXPANDED_RANGE_LINES = 100_000": [],
+        "HL_PAYLOAD_REPLACE = \"+\"": [],
+        "HL_RANGE_SEP = \"..\"": [],
+        "HUNK_LIKE_LITERAL_WARNING": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Hashline Patcher requires a SnapshotStore; section tags are opaque store pointers.": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Hashline edit for <path> did not change the file.": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Invalid line reference. Expected a bare line number from read/search output plus the section header content-hash tag (for example [src/foo.ts#1A2B] and line \"160\") Received \"abc\"..": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Line number must be >= 1, got 0 in \"0\".": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "MISMATCH_CONTEXT = 2": [],
+        "O_EXCL": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "RECOVERY_FUZZ_FACTOR = 0": [],
+        "STOP. ": [],
+        "TMP": [],
+        "Tokenizer is closed; call reset() before reusing.": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "Two hunks targeted the same range; kept only the second. One `replace N..M:` hunk per range \u2014 the body is the final content, never old+new.": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "after": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "apply": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "before": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "block": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "blockRangeAt": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "edit.ts": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "fd": [
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "fe80::/10": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "head": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "insert after": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "internal error: unresolved `replace block` edit reached the applier (resolveBlockEdits was not run).": [],
+        "messages.ts": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "parseTag": [
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "preflight": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md"
+        ],
+        "tail": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "tui/reference.md",
+      "removed_from_public_prose": {
+        "@earendil-works/pi-tui": [
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "SessionSelectorComponent": [
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "close()": [],
+        "error": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "handleInput()": [],
+        "overlay: false": [],
+        "tui.terminal": [],
+        "update": [
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "tui.md",
+      "removed_from_public_prose": {
+        "compaction_end": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "compaction_start": [
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "setStatus()": [
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "usage.md",
+      "removed_from_public_prose": {
+        "accent": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md"
+        ],
+        "text": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "windows.md",
+      "removed_from_public_prose": {
+        "--version": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        ".atomic-native-quarantine": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "NODE_DISABLE_COMPILE_CACHE=1": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "USERNA~1": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "build-binaries.sh --skip-windows": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "bun-windows-arm64": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "bun-windows-x64-baseline": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "fs.watch": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "publish.yml": [
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ],
+        "session_start": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-c/windows-runtime.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "workflows/api-reference.md",
+      "removed_from_public_prose": {
+        "*.json": [],
+        "@bastani/subagents": [],
+        "ATOMIC_WORKFLOW_DEBUG=1": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "SubagentControl": [],
+        "[fallback]": [],
+        "adversarial-verification": [],
+        "blocked": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/task-supervision.md"
+        ],
+        "ctx.__ensureSession()": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "ctx.prompt()": [],
+        "generate-and-filter": [],
+        "graphSnapshot()": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "kill": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "loop-until-done": [],
+        "runId + scheduledAt": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "running": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "scheduledAt": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "startedAt + interval": [],
+        "statusFile: false": [],
+        "statusFile: true": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "subscribe(snapshot)": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "subscribeInvalidation()": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "tournament": []
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "workflows/authoring.md",
+      "removed_from_public_prose": {
+        ".atomic/workflows/lib/release-docs.ts": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        ".atomic/workflows/release-docs.ts": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "RunResult": [],
+        "T": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "Type.Unsafe<ComplexPacket>(...)": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "Type.Unsafe<readonly ComplexRecord[]>(...)": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "agent_end": [],
+        "agent_start": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md"
+        ],
+        "cause": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "complete": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/rpc-transport.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "complete(...)": [],
+        "contract-complex-leaf": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "ctx.exit": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "ctx.stage(...).prompt(...)": [],
+        "ctx.ui.*": [],
+        "ctx.workflow": [],
+        "errors": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "failFast: false": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "finally": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "import": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "intercom.ask": [],
+        "isStreaming": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "onRunEnd": [],
+        "publish-release": [
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "recordRunEnd": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "scope": [
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/windows-runtime.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "sendUserMessage": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "structured_output": [],
+        "workflow-exit": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "workflow.run.end": [],
+        "workflow.stage.end": [],
+        "{ runId, stageId }": []
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "workflows/builtins.md",
+      "removed_from_public_prose": {
+        "accept": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "ctx.tool(...)": [],
+        "discard": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/authentication.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "goal-ledger-state.json": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "goal-ledger.json": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-generate-*": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-manual_edit_apply-*": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-poll-N-M": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-poll.mjs": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-reply-N-M": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-steer-*": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "live-variant_mount_failed-*": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "prefetch": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "timeout": [
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ],
+        "user-feedback-N-start": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "variant_mounted": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "workflows/operations.md",
+      "removed_from_public_prose": {
+        "$ <tool-name>": [],
+        "... (N earlier lines, ctrl+o Expand)": [],
+        "0.9.18-alpha.6": [
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "877a91c7-ed68-4ace-9895-cf2555d9b154": [
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "<cycle>": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "<runId>/<nodeId>": [],
+        "<unreadable>": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "<unserializable>": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "@bastani/atomic-natives": [
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-a/task-supervision.md",
+          "docs/maintainer/readability-c/tool-storage-and-editing.md",
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "@embedded-postgres/linux-*": [],
+        "AbortController": [],
+        "AgentSession": [
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md"
+        ],
+        "AgentSessionAdapter": [],
+        "Follow-up:": [],
+        "PromptAnswerRecord": [],
+        "SessionManager": [
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "Steering:": [],
+        "WorkflowTaskResult": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "\\xNN": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "app.thinking.toggle": [],
+        "app.tree.filter.noTools": [],
+        "argsHash": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "await ctx.tool(...)": [],
+        "cancelled: true": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "catch": [
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "clearQueue()": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "ctrl+o": [],
+        "ctx.chain": [],
+        "ctx.parallel": [],
+        "ctx.stage": [],
+        "ctx.workflow": [],
+        "deliverAs: \"steer\"": [],
+        "display: false": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "display: true": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "fn.toString()": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "followUp": [
+          "docs/maintainer/readability-b/resources-and-ui.md"
+        ],
+        "internal: true": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "isWorkflowRunResumable": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "maxOutput": [],
+        "no_active_stages": [],
+        "null": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-b/session-lifecycle.md"
+        ],
+        "packages/workflows/src/durable/resume-eligibility.ts": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "persistWhenStreaming": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "pi.events": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "prepare-changelog-branch": [
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "publish-release": [
+          "docs/maintainer/readability-c/workflow-recovery.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "runtime-provenance.json": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "stage.sendUserMessage(...)": [],
+        "startedAt + n \u00d7 heartbeatIntervalMinutes": [],
+        "status=running": [],
+        "steer": [
+          "docs/maintainer/readability-b/resources-and-ui.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "toJSON": [],
+        "tool-failure:": [
+          "docs/maintainer/readability-c/workflow-durability.md"
+        ],
+        "tool:h09e55b6c3ff8718bdf7066c90323715f": [
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "triggerTurn": [],
+        "try": [
+          "docs/maintainer/readability-a/compaction-engine.md",
+          "docs/maintainer/readability-a/development-and-startup.md",
+          "docs/maintainer/readability-a/extension-runtime.md",
+          "docs/maintainer/readability-a/intercom-broker.md",
+          "docs/maintainer/readability-a/provider-auth-and-packaging.md",
+          "docs/maintainer/readability-b/benchmark-maintenance.md",
+          "docs/maintainer/readability-b/provider-runtime.md",
+          "docs/maintainer/readability-b/session-lifecycle.md",
+          "docs/maintainer/readability-b/task-supervision.md",
+          "docs/maintainer/readability-c/subagent-lifecycle.md",
+          "docs/maintainer/readability-c/tui-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-durability.md",
+          "docs/maintainer/readability-c/workflow-lifecycle.md",
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "validate-commit-push-open-pr": [
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "wait-required-ci": [
+          "docs/maintainer/readability-c/workflow-recovery.md"
+        ],
+        "workflow status <id>": [],
+        "workflow({ action: \"quit\"|\"pause\", runId, stageId })": [],
+        "workflow({ action: \"status\" | \"stages\" | \"stage\" | \"resume\" })": [],
+        "workflows:workflow-heartbeat": [
+          "docs/maintainer/readability-c/workflow-lifecycle.md"
+        ],
+        "{ runId, stageId }": [],
+        "{ runId, stageId}": [],
+        "~/.nvm": []
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    },
+    {
+      "page": "workflows/reliable-design.md",
+      "removed_from_public_prose": {
+        "32 * 1024": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "MAX_INLINE_CANDIDATE_BYTES": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "SHARED HEAD \u2016 VARYING TAIL": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "Working...": [],
+        "classify_trend": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "fallDelta=-1.5": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "riseDelta=1.5": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "verification-prompts": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "warm_first_fan_out": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ],
+        "window=3": [
+          "docs/maintainer/readability-c/workflow-verification-and-design.md"
+        ]
+      },
+      "review": "batch-c.md authoritative audience amendment"
+    }
+  ]
+}

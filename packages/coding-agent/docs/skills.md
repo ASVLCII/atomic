@@ -8,7 +8,7 @@ Atomic implements the [Agent Skills standard](https://agentskills.io/specificati
 
 ## Where to go next
 
-Skills are on-demand instructions the agent loads when a task matches. Read this page to install and use them, then continue:
+Read this page to install and use skills, then continue:
 
 - [Writing skills](/skills/authoring) — directory structure and a complete worked example.
 - [Skill reference](/skills/reference) — `SKILL.md` frontmatter fields and validation rules.
@@ -94,13 +94,24 @@ The bundled `/skill:show-me` from [HumanLayer](https://github.com/humanlayer/ski
 
 ### Built-in code quality guidance
 
-The bundled `/skill:qlty` runs code-quality verification through the [qlty](https://qlty.sh) CLI, which drives 70+ linters, auto-formatters, and security scanners across 40+ languages: `qlty check` for linting, `qlty fmt` for auto-formatting, `qlty metrics` for complexity, lines, and cohesion, and `qlty smells` for duplication, deep nesting, and overly complex code. It triggers on requests for verifiers or high code quality and prefers one CLI over ad-hoc per-tool linter invocations. The skill directs the agent to [docs.qlty.sh/llms.txt](https://docs.qlty.sh/llms.txt) as the authoritative documentation index, tells it to enable the qlty plugins and linter extensions that fit the codebase before checking, and ships source-attributed reference excerpts beside `SKILL.md`. The CLI is not bundled; install it with `curl https://qlty.sh | bash` (macOS and Linux) or `powershell -c "iwr https://qlty.sh | iex"` (Windows), and keep `~/.qlty/bin` on `PATH`. Note that `qlty init` writes `.qlty/qlty.toml` into the repository. Offline, `qlty metrics` and `qlty smells` still work (built-in static analysis); `qlty check` and `qlty fmt` download plugins and runtimes on first use per repository and need network then.
+The bundled `/skill:qlty` uses the [qlty](https://qlty.sh) CLI for code-quality verification across 70+ linters, auto-formatters, and security scanners in 40+ languages:
+
+- `qlty check` runs linters.
+- `qlty fmt` formats code.
+- `qlty metrics` measures complexity, lines, and cohesion.
+- `qlty smells` finds duplication, deep nesting, and overly complex code.
+
+The skill triggers on requests for verifiers or high code quality and prefers one CLI over ad-hoc linter commands. It directs the agent to [docs.qlty.sh/llms.txt](https://docs.qlty.sh/llms.txt), the authoritative documentation index, and tells it to enable plugins and linter extensions that fit the codebase before checking. Source-attributed reference excerpts ship beside `SKILL.md`.
+
+The CLI is not bundled. Install it with `curl https://qlty.sh | bash` on macOS or Linux, or `powershell -c "iwr https://qlty.sh | iex"` on Windows, and keep `~/.qlty/bin` on `PATH`. Note that `qlty init` writes `.qlty/qlty.toml` into the repository.
+
+Offline, `qlty metrics` and `qlty smells` still work through built-in static analysis. `qlty check` and `qlty fmt` need network access on first use per repository to download plugins and runtimes.
 
 ### Built-in computer-use and automation guidance
 
 For desktop computer use, or CUA, use PyAutoGUI for mouse, keyboard and screenshots. For browser automation, load `/skill:playwright-cli`. For terminal automation/testing, prefer `/skill:herdr` on macOS, Linux and Windows. Install Herdr if missing when network access and permissions permit; fall back to `/skill:tmux` or native Windows psmux when installation or use is not possible. Preserve the upstream skill's explicit-request and managed-pane requirements. These are separate interfaces, not interchangeable command names. See [verification and desktop safety](/workflows/verification) for installation, permissions, dedicated sessions and input cleanup.
 
-The bundled herdr skill is copied from [herdr v0.9.0](https://github.com/herdrdev/herdr/blob/v0.9.0/skills/herdr/SKILL.md) and lives beside tmux in `packages/subagents/skills/herdr/SKILL.md`. It requires an explicit Herdr mention or request and `HERDR_ENV=1`; it stops outside a Herdr-managed pane. It discovers the installed CLI, uses returned pane IDs and distinguishes command submission from completion. The skill does not install Herdr or authorize control of unrelated panes.
+The bundled [Herdr skill](https://github.com/herdrdev/herdr/blob/v0.9.0/skills/herdr/SKILL.md) requires an explicit Herdr mention or request and `HERDR_ENV=1`; it stops outside a Herdr-managed pane. It does not install Herdr or authorize control of unrelated panes. Use returned pane IDs, and check completion separately from command submission.
 
 ### Report feedback
 
@@ -148,15 +159,15 @@ Toggle skill commands via `/settings` in interactive mode or in `settings.json`:
 
 An editable attached stage chat supports the same `/skill:<selector> [arguments]` commands. Its suggestions come from that stage's effective catalog and settings, not the main chat's catalog. Source tags use the main chat format: `[p]` for project, `[u]` for user, and `[t]` for temporary resources, with npm or Git source details when available. After the stage's resources reload, the next completion request reads the updated catalog and qualified aliases.
 
-Completion reuses an already attached session without reattaching or checkpointing it for each keystroke. If attachment is needed, overlapping requests share that attachment and then read the current catalog. The stage adapter provides `/skill:` discovery and Tab completion of relative paths rooted at the stage session cwd. It does not provide `@` file-mention suggestions.
+Stage chat supports `/skill:` discovery and Tab completion of paths relative to its working directory, but not `@` file-mention suggestions.
 
 Enter starts a turn when idle or steers a streaming turn. Ctrl+F keeps follow-up intent. The stage session expands the command once through its admission route; skill-relative references use the skill directory while ordinary tools keep the stage cwd. Turning off `enableSkillCommands` hides suggestions but does not disable manually typed skill commands. Unknown bare selectors pass through as text; unknown or ambiguous qualified selectors and file-read failures show diagnostics in the attached chat without selecting another skill.
 
-The native session pause gate still takes precedence over expansion. If that gate closes during asynchronous attachment, the command is queued as literal text, just as in main chat; releasing that queue does not retroactively expand it. A composer that observes the pause before submission resumes first and then uses normal skill expansion. To invoke a command retained literally by this race, restore it to the editor and submit after resuming.
+If a skill command is queued while the session is paused, it may remain literal text after resume. Restore it to the editor and submit again after resuming to invoke the skill.
 
 Mounted human-input and custom prompts own their input, so answers starting `/skill:` remain literal. Blocked stages, read-only archives, and replay cannot admit skill messages. An explicitly opened editable post-mortem chat can invoke its own skills without restarting workflow execution. Skills do not grant tools, workspace access, or permission to launch workflows or subagents, and unrelated parent slash commands are not forwarded. A host without stage command metadata reports that discovery is unavailable rather than borrowing another session's catalog.
 
-Custom stage hosts must expose admission-aware `sendUserMessage` to support invocation. Without it, skill submission reports that user-message admission is unavailable instead of falling back to unguarded `prompt`, `steer`, or `followUp` calls.
+Custom stage hosts must expose admission-aware `sendUserMessage` for skill invocation. Without it, submission reports that user-message admission is unavailable. See [stage-chat internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/resources-and-ui.md#stage-chat-skills) for attachment and pause ordering.
 
 See [workflow stage chat controls](/workflows/operations#skills-in-attached-stage-chats) for the distinction between skill messages and local view commands.
 

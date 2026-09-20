@@ -1,0 +1,209 @@
+
+> check
+> biome check --error-on-warnings . && npm run typecheck && npm run check:shrinkwrap
+
+packages/coding-agent/src/modes/interactive/components/task-inspector.ts:476:33 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    474 │ 				)
+    475 │ 				.join("");
+  > 476 │ 		const fit = (line: string) => truncateToWidth(safeLine(line), Math.max(1, width)) + "\x1b[0m";
+        │ 		                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    477 │ 		return [
+    478 │ 			theme.bold(`Transcript · ${task ? taskDisplayText(taskLabel(task)) : "Task"}`),
+
+  i Unsafe fix: Use a template literal.
+
+    474 474 │           )
+    475 475 │           .join("");
+    476     │ - → → const·fit·=·(line:·string)·=>·truncateToWidth(safeLine(line),·Math.max(1,·width))·+·"\x1b[0m";
+        476 │ + → → const·fit·=·(line:·string)·=>·`${truncateToWidth(safeLine(line),·Math.max(1,·width))}\x1b[0m`;
+    477 477 │       return [
+    478 478 │         theme.bold(`Transcript · ${task ? taskDisplayText(taskLabel(task)) : "Task"}`),
+
+
+test/ci/ci-workflow-contracts.test.ts:1060:15 lint/complexity/noUselessStringRaw ━━━━━━━━━━━━━━━━━━━
+
+  i String.raw is useless when the raw string doesn't contain any escape sequence.
+
+    1058 │ 		assert.match(
+    1059 │ 			workflow,
+  > 1060 │ 			new RegExp(String.raw`npm run ${script}`, "u"),
+         │ 			           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1061 │ 			`.github/workflows/test.yml never runs \`npm run ${script}\`; with no push gate, a suite CI skips is a suite nothing runs`,
+    1062 │ 		);
+
+  i Remove the String.raw call because it's useless here, String.raw can deal with string which contains escape sequence like \n, \t, \r, \\, \", \'.
+
+
+test/unit/intercom-client-channel.test.ts:241:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    239 │ 		return true;
+    240 │ 	});
+  > 241 │ 	client["socket"] = socket;
+        │ 	       ^^^^^^^^
+    242 │ 	client["_sessionId"] = "self";
+    243 │ 	const receive = (message: BrokerMessage) => client["handleBrokerMessage"](message);
+
+  i Unsafe fix: Use a literal key instead.
+
+    239 239 │       return true;
+    240 240 │     });
+    241     │ - → client["socket"]·=·socket;
+        241 │ + → client.socket·=·socket;
+    242 242 │     client["_sessionId"] = "self";
+    243 243 │     const receive = (message: BrokerMessage) => client["handleBrokerMessage"](message);
+
+
+test/unit/intercom-client-channel.test.ts:242:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    240 │ 	});
+    241 │ 	client["socket"] = socket;
+  > 242 │ 	client["_sessionId"] = "self";
+        │ 	       ^^^^^^^^^^^^
+    243 │ 	const receive = (message: BrokerMessage) => client["handleBrokerMessage"](message);
+    244 │ 	const options = { text: "answer", messageId: "bound", replyTo: "question", expectedRecipientId: "recipient" };
+
+  i Unsafe fix: Use a literal key instead.
+
+    240 240 │     });
+    241 241 │     client["socket"] = socket;
+    242     │ - → client["_sessionId"]·=·"self";
+        242 │ + → client._sessionId·=·"self";
+    243 243 │     const receive = (message: BrokerMessage) => client["handleBrokerMessage"](message);
+    244 244 │     const options = { text: "answer", messageId: "bound", replyTo: "question", expectedRecipientId: "recipient" };
+
+
+test/unit/intercom-client-channel.test.ts:243:53 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    241 │ 	client["socket"] = socket;
+    242 │ 	client["_sessionId"] = "self";
+  > 243 │ 	const receive = (message: BrokerMessage) => client["handleBrokerMessage"](message);
+        │ 	                                                   ^^^^^^^^^^^^^^^^^^^^^
+    244 │ 	const options = { text: "answer", messageId: "bound", replyTo: "question", expectedRecipientId: "recipient" };
+    245 │ 	const bound = client.send("recipient-name", options);
+
+  i Unsafe fix: Use a literal key instead.
+
+    241 241 │     client["socket"] = socket;
+    242 242 │     client["_sessionId"] = "self";
+    243     │ - → const·receive·=·(message:·BrokerMessage)·=>·client["handleBrokerMessage"](message);
+        243 │ + → const·receive·=·(message:·BrokerMessage)·=>·client.handleBrokerMessage(message);
+    244 244 │     const options = { text: "answer", messageId: "bound", replyTo: "question", expectedRecipientId: "recipient" };
+    245 245 │     const bound = client.send("recipient-name", options);
+
+
+test/unit/web-access-fetch-urls.test.ts:189:40 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    187 │ 		fetchAllContent.mockResolvedValueOnce([
+    188 │ 			{ url: urls[0], title: "", content: firstContent, error: "Incomplete extraction" },
+  > 189 │ 			{ url: urls[1], title: "", content: "Retained evidence " + "x".repeat(1100), error: "Incomplete extraction" },
+        │ 			                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    190 │ 		]);
+    191 │ 		const result = await registrations
+
+  i Unsafe fix: Use a template literal.
+
+    187 187 │       fetchAllContent.mockResolvedValueOnce([
+    188 188 │         { url: urls[0], title: "", content: firstContent, error: "Incomplete extraction" },
+    189     │ - → → → {·url:·urls[1],·title:·"",·content:·"Retained·evidence·"·+·"x".repeat(1100),·error:·"Incomplete·extraction"·},
+        189 │ + → → → {·url:·urls[1],·title:·"",·content:·`Retained·evidence·${"x".repeat(1100)}`,·error:·"Incomplete·extraction"·},
+    190 190 │       ]);
+    191 191 │       const result = await registrations
+
+
+Checked 3107 files in 997ms. No fixes applied.
+Found 6 infos.
+
+> typecheck
+> npm --workspace=@bastani/pi-ai run build && node scripts/alias-pi-ai.mjs && tsc --noEmit && npm --workspace=@bastani/atomic run typecheck
+
+
+> @bastani/pi-ai@0.0.0 build
+> npm run generate-models && npm run build:offline
+
+
+> @bastani/pi-ai@0.0.0 generate-models
+> node scripts/generate-models.ts --strict
+
+Fetching models from models.dev API...
+Fetching models from NVIDIA NIM API...
+Fetched 82 model IDs from NVIDIA NIM
+Loaded 756 tool-capable models from models.dev
+Fetching models from OpenRouter API...
+Fetched 378 tool-capable models from OpenRouter
+Fetching models from Vercel AI Gateway API...
+Fetched 236 tool-capable models from Vercel AI Gateway
+Generated provider catalogs and src/models.generated.ts
+Generated JSON model values under src/providers/data/
+
+Model Statistics:
+  Total tool-capable models: 1411
+  Reasoning-capable models: 1148
+  amazon-bedrock: 159 models
+  anthropic: 14 models
+  google: 22 models
+  google-vertex: 14 models
+  openai: 39 models
+  groq: 7 models
+  cerebras: 2 models
+  cloudflare-workers-ai: 18 models
+  cloudflare-ai-gateway: 51 models
+  xai: 3 models
+  zai: 7 models
+  zai-coding-cn: 4 models
+  mistral: 33 models
+  huggingface: 75 models
+  fireworks: 33 models
+  nvidia: 20 models
+  together: 22 models
+  baseten: 21 models
+  opencode: 70 models
+  opencode-go: 27 models
+  github-copilot: 29 models
+  minimax: 3 models
+  minimax-cn: 3 models
+  kimi-coding: 4 models
+  moonshotai: 4 models
+  moonshotai-cn: 4 models
+  xiaomi: 3 models
+  xiaomi-token-plan-cn: 2 models
+  xiaomi-token-plan-ams: 2 models
+  xiaomi-token-plan-sgp: 2 models
+  qwen-token-plan: 20 models
+  qwen-token-plan-individual: 9 models
+  qwen-token-plan-cn: 20 models
+  openrouter: 380 models
+  vercel-ai-gateway: 236 models
+  deepseek: 2 models
+  ant-ling: 3 models
+  openai-codex: 6 models
+  azure-openai-responses: 38 models
+
+> @bastani/pi-ai@0.0.0 build:offline
+> npm run check:model-data && tsgo -p tsconfig.build.json && shx rm -rf dist/providers/data && shx cp -r src/providers/data dist/providers/data
+
+
+> @bastani/pi-ai@0.0.0 check:model-data
+> node scripts/check-model-data.ts
+
+Generated model data is valid.
+aliased @earendil-works/pi-ai -> ../../packages/ai
+
+> @bastani/atomic@0.0.0 typecheck
+> tsgo -p tsconfig.build.json --noEmit && tsgo -p tsconfig.typetests.json
+
+
+> check:shrinkwrap
+> node scripts/generate-coding-agent-shrinkwrap.mjs --check
+
+packages/coding-agent/npm-shrinkwrap.json is up to date.

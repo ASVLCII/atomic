@@ -28,7 +28,9 @@ interface Component {
 
 The installed pi-tui type still permits handlers that return `void`; Atomic treats a missing or `undefined` result as unhandled only for a matching fullscreen viewport key or a mouse event deferred to a focused overlay. Components that mutate state for such an input must return `true` so the viewport does not apply it a second time.
 
-Omitting `handleInput` altogether is the same answer as declining: a focused overlay with no handler still lets fullscreen viewport keys and mouse wheel reports reach the transcript, so a notice or progress panel does not freeze scrolling behind it. An asynchronous handler is judged when it settles — only a promise that resolves `true` consumes the input, while `false`, `undefined`, and a rejection all fall through to the viewport. Input that moved focus while such a promise was pending is left to whatever holds focus when it settles.
+A focused overlay without `handleInput` lets fullscreen viewport keys and mouse wheel reports reach the transcript. A notice or progress panel therefore does not freeze scrolling behind it.
+
+Atomic judges an asynchronous handler when it settles. Only a promise that resolves `true` consumes the input; `false`, `undefined`, and rejection fall through to the viewport. If focus moved while the promise was pending, input goes to the component that holds focus when it settles.
 
 The TUI appends a full SGR reset and OSC 8 reset at the end of each rendered line. Styles do not carry across lines. If you emit multi-line text with styling, reapply styles per line or use `wrapTextWithAnsi()` so styles are preserved for each wrapped line.
 
@@ -141,7 +143,7 @@ Utilities:
 
 ## Invalidation and Theme Changes
 
-When the theme changes, the TUI calls `invalidate()` on all components to clear their caches. Components must properly implement `invalidate()` to ensure theme changes take effect.
+When the theme changes, the TUI calls `invalidate()` on all components. Clear cached render state there so the new theme takes effect.
 
 ### The Problem
 
@@ -243,16 +245,13 @@ This pattern is NOT needed when:
 
 ## Debug logging
 
-Set `PI_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout. The
-variable is read by the vendored `@earendil-works/pi-tui` terminal, so it keeps
-its upstream name; a directory path writes one `tui-<timestamp>-<pid>.log` file
-per process.
+Set `PI_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout. A directory path writes one `tui-<timestamp>-<pid>.log` file per process. Review logs for sensitive content before sharing.
 
 ```bash
 PI_TUI_WRITE_LOG=/tmp/tui-ansi.log atomic
 ```
 
-Atomic vendors TUI components through the installed `@earendil-works/pi-tui` dependency.
+Use this capture when reporting a terminal-rendering problem.
 
 ## Performance
 
@@ -288,7 +287,7 @@ These runtime contracts moved here from the [TUI components guide](/tui), which 
 
 ### Host terminal modes from an isolated component
 
-Because the component runs in the engine child — whose stdout is the JSONL transport, not a TTY — writing raw terminal escape sequences to `process.stdout` from `render()`/`handleInput()` is a no-op and never reaches the real host terminal. For the host autowrap mode an overlay may need, the factory `tui.terminal` exposes a typed, allowlisted setter that the host applies to the real TTY over the engine protocol:
+In isolated mode, writing escape sequences to `process.stdout` does not control the host terminal. Use the optional `tui.terminal.setAutowrap` setter when a Windows overlay needs to change autowrap:
 
 ```typescript
 await ctx.ui.custom((tui, theme, keybindings, done) => {
@@ -297,13 +296,13 @@ await ctx.ui.custom((tui, theme, keybindings, done) => {
 }, { overlay: true });
 ```
 
-This is the only terminal control exposed; arbitrary child bytes are never forwarded to the terminal. The host resets the mode when a component hides, closes, is disposed, or when the engine child crashes or restarts. In fullscreen, pi-tui owns its baseline mouse and autowrap modes; non-isolated overlay fallbacks do not disable that baseline. On regular non-isolated hosts and test seams the setter is absent, and callers may fall back to writing escape sequences to their own `process.stdout`.
+Only autowrap control is exposed. Atomic restores the mode when the component hides, closes, or is disposed, and after an engine crash or restart. Fullscreen mode retains its baseline mouse and autowrap behavior. On non-isolated hosts the setter may be absent; only write escape sequences directly when your component owns the real terminal.
 
 ### Host-native session picker
 
-Remote-rendered components pay one host⇄child round trip per keypress under engine isolation. For session-style list pickers, the `ctx.ui.hostSessionPicker(request)` capability avoids that entirely: the terminal host mounts the real built-in `SessionSelectorComponent` and feeds it JSON-safe rows, so arrow-key navigation and search stay host-local and survive extension event-loop stalls. Only semantic events cross the host⇄extension boundary: the extension pushes row `update`s and `error`s (and may `close()` the picker); the host reports selection, cancel, and confirmed Ctrl+D deletes.
+Use `ctx.ui.hostSessionPicker(request)` for responsive session-list navigation and search, including when an extension is busy. Send JSON-safe rows, update or close the picker, and handle selection, cancellation, and confirmed Ctrl+D deletion through the API.
 
-Every interactive host implements the same API — non-isolated mode mounts the selector directly in-process (no IPC at all), isolated mode routes it over the engine session-picker protocol channel — so callers never branch on the mode. The member is absent only on non-interactive surfaces (headless RPC, print); fail with an actionable error there instead of degrading to a hand-rolled picker.
+The API is available in interactive modes, not headless RPC or print. Report that limitation rather than building a fallback picker. Callers do not need to branch on engine isolation.
 
 ```typescript
 const picker = ctx.ui.hostSessionPicker?.({
@@ -321,11 +320,11 @@ picker.update(await loadMoreRows()); // merge late rows into the open picker
 const path = await picker.result;    // selected row's path, or undefined on cancel
 ```
 
-The bundled workflows extension's `/workflow resume` picker is built exclusively on this channel.
+`/workflow resume` uses this picker.
 
 ### Host-native input form
 
-Use `ctx.ui.hostInputForm(request)` for structured inline forms whose keyboard handling must remain responsive under interactive-engine isolation. The terminal host mounts and focuses the real form in the bottom editor slot (`overlay: false`); Tab/Shift+Tab, arrows, text editing, configured keybindings, Enter, Escape, and Ctrl+C are handled entirely in the host process. In isolated mode only the JSON-safe open request and the final submit/cancel event cross the engine boundary. Non-isolated mode mounts the same component directly.
+Use `ctx.ui.hostInputForm(request)` for a structured inline form in the editor slot. It supports Tab/Shift+Tab, arrows, text editing, configured keybindings, Enter, Escape, and Ctrl+C, including under engine isolation.
 
 ```typescript
 const values = await ctx.ui.hostInputForm?.({
@@ -340,4 +339,4 @@ if (values === undefined) return; // Escape, Ctrl+C, teardown, or close
 
 Field types are `string`, `text`, `number`, `integer`, `boolean`, and `select`. Initial and returned values are raw strings; the caller owns domain coercion. Every current interactive Atomic host exposes the optional capability, while headless RPC and print surfaces omit it. Keep a legacy fallback only when compatibility with older hosts is required.
 
-The bundled `/workflow <name>` input picker uses this channel and retains its older custom-editor/`ctx.ui.custom()` paths only as compatibility fallbacks.
+`/workflow <name>` uses this input form.

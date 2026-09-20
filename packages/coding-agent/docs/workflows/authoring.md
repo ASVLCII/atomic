@@ -62,7 +62,15 @@ const result = await ctx.task("analyze", {
 
 The shared `routerModel` setting chooses the decision provider. It does not choose which workflow to launch. Jev can make the decision but never executes the stage. See [automatic stage operation](/workflows/operations#automatic-stage-models) for failures and resume behavior.
 
-**A workflow executes inside whichever host is running Atomic, so its code has to work on both.** Standalone binaries are Bun-compiled while npm installs run under Node, and the active host is what loads your workflow file — so a `Bun.*` global reaches a workflow only when Atomic itself is running under Bun, and fails with `Bun is not defined` otherwise. Installing Bun separately does not change this. Write workflow code against APIs both hosts provide: `node:child_process` instead of `Bun.spawn`/`Bun.spawnSync`, `node:fs` instead of `Bun.file`, `node:path` instead of Bun's path helpers. Every example on this page follows that rule; a snippet that deliberately requires one host is marked with a `host-specific:` comment naming it.
+**Write workflow code for both Atomic hosts.** Standalone binaries run under Bun; npm installs run under Node. A `Bun.*` global is available only when Atomic itself runs under Bun. Otherwise it fails with `Bun is not defined`, even if Bun is installed separately.
+
+Use APIs both hosts provide:
+
+- `node:child_process` instead of `Bun.spawn`/`Bun.spawnSync`
+- `node:fs` instead of `Bun.file`
+- `node:path` instead of Bun's path helpers
+
+Every example on this page follows that rule. A snippet that deliberately requires one host has a `host-specific:` comment naming it.
 
 Workflow files are TypeScript modules that export a workflow definition:
 
@@ -149,7 +157,9 @@ Author workflows to create at least one tracked execution node by calling `ctx.t
 
 ### Source layout for authored workflows
 
-Keep a small, readable workflow in one entry file and write it for human maintainers. Keep the graph and control flow visible in the top-level workflow entry file, use stage names that state each stage's responsibility, and make its inputs, outputs, evidence, and success contract explicit. A developer reading the entry file from top to bottom should be able to identify the graph, branches, gates, artifacts, and stop conditions. Avoid both monolithic prompt blobs and gratuitous fragmentation: do not split short one-use prompts, create one file per stage, add wrapper-only modules, hide the graph across files, or use line counts alone as a module boundary.
+Keep a small workflow in one readable entry file. Show its graph and control flow at the top level, name each stage for its responsibility, and make inputs, outputs, evidence, and success criteria explicit. A maintainer reading top to bottom should be able to identify branches, gates, artifacts, and stop conditions.
+
+Avoid both monolithic prompt blocks and unnecessary fragmentation. Do not split short one-use prompts, create one file per stage, add wrapper-only modules, or hide the graph across files. Line counts alone are not a module boundary.
 
 When a meaningful source boundary improves clarity, reuse, ownership, or testability, keep the graph and control flow in the top-level workflow entry file and extract cohesive concerns:
 
@@ -161,7 +171,7 @@ When a meaningful source boundary improves clarity, reuse, ownership, or testabi
 
 Put those support modules in a subdirectory below the top-level discovery directory — either one owned by a single workflow or a shared support directory for several workflows. Project and user discovery scans only top-level `.ts`/`.js`/`.mjs`/`.cjs` files in the workflow directory; the scan is non-recursive, so support modules in subdirectories are not scanned as extra top-level workflow candidates. Every top-level candidate in any of those four extensions is imported and each of its exports is shape-checked, so a support module left at the top level produces definition diagnostics for its non-workflow exports regardless of extension. Use `.js` import extensions from TypeScript source, following the repository convention.
 
-The repository uses this shape in `.atomic/workflows/release-docs.ts`: the entry file keeps the graph and imports deterministic helpers from `.atomic/workflows/lib/release-docs.ts`, a shared support directory that also holds the separate `publish-release` helper. A workflow-owned subdirectory is an equally valid layout for a custom workflow:
+For example, a custom workflow can keep its support code in a workflow-owned subdirectory:
 
 ```text
 .atomic/workflows/code-review.ts
@@ -223,11 +233,11 @@ Implement ✓
 
 Record such follow-up as non-topological activity metadata. Do not reopen the original node as a descendant of its own downstream review or validation work.
 
-Runtime and replayed topology checks are the authoritative cycle boundary. If code that materializes or restores topology changes, cover every new parent edge with incremental edge checks and validate reconstruction during execution, replay, and DBOS hydration. Authoring guidance cannot replace those runtime checks or make malformed durable topology safe.
+Discovery cannot prove every dynamic path acyclic. Validate your branches and resumed runs before relying on a definition. Runtime topology checks are documented in [Workflow durability maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-durability.md).
 
 ### Guiding Principles
 
-- **Locally scoped stage prompts** - Describe only the current stage's objective, inputs, expected outputs, and success criteria. Avoid references to other stages unless the current stage explicitly receives and needs that information, and avoid workflow-specific or stage-specific vocabulary that is not explained inside the current prompt. See [Locally Scoped Stage Prompts](/workflows/reliable-design#locally-scoped-stage-prompts) for the expanded contract.
+- **Locally scoped stage prompts** - State only the current objective, inputs, expected outputs, and success criteria. Define any vocabulary the stage needs. See [Locally Scoped Stage Prompts](/workflows/reliable-design#locally-scoped-stage-prompts).
 - **DAG-only dynamic topology** - Treat `run(ctx)` as imperative code that materializes graph nodes at runtime. Keep every branch, loop iteration, and nested boundary acyclic; never add a self-edge or a parent edge to an ancestor, and redesign or stop before launch if one remains.
 - **Clear vocabulary** - Use clear software engineering terminology in self-described prompts.
 - **No regex gates** - Avoid hard-coded regular expressions that gate reviews or model outputs.
@@ -313,7 +323,9 @@ export default workflow({
 
 Atomic never adds a `result` output. A workflow exposes only the keys it declares in `outputs` and returns from `run`. To expose `result`, declare `outputs: { result: schema }` and return `{ result }`. Returning a key not declared in `outputs` fails with the `returned undeclared output` error quoted above. For a child workflow call, `<name>` is the child's name, and the parent surfaces the failure through the child-failure wrapper described in [Workflow Composition](#workflow-composition).
 
-Outputs are declared with TypeBox `Type.*` schemas in the `outputs` object. **Prefer precise schemas.** A precise schema gives a precise `Static<>` type for the `run` return and for any parent reading `child.outputs`, and it makes runtime validation enforce the real shape instead of accepting values without checking that precise shape. Reach for `Type.Unknown()`, `Type.Any()`, `Type.Array(Type.Unknown())`, or `Type.Object({}, { additionalProperties: true })` only for genuinely dynamic data whose shape you cannot know ahead of time.
+Declare outputs with TypeBox `Type.*` schemas. **Prefer precise schemas:** they give the `run` return and `child.outputs` precise `Static<>` types and validate the actual shape at runtime.
+
+Use `Type.Unknown()`, `Type.Any()`, `Type.Array(Type.Unknown())`, or `Type.Object({}, { additionalProperties: true })` only for genuinely dynamic data whose shape you cannot know ahead of time.
 
 | TypeBox schema | Static type | Accepted runtime value |
 |---|---|---|
@@ -392,7 +404,7 @@ export default workflow({
 });
 ```
 
-Tradeoff: `Type.Unsafe<T>()` does not deeply validate at runtime — it trusts that the produced value matches `T`. Use it when the producing code already guarantees the shape (the `contract-complex-leaf` contract workflow does exactly this, wrapping `Type.Unsafe<ComplexPacket>(...)` and `Type.Unsafe<readonly ComplexRecord[]>(...)` around permissive runtime schemas). When you can express the shape directly, prefer a real `Type.Object(...)`/`Type.Array(...)` so runtime validation also catches drift. Keep bare `Type.Unknown()` and `Type.Object({}, { additionalProperties: true })` for the rare cases where the value is genuinely dynamic.
+`Type.Unsafe<T>()` does not deeply validate at runtime. Use it only when the producing code guarantees the shape. Prefer `Type.Object(...)` and `Type.Array(...)` when possible; reserve permissive schemas for genuinely dynamic values.
 
 #### How types flow
 
@@ -431,7 +443,7 @@ Each queue is FIFO in admission order. There is no global FIFO *across* the two 
 
 A message you type into an attached stage chat and submit with Enter defaults to `steer`, matching normal (non-workflow) session steering, so a mid-run correction lands at the next steering boundary rather than at the end of the turn. Ctrl+F queues a follow-up instead. This is a property of the interactive surface, not of the API: an authored `stage.sendUserMessage()` call that names no `deliverAs` still defaults to follow-up while the stage is streaming.
 
-Custom `AgentSessionAdapter` implementations must make asynchronous idle-turn ownership observable through their public `subscribe()` stream: emit `{ type: "agent_start" }` when the submitted message has entered the turn, before waiting for that turn to finish, and emit `{ type: "agent_end", messages }` when that turn terminates. This applies both to native `sendUserMessage()` implementations and to the required `prompt()` fallback when `sendUserMessage` is omitted. Atomic retains the resulting logical ownership after releasing serialized message admission, so a concurrent second message is routed as steering/follow-up rather than another prompt even when the adapter publishes `isStreaming` asynchronously after `agent_start`. Correlated turn generations prevent a late end or older delivery settlement from clearing a newer owner. A subscription may replay earlier lifecycle state synchronously during registration; an untagged synchronous replay is treated as a snapshot and does not consume a later current-turn end. If an adapter can emit a delayed end for a replayed turn while a newer turn is active, it must attach the same stable string or numeric `turnId` to that replayed `agent_start` and its matching `agent_end`; Atomic then correlates the old end without disturbing current ownership. After `subscribe()` returns, adapters must emit `agent_start` only for newly started turns, never as a delayed replay of an earlier turn. Adapters that enter streaming synchronously are also detected through `isStreaming`; the bundled Atomic session additionally retains its internal handshake for compatibility. Implementations must not delay the current turn's `agent_start` until turn completion.
+Custom `AgentSessionAdapter` implementations must emit `{ type: "agent_start" }` through `subscribe()` when a submitted turn starts, then `{ type: "agent_end", messages }` when it ends. This applies to `sendUserMessage()` and the `prompt()` fallback. Do not delay start until completion. A synchronous subscription replay is a snapshot; after subscription returns, emit starts only for new turns. If an old replayed turn can end during a newer turn, attach the same stable string or numeric `turnId` to its start and end so the old event cannot clear the newer turn's ownership.
 
 Native queue pause is an optional `StageSessionRuntime` optimization for custom adapters:
 
@@ -454,13 +466,9 @@ interface StageSessionRuntime {
 }
 ```
 
-A session announces its queue by `queue_update`, so a queue that exists before Atomic's listeners reach that session is announced to nobody — which happens when a retiring session hands its pending messages to the session replacing it, and when a retained session is reopened for post-mortem chat holding what it was queued. Atomic reads these two methods once, as it attaches a session, and replays the missed snapshot to that stage's listeners; every later change still arrives as an ordinary event. An adapter that omits them loses nothing it had before: only a queue predating the attach is invisible, and a session that starts empty never had one.
+Implement these getters to expose messages queued before session attachment, including messages transferred during fallback or retained post-mortem chat. Atomic reads an initial snapshot, then follows ordinary `queue_update` events. Without the getters, only pre-attachment queue contents are unavailable to the view.
 
-Externally produced traffic has a separate lifecycle rule. While a workflow stage generation is still open, Intercom messages are admitted as priority input that cancels the current model call or cancellable tool and continues in the same stage generation; subagent completion notices retain the stage AgentSession's native steering/follow-up queue. For a busy stage, admission into the generation boundary happens synchronously before the exact foreground subagent owner's probe/commit detach handshake; Intercom cancellation and model-visible delivery wait inside that admitted delivery until the handshake is claimed or falls back after an unclaimed/vanished owner. A commit accepted within a parallel foreground group releases aggregate supervision for every active sibling while retaining their process and eventual-result ownership. Reserving admission before the asynchronous handshake prevents terminal close from overtaking an in-flight Intercom delivery, while waiting inside the reservation prevents a blocking child request from queueing behind either a single foreground tool call or a parallel aggregate still waiting on another child. The stage drains already-admitted work before publishing its terminal snapshot, including schema-backed turns that have already called `structured_output`.
-
-Closing the generation is atomic with admission: a notification admitted first belongs to that stage. Stage-owned children that are still running are cancelled at close, and their later findings or completion notifications cannot reopen the completed stage or escape through the main-chat notification path. Ordinary notifications not owned by that stage arriving after close retain the existing single main-chat route. A blocking sibling `intercom.ask` is the deliberate exception: when the completed stage retains a valid conversation, Atomic schedules a post-mortem turn in that conversation so it can inspect the exact ask and reply without changing terminal workflow state. Failed running-stage admission and failed post-mortem admission return correlated actionable errors to the asker instead of consuming the full reply timeout.
-
-Stage completion never waits for producers that are still running; only traffic already admitted at the close boundary is drained. Explicit `sendUserMessage()` calls and post-mortem stage chat remain deliberate user/workflow-authored follow-up turns on the retained session.
+Intercom updates can interrupt current model work; subagent completion notices use the stage's message queues. Work accepted before stage close is handled before the terminal result. Closing cancels remaining stage-owned children and suppresses their late findings. A blocking sibling ask can still open an eligible retained conversation for post-mortem discussion without changing workflow state. Explicit `sendUserMessage()` remains the API for authored follow-up turns.
 
 ### Early exit with `ctx.exit()`
 
@@ -496,23 +504,13 @@ export default workflow({
 
 An author-initiated failed exit returns to a parent as `{ exited: true, status: "failed" }` with its reason and partial outputs; it does not throw. An unintentional child failure still throws, so check `child.exited === true` before reading required child outputs and use the discriminator to branch. The lifecycle terminal notice uses the same steer/trigger-turn delivery path and references partial outputs so the launching agent does not need a separate status call.
 
-The first selected `ctx.exit({ outputs })` snapshots its output payload synchronously by value before JavaScript `finally` blocks or cleanup callbacks can mutate the caller-owned object. The snapshot preserves undeclared keys and invalid values until post-cleanup validation, so deleting an undeclared key or changing an invalid value after `ctx.exit(...)` does not change the terminal validation result.
+Exit snapshots `outputs` before cleanup, so later mutation cannot repair an invalid payload. If reading or copying exit options fails, the run records a non-resumable authoring failure unless external terminal control already won.
 
-If reading `status`, `reason`, `resumable`, or `outputs`, or enumerating/copying the output snapshot itself, throws, Atomic still selects the exit signal, runs workflow-exit cleanup when feasible, and then records a terminal non-resumable authoring failure (`resumable: false`) if no external terminal control won first.
+After exit is selected, new tracked work and retained stage operations are refused. Queued parallel work does not start; active stages and prompts are skipped. External cancellation can win during cleanup, in which case the canonical result is `killed`.
 
-After the first `ctx.exit(...)` wins, the executor treats that exit as a level-triggered gate. Later delayed calls to `ctx.stage`, `ctx.task`, `ctx.chain`, `ctx.parallel`, `ctx.workflow`, or graph-backed `ctx.ui.*` prompts rethrow the selected exit signal before creating stages, prompt nodes, child runs, or control handles. Retained `StageContext` handles from before the exit also become inert: `prompt`, `complete`, steering/follow-up, model/thinking controls, tree navigation, compaction, abort, and attached-pane session-realization paths refuse to touch or create an `AgentSession` after the exit is selected.
+On resume of an unfinished tool, a successful exit cannot skip that tool. Restore its matching call before new tracked work; otherwise Atomic reports `insufficient_state: replay topology mismatch`. Intentional failed, blocked, cancelled, or skipped exits remain available.
 
-`ctx.parallel` stops dequeuing queued work after exit even with `failFast: false` and limited concurrency; already-started stages and prompt nodes are finalized as `skipped` with a `workflow-exit` reason that prompt-node abort handling preserves instead of overwriting with a generic run-aborted reason.
-
-Continuation replay also observes the exit gate. Replayed `ctx.stage(...).prompt(...)`, replayed `complete(...)`, graph-backed prompt-node replay, and completed child-boundary replay re-check for a selected exit after their replay microtask and before writing a current-run completed stage end. If `ctx.exit(...)` wins that gap, the pending replay finalizer is skipped/suppressed with the workflow-exit reason instead of creating a misleading completed stage in the resumed run.
-
-A continuation selected at an unfinished durable tool cannot use `ctx.exit()` or `ctx.exit({ status: "completed" })` to bypass that tool. The executor requires the exact pending frontier to have been reached and consumed, even if workflow code catches the exit signal. Otherwise it records an `insufficient_state: replay topology mismatch` failure naming the unfinished tool, not a successful author exit. This check does not change intentional `failed`, `blocked`, `cancelled`, or `skipped` exits.
-
-While that tool frontier is pending, completed model stages and child workflows may replay their recorded results, but new model/task execution and child workflow bodies are rejected before they can replace the tool. Stage/task worktree preparation runs only after replay selection and live admission. Keep the matching tool call before new tracked work when editing a resumable workflow.
-
-The store is the terminal authority for all run-end races. `ctx.exit(...)` starts cleanup before validating exit outputs, and an internal destructive cancellation can still win the terminal `recordRunEnd` write while that cleanup is pending. When that happens, the SDK `RunResult`, `onRunEnd` callback, live store, and persisted `workflow.run.end` entries all report the canonical `killed` state; the losing `ctx.exit` status or validation failure is not returned and does not append a second run-end entry.
-
-Control-signal probing is fail-closed. When the executor inspects an arbitrary thrown value or abort reason for internal workflow-exit markers, parent-exit markers, aggregate `errors`, `cause`, `reason`, or `scope`, throwing or inaccessible accessors are treated as “no signal for that branch.” The run then continues through ordinary failure finalization, or the ordinary killed path for external abort reasons, instead of letting author-defined getters escape the executor catch path or be misclassified as `ctx.exit(...)`.
+Exit arbitration, replay checks, and control-signal handling are covered in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md).
 
 ### Workflow Composition
 
@@ -649,7 +647,7 @@ export default workflow({
 
 Passing a definition directly to `ctx.workflow(...)` uses the child definition's normalized name for replay metadata and the default boundary label.
 
-`ctx.workflow(workflowDefinition)` starts a nested workflow behind a parent boundary stage named `workflow:<workflow-name>` by default. User-facing status and graph views flatten a valid child graph into the parent run recursively, so composition behaves like inlining the child workflow code: child stages, HIL prompt nodes, and deeper imported workflows appear in one expanded graph. When Atomic hides a valid import boundary, every boundary parent connects to every child root, and every child terminal connects to each downstream dependent of the boundary. Every visible child node keeps a distinct virtual graph ID and its exact `{ runId, stageId }` control target, even when sibling or repeated child workflows reuse local stage IDs or names. Attach, send, pause, resume, stage selection, and post-mortem chat therefore route to the nested run and stage that actually own the node. Implementation-owned child runs are not shown as separate top-level `/workflow status` entries. The returned child result has:
+`ctx.workflow(workflowDefinition)` creates a boundary named `workflow:<workflow-name>` by default. Valid child graphs appear inside the parent graph, including nested stages and human-input prompts. Attach and control actions target the actual child stage even when names repeat. Child runs are not separate top-level status entries. The returned result has:
 
 | Field | Meaning |
 |---|---|
@@ -683,14 +681,10 @@ A child exposes only outputs declared in `outputs` and returned from `run` or su
 
 Missing required outputs, schema type mismatches, and non-JSON-serializable returned values fail normal child completion before the parent continues; child `ctx.exit({ outputs })` allows missing required outputs but still validates every provided key and sets `child.exited === true` so parent code must handle the partial shape.
 
-Pass only workflow definitions to `ctx.workflow(...)`. Import reusable workflows with TypeScript `import` statements first; registry names are only for top-level named runs, not `ctx.workflow(...)` arguments. If a module is missing or does not export a workflow definition, workflow discovery fails when loading that module. Nested child workflows count against `maxDepth` (default `4` total workflow levels).
+Pass only imported workflow definitions to `ctx.workflow(...)`, not registry names or paths. Missing modules or invalid exports fail discovery. Nested children count against `maxDepth`, default `4` total workflow levels.
 
-Atomic hides an import boundary only when the referenced child run is non-empty and reciprocally identifies that parent run and boundary stage. The same rule applies recursively at deeper nesting levels. If no valid child graph can stand in for the boundary—including a failed or skipped boundary, a missing or empty child graph, stale or mismatched ownership metadata, or a recursive link that cannot produce a valid expansion—the graph keeps the boundary summary node instead of flattening an unrelated or invalid child. Running and completed boundaries with valid child graphs are flattened; completed summaries still retain the child workflow name, full child run id, and exposed output count for replay/debugging when fallback is required.
+A missing, empty, or invalid child graph retains a boundary summary rather than displaying unrelated nodes. Failed or skipped boundaries also retain summaries. Use `stageName` for a concise custom boundary label.
 
-Use `stageName` when the parent needs a more specific label, but keep it concise so the child summary remains readable in the graph.
+If the parent exits while a child runs, the child is cleaned up and becomes `cancelled`, non-resumable; active child stages and prompts are skipped. No further child work starts after parent exit.
 
-If a parent workflow exits through `ctx.exit(...)` while a child workflow is in flight, the parent executor only skips the parent boundary and sends the child a typed parent-exit abort reason. The hidden child executor owns child cleanup: active child stages and prompt nodes are skipped for `workflow-exit`, live child stage handles/sessions are disposed, and the child run is finalized as terminal `cancelled` (not `killed`) and non-resumable.
-
-The child executor writes each skipped child `workflow.stage.end` exactly once before its child `workflow.run.end`, and parent exit finalization waits for that child cleanup before writing the parent `workflow.run.end`, so restored sessions do not reconstruct the child as interrupted or failed. The skipped parent boundary clears any live child-run edge before store or persistence updates, so status/graph views do not display stale child stages from a boundary that did not complete. A delayed parent branch that calls `ctx.workflow(...)` after the exit gate is selected does not create a boundary or child run.
-
-Continuation replay treats the parent child-workflow boundary as the durable checkpoint: a previously completed child boundary replays with the original exposed outputs and without re-running the child, while a child that failed or was interrupted before completion starts again from the beginning on continuation. If `ctx.exit(...)` wins while a completed boundary is being replayed but before replay finalization, the boundary is finalized as skipped and its preloaded child metadata is omitted from store, persistence, restore, and expanded graph views.
+Resume reuses a completed child boundary's recorded outputs without running it again. A child interrupted before completion starts from the beginning. If the parent exits during replay, the boundary is skipped rather than reported as newly completed.

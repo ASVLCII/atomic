@@ -36,7 +36,11 @@ With `AGENTS.md` saved, run `/reload` (or restart Atomic), then ask:
 What project instructions are you following in this repository?
 ```
 
-Expected result: the answer restates your own rules — the `bun run typecheck` line above, or whatever you wrote — rather than generic advice. A generic answer means the file was not picked up: confirm it is named `AGENTS.md`, that it sits in the directory you started Atomic from or one of its parents, and that no `AGENTS.override.md` in the same directory is replacing it.
+The answer should restate your rules, such as the `bun run typecheck` line above, rather than give generic advice. If it does not, check that:
+
+- The file is named `AGENTS.md`.
+- It is in the directory where you started Atomic or one of its parents.
+- No `AGENTS.override.md` in the same directory replaces it.
 
 ## Next step
 

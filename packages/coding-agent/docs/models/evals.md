@@ -5,7 +5,7 @@ description: "The external evals that inform Atomic model selection — Artifici
 
 # Evals
 
-Atomic's model-selection docs are keyed to two live external eval sources rather than a hand-maintained table of scores. This page lists each eval, what it measures, the measured numbers for the models in Atomic's catalog, and **when to reference it** for a given workflow role — so an agent authoring a workflow can pick a model for a task type from evidence rather than from an aggregate rank.
+Atomic's model-selection docs use two live external evaluation sources. This page records what each evaluation measures, results for models in Atomic's catalog, and when to use it for a workflow role. Choose by task-specific evidence, not aggregate rank.
 
 <Warning>
 No single benchmark is the source of truth. Validate these inputs against Atomic's own workflow evals. Artificial Analysis was retrieved on **2026-09-08**, after its **September 7 Intelligence Index v4.3** announcement. The AA tables and charts below use that read; source pages show no separate per-measurement publication date. DeepSWE retains its **2026-09-03** snapshot, read on **2026-09-05**, and was not revalidated in this refresh. Values preserve the displayed source precision; a rounded lead is not a significance claim.
@@ -182,7 +182,11 @@ The live leaderboard also lists **Qwen3.8 2.4T A95B** at 40 index points and $2.
 
 ### Per-evaluation scores for catalog models
 
-Read on 2026-09-08 from the rendered "Intelligence Evaluations" charts on [Astra](https://artificialanalysis.ai/models/gpt-6-astra), [GLM-5.3-Flash](https://artificialanalysis.ai/models/glm-5-3-flash), [Gemini 3.7 Flash](https://artificialanalysis.ai/models/gemini-3-7-flash), [Sonnet 5](https://artificialanalysis.ai/models/claude-sonnet-5) and [Terra](https://artificialanalysis.ai/models/gpt-5-6-terra). AA-Briefcase and GDPval-AA v2 are normalized Elo scores displayed as `100 × clamp((Elo - 500) / 2000, 0, 1)`, **not pass percentages**. For index inclusion, the [methodology](https://artificialanalysis.ai/methodology/intelligence-benchmarking) freezes each evaluation's Elo at model addition. Rounded displays cannot be inverted into exact Elo: 58% corresponds to approximately 1660, not an exact rating. AA-Omniscience non-hallucination is one minus the [hallucination rate](https://artificialanalysis.ai/evaluations/omniscience): `(partial answers + not attempted) / (incorrect + partial answers + not attempted)`, expressed as a percentage. It includes partial answers and not-attempted responses among non-correct responses, not just abstentions or a fraction of all answers.
+The scores were read on 2026-09-08 from the rendered "Intelligence Evaluations" charts on [Astra](https://artificialanalysis.ai/models/gpt-6-astra), [GLM-5.3-Flash](https://artificialanalysis.ai/models/glm-5-3-flash), [Gemini 3.7 Flash](https://artificialanalysis.ai/models/gemini-3-7-flash), [Sonnet 5](https://artificialanalysis.ai/models/claude-sonnet-5) and [Terra](https://artificialanalysis.ai/models/gpt-5-6-terra).
+
+AA-Briefcase and GDPval-AA v2 report normalized Elo as `100 × clamp((Elo - 500) / 2000, 0, 1)`, **not pass percentages**. For index inclusion, the [methodology](https://artificialanalysis.ai/methodology/intelligence-benchmarking) freezes each evaluation's Elo when a model is added. Rounded displays cannot yield exact Elo: 58% corresponds to approximately 1660, not an exact rating.
+
+AA-Omniscience non-hallucination is one minus the [hallucination rate](https://artificialanalysis.ai/evaluations/omniscience): `(partial answers + not attempted) / (incorrect + partial answers + not attempted)`, expressed as a percentage. It counts partial and not-attempted responses among non-correct responses. It is not just abstentions or a fraction of all answers.
 
 Sol's additional efforts were read from its [xhigh](https://artificialanalysis.ai/models/gpt-5-6-sol-xhigh) and [high](https://artificialanalysis.ai/models/gpt-5-6-sol-high) pages. Selection is explicit: the tables retain the previously documented configurations and add Fable 5.1's lower efforts and Astra's Non-reasoning row. A source label does not establish that Atomic exposes that configuration through every provider.
 
@@ -429,7 +433,7 @@ Three reads from the agent table:
 
 AA's DeepSWE component uses the DeepSWE dataset with the named agent. It is not the same experiment as Datacurve's `mini-swe-agent` leaderboard, and the two disagree: inside AA's harness Muse Code + Muse Spark 1.3 (68) edges Codex + Astra (67), while Datacurve's Best view has Astra [xhigh] at 74% and has not published Muse Spark 1.3 at all (its Muse Spark 1.2 [xhigh] row sits at 55%). Neither its component score nor its composite belongs in the [DeepSWE frontier](/models/pareto-efficiency).
 
-Earlier versions of these docs referred to a base-model **Coding Index** and **Agentic Index**. Neither is listed in the [capability directory](https://artificialanalysis.ai/models/capabilities) or [capability methodology](https://artificialanalysis.ai/methodology/capability-indices) inspected on 2026-09-08. We do not silently rename either to Coding Agent Index. Use the named coding and agentic evaluations above instead.
+Use the named coding and agentic evaluations above. The separately measured Coding Agent Index is not a base-model Coding Index or Agentic Index. See [benchmark naming history](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md#retrieval-history-and-naming) for the older documentation labels.
 
 ### Professional capability indices
 
@@ -459,11 +463,9 @@ See [Model Selection](/models/model-selection) for a small dated shortlist and p
 
 ## Keeping the docs fresh
 
-1. Record each source's retrieval date separately from its publication or snapshot date. Follow the rendered charts and methodology, not just an old article's score.
-2. Preserve exact model, reasoning configuration, agent, benchmark version and units. A changed index or agent can change the ranking without a new model release.
-3. Say **unmeasured on the named benchmark and date**. Missing text extraction is not evidence of absence; inspect the rendered page. Never transfer a predecessor's score.
-4. Check the configured catalog and live provider access separately. These docs do not change runtime routing or model defaults.
-5. AA's per-evaluation numbers are only in client-rendered Recharts bar charts, so a plain HTTP fetch returns headings without values. To refresh them, open the model page in a headless browser, scroll the whole page so every chart animates in, then read each chart's `foreignObject` labels (model names, in bar order) alongside its `svg text` nodes (values, in the same order). The DeepSWE leaderboard and the AA evaluation leaderboards (AA-Briefcase, GDPval-AA v2) render as text and fetch cleanly.
+Use the live benchmark for a current decision, and record its date, version, exact model/effort, and units when citing it. Verify configured provider access separately. A missing measurement is not a zero or a predecessor's score.
+
+Chart extraction and documentation refresh procedures are in [Benchmark maintenance](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md).
 
 ## Related
 
