@@ -546,6 +546,53 @@ test("hello-world routing excludes unavailable model evidence and fits one small
 	assert.doesNotMatch(body, /mermaid|# Model Selection|claude-fable-5/);
 });
 
+test("long auto-routing tasks fit Jev while preserving protected requirements and both ends", async () => {
+	const f = await fixture();
+	const notice = vi.spyOn(console, "warn").mockImplementation(() => {});
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	const protectedText = "<keepContext>Review only. Never edit files.</keepContext>";
+	const task = `Review this change.\n${"reference data ".repeat(10000)}${protectedText}${"more data ".repeat(10000)}\nReport defects.`;
+	const transport = vi.fn(async (_url: string, init: RequestInit) => {
+		const body = JSON.parse(String(init.body));
+		assert.ok(Buffer.byteLength(String(init.body)) < 24000);
+		assert.ok(body.state.task.includes(protectedText));
+		assert.match(body.state.task, /Review this change/);
+		assert.match(body.state.task, /Report defects/);
+		assert.match(body.state.task, /omitted/);
+		return Response.json(jevFixtureResponse(body));
+	});
+	vi.stubGlobal("fetch", transport);
+	assert.equal((await f.route(task)).modelOverride, "decision-test/chat");
+	assert.equal(transport.mock.calls.length, 1);
+	assert.equal(f.infer.mock.calls.length, 0);
+	assert.deepEqual(notice.mock.calls, [
+		["Text was truncated to fit the input budget. Continuing with the shortened text."],
+	]);
+});
+
+test("auto routing screens credentials even in omitted middle text", async () => {
+	const f = await fixture();
+	await assert.rejects(f.route(`${"a".repeat(30_000)}mock-chat-secret${"b".repeat(30_000)}`), /credential/);
+	assert.equal(f.infer.mock.calls.length, 0);
+});
+
+test("oversized protected tasks still fall back intact or fail when Jev is pinned", async () => {
+	const f = await fixture();
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
+	vi.spyOn(console, "warn").mockImplementation(() => {});
+	const transport = vi.fn();
+	vi.stubGlobal("fetch", transport);
+	const task = `<keepContext>${"required detail ".repeat(3000)}</keepContext>`;
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	await assert.rejects(f.route(task), /conservative input budget/);
+	f.ctx.getRouterModel = () => "";
+	await f.route(task);
+	assert.equal(transport.mock.calls.length, 0);
+	assert.equal(f.infer.mock.calls.length, 1);
+	assert.equal(JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state.task, task);
+});
+
 test("auto ranks three distinct models, excludes their other efforts, and replays without inference", async () => {
 	const f = await fixture();
 	const models = ["a", "b", "c", "d"].map((id) => ({ ...reasoningModel, id }));

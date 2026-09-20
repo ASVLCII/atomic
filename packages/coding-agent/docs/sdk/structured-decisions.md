@@ -113,7 +113,9 @@ Overflow requires multiple HTTP requests and can increase latency and billed inp
 
 Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Without an exact Jev tokenizer, Atomic uses conservative UTF-8 byte budgets of 24,000 and 48,000 respectively, reserving further framing headroom when packing. These checks include compiled instructions and criteria, apply even below 255 options, and may reject inputs the provider would accept.
 
-Atomic never trims state or sends an indivisible comparison that exceeds its local budget. Default routing can use the original context with the current chat model; explicitly pinned Jev and general structured-output calls fail. A provider `max_tokens_exceeded` response still uses the same routing fallback policy without repeating the rejected request. Supply concise context or select a chat model with enough capacity when needed.
+The structured-decision transport never trims supplied state or sends an indivisible comparison that exceeds its local budget. Default routing can use that state with the current chat model; explicitly pinned Jev and general structured-output calls fail. A provider `max_tokens_exceeded` response still uses the same routing fallback policy without repeating the rejected request. Supply concise context or select a chat model with enough capacity when needed.
+
+Automatic subagent and workflow-stage model selection prepares a [bounded task excerpt](/subagents/reference#automatic-model-selection) before calling this API. That excerpt preserves protected spans and does not replace the execution prompt. Workflow-launch routing and direct SDK decision calls do not apply this task-excerpt policy.
 
 Jev response bodies are limited to 1 MiB per request. Atomic validates answer types, choices, probability distributions and usage without imposing a confidence threshold.
 

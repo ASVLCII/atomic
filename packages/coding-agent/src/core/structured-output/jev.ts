@@ -158,7 +158,7 @@ const KEEP = 3;
 
 function contextLimit(): JevRequestError {
 	return new JevRequestError(
-		"Jev routing context exceeds the conservative input budget. No oversized request was sent. Supply less context or select a chat router model; task requirements were not truncated.",
+		"Jev's conservative input budget is still exceeded for this comparison. Reduce the supplied context or choose another router model.",
 	);
 }
 

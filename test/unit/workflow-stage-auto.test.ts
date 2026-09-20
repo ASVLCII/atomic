@@ -146,6 +146,54 @@ test("public stage auto decides from actual prompt and compact shipped policy be
 	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 3_000);
 });
 
+test("long stage prompts are excerpted only for routing, never for execution", async () => {
+	const f = await fixture();
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
+	const task = `Review this implementation.\n${"reference ".repeat(20_000)}\n<keepContext>Read-only review.</keepContext>\nReport defects.`;
+	const transport = vi.fn(async (_url: string, init: RequestInit) => {
+		const body = JSON.parse(String(init.body));
+		assert.ok(Buffer.byteLength(String(init.body)) < 24_000);
+		assert.match(body.state.task, /omitted/);
+		assert.match(body.state.task, /<keepContext>Read-only review.<\/keepContext>/);
+		return Response.json(jevFixtureResponse(body));
+	});
+	vi.stubGlobal("fetch", transport);
+	const models = workflowModelCatalogFromContext({
+		model: decisionModel,
+		modelRegistry: f.modelRegistry,
+		getRouterModel: () => "typesafe-ai/jev-latest",
+	});
+	const executed: string[] = [];
+	const ctx = createStageContext(
+		makeOpts({
+			models,
+			stageOptions: { model: "auto" },
+			adapters: {
+				agentSession: {
+					async create(options) {
+						return makeMockSession({
+							model: options.model,
+							async prompt(text) {
+								executed.push(text);
+								return "done";
+							},
+							getLastAssistantText: () => "done",
+						}).session;
+					},
+				},
+			},
+		}),
+	);
+	try {
+		await ctx.prompt(task);
+		assert.deepEqual(executed, [task]);
+		assert.equal(transport.mock.calls.length, 1);
+		assert.equal(f.infer.mock.calls.length, 0);
+	} finally {
+		await ctx.__dispose();
+	}
+});
+
 test("malformed stage decision admits no execution session", async () => {
 	const f = await fixture();
 	f.infer.mockImplementation(() => messageStream(decisionMessage({ model: "decision-test/chat", effort: "high" })));
