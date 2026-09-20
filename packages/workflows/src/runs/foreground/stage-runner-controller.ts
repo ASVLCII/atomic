@@ -1625,10 +1625,17 @@ export class StageSessionController {
 			for (const listener of this.pendingListeners) listener(missedQueueUpdate);
 		}
 		this.unsubscribeTerminateWatcher?.();
+		let applyingFallback = false;
 		this.unsubscribeTerminateWatcher = result.session.subscribe((event) => {
-			// SDK fallbacks apply model and effort before model_changed, not fallback_start.
-			if (event.type === "model_changed" && event.source === "fallback") {
-				this.selectedModel = workflowModelId(event.model);
+			if (event.type === "model_fallback_start") applyingFallback = true;
+			// SDK effort-only fallbacks suppress model_changed, but emit thinking_level_changed
+			// after applying both model and effort. Ignore effort changes outside fallback selection.
+			if (
+				(event.type === "model_changed" && event.source === "fallback") ||
+				(event.type === "thinking_level_changed" && applyingFallback)
+			) {
+				applyingFallback = false;
+				this.selectedModel = workflowModelId(event.type === "model_changed" ? event.model : result.session.model);
 				this.notifyModelFallbackMetaChange();
 			}
 			this.artifactCapture.onEvent(result.session, event);
