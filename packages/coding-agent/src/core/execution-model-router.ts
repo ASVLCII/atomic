@@ -30,19 +30,19 @@ export interface ModelRoute {
 	allowsModel(model: Model<Api>, effort?: string): boolean;
 }
 const instructions =
-	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `model_selection_guide`. Consider task fit, measured effort, dates, caveats and cost. Guide recommendations cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
+	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals`. Consider task fit, measured effort, dates, caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
 
-async function readModelSelectionGuide(signal?: AbortSignal): Promise<string> {
+async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {
-		const guide = await readFile(join(getDocsPath(), "models", "model-selection.md"), { encoding: "utf8", signal });
+		const evals = await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
 		// Reserve room for the 12 KB task excerpt, instructions and candidate batches
-		// within Jev's conservative 24 KB per-comparison budget. Never trim the guide.
-		if (!guide.trim() || Buffer.byteLength(JSON.stringify(guide), "utf8") > 8_000) throw new Error("Invalid guide");
-		return guide;
+		// within Jev's conservative 24 KB per-comparison budget. Never trim scores.
+		if (!evals.trim() || Buffer.byteLength(JSON.stringify(evals), "utf8") > 8_000) throw new Error("Invalid evals");
+		return evals;
 	} catch {
 		signal?.throwIfAborted();
 		throw new Error(
-			"Auto routing requires a nonempty model-selection.md guide within 8,000 JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.",
+			"Auto routing requires a nonempty evals.md document within 8,000 JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.",
 		);
 	}
 }
@@ -94,7 +94,7 @@ export async function routeExecutionModel(input: {
 		const state = {
 			task: input.task,
 			agent: { name: input.agent.name, description: input.agent.description },
-			model_selection_guide: await readModelSelectionGuide(signal),
+			evals: await readModelSelectionEvals(signal),
 		};
 		if (!state.task.trim()) throw new Error("Auto routing requires task instructions.");
 		const serialized = JSON.stringify({ state, criteria: allCriteria, constraints });
@@ -154,7 +154,7 @@ export async function routeExecutionModel(input: {
 						questions: {
 							pair: {
 								instructions:
-									"Which eligible model and reasoning effort best suit this task and agent role, considering the model_selection_guide and candidate capabilities and prices? Candidate cost is USD per million tokens, not benchmark task cost.",
+									"Which eligible model and reasoning effort best suit this task and agent role, considering evals and candidate capabilities and prices? Candidate cost is USD per million tokens, not benchmark task cost.",
 								criteria,
 							},
 						},

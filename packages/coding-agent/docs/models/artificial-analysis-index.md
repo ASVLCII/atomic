@@ -6,7 +6,7 @@ description: "The external benchmarks that inform Atomic model selection — Art
 # Benchmark Sources
 
 <Note>
-This is the historical benchmark snapshot retained from the September 3, 2026 documentation baseline. It is not current model-selection guidance. For the latest dated measurements, methodology, and task-specific recommendations, use [Evals](/models/evals) and [Model selection](/models/model-selection).
+This is the historical benchmark snapshot retained from the September 3, 2026 documentation baseline. It is not current model-selection guidance. For the latest dated measurements, methodology, and general model-selection guidance, use [Evals](/models/evals) and [Model selection](/models/model-selection).
 </Note>
 
 Atomic's model-selection docs use two live external benchmark sources. This page explains what each benchmark measures and when to use it for a workflow role, rather than maintaining a score table that needs rewriting whenever models ship.

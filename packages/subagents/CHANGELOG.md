@@ -10,6 +10,7 @@
 
 - All builtin agents now default to `model: "auto"` instead of pinned models and fallback chains. Explicit model overrides and builtin effort settings remain effective, including empty legacy `thinking` values that clear an inherited effort and fallback suffixes that override legacy defaults. Hard model constraints still apply to every candidate; main-chat and custom-agent defaults are unchanged.
 - Automatic model selection ranks up to three distinct eligible models and tries them in order before remaining configured fallbacks and the current chat model, retaining each selected effort and skipping duplicate model IDs.
+- Orchestrator model-pinning guidance now treats `evals.md` as factual per-evaluation records and leaves unmatching catalogs unpinned instead of describing benchmark rows as recommendations.
 
 ### Fixed
 

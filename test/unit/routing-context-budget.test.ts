@@ -7,6 +7,28 @@ import {
 import { type JevFixtureRequest, jevFixtureResponse } from "../helpers/jev-tournament.js";
 import { decisionMessage, decisionRequest, messageStream } from "../helpers/structured-output.js";
 
+// TypeSafe Jev 1.13 documents 64k tokens per request and 32k tokens for
+// state plus the longest question. The implementation has no Jev tokenizer, so
+// these byte ceilings are deliberately below those token limits and include the
+// actual JSON request fields sent to `/v1/systemone`.
+const CONSERVATIVE_STATE_AND_QUESTION_BYTES = 24_000;
+const CONSERVATIVE_STATE_AND_ALL_BYTES = 48_000;
+
+function serializedJevBytes(body: string): { total: number; stateAndLongestQuestion: number } {
+	const request = JSON.parse(body) as JevFixtureRequest & { model?: string };
+	return {
+		total: Buffer.byteLength(body, "utf8"),
+		stateAndLongestQuestion: Math.max(
+			...Object.entries(request.questions).map(([id, question]) =>
+				Buffer.byteLength(
+					JSON.stringify({ model: request.model, state: request.state, questions: { [id]: question } }),
+					"utf8",
+				),
+			),
+		),
+	};
+}
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.unstubAllEnvs();
@@ -18,11 +40,12 @@ test("Jev partitions fewer than 255 verbose candidates before dispatch without l
 	const seen = new Set<string>();
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
 		const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+		const size = serializedJevBytes(String(init.body));
+		assert.ok(size.stateAndLongestQuestion <= CONSERVATIVE_STATE_AND_QUESTION_BYTES);
+		assert.ok(size.total <= CONSERVATIVE_STATE_AND_ALL_BYTES);
 		for (const question of Object.values(request.questions)) {
-			assert.ok(Buffer.byteLength(JSON.stringify({ state: request.state, questions: { question } })) < 24_000);
 			for (const key of Object.keys(question.criteria)) seen.add(key);
 		}
-		assert.ok(Buffer.byteLength(String(init.body)) < 48_000);
 		return Response.json(jevFixtureResponse(request));
 	});
 	vi.stubGlobal("fetch", transport);
@@ -86,8 +109,11 @@ test("independent small questions are packed against the aggregate budget", asyn
 	const original = decisionRequest();
 	const seen = new Set<string>();
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
-		assert.ok(Buffer.byteLength(String(init.body)) < 48_000);
-		const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+		const body = String(init.body);
+		const size = serializedJevBytes(body);
+		assert.ok(size.total <= CONSERVATIVE_STATE_AND_ALL_BYTES);
+		assert.ok(size.stateAndLongestQuestion <= CONSERVATIVE_STATE_AND_QUESTION_BYTES);
+		const request = JSON.parse(body) as JevFixtureRequest;
 		for (const id of Object.keys(request.questions)) seen.add(id);
 		return Response.json(jevFixtureResponse(request));
 	});

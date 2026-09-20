@@ -7,7 +7,7 @@ description: "Cost-vs-accuracy frontier for model selection: which models domina
 
 A model is **Pareto-efficient** (on the frontier) if no other model is both cheaper and more accurate. Everything not on the frontier is **dominated**: some other option matches or beats it on accuracy for less money. Avoid a dominated model unless it earns a slot through a specific role fit or provider diversity.
 
-The axes here are `pass@1` (accuracy) and `average dollars per task` (cost), taken from the [DeepSWE](https://deepswe.datacurve.ai/) coding-agent leaderboard. For the full table and role guidance, see [Model Selection](/models/model-selection).
+The axes here are `pass@1` (accuracy) and `average dollars per task` (cost), taken from the [DeepSWE](https://deepswe.datacurve.ai/) coding-agent leaderboard. For compact dated DeepSWE facts, see [Evals](/models/evals); for general effort and catalog guidance, see [Model Selection](/models/model-selection).
 
 <Note>
 Figures are a snapshot of DeepSWE v1.1 using the highest published thinking level for each of the 21 models displayed on the September 3, 2026 leaderboard. They include the August 21 pricing corrections for GPT-5.6 Sol and DeepSeek V4, and GPT-6 Astra's costs are DeepSWE's expected launch pricing rather than billed rates. DeepSWE's own default table view is **Best** — the best-scoring configuration per model — which picks a different row for four models; the frontier under that reading is stated below. DeepSWE publishes a live cost-vs-score scatter, so **read the frontier off the live chart** rather than trusting a static list. **Last compiled: 2026-09-03.**
@@ -51,7 +51,7 @@ The chart uses published peak-rate DeepSeek costs. Off-peak rates are half as mu
 - **claude-opus-4.8 [max]** and **claude-sonnet-5 [max]**: each is dominated on both cost and accuracy.
 - **qwen3.8-max [xhigh]**, **gemini-3.6-flash [high]**, **gemini-3.5-flash [high]**, and **glm-5.2 [max]**: each has a cheaper, more accurate displayed alternative.
 
-Seven measured configurations are excluded from DeepSWE's default model selection and therefore from this frontier calculation. They are still in the current v1.1 artifact and can be re-enabled in the site's model picker, so this is a display default rather than a withdrawal. [Model Selection](/models/model-selection) keeps their last published values as clearly labeled history, each re-verified unchanged against the September 3, 2026 artifact: GPT-5.6 Terra, Grok 4.5, Muse Spark 1.1, GPT-5.4, Kimi K2.7 Code, Claude Sonnet 4.6, and Gemini 3.1 Pro Preview.
+Seven measured configurations are excluded from DeepSWE's default model selection and therefore from this frontier calculation. They are still in the current v1.1 artifact and can be re-enabled in the site's model picker, so this is a display default rather than a withdrawal. Re-check the live DeepSWE table before relying on their values: GPT-5.6 Terra, Grok 4.5, Muse Spark 1.1, GPT-5.4, Kimi K2.7 Code, Claude Sonnet 4.6, and Gemini 3.1 Pro Preview.
 
 ## Diversity and role-fit exceptions
 
@@ -67,12 +67,12 @@ Efficiency is not the only axis. A dominated model can still earn a slot when it
 - **glm-5.3 [max]** remains the best open-weights point; the new frontier ceiling is closed-weights, so the open-weights niche survives the frontier change intact.
 - **gemini-3.8-flash [high]** holds the frontier ceiling but is Google-family and step-heavy at 166 average steps; pair it with a model from another family for fallback diversity rather than routing every stage through one provider.
 - **claude-fable-5** remains useful where Anthropic-family behavior is specifically wanted, such as the quality-first, unbenchmarked design chain.
-- **claude-fable-5-1** is available in Atomic's catalog but absent from the September 3, 2026 Datacurve snapshot, so it has no position on this frontier. The [September 8 AA cross-check](/models/model-selection#aa-cross-check-for-current-candidates) includes Fable 5.1's max and xhigh default-fallback measurements. Those results justify task-specific evaluation, not importing AA scores or costs into this DeepSWE chart. A token-price discount is not a measured task-cost saving.
+- **claude-fable-5-1** is available in Atomic's catalog but absent from the September 3, 2026 Datacurve snapshot, so it has no position on this frontier. The dated AA records in [Evals](/models/evals) include Fable 5.1 default-fallback measurements where available. Those results justify task-specific evaluation, not importing AA scores or costs into this DeepSWE chart. A token-price discount is not a measured task-cost saving.
 - **Unmeasured models** may remain operational defaults when a family lacks current DeepSWE or Artificial Analysis coverage, but they should not inherit a predecessor's score.
 
 ## How to use this
 
-1. Default to a frontier model for the role's accuracy needs (see [Model Selection](/models/model-selection)).
+1. Choose from the frontier for the role's accuracy needs, then apply the general effort and catalog checks in [Model Selection](/models/model-selection).
 2. Only reach for a dominated model when you have an explicit reason, such as provider diversity, a long-context or token-price niche, or an unbenchmarked domain like design.
 3. Re-read the frontier on the [DeepSWE live chart](https://deepswe.datacurve.ai/) when prices or benchmarks change.
 

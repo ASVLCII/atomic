@@ -21,7 +21,7 @@ The same value works on individual parallel tasks and in an agent definition's `
 
 Workflow stages also support [prompt-based `model: "auto"`](/workflows/authoring#automatic-stage-model-selection), using the same decision provider and evaluation guidance. Stage model selection is separate from choosing which workflow to launch.
 
-Put requirements that should influence model selection in the task. Atomic supplies `task`, `agent` (name and description), and `model_selection_guide` containing the complete concise [Model Selection](/models/model-selection) page. Eligible provider-qualified models and efforts, capabilities and prices appear in the choices. There is no separate policy-version field or filtered benchmark dataset. You do not need to attach the guide yourself.
+Put requirements that should influence model selection in the task. Atomic supplies `task`, `agent` (name and description), and `evals` containing the compact factual [Evals](/models/evals) page. Eligible provider-qualified models and efforts, capabilities and prices appear in the choices. There is no separate policy-version field or provider-name filter. You do not need to attach eval records yourself.
 
 The agent's system prompt is not routing metadata. For a self-contained agent with no task, it remains the task fallback. The router weighs task-relevant evidence, cost, and latency rather than always choosing a benchmark winner or maximum effort. Benchmark measurement effort does not prescribe execution effort.
 
