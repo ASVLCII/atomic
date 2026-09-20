@@ -5,65 +5,67 @@ description: "Compact primary-source benchmark facts used by Atomic automatic mo
 
 # Evals
 
-Facts only; accessed 2026-09-20. `∅`=source null/absent, not zero. Costs are benchmark costs, not Atomic bills. Inputs, not policy.
+Facts only; accessed 2026-09-20. `∅`=source null/absent, not zero. Benchmark costs are not Atomic bills.
 
 ## Artificial Analysis Intelligence Index v4.3.2
 
-Sources: https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index; methodology https://artificialanalysis.ai/methodology/intelligence-benchmarking; constituent pages. v4.3.2 weights: Briefcase 15, GDPval 10, AutomationBench 5, Terminal-Bench 4.0 10, SciCode 10, HLE 10, GDP.pdf 10, CritPt 10, AA-LCR 5, Omniscience accuracy 10, non-hallucination 5. GPQA/MMMU-Pro are not constituents. Briefcase/GDPval raw Elo are separate from normalized components (clamp((Elo-500)/2000)*100). Omniscience headline index (−100..100) is separate from accuracy/non-hallucination.
+Sources: [index](https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index); [methodology](https://artificialanalysis.ai/methodology/intelligence-benchmarking). Constituents: [Briefcase](https://artificialanalysis.ai/evaluations/aa-briefcase), [GDPval-AA](https://artificialanalysis.ai/evaluations/gdpval-aa), [AutomationBench-AA](https://artificialanalysis.ai/evaluations/automationbench-aa), [Terminal-Bench 4.0](https://artificialanalysis.ai/evaluations/terminalbench-4-0), [SciCode](https://artificialanalysis.ai/evaluations/scicode), [HLE](https://artificialanalysis.ai/evaluations/humanitys-last-exam), [GDP.pdf](https://artificialanalysis.ai/evaluations/gdp-pdf), [CritPt](https://artificialanalysis.ai/evaluations/critpt), [Omniscience](https://artificialanalysis.ai/evaluations/omniscience), [AA-LCR](https://artificialanalysis.ai/evaluations/artificial-analysis-long-context-reasoning). Weights are documented in the methodology source. GPQA/MMMU-Pro are not constituents.
 
-47-config default-chart union: 31 aggregate rows plus default constituent selections (311 displayed constituent records; CritPt has 32). Columns: idx/Belo/Bn/Gelo/Gn/Auto/TB/Sci/HLE/PDF/Crit/Omni/OA/ONH/LCR. `Bn`,`Gn`=normalized Elo; `OA`=Omniscience accuracy; `ONH`=1-hallucination. Slugs preserve config identity; Fable 5 fallback=Opus 4.8; Fable 5.1 fallback=source default fallback; Inkling `xhigh` is AA's label only.
+47-config default-chart union: 31 aggregate rows plus default constituent selections (311 displayed constituent records; CritPt has 32). Columns: `idx`=AA Index score (points, 0–100; not %), `Bn/Gn`=normalized Elo (points, 0–100), `Auto/TB/Sci/HLE/PDF/Crit/OA/ONH/LCR`=%; `OA`=Omniscience accuracy and `ONH`=non-hallucination. Raw Briefcase/GDPval Elo and the separate −100…100 Omniscience headline are omitted here because their normalized/component values are retained. Normalized Elo is `clamp((Elo−500)/2000)*100`; PDF is GDP.pdf All-pass. Omniscience OA/ONH use 6,000-question accuracy and `1−hallucination` denominators. Fable 5 fallback=Opus 4.8; Fable 5.1 fallback=source default fallback; Inkling `xhigh` is AA's label only.
 
-A01 claude-fable-5-1|53/1678/58.9/1735/61.7/59.4/52/63.1/59.1/26.2/29.7/43.5/67.2/27.4/85.3
-A02 claude-fable-5-1-xhigh|53/1669/58.4/1721/61/57.8/55.1/60.9/58.7/26.2/31.1/42.4/66.2/29.5/83
-A03 gpt-6-astra|53/1569/53.4/1542/52.1/68.5/59.1/56.5/54.7/31/31.7/43.4/62.6/48.7/80.7
-A04 gpt-6-astra-xhigh|52/1544/52.2/1516/50.8/67.2/59.6/55.7/54.6/32.2/31.4/43.4/61.9/51.7/80
-A05 claude-fable-5-1-high|51/1592/54.6/1617/55.9/55.3/52/58.7/55.9/26.8/30.3/40.8/64.9/31.2/83.7
-A06 gpt-6-astra-high|51/1507/50.3/1485/49.2/66.6/54/55.4/53.1/31/28.9/43.7/61.1/55.2/80
-A07 claude-opus-5|51/1673/58.7/1708/60.4/56.6/49/56.4/54.9/21.6/29.1/37.1/60.9/39.2/79.3
-A08 claude-opus-5-xhigh|50/1649/57.5/1676/58.8/53.2/46.5/55.7/54.4/21/27.7/35.4/59.5/40.5/80.3
-A09 claude-fable-5|50/1544/52.2/1595/54.8/54.1/42.4/61/55.5/24/28.6/43.3/65.3/36.4/82.3
-A10 gpt-6-astra-medium|50/1459/48/1468/48.4/64.6/49.5/54.2/52.7/30.4/29.1/42.2/60.6/53.5/79.7
-A11 claude-fable-5-1-medium|49/1542/52.1/1536/51.8/54.7/44.9/56.4/53.8/26.8/29.1/37.6/63.1/30.9/84.7
-A12 claude-opus-5-high|48/1573/53.7/1581/54/53.6/46/55.4/52.8/19.6/28.3/33.7/58.9/38.8/79
-A13 muse-spark-1-3|48/1599/54.9/1674/58.7/57.9/33.3/58.8/48.7/26.6/24.9/25/43.6/67.1/83
-A14 gpt-5-6-sol|47/1487/49.4/1588/54.4/60.1/39.9/57.1/49.5/27.2/32.3/22/59.4/7.8/84
-A15 claude-fable-5-1-low|47/1490/49.5/1450/47.5/52.2/40.4/56.7/48.9/28/27.7/34.1/60.2/34.4/82.3
-A16 gpt-6-astra-low|46/1261/38/1366/43.3/59.1/41.9/54.1/49.2/30.4/26.3/40.5/59.5/53.1/80
-A17 qwen3-8-max|45/1642/57.1/1668/58.4/56.2/38.9/52.1/43.1/22.8/17.7/12/31.7/71.2/80.3
-A18 muse-spark-1-3-xhigh|45/1495/49.7/1628/56.4/56.8/16.7/59.7/47.5/24.2/26/23.1/41.5/68.5/83
-A19 glm-5-3|45/1526/51.3/1645/57.3/62.2/41.9/59/42.3/11.2/19.1/14.3/33.9/70.4/79.7
-A20 grok-4-6|44/1523/51.2/1605/55.3/66.7/21.2/56.5/42.9/17/17.1/30.5/48.2/65.7/80.3
-A21 grok-4-6-xhigh|44/1556/52.8/1632/56.6/67/17.2/53/44.1/17.2/19.7/29.3/43/76/81
-A22 step-5|44/1433/46.7/1566/53.3/51/33.3/58.9/46.5/14.8/20.9/16.4/41.5/57/88.3
-A23 kimi-k3|44/1511/50.6/1524/51.2/58.3/12.6/59.5/46.9/22/23.4/19.7/47.6/46.8/88.7
-A24 grok-4-6-medium|43/1493/49.6/1605/55.2/63.2/13.1/55.9/42.1/17.8/17.7/28/41.9/76/81
-A25 gpt-5-6-terra|42/1337/41.9/1432/46.6/59.6/35.4/55/42.9/24/30/0.1/46.8/12.1/83
-A26 glm-5-3-flash|42/1461/48/1641/57/60.4/32.8/51.6/39.9/15.4/15.4/7.5/27.5/72.4/80
-A27 gemini-3-8-flash|41/1202/35.1/1412/45.6/59.9/19.7/56.6/47.8/21/18.3/29.6/54.6/44.8/81.3
-A28 qwen3-8-flash-next|40/1598/54.9/1612/55.6/55.9/25.3/50.6/38/15.6/11.1/-9.7/24.5/54.7/79.7
-A29 gemini-3-8-flash-medium|40/1178/33.9/1409/45.4/60.9/19.7/55.1/42.1/22.8/12.3/28.6/53/48.1/84
-A30 gemini-3-7-flash-medium|40/∅/∅/1339/42/∅/∅/59.8/39/∅/9.4/23.7/54/34.1/83
-A31 deepseek-v4-1-flash|39/1433/46.7/1600/55/68.9/26.8/51.9/39.2/12.8/14.3/-5.3/46.4/3.5/84
-A32 gpt-5-5|38/1139/32/1336/41.8/47.3/14.6/55.8/45.8/21.2/27.1/20.5/58/11/84.3
-A33 gpt-5-6-luna|37/1346/42.3/1443/47.1/50.2/11.6/53.6/39.5/24/20.6/-10.3/42.7/7.4/83.7
-A34 gpt-5-5-high|37/1090/29.5/1309/40.5/44.3/9.1/56.1/45/22.6/25.4/18.8/57/10.9/84.3
-A35 deepseek-v4-pro|36/1261/38.1/1441/47.1/56.7/14.1/51/41/11.4/18/0.8/49.1/5.2/80.3
-A36 muse-spark-1-1|34/846/17.3/1209/35.4/38.8/6.1/58.8/46.2/14.4/15.1/28.1/52/50/77.7
-A37 qwen3-8-27b|34/1404/45.2/1409/45.4/48.2/5.6/46.6/33.9/16.6/5.4/-10/15.6/69.7/82
-A38 k2-horizon-375b-a23b|31/1304/40.2/1349/42.5/37.2/1.5/42.9/32/7.4/4.6/-3/18.2/74.1/80
-A39 minimax-m3|29/1093/29.7/1230/36.5/21.3/2/47.1/39/9.8/3.7/1.4/16.7/81.6/83
-A40 inkling|25/829/16.5/1063/28.2/5/1/47/31.9/12.8/5.4/2/41.5/32.3/77.3
-A41 nvidia-nemotron-3-ultra-550b-a55b|23/874/18.7/1000/25/3/0.5/40.3/28.4/5/3.1/-0.4/22.6/70.3/79.3
-A42 gemini-3-5-flash-lite|22/642/7.1/970/23.5/25/1/41.3/18.8/13.6/0/5.2/29.5/65.6/76
-A43 muse-glimmer|17/490/0/774/13.7/6.8/0.5/44.9/22/10/2.6/-32.9/27/18.1/83.3
-A44 mistral-medium-3-5|14/515/0.7/747/12.4/6.3/0/40.2/13.8/2.8/0/-36.8/24.7/18.4/69.3
-A45 gpt-oss-120b|12/0/0/596/4.8/0.2/0/34/19.6/4/1.1/-49.2/21.8/9.2/52
-A46 gpt-5-4-pro|∅/∅/∅/∅/∅/∅/∅/∅/∅/∅/30/∅/∅/∅/∅
-A47 gpt-5-5-pro|∅/∅/∅/∅/∅/∅/∅/∅/∅/∅/30.6/∅/∅/∅/∅
+AA config legend: slug model names are exact source labels; no suffix=`max`, and `-xhigh/-high/-medium/-low` are exact efforts. Explicit source labels: `gpt-6-astra`=GPT-6 Astra (max), `grok-4-6`=Grok 4.6 (high), `deepseek-v4-pro`=DeepSeek V4 Pro 0813 (max), `qwen3-8-max`=Qwen3.8 Max (0902), `claude-fable-5-1`=Claude Fable 5.1 (default fallback), `claude-fable-5`=Claude Fable 5 (Opus 4.8 fallback). Inkling is distinct; its AA-only `xhigh` is not Frontier `0.99`.
+
+A01 claude-fable-5-1|53/58.9/61.7/59.4/52/63.1/59.1/26.2/29.7/67.2/27.4/85.3
+A02 claude-fable-5-1-xhigh|53/58.4/61/57.8/55.1/60.9/58.7/26.2/31.1/66.2/29.5/83
+A03 gpt-6-astra|53/53.4/52.1/68.5/59.1/56.5/54.7/31/31.7/62.6/48.7/80.7
+A04 gpt-6-astra-xhigh|52/52.2/50.8/67.2/59.6/55.7/54.6/32.2/31.4/61.9/51.7/80
+A05 claude-fable-5-1-high|51/54.6/55.9/55.3/52/58.7/55.9/26.8/30.3/64.9/31.2/83.7
+A06 gpt-6-astra-high|51/50.3/49.2/66.6/54/55.4/53.1/31/28.9/61.1/55.2/80
+A07 claude-opus-5|51/58.7/60.4/56.6/49/56.4/54.9/21.6/29.1/60.9/39.2/79.3
+A08 claude-opus-5-xhigh|50/57.5/58.8/53.2/46.5/55.7/54.4/21/27.7/59.5/40.5/80.3
+A09 claude-fable-5|50/52.2/54.8/54.1/42.4/61/55.5/24/28.6/65.3/36.4/82.3
+A10 gpt-6-astra-medium|50/48/48.4/64.6/49.5/54.2/52.7/30.4/29.1/60.6/53.5/79.7
+A11 claude-fable-5-1-medium|49/52.1/51.8/54.7/44.9/56.4/53.8/26.8/29.1/63.1/30.9/84.7
+A12 claude-opus-5-high|48/53.7/54/53.6/46/55.4/52.8/19.6/28.3/58.9/38.8/79
+A13 muse-spark-1-3|48/54.9/58.7/57.9/33.3/58.8/48.7/26.6/24.9/43.6/67.1/83
+A14 gpt-5-6-sol|47/49.4/54.4/60.1/39.9/57.1/49.5/27.2/32.3/59.4/7.8/84
+A15 claude-fable-5-1-low|47/49.5/47.5/52.2/40.4/56.7/48.9/28/27.7/60.2/34.4/82.3
+A16 gpt-6-astra-low|46/38/43.3/59.1/41.9/54.1/49.2/30.4/26.3/59.5/53.1/80
+A17 qwen3-8-max|45/57.1/58.4/56.2/38.9/52.1/43.1/22.8/17.7/31.7/71.2/80.3
+A18 muse-spark-1-3-xhigh|45/49.7/56.4/56.8/16.7/59.7/47.5/24.2/26/41.5/68.5/83
+A19 glm-5-3|45/51.3/57.3/62.2/41.9/59/42.3/11.2/19.1/33.9/70.4/79.7
+A20 grok-4-6|44/51.2/55.3/66.7/21.2/56.5/42.9/17/17.1/48.2/65.7/80.3
+A21 grok-4-6-xhigh|44/52.8/56.6/67/17.2/53/44.1/17.2/19.7/43/76/81
+A22 step-5|44/46.7/53.3/51/33.3/58.9/46.5/14.8/20.9/41.5/57/88.3
+A23 kimi-k3|44/50.6/51.2/58.3/12.6/59.5/46.9/22/23.4/47.6/46.8/88.7
+A24 grok-4-6-medium|43/49.6/55.2/63.2/13.1/55.9/42.1/17.8/17.7/41.9/76/81
+A25 gpt-5-6-terra|42/41.9/46.6/59.6/35.4/55/42.9/24/30/46.8/12.1/83
+A26 glm-5-3-flash|42/48/57/60.4/32.8/51.6/39.9/15.4/15.4/27.5/72.4/80
+A27 gemini-3-8-flash|41/35.1/45.6/59.9/19.7/56.6/47.8/21/18.3/54.6/44.8/81.3
+A28 qwen3-8-flash-next|40/54.9/55.6/55.9/25.3/50.6/38/15.6/11.1/24.5/54.7/79.7
+A29 gemini-3-8-flash-medium|40/33.9/45.4/60.9/19.7/55.1/42.1/22.8/12.3/53/48.1/84
+A30 gemini-3-7-flash-medium|40/∅/42/∅/∅/59.8/39/∅/9.4/54/34.1/83
+A31 deepseek-v4-1-flash|39/46.7/55/68.9/26.8/51.9/39.2/12.8/14.3/46.4/3.5/84
+A32 gpt-5-5|38/32/41.8/47.3/14.6/55.8/45.8/21.2/27.1/58/11/84.3
+A33 gpt-5-6-luna|37/42.3/47.1/50.2/11.6/53.6/39.5/24/20.6/42.7/7.4/83.7
+A34 gpt-5-5-high|37/29.5/40.5/44.3/9.1/56.1/45/22.6/25.4/57/10.9/84.3
+A35 deepseek-v4-pro|36/38.1/47.1/56.7/14.1/51/41/11.4/18/49.1/5.2/80.3
+A36 muse-spark-1-1|34/17.3/35.4/38.8/6.1/58.8/46.2/14.4/15.1/52/50/77.7
+A37 qwen3-8-27b|34/45.2/45.4/48.2/5.6/46.6/33.9/16.6/5.4/15.6/69.7/82
+A38 k2-horizon-375b-a23b|31/40.2/42.5/37.2/1.5/42.9/32/7.4/4.6/18.2/74.1/80
+A39 minimax-m3|29/29.7/36.5/21.3/2/47.1/39/9.8/3.7/16.7/81.6/83
+A40 inkling|25/16.5/28.2/5/1/47/31.9/12.8/5.4/41.5/32.3/77.3
+A41 nvidia-nemotron-3-ultra-550b-a55b|23/18.7/25/3/0.5/40.3/28.4/5/3.1/22.6/70.3/79.3
+A42 gemini-3-5-flash-lite|22/7.1/23.5/25/1/41.3/18.8/13.6/0/29.5/65.6/76
+A43 muse-glimmer|17/0/13.7/6.8/0.5/44.9/22/10/2.6/27/18.1/83.3
+A44 mistral-medium-3-5|14/0.7/12.4/6.3/0/40.2/13.8/2.8/0/24.7/18.4/69.3
+A45 gpt-oss-120b|12/0/4.8/0.2/0/34/19.6/4/1.1/21.8/9.2/52
+A46 gpt-5-4-pro|∅/∅/∅/∅/∅/∅/∅/∅/30/∅/∅/∅
+A47 gpt-5-5-pro|∅/∅/∅/∅/∅/∅/∅/∅/30.6/∅/∅/∅
 
 ## DeepSWE v1.1
 
-Source: https://deepswe.datacurve.ai/; changelog https://deepswe.datacurve.ai/changelog. Update 2026-09-03. 113 tasks/91 repos/5 languages; mini-swe-agent. All 21 default Best rows in source order. Columns: model[effort] pass@1±CI, USD/task, output k-tokens, steps. Caveats: GPT-6 Astra expected launch pricing; DeepSeek peak/off-peak; GPT-5.6 Sol promo through ≥2026-11-21; Gemini intro through 2026-12-31.
+Source: https://deepswe.datacurve.ai/; changelog https://deepswe.datacurve.ai/changelog. Update 2026-09-03. 113 tasks/91 repos/5 languages; mini-swe-agent. All 21 default Best rows in source order. Columns: source model label[measured effort], pass@1±95% run-to-run CI (percent), USD/task, output k-tokens, steps; the CI is across four repeated whole-benchmark runs.
 
 D01 gpt-6-astra[xhigh] 74±3 6.52 30 29
 D02 gemini-3.8-flash[high] 74±1 2.36 143 166
@@ -89,41 +91,40 @@ D21 gemini-3.5-flash[high] 36±4 3.45 76 105
 
 ## Cognition FrontierCode 1.1
 
-Sources: https://cognition.com/frontiercode; data https://cognition.com/data/frontiercode-leaderboard/data.json; methods https://cognition.com/blog/frontier-code-1.1 and https://cognition.com/blog/frontier-code. Revision 2026-07-07; 2026-09-10 pricing changelog covers GPT-6 Astra, GPT-5.6 Terra/Luna, GPT-5.6 Sol promo. Score=weighted rubric aggregate; blocking failures score 0; unfair-internet-use flags zeroed. Main=100 tasks; Extended=150. All 36 Best rows in Main source order. Columns: model[source key; harness] Main score/pass/flag/$/out-k | Extended score/pass/flag/$/out-k. Harness aliases: cc=claude-code, gb=grok-build, msa=mini-swe-agent. `—` is source null, not 0. Inkling `0.99` is an unexplained source key, not established equivalent to AA `xhigh`.
-
-F01 Fable5[xhigh;cc] 53.5/58.9/0.3/13.09/58.6|64.9/70.9/0.2/10.53/48.4
-F02 Opus5[medium;cc] 53.4/58.9/0.6/4.31/33.6|63.6/69.6/0.4/3.51/27.6
-F03 G6Astra[max;codex] 53.3/58.8/—/4.59/30.1|64.5/70.6/—/3.93/26.0
-F04 Fable5.1[medium;cc] 50.9/55.5/0.0/3.28/26.1|63.6/68.8/0.0/2.68/21.4
-F05 SWE-2[max;devin] 50.0/55.5/—/1.18/72.8|62.5/68.4/—/0.94/59.9
-F06 Grok4.6[high;gb] 48.0/53.1/0.7/2.88/36.8|61.3/67.0/0.5/2.38/31.6
-F07 G5.6Sol[max;codex] 47.5/52.9/0.0/5.19/33.2|60.6/66.6/0.0/4.25/28.1
-F08 Opus4.8[max;cc] 46.5/51.6/0.6/9.62/95.9|59.6/65.5/0.4/8.05/82.9
-F09 KimiK3[none;msa] 44.2/48.9/0.2/3.82/53.6|58.2/63.6/0.1/3.12/45.6
-F10 Gem3.7Fl[medium;chisel] 43.6/48.9/0.0/1.82/51.1|56.3/62.3/0.0/1.53/44.5
-F11 G5.5[xhigh;codex] 43.0/48.2/0.4/4.03/25.0|56.7/62.8/0.3/3.34/21.3
-F12 Sonnet5[xhigh;cc] 42.7/47.6/0.5/10.07/87.9|56.2/61.7/0.6/8.23/74.0
-F13 Grok4.5[high;gb] 42.4/47.2/0.0/1.30/15.3|56.5/62.3/0.0/1.09/13.0
-F14 SWE-1.7[none;chisel] 42.0/47.4/1.2/1.97/64.8|54.3/60.3/0.9/1.64/56.4
-F15 G5.6Terra[max;codex] 41.3/46.3/0.1/1.87/40.5|55.8/61.8/0.1/1.57/35.1
-F16 Gem3.8Fl[medium;chisel] 41.2/46.7/0.0/2.60/78.9|53.4/59.6/0.0/2.21/69.7
-F17 GLM5.3[max;chisel] 40.1/44.7/0.0/16.91/112.2|52.6/57.7/0.0/13.79/98.3
-F18 G5.6Luna[max;codex] 39.8/44.7/0.1/0.37/37.4|55.1/60.9/0.1/0.31/31.9
-F19 Opus4.7[max;cc] 38.5/42.8/0.1/9.09/49.1|53.9/59.1/0.1/7.61/42.1
-F20 Gem3.6Fl[medium;chisel] 34.4/38.9/0.0/4.04/46.7|48.0/53.3/0.0/3.41/40.4
-F21 GLM5.3Fl[max;chisel] 31.8/35.7/0.0/1.15/169.3|46.2/51.1/0.0/0.94/143.6
-F22 KimiK2.7[none;msa] 30.1/33.6/0.0/3.01/43.9|45.4/50.0/0.0/2.56/38.0
-F23 DSV4Pro0813[high;chisel] 28.5/31.8/10.6/1.81/104.7|44.5/48.9/7.6/1.50/87.4
-F24 G5.4-mini[xhigh;codex] 27.0/30.8/0.0/1.52/90.9|43.0/47.9/0.0/1.26/75.6
-F25 Opus4.6[high;cc] 26.6/29.7/0.1/3.98/26.7|43.7/48.0/0.1/3.30/23.2
-F26 Composer2.5[none;cursor] 25.6/29.3/2.4/3.09/16.0|40.8/45.1/2.3/2.57/13.8
-F27 GLM5.2[none;msa] 24.5/27.4/0.0/2.47/17.8|40.1/44.1/0.0/2.14/15.4
-F28 Sonnet4.6[max;cc] 24.3/27.5/0.2/2.90/44.2|40.0/44.4/0.1/2.44/38.9
-F29 DSV4Fl0731[high;chisel] 18.8/21.1/25.5/1.53/94.4|31.7/35.0/19.1/1.31/82.1
-F30 DSV4Pro[none;msa] 17.6/20.0/1.0/1.55/28.8|31.0/34.5/0.7/1.37/26.2
-F31 MMM3[none;msa] 14.7/16.6/1.5/0.68/34.0|28.5/31.5/1.1/0.59/31.1
-F32 Inkling[0.99;msa] 14.0/15.9/7.6/3.60/33.6|24.8/27.8/7.3/3.20/30.1
-F33 Nemotron3Ult[none;chisel] 13.6/15.4/0.2/1.47/27.7|27.2/30.3/0.1/1.32/25.8
-F34 Qwen3.7Plus[none;msa] 10.2/11.5/0.9/0.24/45.3|21.8/24.1/0.6/0.21/41.2
-F35 SWE-1.6[none;chisel] 9.4/10.4/0.0/0.49/19.8|20.5/22.7/0.0/0.45/18.2
-F36 Mis3.5Med[none;chisel] 8.0/9.0/0.6/1.35/22.5|18.7/20.6/0.4/1.24/21.0
+Sources: https://cognition.com/frontiercode; data https://cognition.com/data/frontiercode-leaderboard/data.json; methods https://cognition.com/blog/frontier-code-1.1 and https://cognition.com/blog/frontier-code. Revision 2026-07-07; v1.1, Main=100 tasks, Extended=150, Best rows in source order. Main columns: model[source label; harness] score/pass/flag (%), USD/task, output k-tokens; score is weighted aggregate, blocking/unfair-use failures are zeroed. Extended values remain linked (not routed). Harness: cc=claude-code, gb=grok-build, msa=mini-swe-agent. `—`=source null, not 0; Inkling `0.99` is unexplained.
+F01 Claude Fable 5[xhigh;cc] 53.5/58.9/0.3/13.09/58.6
+F02 Claude Opus 5[medium;cc] 53.4/58.9/0.6/4.31/33.6
+F03 GPT-6 Astra[max;codex] 53.3/58.8/—/4.59/30.1
+F04 Claude Fable 5.1[medium;cc] 50.9/55.5/0.0/3.28/26.1
+F05 SWE-2[max;devin] 50.0/55.5/—/1.18/72.8
+F06 Grok 4.6[high;gb] 48.0/53.1/0.7/2.88/36.8
+F07 GPT-5.6 Sol[max;codex] 47.5/52.9/0.0/5.19/33.2
+F08 Claude Opus 4.8[max;cc] 46.5/51.6/0.6/9.62/95.9
+F09 Kimi K3[none;msa] 44.2/48.9/0.2/3.82/53.6
+F10 Gemini 3.7 Flash[medium;chisel] 43.6/48.9/0.0/1.82/51.1
+F11 GPT-5.5[xhigh;codex] 43.0/48.2/0.4/4.03/25.0
+F12 Claude Sonnet 5[xhigh;cc] 42.7/47.6/0.5/10.07/87.9
+F13 Grok 4.5[high;gb] 42.4/47.2/0.0/1.30/15.3
+F14 SWE-1.7[none;chisel] 42.0/47.4/1.2/1.97/64.8
+F15 GPT-5.6 Terra[max;codex] 41.3/46.3/0.1/1.87/40.5
+F16 Gemini 3.8 Flash[medium;chisel] 41.2/46.7/0.0/2.60/78.9
+F17 GLM 5.3[max;chisel] 40.1/44.7/0.0/16.91/112.2
+F18 GPT-5.6 Luna[max;codex] 39.8/44.7/0.1/0.37/37.4
+F19 Claude Opus 4.7[max;cc] 38.5/42.8/0.1/9.09/49.1
+F20 Gemini 3.6 Flash[medium;chisel] 34.4/38.9/0.0/4.04/46.7
+F21 GLM 5.3 Flash[max;chisel] 31.8/35.7/0.0/1.15/169.3
+F22 Kimi K2.7[none;msa] 30.1/33.6/0.0/3.01/43.9
+F23 DeepSeek V4 Pro 0813[high;chisel] 28.5/31.8/10.6/1.81/104.7
+F24 GPT-5.4-mini[xhigh;codex] 27.0/30.8/0.0/1.52/90.9
+F25 Claude Opus 4.6[high;cc] 26.6/29.7/0.1/3.98/26.7
+F26 Composer 2.5[none;cursor] 25.6/29.3/2.4/3.09/16.0
+F27 GLM 5.2[none;msa] 24.5/27.4/0.0/2.47/17.8
+F28 Claude Sonnet 4.6[max;cc] 24.3/27.5/0.2/2.90/44.2
+F29 DeepSeek V4 Flash 0731[high;chisel] 18.8/21.1/25.5/1.53/94.4
+F30 DeepSeek V4 Pro[none;msa] 17.6/20.0/1.0/1.55/28.8
+F31 MiniMax M3[none;msa] 14.7/16.6/1.5/0.68/34.0
+F32 Inkling[0.99;msa] 14.0/15.9/7.6/3.60/33.6
+F33 Nemotron 3 Ultra[none;chisel] 13.6/15.4/0.2/1.47/27.7
+F34 Qwen 3.7 Plus[none;msa] 10.2/11.5/0.9/0.24/45.3
+F35 SWE-1.6[none;chisel] 9.4/10.4/0.0/0.49/19.8
+F36 Mistral 3.5 Medium[none;chisel] 8.0/9.0/0.6/1.35/22.5

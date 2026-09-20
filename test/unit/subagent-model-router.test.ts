@@ -82,6 +82,65 @@ function jevPayloadBytes(body: string): { total: number; stateAndLongestQuestion
 	};
 }
 
+const ROUTING_STATE_AND_LONGEST_BYTES = 24_000;
+const ROUTING_STATE_AND_ALL_BYTES = 48_000;
+
+test("execution routing keeps the real evals, 12KB task, and nine verbose candidates within Jev budgets", async () => {
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
+	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
+	const candidates = Array.from({ length: 9 }, (_, index) => ({
+		...decisionModel,
+		id: `candidate-${index + 1}`,
+		name: `Verbose candidate ${index + 1} with a catalog description`,
+		contextWindow: 128_000,
+		cost: { input: 1.25, output: 7.5, cacheRead: 0.2, cacheWrite: 1.5 },
+	}));
+	const seen = new Set<string>();
+	let maxTotal = 0;
+	let maxStateAndLongest = 0;
+	const transport = vi.fn(async (_url: string, init: RequestInit) => {
+		const body = String(init.body);
+		const size = jevPayloadBytes(body);
+		maxTotal = Math.max(maxTotal, size.total);
+		maxStateAndLongest = Math.max(maxStateAndLongest, size.stateAndLongestQuestion);
+		const request = JSON.parse(body) as JevFixtureRequest;
+		assert.equal(request.state.evals, evals);
+		for (const question of Object.values(request.questions)) {
+			for (const [key, value] of Object.entries(question.criteria)) {
+				const candidate = JSON.parse(value) as { model: string };
+				seen.add(candidate.model);
+				assert.match(key, /^pair_\d+$/u);
+			}
+		}
+		return Response.json(jevFixtureResponse(request));
+	});
+	vi.stubGlobal("fetch", transport);
+	const result = await routeExecutionModel({
+		ctx: {
+			model: decisionModel,
+			getRouterModel: () => "typesafe-ai/jev-latest",
+			modelRegistry: {
+				getAll: () => candidates,
+				getAvailable: () => candidates,
+				containsConfiguredCredential: async () => false,
+				streamSimple: () => {
+					throw new Error("Jev should make the decision");
+				},
+			},
+		},
+		task: taskNearRoutingLimit(),
+		agent,
+	});
+	assert.equal(transport.mock.calls.length, 13);
+	assert.equal(seen.size, candidates.length);
+	assert.ok(
+		maxStateAndLongest <= ROUTING_STATE_AND_LONGEST_BYTES,
+		`${maxStateAndLongest} > ${ROUTING_STATE_AND_LONGEST_BYTES}`,
+	);
+	assert.ok(maxTotal <= ROUTING_STATE_AND_ALL_BYTES, `${maxTotal} > ${ROUTING_STATE_AND_ALL_BYTES}`);
+	assert.equal(result.routerSelection.model, "decision-test/candidate-1");
+});
+
 function taskNearRoutingLimit(): string {
 	const seed = 'Route this exact task; preserve JSON characters {"quoted":"value\\n"} and Unicode Ω界. ';
 	const protectedRequirement =
@@ -771,18 +830,12 @@ test("auto routing keeps exact benchmark identity and provenance distinctions", 
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		assert.match(state.evals, /Fable 5 fallback=Opus 4\.8/);
-		assert.match(state.evals, /Fable 5\.1 fallback=source default fallback/);
-		assert.match(state.evals, /Inkling `0\.99` is an unexplained source key/);
-		assert.match(state.evals, /Harness aliases: cc=claude-code, gb=grok-build, msa=mini-swe-agent/);
-		assert.match(state.evals, /`—` is source null, not 0/);
-		assert.match(
-			state.evals,
-			/F03 G6Astra\[max;codex\] 53\.3\/58\.8\/—\/4\.59\/30\.1\|64\.5\/70\.6\/—\/3\.93\/26\.0/,
-		);
-		assert.match(
-			state.evals,
-			/F04 Fable5\.1\[medium;cc\] 50\.9\/55\.5\/0\.0\/3\.28\/26\.1\|63\.6\/68\.8\/0\.0\/2\.68\/21\.4/,
-		);
+		assert.match(state.evals, /Fable 5\.1 \(default fallback\)/);
+		assert.match(state.evals, /Inkling `0\.99` is unexplained/);
+		assert.match(state.evals, /Harness: cc=claude-code, gb=grok-build, msa=mini-swe-agent/);
+		assert.match(state.evals, /`—`=source null, not 0/);
+		assert.match(state.evals, /GPT-6 Astra\[max;codex\] 53\.3\/58\.8\/—\/4\.59\/30\.1/);
+		assert.match(state.evals, /Claude Fable 5\.1\[medium;cc\] 50\.9\/55\.5\/0\.0\/3\.28\/26\.1/);
 		assert.equal(state.model_selection_guide, undefined);
 		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
 	});
