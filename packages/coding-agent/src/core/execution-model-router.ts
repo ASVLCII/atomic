@@ -32,7 +32,7 @@ export interface ModelRoute {
 const instructions =
 	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals`. Consider task fit, measured effort, dates, caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
 
-const MODEL_SELECTION_EVALS_JSON_BYTES = 14_000;
+const MODEL_SELECTION_EVALS_JSON_BYTES = 16_000;
 
 async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {

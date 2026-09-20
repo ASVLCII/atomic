@@ -465,7 +465,7 @@ for (const evalsCase of ["missing", "empty", "oversized"] as const) {
 		if (evalsCase === "oversized") read.mockResolvedValueOnce("evals ".repeat(3_000));
 		await assert.rejects(
 			f.route(),
-			/Auto routing requires a nonempty evals\.md document within 14,000 JSON-encoded bytes/,
+			/Auto routing requires a nonempty evals\.md document within 16,000 JSON-encoded bytes/,
 		);
 		assert.equal(f.infer.mock.calls.length, 0);
 	});
