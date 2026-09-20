@@ -189,14 +189,19 @@ export async function copyToClipboard(text: string): Promise<void> {
 	}
 
 	let osc52Emitted = false;
-	if (!copied && p === "linux" && isWSL(env)) {
+	// A remote session skips the Windows clipboard: the copied text belongs on the connected
+	// client, which the OSC 52 fallback below reaches, not on the remote host.
+	if (!copied && !remote && p === "linux" && isWSL(env)) {
 		// Windows Terminal supports OSC 52; prefer it over the slower PowerShell round trip.
 		if (env.WT_SESSION) osc52Emitted = emitOsc52(text);
 		copied = osc52Emitted || copyViaWindowsClipboard(text);
 	}
 	// OSC 52 cannot be verified, so a desktop session with a display reports the failure
 	// instead. Without a display the terminal is the only clipboard route (containers,
-	// WSL without WSLg), and remote sessions always emit it to reach the client clipboard.
+	// WSL without WSLg). A remote session emits it even after a successful local write:
+	// that write reached the remote host's display clipboard, while the user is at the
+	// client, which only the terminal can reach. The Windows interop fallback above is
+	// different because it is a last resort that a remote session gains nothing from.
 	const headless = p === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY && !env.TERMUX_VERSION;
 	let oversized = false;
 	if (!osc52Emitted && (remote || (!copied && headless))) {

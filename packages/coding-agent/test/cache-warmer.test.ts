@@ -1,5 +1,6 @@
+import assert from "node:assert/strict";
 import type { Api, Model, TranscriptContext } from "@bastani/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import {
 	CacheWarmer,
 	formatCacheWarmingStatus,
@@ -37,13 +38,13 @@ describe("cache warming", () => {
 	});
 
 	it("schedules a refresh before TTL expiry and refuses short lifetimes", () => {
-		expect(getCacheWarmingDelayMs(60_000)).toBe(50_000);
-		expect(getCacheWarmingDelayMs(10_000)).toBeUndefined();
+		assert.equal(getCacheWarmingDelayMs(60_000), 50_000);
+		assert.equal(getCacheWarmingDelayMs(10_000), undefined);
 	});
 
 	it("does not replay budget-based Anthropic thinking", () => {
-		expect(isReplayable(model, { reasoning: "high" })).toBe(false);
-		expect(isReplayable(model, undefined)).toBe(true);
+		assert.equal(isReplayable(model, { reasoning: "high" }), false);
+		assert.equal(isReplayable(model, undefined), true);
 	});
 
 	it("cancel stops an active run under owner cancellation", () => {
@@ -51,7 +52,7 @@ describe("cache warming", () => {
 		const warmer = new CacheWarmer({ streamSimple: vi.fn() }, sessionManager(), () => "idle");
 		warmer.start({ model, context, options: { cacheRetention: "long" } }, () => true);
 		warmer.cancel();
-		expect(warmer.status).toMatchObject({ state: "inactive", reason: "inactive" });
+		assert.deepEqual(warmer.status, { state: "inactive", reason: "inactive" });
 	});
 
 	it("does not issue refreshes after their safe deadline", async () => {
@@ -69,8 +70,8 @@ describe("cache warming", () => {
 		if (!internal.run) throw new Error("expected an active cache-warming run");
 		await internal.refresh(internal.run);
 
-		expect(streamSimple).not.toHaveBeenCalled();
-		expect(warmer.status).toMatchObject({ state: "inactive", reason: "cache refresh deadline missed" });
+		assert.equal(streamSimple.mock.calls.length, 0);
+		assert.deepEqual(warmer.status, { state: "inactive", reason: "cache refresh deadline missed" });
 	});
 
 	it("rechecks the deadline after an extension decision", async () => {
@@ -93,12 +94,13 @@ describe("cache warming", () => {
 		if (!internal.run) throw new Error("expected an active cache-warming run");
 		await internal.refresh(internal.run);
 
-		expect(streamSimple).not.toHaveBeenCalled();
-		expect(warmer.status).toMatchObject({ state: "inactive", reason: "cache refresh deadline missed" });
+		assert.equal(streamSimple.mock.calls.length, 0);
+		assert.deepEqual(warmer.status, { state: "inactive", reason: "cache refresh deadline missed" });
 	});
 
 	it("formats an inactive status without leaking economics", () => {
-		expect(formatCacheWarmingStatus({ state: "inactive", reason: "cache warming disabled" })).toBe(
+		assert.equal(
+			formatCacheWarmingStatus({ state: "inactive", reason: "cache warming disabled" }),
 			"Inactive (cache warming disabled)",
 		);
 	});

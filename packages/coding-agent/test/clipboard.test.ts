@@ -1,9 +1,10 @@
+import assert from "node:assert/strict";
 import { execFileSync, execSync, spawn } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import type * as OsModule from "os";
 import { platform } from "os";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { copyToClipboard } from "../src/utils/clipboard.ts";
+import { afterEach, beforeEach, describe, test, vi } from "vitest";
+import { copyToClipboard } from "../src/utils/clipboard.js";
 
 const mocks = vi.hoisted(() => {
 	return {
@@ -56,6 +57,26 @@ let nativeResolved = false;
 
 function osc52Writes(): string[] {
 	return stdoutWrites.filter((write) => write.startsWith("\x1b]52;c;"));
+}
+
+function execSyncCommands(): string[] {
+	return mockedExecSync.mock.calls.map(([command]) => command as string);
+}
+
+function execFileSyncFiles(): string[] {
+	return mockedExecFileSync.mock.calls.map(([file]) => file);
+}
+
+function spawnCalls(): {
+	command: string;
+	args: readonly string[];
+	options: { stdio?: unknown; env?: NodeJS.ProcessEnv };
+}[] {
+	return mockedSpawn.mock.calls.map(([command, args, options]) => ({
+		command: command as string,
+		args: args as readonly string[],
+		options: options as { stdio?: unknown; env?: NodeJS.ProcessEnv },
+	}));
 }
 
 function mockWlCopyExit(code: number): void {
@@ -119,25 +140,25 @@ describe("copyToClipboard", () => {
 	test("local native success skips OSC 52 and shell fallbacks", async () => {
 		await copyToClipboard("hello");
 
-		expect(mocks.clipboard.setText).toHaveBeenCalledWith("hello");
-		expect(osc52Writes()).toHaveLength(0);
-		expect(mockedExecSync).not.toHaveBeenCalled();
-		expect(mockedSpawn).not.toHaveBeenCalled();
+		assert.deepEqual(mocks.clipboard.setText.mock.calls, [["hello"]]);
+		assert.equal(osc52Writes().length, 0);
+		assert.equal(mockedExecSync.mock.calls.length, 0);
+		assert.equal(mockedSpawn.mock.calls.length, 0);
 	});
 
 	test("remote native success emits OSC 52 after native write", async () => {
 		vi.stubEnv("SSH_CONNECTION", "client server");
 		mocks.clipboard.setText.mockImplementation(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 1));
-			expect(osc52Writes()).toHaveLength(0);
+			assert.equal(osc52Writes().length, 0);
 			nativeResolved = true;
 		});
 
 		await copyToClipboard("hello");
 
-		expect(nativeResolved).toBe(true);
-		expect(osc52Writes()).toHaveLength(1);
-		expect(mockedExecSync).not.toHaveBeenCalled();
+		assert.equal(nativeResolved, true);
+		assert.equal(osc52Writes().length, 1);
+		assert.equal(mockedExecSync.mock.calls.length, 0);
 	});
 
 	test("local shell fallback success skips OSC 52", async () => {
@@ -146,13 +167,14 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync).toHaveBeenCalledWith("pbcopy", {
-			input: "hello",
-			stdio: ["pipe", "ignore", "ignore"],
-			timeout: 5000,
-			env: expect.objectContaining({ AI_AGENT: "atomic" }),
-		});
-		expect(osc52Writes()).toHaveLength(0);
+		assert.equal(mockedExecSync.mock.calls.length, 1);
+		const [command, options] = mockedExecSync.mock.calls[0]!;
+		assert.equal(command, "pbcopy");
+		assert.equal(options?.input, "hello");
+		assert.deepEqual(options?.stdio, ["pipe", "ignore", "ignore"]);
+		assert.equal(options?.timeout, 5000);
+		assert.equal(options?.env?.AI_AGENT, "atomic");
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test.each(["SSH_CONNECTION", "SSH_CLIENT", "MOSH_CONNECTION"])("remote %s retains OSC 52 fallback", async (key) => {
@@ -164,7 +186,7 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(osc52Writes()).toHaveLength(1);
+		assert.equal(osc52Writes().length, 1);
 	});
 
 	test("does not emit oversized OSC 52 payloads", async () => {
@@ -174,10 +196,10 @@ describe("copyToClipboard", () => {
 			throw new Error("pbcopy failed");
 		});
 
-		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow(
-			"Clipboard unavailable: text exceeds the OSC 52 size limit",
-		);
-		expect(osc52Writes()).toHaveLength(0);
+		await assert.rejects(copyToClipboard("x".repeat(80_000)), {
+			message: "Clipboard unavailable: text exceeds the OSC 52 size limit",
+		});
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test("awaits successful wl-copy before reporting Wayland success", async () => {
@@ -189,12 +211,14 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedSpawn).toHaveBeenCalledWith("wl-copy", [], {
-			stdio: ["pipe", "ignore", "ignore"],
-			env: expect.objectContaining({ AI_AGENT: "atomic" }),
-		});
-		expect(mockedExecSync.mock.calls.map(([command]) => command)).toEqual(["which wl-copy"]);
-		expect(osc52Writes()).toHaveLength(0);
+		const calls = spawnCalls();
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0]!.command, "wl-copy");
+		assert.deepEqual(calls[0]!.args, []);
+		assert.deepEqual(calls[0]!.options.stdio, ["pipe", "ignore", "ignore"]);
+		assert.equal(calls[0]!.options.env?.AI_AGENT, "atomic");
+		assert.deepEqual(execSyncCommands(), ["which wl-copy"]);
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test("falls through to X11 when wl-copy exits unsuccessfully", async () => {
@@ -207,11 +231,8 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync.mock.calls.map(([command]) => command)).toEqual([
-			"which wl-copy",
-			"xclip -selection clipboard",
-		]);
-		expect(osc52Writes()).toHaveLength(0);
+		assert.deepEqual(execSyncCommands(), ["which wl-copy", "xclip -selection clipboard"]);
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test("rejects failed local wl-copy without emitting OSC 52", async () => {
@@ -221,10 +242,10 @@ describe("copyToClipboard", () => {
 		mockWlCopyExit(1);
 		mockedExecSync.mockReturnValue(Buffer.alloc(0));
 
-		await expect(copyToClipboard("hello")).rejects.toThrow(
-			"Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access",
-		);
-		expect(osc52Writes()).toHaveLength(0);
+		await assert.rejects(copyToClipboard("hello"), {
+			message: "Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access",
+		});
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test("display-less Linux falls back to OSC 52", async () => {
@@ -233,9 +254,9 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync).not.toHaveBeenCalled();
-		expect(mockedExecFileSync).not.toHaveBeenCalled();
-		expect(osc52Writes()).toHaveLength(1);
+		assert.equal(mockedExecSync.mock.calls.length, 0);
+		assert.equal(mockedExecFileSync.mock.calls.length, 0);
+		assert.equal(osc52Writes().length, 1);
 	});
 
 	test("WSL without a display writes the Windows clipboard through PowerShell", async () => {
@@ -251,14 +272,14 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("héllo");
 
-		expect(mockedExecFileSync.mock.calls.map(([file]) => file)).toEqual(["wslpath", "powershell.exe"]);
-		expect(written).toBe("héllo");
+		assert.deepEqual(execFileSyncFiles(), ["wslpath", "powershell.exe"]);
+		assert.equal(written, "héllo");
 		const [, wslpathArgs] = mockedExecFileSync.mock.calls[0]!;
-		expect(existsSync(wslpathArgs[1]!)).toBe(false);
+		assert.equal(existsSync(wslpathArgs[1]!), false);
 		const [, powershellArgs] = mockedExecFileSync.mock.calls[1]!;
-		expect(powershellArgs[2]).toContain("Set-Clipboard");
-		expect(powershellArgs[2]).toContain("'\\\\wsl.localhost\\Ubuntu\\tmp\\clip.txt'");
-		expect(osc52Writes()).toHaveLength(0);
+		assert.match(powershellArgs[2]!, /Set-Clipboard/);
+		assert.ok(powershellArgs[2]!.includes("'\\\\wsl.localhost\\Ubuntu\\tmp\\clip.txt'"));
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test("WSL falls back to OSC 52 when Windows interop is unavailable", async () => {
@@ -270,8 +291,8 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecFileSync.mock.calls.map(([file]) => file)).toEqual(["wslpath"]);
-		expect(osc52Writes()).toHaveLength(1);
+		assert.deepEqual(execFileSyncFiles(), ["wslpath"]);
+		assert.equal(osc52Writes().length, 1);
 	});
 
 	test("WSL in Windows Terminal prefers OSC 52 over PowerShell", async () => {
@@ -281,8 +302,8 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecFileSync).not.toHaveBeenCalled();
-		expect(osc52Writes()).toHaveLength(1);
+		assert.equal(mockedExecFileSync.mock.calls.length, 0);
+		assert.equal(osc52Writes().length, 1);
 	});
 
 	test("WSL in Windows Terminal emits OSC 52 once in a remote session", async () => {
@@ -293,9 +314,25 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecFileSync).not.toHaveBeenCalled();
-		expect(osc52Writes()).toHaveLength(1);
+		assert.equal(mockedExecFileSync.mock.calls.length, 0);
+		assert.equal(osc52Writes().length, 1);
 	});
+
+	test.each(["SSH_CONNECTION", "SSH_CLIENT", "MOSH_CONNECTION"])(
+		"remote %s into WSL skips the Windows clipboard and emits OSC 52 for the client",
+		async (key) => {
+			// A remote session's copy belongs on the connected client; writing the remote host's
+			// Windows clipboard as well would leak the text to a second endpoint.
+			mockedPlatform.mockReturnValue("linux");
+			vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+			vi.stubEnv(key, "client server");
+
+			await copyToClipboard("hello");
+
+			assert.equal(mockedExecFileSync.mock.calls.length, 0);
+			assert.equal(osc52Writes().length, 1);
+		},
+	);
 
 	test("WSL in Windows Terminal uses PowerShell for oversized OSC 52 payloads", async () => {
 		mockedPlatform.mockReturnValue("linux");
@@ -307,8 +344,8 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("x".repeat(80_000));
 
-		expect(mockedExecFileSync.mock.calls.map(([file]) => file)).toEqual(["wslpath", "powershell.exe"]);
-		expect(osc52Writes()).toHaveLength(0);
+		assert.deepEqual(execFileSyncFiles(), ["wslpath", "powershell.exe"]);
+		assert.equal(osc52Writes().length, 0);
 	});
 
 	test("WSL with a display prefers the Linux clipboard tools", async () => {
@@ -321,9 +358,34 @@ describe("copyToClipboard", () => {
 
 		await copyToClipboard("hello");
 
-		expect(mockedSpawn).toHaveBeenCalledWith("wl-copy", [], expect.anything());
-		expect(mockedExecFileSync).not.toHaveBeenCalled();
-		expect(osc52Writes()).toHaveLength(0);
+		assert.deepEqual(
+			spawnCalls().map(({ command, args }) => ({ command, args })),
+			[{ command: "wl-copy", args: [] }],
+		);
+		assert.equal(mockedExecFileSync.mock.calls.length, 0);
+		assert.equal(osc52Writes().length, 0);
+	});
+
+	test("remote WSLg session writes the display clipboard and still emits OSC 52 for the client", async () => {
+		// Deliberate: the wl-copy write serves the remote host's desktop, while the SSH user
+		// is at the client, which only OSC 52 reaches. Mirrors "remote native success emits
+		// OSC 52 after native write" for the Linux display backends.
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("WSL_DISTRO_NAME", "Ubuntu");
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		vi.stubEnv("SSH_CONNECTION", "client server");
+		mocks.isWaylandSession.mockReturnValue(true);
+		mockWlCopyExit(0);
+		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+
+		await copyToClipboard("hello");
+
+		assert.deepEqual(
+			spawnCalls().map(({ command, args }) => ({ command, args })),
+			[{ command: "wl-copy", args: [] }],
+		);
+		assert.equal(mockedExecFileSync.mock.calls.length, 0);
+		assert.equal(osc52Writes().length, 1);
 	});
 
 	test.each([
@@ -350,8 +412,8 @@ describe("copyToClipboard", () => {
 			mockedExecSync.mockImplementation(() => {
 				throw new Error("backend failed");
 			});
-			await expect(copyToClipboard("hello")).rejects.toThrow(message);
-			expect(osc52Writes()).toHaveLength(0);
+			await assert.rejects(copyToClipboard("hello"), { message });
+			assert.equal(osc52Writes().length, 0);
 		},
 	);
 });
