@@ -109,7 +109,6 @@ Dragging selects and copies text by default. Set `fullscreenCopyOnSelect: false`
 
 Hold Alt while using the mouse wheel to scroll five times as far in fullscreen mode. This requires the terminal to forward the Alt modifier in mouse events; focused components may still consume the wheel input themselves.
 
-
 Drag with the primary button to select characters, double-click for a word or path, and triple-click for a line. Changing focus or clicking elsewhere clears the selection.
 
 While the main editor has focus, fullscreen transcript bindings take precedence. Unmodified navigation keys control the transcript; their `ctrl` variants control the editor.
@@ -122,7 +121,7 @@ While the main editor has focus, fullscreen transcript bindings take precedence.
 | `ctrl+pageUp`, `ctrl+pageDown` | Editor | Editor |
 
 This routing remains configurable through the ordinary action bindings. For example, `"tui.altScreen.pageUp": "ctrl+pageUp"` makes `pageUp` control the editor and `ctrl+pageUp` control the transcript in fullscreen mode. Bind `tui.altScreen.halfPageUp` and `tui.altScreen.halfPageDown` for half-page steps, or `tui.altScreen.lineUp` and `tui.altScreen.lineDown` for single-line steps, while keeping the full-page bindings. Setting `"tui.altScreen.pageUp": []` disables that transcript shortcut entirely. User bindings replace the defaults for that action.
-A focused custom component may consume viewport keys and mouse input before the transcript. Extension authors should follow the [input handling contract](/extensions/ui#custom-components). Renderer routing details live in [maintainer notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/task-supervision.md#focused-viewport-routing).
+A focused custom component may consume viewport keys and mouse input before the transcript. Extension authors should follow the [input handling contract](/extensions/ui#custom-components).
 
 The blocking `ask_user_question` dialog is a bottom-pinned overlay. Opening it does not shrink the transcript viewport or change the page step. `pageUp`, `pageDown`, `home`, `end`, and the wheel still reach every scrollback line, including the newest ones, in the visible strip above the dialog.
 

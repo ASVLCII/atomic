@@ -29,7 +29,7 @@ Check these installation constraints:
 - A custom `ATOMIC_BIN_DIR` containing `;` cannot be one Windows PATH entry. The installer leaves PATH untouched and prints a direct-run command for `atomic.cmd` instead.
 - A same-stem launcher that `PATHEXT` resolves before `atomic.cmd`, such as a stale `atomic.exe`, stops installation before download. Remove that entry and rerun.
 - `PATHEXT` must include `.CMD` for bare `atomic` to resolve. Otherwise, the installer reports the problem and stops.
-- An unexpected regular `current` entry under `ATOMIC_INSTALL_DIR`, or regular `atomic-current` entry under `ATOMIC_BIN_DIR`, is reported and left untouched, not moved or deleted.
+- An unexpected regular `current` entry under `ATOMIC_INSTALL_DIR`, or regular `atomic-current` entry under `ATOMIC_BIN_DIR`, is reported and left untouched instead of being moved or deleted.
 - A pinned `-Ref` is honored literally. If GitHub returns a different release tag, installation stops before download.
 
 Package-manager installation remains available but requires Node.js; see the [Quickstart](/getting-started/installation#package-managers).
@@ -52,12 +52,9 @@ For the Bash tool, [Git for Windows](https://git-scm.com/download/win) is suffic
 
 Paths copied from Git Bash, MSYS2, Cygwin, or WSL are accepted anywhere Atomic resolves a file path. For example, `/c/Users/name/project/file.ts`, `/cygdrive/c/Users/name/project/file.ts`, and `/mnt/c/Users/name/project/file.ts` resolve as the matching Windows drive path.
 
-
 ## Interactive Startup
 
 You can type while Atomic finishes startup. Submitting shows the working indicator; Escape cancels a submission still waiting for resources. If loading fails before the prompt is sent, Atomic restores your exact draft and sends no provider request. Use `/reload` to retry resource loading.
-
-Release-build constraints and startup internals are documented in [Windows maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/windows-runtime.md).
 
 ## Filesystem Watchers
 

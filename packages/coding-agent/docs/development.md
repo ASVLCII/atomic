@@ -1,18 +1,16 @@
 # Development
 
-For extensions and SDK integrations, start with [Build with Atomic](/build). Repository contribution instructions live in the [maintainer development guide](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md).
+For extensions and SDK integrations, start with [Build with Atomic](/build).
 
 ## Setup
 
-To install the released CLI, follow [Installation](/getting-started/installation). To run a source checkout, follow [maintainer setup](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#setup).
+To install the released CLI, follow [Installation](/getting-started/installation).
 
-## Forking / Rebranding
-
-Fork configuration is covered in [rebranding instructions](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#forking--rebranding).
+<a id="forking--rebranding"></a>
 
 ## Path Resolution
 
-Atomic supports package-manager installs and standalone archives. Keep an archive's complete payload together. Source asset resolution is covered in the [maintainer guide](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#path-resolution).
+Atomic supports package-manager installs and standalone archives. Keep an archive's complete payload together.
 
 ## Debug Command
 
@@ -35,24 +33,19 @@ displayed diagnostic and conversion error when reporting a PDF problem.
 
 ## Startup timing probes
 
-For a startup problem, report your OS, terminal, installation method, and Atomic version. Benchmark procedures and internal timing interpretation live in [startup measurement notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#startup-timing-probes).
+For a startup problem, report your OS, terminal, installation method, and Atomic version.
 
-## Testing
-
-Repository checks and test commands live in [maintainer testing instructions](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#testing).
-
-### Installed package smoke test
-
-For release-package validation, use the [installed-package smoke test](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#installed-package-smoke-test).
+<a id="testing"></a>
+<a id="installed-package-smoke-test"></a>
 
 ## Deterministic installs
 
-Package-manager installs use Atomic's published shrinkwrap. Contributor regeneration instructions live in [deterministic installs](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#deterministic-installs).
+Package-manager installs use Atomic's published shrinkwrap.
 
 ## Release security boundary
 
 Download official releases through the [installation instructions](/getting-started/installation). Maintainers should follow the [release pipeline](https://github.com/bastani-inc/atomic/blob/main/docs/ci.md#direct-release-trigger-and-recovery).
 
-## Project Structure
+<a id="project-structure"></a>
 
-For the repository package map, see [project structure](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/development-and-startup.md#project-structure).
+For source setup and repository checks, see [DEV_SETUP.md](https://github.com/bastani-inc/atomic/blob/main/DEV_SETUP.md).

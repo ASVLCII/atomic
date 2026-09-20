@@ -150,7 +150,6 @@ Authoring basics:
 - `outputs` declares typed outputs that parent workflows receive from `ctx.workflow(childWorkflow, ...)`.
 - `run: async (ctx) => { ... }` defines the workflow body.
 
-
 `prompt` and `task` are aliases for task text inside authored workflow primitives. Prefer `prompt` because it mirrors lower-level `stage.prompt(...)`; `task` remains useful in `ctx.chain(...)` examples.
 
 Author workflows to create at least one tracked execution node by calling `ctx.task()`, `ctx.chain()`, `ctx.parallel()`, `ctx.stage()`, `ctx.workflow()`, or `ctx.tool()` in the run body so each normal run has graph work to inspect and render. Stage nodes remain the attachable, interruptible, resumable chat units; durable tool nodes are non-chat execution. Guard-only workflows may call `ctx.exit(...)` before creating a node when they intentionally stop early.
@@ -233,7 +232,7 @@ Implement ✓
 
 Record such follow-up as non-topological activity metadata. Do not reopen the original node as a descendant of its own downstream review or validation work.
 
-Discovery cannot prove every dynamic path acyclic. Validate your branches and resumed runs before relying on a definition. Runtime topology checks are documented in [Workflow durability maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-durability.md).
+Discovery cannot prove every dynamic path acyclic. Validate your branches and resumed runs before relying on a definition.
 
 ### Guiding Principles
 
@@ -509,8 +508,6 @@ Exit snapshots `outputs` before cleanup, so later mutation cannot repair an inva
 After exit is selected, new tracked work and retained stage operations are refused. Queued parallel work does not start; active stages and prompts are skipped. External cancellation can win during cleanup, in which case the canonical result is `killed`.
 
 On resume of an unfinished tool, a successful exit cannot skip that tool. Restore its matching call before new tracked work; otherwise Atomic reports `insufficient_state: replay topology mismatch`. Intentional failed, blocked, cancelled, or skipped exits remain available.
-
-Exit arbitration, replay checks, and control-signal handling are covered in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md).
 
 ### Workflow Composition
 

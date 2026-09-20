@@ -22,7 +22,7 @@ Atomic carries the recent tail with the compaction boundary rather than replayin
 
 Compaction resets Claude's signed reasoning chain: `thinking` and `redacted_thinking` blocks do not survive the boundary. See [Preserved thinking and model switches](/models/reference#preserved-thinking-and-model-switches) for behavior between boundaries.
 
-The query is never truncated. An oversized planner request reports overflow rather than silently dropping part of it. Use `keepContext` tags, not a longer query, to guarantee protection. Reconstruction rationale lives in [maintainer notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#boundary-reconstruction-and-historical-formats).
+The query is never truncated. An oversized planner request reports overflow rather than silently dropping part of it. Use `keepContext` tags, not a longer query, to guarantee protection.
 
 Configure defaults in `~/.atomic/agent/settings.json` or `.atomic/settings.json`:
 
@@ -98,7 +98,7 @@ The entry's `tokensBefore` is the provider-aware whole-context count used for bu
 
 A `"fresh"` boundary that drops the recent tail records `firstKeptEntryId: null`. Only entries with `details.strategy === "verbatim-lines"` affect active context.
 
-Resume uses the saved compacted text without rerunning planning. The TUI shows a collapsible compaction card; new messages after it remain ordinary messages. Old inactive formats do not reapply their historical omissions, so content they once hid can return on resume. See [format mechanics](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#boundary-reconstruction-and-historical-formats).
+Resume uses the saved compacted text without rerunning planning. The TUI shows a collapsible compaction card; new messages after it remain ordinary messages. Old inactive formats do not reapply their historical omissions, so content they once hid can return on resume.
 
 ## Extension hooks
 
@@ -265,5 +265,3 @@ Two old formats remain parseable but inactive:
 
 - `type:"context_compaction"` records store logical entry/content-block deletion targets from older versions. Those records are inert, so content they once hid can re-enter context when an old session resumes.
 - `type:"compaction"` without `details.strategy: "verbatim-lines"` stored generated summary prose. Those records also remain inert.
-
-Maintainer compatibility details live in [historical format notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#boundary-reconstruction-and-historical-formats).

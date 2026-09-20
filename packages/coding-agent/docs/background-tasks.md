@@ -233,7 +233,7 @@ Closing `/tasks` does not stop the chat footer's live Git branch updates.
 
 Foreground and background are observation modes for the same task. Stopping a wait does not create, stop, or restart execution.
 
-A terminal result does not by itself confirm resource cleanup. Check the tool's cleanup status before treating a stop as complete. Native timers, receipts, and settlement recovery are covered in [task supervision notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/task-supervision.md).
+A terminal result does not by itself confirm resource cleanup. Check the tool's cleanup status before treating a stop as complete.
 
 UI previews are bounded and are not a substitute for retained output. Gaps and truncation are labelled; unavailable history is reported rather than reconstructed from activity counters.
 

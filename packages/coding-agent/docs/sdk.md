@@ -315,8 +315,6 @@ Disposal and reload wait for admitted callbacks, resource refreshes, and subproc
 
 Register cleanup before acquiring resources or starting asynchronous callbacks. Call the unsubscribe returned by `pi.events.on()` or a workflow publisher's `dispose()` when you no longer need it; both are idempotent. Generation cleanup releases remaining handles and reports failures.
 
-The full admission and drain rules are in [Session lifecycle internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/session-lifecycle.md).
-
 #### Reload failures and resource ownership
 
 Strict transactional reload failure leaves the original generation usable. Ordinary reload failure does not restore the retired generation. Both attempt cleanup of newly acquired resources and report cleanup failures through `ShutdownFailed` without hiding the original error.

@@ -250,8 +250,6 @@ delete 20
 - An identical no-op payload returns a diagnostic twice; the third attempt fails with `STOP.`. Re-read and verify the anchor instead of repeating it.
 - Recovery never slides a hunk to a nearby duplicate. Explicit `+TEXT` resembling a hunk header remains literal and produces a warning.
 
-Parser constants and inactive diagnostics are in [Hashline maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/tool-storage-and-editing.md).
-
 Across whole-file, truncated, and range/offset reads of LF or CRLF text, numbered output treats a terminal newline as a
 separator, not an extra synthetic row. Genuine blank lines—including one immediately before that terminal newline—remain
 visible, and truncation totals and continuation selectors count real lines. Bare-CR files retain their existing
@@ -343,7 +341,6 @@ Edit rejected for <path>: file changed between read and edit.
 Section is bound to #<expected tag>, but the current file hashes to #<actual tag>. If a prior edit in this session modified this file, copy the [path#newhash] header from that edit's response; otherwise re-read the file with `read` to refresh the tag before retrying.
 ```
 
-
 #### No-op edits
 
 A single-file or all-no-op call returns this text without writing on attempts one and two:
@@ -375,7 +372,6 @@ Warnings that have active emission sites are emitted verbatim beneath the refres
   `dropped K duplicated leading payload line(s) already present above the range`, or
   `kept K structural closing line(s) the range deleted without restating`.
 - `Applied N parallel edit calls as one snapshot-anchored batch.`
-
 
 ## `write`
 
@@ -545,4 +541,4 @@ Each persisted file is capped at 64 MB. Output beyond the cap is replaced by `[O
 
 Cleanup removes temp trees and `tool-results` directories whose newest file is more than 30 days old. One fresh file keeps the directory. This includes custom roots selected with `--session-dir`, `ATOMIC_CODING_AGENT_SESSION_DIR`, or `sessionDir`.
 
-Output from a session in the running process remains available for that session's lifetime. Cleanup never deletes session transcripts or `.jsonl` files and does not follow symlinks. Copy important output elsewhere before relying on it long-term. Permission checks, cleanup locks, and URL-test exceptions are documented in [Tool storage maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/tool-storage-and-editing.md).
+Output from a session in the running process remains available for that session's lifetime. Cleanup never deletes session transcripts or `.jsonl` files and does not follow symlinks. Copy important output elsewhere before relying on it long-term.

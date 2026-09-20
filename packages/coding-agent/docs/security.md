@@ -67,8 +67,6 @@ What credential-export forms guarantee:
 - **Useful OAuth lifetime.** An auth-check export needs an OAuth token with at least 30 minutes remaining. Its normal path can refresh the token; `--no-refresh` makes no auth-file mutation and refuses a shorter-lived token. `print-bearer-token` applies the same floor and uses exit `5` only for a refresh failure that leaves the stored credential untouched.
 - Atomic does not include exported credentials in its logs, session transcripts, error messages, or RPC responses. This does not protect text after it reaches your shell or another program.
 
-Maintainer details are in [Credential export safeguards](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/authentication.md#credential-export-safeguards).
-
 What they do **not** do: once the credential is on stdout it is ordinary text in your shell, your pipeline, and possibly your shell history and process listing. Prefer `print-bearer-token`, whose output expires, over a long-lived API key. Do not embed any credential-export form in a script that logs its own output.
 
 ## Reporting Security Issues

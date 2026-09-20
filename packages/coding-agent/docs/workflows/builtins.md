@@ -6,7 +6,6 @@ When a builtin supplies part of your graph, import its definition and compose it
 
 ## Quick Start
 
-
 To start a workflow quickly, **describe it in natural language** and let Atomic write it. If you'd rather write the TypeScript yourself, continue to [Or hand-write the TypeScript](/workflows/authoring#or-hand-write-the-typescript).
 
 ### Just describe it
@@ -46,7 +45,6 @@ Atomic will:
 - use `ctx.tool(name, args, fn)` for workflow-owned side effects so completed operations are durably checkpointed and do not run again after resume (see [`ctx.tool`](/workflows/operations#ctx-tool-—-durable-cached-tool-execution)),
 - run `/workflow reload` so Atomic rediscovers the workflow resource and you can launch it immediately,
 - then report the generated workflow folder so you can inspect the code it wrote, using `Custom workflow created. You can inspect its code at: <workflow-folder-path>` (for example, `.atomic/workflows/`); Atomic does this only for newly created custom workflows, never builtin or pre-existing workflows.
-
 
 You can also edit or harden an existing workflow in plain chat — ask Atomic to add a stage, switch a model, save artifacts, or wire in a human approval gate.
 
@@ -229,8 +227,6 @@ The workflow establishes or loads project design context, extracts user-provided
 **One live session, then export.** The `live` session is unbounded: the user picks elements, receives three on-brand variants, accepts edits that are written into `preview.html` in place, and steers the page until leaving. The workflow-owned loop ends on the helper's `exit` event, and the exporter receives the preview exactly as it stands. There is no second opinion, decision stage, or later review session.
 
 The workflow uses Atomic's bundled live-review helper, not a project-vendored copy. Helper failures fail the run rather than silently ending review. Live injection supports SvelteKit, Nuxt, TanStack Start, Astro, Next.js, Vite, and static HTML. Keep configured files inside the real app root and outside symlinked parents; browser review URLs must use loopback HTTP(S).
-
-Helper events, adapter boundaries, and review-ledger mechanics are documented in [Builtin workflow maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-verification-and-design.md).
 
 **Ending the review is the user's job.** The session waits through any amount of silence — a poll timeout is not an ending — so the run advances only when the user clicks exit in the Impeccable overlay, closes the browser tab, or says `exit live`. The run-level gate says so before the session opens, and the session-start stage prints it again directly under the live review URL. Ending the session exports the design as it then stands: there is no further round and no confirmation step.
 

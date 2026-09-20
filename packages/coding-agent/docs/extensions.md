@@ -88,7 +88,7 @@ Discovery scope depends on the operation:
 
 Failed first-use initialization can be retried. Cancelling one caller does not cancel initialization needed by others. Web-access batches with no successful items report a tool error; partial successes retain their completed items.
 
-MCP tool `timeoutMs` is an inactivity limit, not a total deadline: progress resets it. Omit it to use the MCP SDK default. For initialization ownership and cleanup mechanics, see [runtime notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#lazy-initialization-and-reload).
+MCP tool `timeoutMs` is an inactivity limit, not a total deadline: progress resets it. Omit it to use the MCP SDK default.
 
 ## Interactive callback isolation
 
@@ -120,7 +120,7 @@ After an unexpected engine stop, Atomic closes its custom UI and makes one autom
 
 If a saved tool call has no recorded result, reopening the session shows that its result is unavailable. **Inspect files or external systems before retrying: the tool may already have had side effects.**
 
-When spawning processes from an extension, pass an explicit `env` derived from `process.env`. Engine-only bootstrap values are not exposed in that environment. Recovery, request ownership, and bootstrap mechanics live in [runtime notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#engine-watchdog-and-recovery).
+When spawning processes from an extension, pass an explicit `env` derived from `process.env`. Engine-only bootstrap values are not exposed in that environment.
 
 Dialogs and `ctx.ui.custom()` components are proxied to the host as rendered lines with asynchronous input forwarding. Custom UI results must be JSON-safe. APIs that require a synchronous callback in the terminal process—raw `onTerminalInput` transforms, synchronous `getEditorText`, custom editor factories, autocomplete wrappers, component-factory widgets, and custom header/footer factories—are unavailable in isolated interactive mode and produce a warning rather than executing extension code in the host. Print and public RPC modes retain their existing execution model.
 

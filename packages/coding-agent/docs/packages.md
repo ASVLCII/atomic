@@ -61,7 +61,7 @@ These commands manage Atomic packages and `atomic update` can update the Atomic 
 
 Self-update installs an exact advertised package/version, so it cannot drift to a newer registry release during installation. Atomic shows any release note supplied by the update service before installing.
 
-Atomic updates only installations it can verify are writable and managed by the detected global package manager. Otherwise, follow the manual command it prints. Platform replacement mechanics are in [Package loading internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/resources-and-ui.md#package-loading).
+Atomic updates only installations it can verify are writable and managed by the detected global package manager. Otherwise, follow the manual command it prints.
 
 By default, `install` and `remove` write to user settings (`~/.atomic/agent/settings.json`). Use `-l` to write to project settings (`.atomic/settings.json`; legacy `.pi/settings.json` is also read) instead. Project settings can be shared with your team, and Atomic installs any missing packages automatically on startup after the project is trusted.
 

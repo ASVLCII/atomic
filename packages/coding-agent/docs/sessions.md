@@ -54,7 +54,7 @@ For the JSONL file format and SessionManager API, see [Session Format](/session-
 
 `/resume` opens an interactive session picker for the current project. `atomic -r` opens the same picker at startup.
 
-Resuming restores saved verbatim compaction without another planning request. Older sessions with retired logical-deletion compaction can bring previously hidden content back into context. See [Session format](/session-format#compactionentry) for persisted fields and [context reconstruction internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/session-lifecycle.md#compaction-reconstruction) for rebuild mechanics.
+Resuming restores saved verbatim compaction without another planning request. Older sessions with retired logical-deletion compaction can bring previously hidden content back into context.
 
 In the picker you can:
 

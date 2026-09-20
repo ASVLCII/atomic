@@ -97,14 +97,12 @@ How you install Atomic decides which runtime hosts it: a package-manager install
 
 ### Alpine and musl Linux archives
 
-The shell installer detects Alpine and selects `atomic-linux-x64-musl.tar.gz` or `atomic-linux-arm64-musl.tar.gz`. Stock Alpine needs no extra runtime package installation.
+The shell installer detects Alpine and selects `atomic-linux-x64-musl.tar.gz` or `atomic-linux-arm64-musl.tar.gz`. Keep the complete archive, including payload-local `libgcc` and `libstdc++`; stock Alpine needs no runtime package install.
 
 Two features work differently on musl:
 
 - **Clipboard:** install `wl-clipboard` on Wayland, `xclip` or `xsel` on X11, or the Termux:API app and `termux-api` package on Termux. OSC 52 is available only over SSH or Mosh, not as a substitute for a failed local clipboard backend.
 - **Durable workflows:** PostgreSQL is included and provisions offline without Docker or external Postgres. If no durable backend can be provisioned, Atomic warns and uses non-durable in-memory storage.
-
-Payload selection and dependency constraints live in [maintainer packaging notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/provider-auth-and-packaging.md#runtime-payload-selection).
 
 Then start Atomic in the project directory you want it to work on:
 

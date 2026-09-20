@@ -13,10 +13,7 @@ The interactive `/model` selector and `/scoped-models` show the current authenti
 
 If refresh times out or fails, the selector reports that it is using cached models. You do not need to reset `auth.json` or `~/.atomic` for a slow catalog. Login and logout remain effective even if an older refresh finishes later.
 
-Refresh scheduling and cache validation are documented in [Catalog refresh internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/provider-runtime.md#catalog-refresh).
-
 A complete `defaultProvider`/`defaultModel` pair in `settings.json` is resolved after built-in, configured, and extension providers register. If the provider remains unsupported, interactive mode reports a generic saved-configuration warning and leaves model selection open instead of routing the session to a different provider. Print and JSON modes write that diagnostic to stderr and exit nonzero before prompting, keeping JSON stdout JSONL-clean. RPC rejects `prompt` with the same correlated diagnostic until an explicit successful `set_model` selects an available model or an explicit model cycle returns a different available model. A null or unchanged cycle result does not clear the condition. If the provider is supported but the model is unknown or lacks authentication, normal automatic selection of an available authenticated model continues. Valid custom- and extension-provider defaults resolve once their provider registration is available. See [Settings](/settings#model-&-thinking).
-
 
 ## Where to go next
 

@@ -79,7 +79,7 @@ OAuth callbacks run in the engine in isolated interactive mode. Use the provided
 
 `loginLabel` sets the dialog title. `usesCallbackServer: true` offers a redirect-URL paste field alongside the browser callback.
 
-Successful login persists credentials before refreshing the catalog. Logout removes stored credentials without calling `refreshModels`. Escape or Ctrl+C cancels the matching login and preserves the previous credentials and catalog. Later registrations still override earlier providers by ID. Transaction and transport mechanics live in [maintainer OAuth notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/provider-auth-and-packaging.md#isolated-oauth-transactions).
+Successful login persists credentials before refreshing the catalog. Logout removes stored credentials without calling `refreshModels`. Escape or Ctrl+C cancels the matching login and preserves the previous credentials and catalog. Later registrations still override earlier providers by ID.
 
 Intentional cancellation is quiet, including native `AbortError`, an aborted signal or its exact reason, nested abort causes, and the legacy exact `Login cancelled` error. Provider denial, timeout, network/protocol errors, malformed responses, token exchange failures, and storage failures remain visible. Catalog-refresh failures are reported by `/model` while cached models remain selectable; they do not turn a persisted login into a failed transaction.
 

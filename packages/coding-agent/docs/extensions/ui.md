@@ -335,7 +335,7 @@ const result = await ctx.ui.custom<string | null>(
 
 A component mounted with `reserveTranscriptRows` always releases configured fullscreen transcript actions and vertical wheel input to the host viewport, including while a nested input has focus. The component keeps all other keyboard and mouse input, including text editing, arrows, confirmation, cancellation, and clicks. This rule applies only to reserving overlays; other focused overlays still receive page and wheel input first and can keep it by returning `true`.
 
-Embed `OVERLAY_ACTIVE_ROW_MARKER` once per frame on the line that should stay visible when the dialog is cropped, usually the selected row. The first marked line wins, even with `maxHeight: 1`; the marker has zero visible width and is removed before terminal output. Focused inputs also keep their cursor row visible. See [overlay composition notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#overlay-composition) for rendering mechanics.
+Embed `OVERLAY_ACTIVE_ROW_MARKER` once per frame on the line that should stay visible when the dialog is cropped, usually the selected row. The first marked line wins, even with `maxHeight: 1`; the marker has zero visible width and is removed before terminal output. Focused inputs also keep their cursor row visible.
 
 ```typescript
 import { OVERLAY_ACTIVE_ROW_MARKER } from "@bastani/atomic";

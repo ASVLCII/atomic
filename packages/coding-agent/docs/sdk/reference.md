@@ -217,7 +217,6 @@ const { session } = await createAgentSession({
 
 Atomic's built-in `bash` tool matches upstream pi: when `bash` is enabled, commands execute through the configured shell with the Atomic process permissions. Use `tools`, `excludedTools`, or `noTools` to decide whether a session exposes the `bash` tool at all. Atomic no longer provides a command-level allow/deny option for `bash`; use an operating-system/container sandbox or a custom tool/extension when you need command allowlisting or stronger isolation.
 
-
 #### Waiting for existing shell tasks
 
 Both Bash and PowerShell factories accept `{ action: "wait", id: taskId, budgetMs: 1000 }` with a trusted `taskOwner` binding. No command is executed. `BashToolInput` and `PowerShellToolInput` distinguish command launches from existing-task waits; narrow by `action` before reading `command`.
@@ -900,16 +899,12 @@ For trusted custom hosts, the package exports `AgentTaskHost` and its integratio
 
 Use `observeAgentLaunch(taskId, policy?)`, `waitForTask`, `resolveTask`, `cancelTask`, `watchOwnerTasks`, and `close` within the bound owner. Observation returns Result/WaitOutcome. Yielding or cancelling an observation does not stop execution. Cancellation and cleanup failures remain observable; owner close may remain pending until your runner acknowledges cleanup.
 
-Implementation, native contracts, and regression constraints are in [Task supervision](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/task-supervision.md).
-
 ### Supervised command SDK
 
 For shell integration, use the exported Bash and PowerShell factories with a trusted `taskOwner` binding. Execution timeout and observation budget are separate. The automatic command wait is normally 10000 ms; `until-settled` waits for completion. A yielded command remains owned, and later waits can read retained output with explicit omission markers.
 
-Without a supported owner, explicit background execution is refused. Native Windows legacy WSL `bash.exe` is not supported for owned commands; run Atomic inside WSL instead. See [waiting for shell tasks](#waiting-for-existing-shell-tasks) and [Background tasks](/background-tasks) for caller usage. Raw command admission, stdin, output storage, and platform cleanup contracts are in [Task supervision](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/task-supervision.md#supervised-commands).
+Without a supported owner, explicit background execution is refused. Native Windows legacy WSL `bash.exe` is not supported for owned commands; run Atomic inside WSL instead. See [waiting for shell tasks](#waiting-for-existing-shell-tasks) and [Background tasks](/background-tasks) for caller usage.
 
 ### Task transcript references
 
 Task inspectors show references to the bound child conversation, excluding thinking and non-conversation entries. An unbound or empty history reports `Transcript unavailable`. Saved history is not authority to restart or control a task.
-
-The trusted runner binding, pagination, and view-lifetime rules are in [Transcript adapter](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/task-supervision.md#transcript-adapter).

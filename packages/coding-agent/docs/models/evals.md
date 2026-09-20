@@ -433,7 +433,7 @@ Three reads from the agent table:
 
 AA's DeepSWE component uses the DeepSWE dataset with the named agent. It is not the same experiment as Datacurve's `mini-swe-agent` leaderboard, and the two disagree: inside AA's harness Muse Code + Muse Spark 1.3 (68) edges Codex + Astra (67), while Datacurve's Best view has Astra [xhigh] at 74% and has not published Muse Spark 1.3 at all (its Muse Spark 1.2 [xhigh] row sits at 55%). Neither its component score nor its composite belongs in the [DeepSWE frontier](/models/pareto-efficiency).
 
-Use the named coding and agentic evaluations above. The separately measured Coding Agent Index is not a base-model Coding Index or Agentic Index. See [benchmark naming history](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md#retrieval-history-and-naming) for the older documentation labels.
+Use the named coding and agentic evaluations above. The separately measured Coding Agent Index is not a base-model Coding Index or Agentic Index.
 
 ### Professional capability indices
 
@@ -464,8 +464,6 @@ See [Model Selection](/models/model-selection) for a small dated shortlist and p
 ## Keeping the docs fresh
 
 Use the live benchmark for a current decision, and record its date, version, exact model/effort, and units when citing it. Verify configured provider access separately. A missing measurement is not a zero or a predecessor's score.
-
-Chart extraction and documentation refresh procedures are in [Benchmark maintenance](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md).
 
 ## Related
 

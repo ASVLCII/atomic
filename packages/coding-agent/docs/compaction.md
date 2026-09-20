@@ -49,7 +49,7 @@ The planner sees the same text numbered as `N→content` and returns only one-ba
 2,5
 ```
 
-The model selects lines to delete; it does not rewrite retained text. Retained non-marker lines stay byte-identical and in their original order. The range-validation algorithm is documented in [compaction engine notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#planning-and-reconstruction).
+The model selects lines to delete; it does not rewrite retained text. Retained non-marker lines stay byte-identical and in their original order.
 
 ### Markers and repeated compaction
 
@@ -115,8 +115,6 @@ Atomic uses the session's reasoning level unless a fallback entry specifies its 
 
 `settings.retry` controls retries within one model. If planning fails, Atomic tries configured `settings.fallbackModels` in order, using each model's own credentials. Unavailable credentials do not prevent trying later models. Borrowing does not change the chat model, thinking level, or model-selection events.
 
-See [compaction engine notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#planning-and-reconstruction) for outcome classification and overflow retry mechanics.
-
 When every configured model is exhausted, what happens depends on how much the caller can afford to lose:
 
 | Call site | Urgency | Can borrow a model | Can start a fresh context window |
@@ -140,7 +138,7 @@ Clearing context does not fix provider rate limits or guarantee the next turn su
 
 ### Length-truncated response recovery
 
-Atomic may recover usable deletion records when the provider truncates a planner response. Successful recovery appears as ordinary `✻ Context compacted`; unusable output advances to the next configured model. Parser rules and the truncated-output example now live in [recovery mechanics](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#truncated-planner-responses).
+Atomic may recover usable deletion records when the provider truncates a planner response. Successful recovery appears as ordinary `✻ Context compacted`; unusable output advances to the next configured model.
 
 ### Planner failure diagnostics
 
@@ -150,7 +148,7 @@ For a persisted session, each failed planner attempt writes its own JSON sidecar
 Compaction range planning returned malformed output (diagnostic: /path/session-compaction-diagnostic-1785222000000-019fa7….json)
 ```
 
-Treat diagnostic sidecars like session files: a raw model response may echo sensitive input. They use `0600` permissions where supported and omit API keys, request headers, and the planner request. In-memory sessions do not create them. Detailed record fields and classifications live in [diagnostic notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#diagnostic-records-and-token-estimates).
+Treat diagnostic sidecars like session files: a raw model response may echo sensitive input. They use `0600` permissions where supported and omit API keys, request headers, and the planner request. In-memory sessions do not create them.
 
 Interactive main chat and attached workflow stage chat treat `compaction_end` as the authority for cancellation and failure UI. A failed or cancelled `/compact` stops its spinner, shows the event-provided status or diagnostic path without a duplicate stack trace, writes no boundary, and leaves the session usable for another `/compact` attempt or a normal follow-up turn.
 
@@ -186,7 +184,7 @@ Branch summarization is a separate mechanism from context compaction. It generat
 
 ### How It Works
 
-Atomic summarizes the branch you leave, prioritizing newer messages within its token budget, and saves the summary at the navigation point. It rejects incomplete summaries rather than saving partial prose. The [maintainer notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#branch-summaries-and-request-isolation) describe traversal and request handling.
+Atomic summarizes the branch you leave, prioritizing newer messages within its token budget, and saves the summary at the navigation point. It rejects incomplete summaries rather than saving partial prose.
 
 ```text
 Tree before navigation:
@@ -233,8 +231,6 @@ interface BranchSummaryDetails {
 ```
 
 Extensions can store custom data in `details`.
-
-Implementation entry points are listed in the [maintainer notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/compaction-engine.md#branch-summaries-and-request-isolation).
 
 ## Branch Summary Format
 

@@ -84,7 +84,7 @@ Fast behavior comes from explicit route metadata attached when the variant is de
 
 Provider-owned names ending in `-fast` remain ordinary exact IDs. Vercel AI Gateway advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-fast`; OpenRouter advertises `openai/gpt-6-astra` and `openai/gpt-6-astra-pro`. Their catalog prices and routing apply, not Atomic's first-party fast routing. Check the live catalog before selecting one.
 
-First-party Codex fast models keep their priority routing across retries and transport changes. Renaming a provider or setting `serviceTier: priority` on a normal model does not grant fast-model identity. See [provider routing internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/provider-runtime.md#codex-fast-routing) for transport headers and connection handling.
+First-party Codex fast models keep their priority routing across retries and transport changes. Renaming a provider or setting `serviceTier: priority` on a normal model does not grant fast-model identity.
 
 Pick fast variants deliberately in workflows: parallel fan-out multiplies provider usage, and priority-tier requests are billed at a higher rate.
 
@@ -135,7 +135,6 @@ The `codebase-locator`, `codebase-pattern-finder`, and `codebase-research-locato
 ### Radius
 
 Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens in `auth.json`; its model catalog refreshes independently and is cached in `models-store.json`. API-key authentication is also available through `/login radius` or `RADIUS_API_KEY`. Custom Radius gateways can be declared in `models.json` with `"oauth": "radius"` and the gateway `baseUrl`.
-
 
 ## API Keys
 
@@ -199,7 +198,7 @@ Catalog failures preserve the last usable models for each provider. See [catalog
 
 Z.AI and Z.AI Coding Plan (China) default to `glm-5.3` (`zai/glm-5.3` and `zai-coding-cn/glm-5.3`), and both direct providers also expose the multimodal `glm-5.3-flash`. Baseten defaults to its directly selectable `zai-org/GLM-5.3` and also exposes `zai-org/GLM-5.3-Fast` and the multimodal `zai-org/GLM-5.3-Flash`; OpenRouter exposes `z-ai/glm-5.3` and `z-ai/glm-5.3-flash`. The full and Flash entries support `low`, `high`, and `max` reasoning; Baseten's Fast entry also supports `off`. Built-in workflow and subagent chains include the Z.AI, Z.AI Coding Plan, Baseten, and OpenRouter routes at `:high`. Use Baseten's `zai-org/GLM-5.2` or `zai-org/GLM-5.3-Fast` when fully disabled reasoning is required. Qwen Token Plan Individual defaults to `qwen3.8-max` and uses the international `QWEN_TOKEN_PLAN_API_KEY` shared with the existing Qwen Token Plan provider. These catalogs follow their upstream providers, so use `--list-models` for the current entries.
 
-Use the table above for environment-variable and `auth.json` names. Maintainers can find the implementation in [Authentication internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/authentication.md).
+Use the table above for environment-variable and `auth.json` names.
 
 #### Auth File
 
@@ -251,7 +250,6 @@ API-key credentials may include provider-scoped `env` values. They take preceden
 ```
 
 Use this when Atomic should use provider settings different from the project shell environment.
-
 
 ### Key Resolution
 

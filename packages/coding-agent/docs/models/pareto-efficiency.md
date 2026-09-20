@@ -35,8 +35,6 @@ In this September 3 snapshot, Gemini 3.8 Flash replaces Opus 5, Sol, and GLM-5.3
 
 The chart uses published peak-rate DeepSeek costs. Off-peak rates are half as much: V4 Pro remains dominated, while V4 Flash at about $0.23 becomes slightly cheaper than GLM-5.3 Flash's $0.24 but remains ten rounded points less accurate. Recheck current prices before choosing.
 
-Earlier frontier changes and pricing corrections are in [Benchmark maintenance](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md#frontier-history).
-
 ## Dominated models and why
 
 - **claude-opus-5 [max]**: Gemini 3.8 Flash is more accurate unrounded (73.83% versus 73.65%; both display 74%) and costs $9.48 less per task. Opus 5 keeps a role only as the Anthropic entry in the accuracy-ceiling class.

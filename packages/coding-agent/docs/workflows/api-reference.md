@@ -129,7 +129,7 @@ When several runs are due together, older scheduled heartbeats arrive first. Use
 
 Terminal runs stop producing heartbeats. A recoverable provider or rate-limit block also suppresses new heartbeats but retains the cadence for resume.
 
-An already-visible card remains in the transcript. Its stale instruction is excluded from model context if the run has ended or the card no longer belongs to the current run state. Scheduler cleanup and recovery details are in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md).
+An already-visible card remains in the transcript. Its stale instruction is excluded from model context if the run has ended or the card no longer belongs to the current run state.
 
 ### `budget`
 
@@ -1220,7 +1220,6 @@ export default workflow({
 
 Programmatic callers import `run` and call `run(definition, inputs)` with an exported definition and validated inputs. Use `createRegistry()` when an integration needs to register, merge, or look up several definitions before selecting one to run. The extension also registers the `/workflow` commands and the `workflow` tool for named execution, discovery, inspection, messaging, run control, and reload.
 
-
 ### `workflow(spec)`
 
 ```typescript
@@ -1480,8 +1479,6 @@ interface Store {
 
 This is the stable core exposed by the standalone authoring declaration. Atomic's runtime store also has graph, prompt, session, pause/resume, snapshot, and subscription methods used by embedded integrations; those richer runtime controls are not part of the lean workflow-package `Store` contract shown here.
 
-Embedded graph snapshot and invalidation mechanics are documented in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md), not the standalone authoring contract.
-
 ### `createCancellationRegistry()` / `cancellationRegistry`
 
 ```typescript
@@ -1507,7 +1504,6 @@ export type { Static, TSchema } from "typebox";
 ```
 
 These TypeBox types are re-exported for authoring helpers. Import the runtime `Type` builder from `typebox`.
-
 
 ### Builtin workflow exports
 

@@ -597,8 +597,6 @@ The default is a one-cell `∀` pulse beside a message selected once per turn. T
 
 Compaction and retry loaders use their own factual text and the built-in indicator, not extension frames. Successful mid-turn compaction restores Working without another user submission. Cancelled or failed compaction stops activity; errors appear when supplied by the compaction event.
 
-Animation timing and status ownership are covered in [TUI maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/tui-lifecycle.md).
-
 **Examples:** [working-indicator.ts](https://github.com/bastani-inc/atomic/blob/main/packages/coding-agent/examples/extensions/working-indicator.ts)
 
 ### Pattern 5: Widgets Above/Below Editor

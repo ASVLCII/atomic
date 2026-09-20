@@ -76,7 +76,7 @@ A quick lookup for which benchmark to weight per role:
 
 ## Keeping the docs fresh
 
-Check the live sources before choosing a model; this page is a dated snapshot. Do not give an unmeasured model its predecessor's score. Documentation refresh instructions are in [Benchmark maintenance](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/benchmark-maintenance.md).
+Check the live sources before choosing a model; this page is a dated snapshot. Do not give an unmeasured model its predecessor's score.
 
 ## Related
 

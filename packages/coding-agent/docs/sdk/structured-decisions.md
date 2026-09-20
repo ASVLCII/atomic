@@ -105,7 +105,7 @@ For an abstention option that must remain available, set the question's optional
 
 Overflow requires multiple HTTP requests and can increase latency and billed input tokens because each request repeats the unchanged state. Returned usage sums all successful requests; `responseModel` identifies the last response. Grouping can change the winner: this tournament does not guarantee the result of an unlimited flat Choice or a globally optimal selection.
 
-Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Atomic estimates context when packing questions, but the estimate does not guarantee a fit; actual provider limits remain authoritative. See [structured decision transport](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/provider-runtime.md#structured-decision-transport) for packing mechanics.
+Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Atomic estimates context when packing questions, but the estimate does not guarantee a fit; actual provider limits remain authoritative.
 
 Atomic never trims state, rejects solely on the estimate, or retries a rejected request. It sends indivisible oversized context once; HTTP 422 stops the operation. If context is rejected, explicitly supply concise context or choose an ordinary inference model with enough capacity.
 

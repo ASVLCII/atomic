@@ -318,7 +318,7 @@ These notification-only events wrap blocking user-facing prompts. Each event has
 
 Trust-safe extensions receive a live context before the trust prompt. Newly authorized project extensions load afterward and do not receive historical prompt events. Resume trust dialogs use the outgoing session context; failed preparation leaves that session active.
 
-Nested or overlapping prompts share one outer span. Its end retains the original reason, kind, and title and fires after all nested prompts settle. Prompt display and answers never wait for observers. An observer's asynchronous start and end work can overlap, so update lifecycle state before awaiting unrelated work. During session replacement, pending notification delivery has a 1,000 ms limit; do not assume an old context remains valid beyond it. See [delivery mechanics](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#prompt-notification-delivery).
+Nested or overlapping prompts share one outer span. Its end retains the original reason, kind, and title and fires after all nested prompts settle. Prompt display and answers never wait for observers. An observer's asynchronous start and end work can overlap, so update lifecycle state before awaiting unrelated work. During session replacement, pending notification delivery has a 1,000 ms limit; do not assume an old context remains valid beyond it.
 
 ```typescript
 pi.on("ui_prompt_start", (event) => {
@@ -706,10 +706,9 @@ Transforms chain across handlers. See [input-transform.ts](https://github.com/ba
 
 The host exposes typed workflow observation contracts. A workflow provider must register and publish activity; these APIs alone do not connect the workflow scheduler. Without a publisher snapshot, availability is `unavailable`, not an empty ready state.
 
-Use `ctx.observeWorkflowActivity` rather than importing internal workflow helpers. Root summaries distinguish live work from stored history: independent work remains `working` even when another stage needs attention; paused roots are `idle`, and unresolved waits without progressing work are `blocked`. A control event does not prove execution has stopped. The internal aggregation rules live in [workflow activity projection notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#workflow-activity-projection).
+Use `ctx.observeWorkflowActivity` rather than importing internal workflow helpers. Root summaries distinguish live work from stored history: independent work remains `working` even when another stage needs attention; paused roots are `idle`, and unresolved waits without progressing work are `blocked`. A control event does not prove execution has stopped.
 
 The workflows extension registers a publisher on activation and publishes this activity stream for its owning session: root snapshots and changes, plus `workflow_lifecycle`, `workflow_stage_completed`, and `workflow_heartbeat` hooks (the runtime state table is in [`workflows/operations.md`](/workflows/operations#workflow-activity-for-extensions)). It does not change chat notifications. The built-in [Herdr reporter](/herdr) consumes this stream to reflect workflow execution and human-input waits in the owning pane.
-
 
 | Hook | Payload and semantics |
 | --- | --- |

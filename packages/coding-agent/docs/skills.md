@@ -167,7 +167,7 @@ If a skill command is queued while the session is paused, it may remain literal 
 
 Mounted human-input and custom prompts own their input, so answers starting `/skill:` remain literal. Blocked stages, read-only archives, and replay cannot admit skill messages. An explicitly opened editable post-mortem chat can invoke its own skills without restarting workflow execution. Skills do not grant tools, workspace access, or permission to launch workflows or subagents, and unrelated parent slash commands are not forwarded. A host without stage command metadata reports that discovery is unavailable rather than borrowing another session's catalog.
 
-Custom stage hosts must expose admission-aware `sendUserMessage` for skill invocation. Without it, submission reports that user-message admission is unavailable. See [stage-chat internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/resources-and-ui.md#stage-chat-skills) for attachment and pause ordering.
+Custom stage hosts must expose admission-aware `sendUserMessage` for skill invocation. Without it, submission reports that user-message admission is unavailable.
 
 See [workflow stage chat controls](/workflows/operations#skills-in-attached-stage-chats) for the distinction between skill messages and local view commands.
 

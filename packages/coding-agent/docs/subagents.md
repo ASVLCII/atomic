@@ -100,7 +100,7 @@ Completed, failed, interrupted, and cancelled noninteractive children cannot ans
 
 ### Single-child handoff
 
-A claimed parent-targeted blocking request ends a single child and returns its question, attachments, agent identity, and `[TASK_CONTEXT]` through the parent's `subagent` call. Start a fresh child with the answer and handoff. Parallel runs and collected sibling launches instead resume the same requesting child after its reply.
+A claimed parent-targeted blocking request ends a single child and returns its question, attachments, agent identity, and `[TASK_CONTEXT]` through the parent's `subagent` call. Start a fresh child with the answer and handoff. In parallel runs and collected sibling launches, the requesting child instead stays alive and continues its ongoing execution after receiving the supervisor's reply.
 
 The handoff explicitly tells the parent to start a fresh child with a normal launch such as `subagent({ agent: "worker", task: "[TASK_CONTEXT] ... Continue with this supervisor answer: ..." })`. The new child receives a new run identity. Completed, interrupted, and parent-question children are terminal for continuation; a prior run ID cannot revive one.
 
@@ -266,7 +266,7 @@ subagent({ agent: "worker", task: "Implement the approved fix.", progress: true 
 
 Delegation is exactly one level deep and cannot be configured. Children complete their assigned tasks directly; they cannot launch or kill other children. They may inspect definitions and status with `list`, `get`, and `status`; management-restricted children also cannot `create`, `update`, or `delete` definitions.
 
-Child prompts omit parent orchestration artifacts and prior subagent control traffic. Tool availability does not grant delegation authority. The parent remains responsible for orchestration. Admission and delivery mechanics are in [Subagent maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/subagent-lifecycle.md).
+Child prompts omit parent orchestration artifacts and prior subagent control traffic. Tool availability does not grant delegation authority. The parent remains responsible for orchestration.
 
 ## Custom agents
 

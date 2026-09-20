@@ -1078,7 +1078,6 @@ Before turning a process into a workflow, confirm that it suits automation:
 
 For complex workflows, structure the implementation as a pipeline: acquire context, prepare prompts/artifacts, process with LLM stages, parse or validate outputs, and render the final result.
 
-
 ## Design Checklist
 
 Before implementing or shipping a non-trivial workflow, answer these questions:
@@ -1428,7 +1427,7 @@ Best practices:
 - The shipped `adversarial-verification` builtin accepts `criteria` as a record of criterion names to descriptions or as a `criteria.md` Markdown string; the shared `verification-criteria` module also canonicalizes string lists and `CriterionInput` lists. Its public doors are `parse_rubric`, `normalize_criteria`, `select_criteria`, and `decide_verification`, using the `Criterion`, `CriterionInput`, `CriterionScore`, and `Finding` shapes; `NoCriteria` and `EmptyCriterion` are explicit rubric errors.
 - A `criteria.md` rubric may have a `#` title, an optional `##` section whose heading contains `ground truth` (normally `## Ground Truth Note`; the first such section wins), and must include a `##` section whose heading contains `criteri` (normally `## Criteria`) whose `### Name {#id}` headings own non-empty criterion bodies. HTML comments are ignored; an omitted `{#id}` is slugged to lowercase alphanumeric/underscore text (up to 40 characters), with a fallback `criterion` id and encounter-order `_2`/`_3` deduplication. `parse_rubric` rejects a rubric with no criterion headings or an empty criterion body.
 - `VERIFICATION_SCALE` anchors integer scores from 1 (certainly fails) through 20 (verified correct). `select_criteria` preserves the requested id order and rejects unknown ids; `decide_verification` accepts only with quorum, a mean at or above the policy threshold, and no `veto` finding, while an invalid report remains metadata rather than a score.
-- Put large candidate bodies in files and pass paths. Keep the rubric and output contract consistent across comparisons. Builtin prefix caching and warm-first scheduling are covered in [Verification maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-verification-and-design.md).
+- Put large candidate bodies in files and pass paths. Keep the rubric and output contract consistent across comparisons.
 - The builtin input defaults are `verifier_count=3`, `max_repairs=2`, `accept_mean=14` on the 1–20 scale, and `reask_limit=1`; omitted `criteria` uses the `task_fit`, `evidence`, and `completeness` record. A round expects one schema-valid score for every criterion/verifier cell, and the normal call shape is criteria length multiplied by verifier count.
 - Invalid criterion reports are written as invalid artifacts and re-asked in bounded waves up to `reask_limit`; an invalid or missing report is counted in `invalidCount` only and is never converted into a fail vote or included in the mean. If the required quorum is still missing after the re-asks, the round is `indeterminate` rather than silently narrowing the decision.
 - `score_table_path` names the durable `verification-summary-<round>.json` for the final round. Its object contains `scores` (`criterion_id`, integer `score`, `evidence`, and `findings` with `finding` plus `severity`), `mean`, `invalidCount`, the `decision` (`accept`, `repair`, or `indeterminate` with its corresponding mean/findings or missing count), and folded `usage`; `review_report_path` carries repair guidance or quorum evidence.
@@ -1713,7 +1712,7 @@ Use `ralph` or a task-specific child in the same positions when its input contra
 
 Use an anchored integer scale and repeat comparisons only when the extra confidence justifies the model-call cost. Sixteen repeats cost roughly sixteen times one comparison. Test the judge on known examples before widening the candidate pool; more candidates do not help an unreliable selector.
 
-The builtin inputs and artifacts are documented under [Adversarial verification](#3-adversarial-verification), [Tournament](#5-tournament), [Loop until done](#6-loop-until-done), and [Goal/Ralph](/workflows/builtins). Research figures and reducer rationale moved to [Verification maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-verification-and-design.md); they are not performance guarantees for your workflow.
+The builtin inputs and artifacts are documented under [Adversarial verification](#3-adversarial-verification), [Tournament](#5-tournament), [Loop until done](#6-loop-until-done), and [Goal/Ralph](/workflows/builtins).
 
 #### Choosing a common workflow pattern
 

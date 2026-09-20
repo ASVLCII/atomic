@@ -109,7 +109,6 @@ Atomic advertises PDF only where its runtime can serialize a document block: Ant
 
 `"pdf"` means PDF specifically. A document block's media type must be `application/pdf`; other values are rejected by name.
 
-
 ### GPT-6-Astra Built-in Models
 
 Atomic ships `openai/gpt-6-astra` and `openai-codex/gpt-6-astra`. Both accept text and image input, expose tool search and additional tools, and offer exactly `low`, `medium`, `high`, `xhigh`, and `max` reasoning. `off`, `minimal`, and Codex's client-side `ultra` orchestration preset are not API reasoning levels and do not appear in Atomic's selector.
@@ -469,8 +468,6 @@ Server-side fallback may continue a declined Fable 5.1 response with Claude Opus
 
 These preserved-thinking behaviors apply only to first-party `anthropic` models using `anthropic-messages`. Bedrock, Vertex, Copilot, opencode zen, Vercel AI Gateway, and compatible proxies do not receive them automatically. On those routes, switching models does not replay the earlier model's thinking, and a changed prefix may cause a provider error. Enable `compat.delegatesThinkingModelBinding` and `compat.enforcesPreservedThinkingBinding` only for custom providers known to support the corresponding behavior.
 
-Serialization, binding controls, and fallback replay details are in [Provider runtime internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/provider-runtime.md#preserved-thinking).
-
 ## OpenAI Compatibility
 
 For providers with partial OpenAI compatibility, use the `compat` field.
@@ -529,7 +526,7 @@ Strict JSON-schema support currently includes OpenAI, Anthropic, capable Bedrock
 
 ### Catalog freshness and precedence
 
-Atomic caches remote catalogs in `models-store.json`, keeps each provider's last usable snapshot on failure, and prefers newer bundled data over stale remote overlays. The final catalog combines built-ins, fresh persisted/remote data, the active agent directory's single `models.json`, and live provider catalogs/overrides. Project `.atomic`/`.pi` model files and legacy agent-directory fallbacks are not merged. See [catalog refresh internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/provider-runtime.md#catalog-refresh) for cache validation.
+Atomic caches remote catalogs in `models-store.json`, keeps each provider's last usable snapshot on failure, and prefers newer bundled data over stale remote overlays. The final catalog combines built-ins, fresh persisted/remote data, the active agent directory's single `models.json`, and live provider catalogs/overrides. Project `.atomic`/`.pi` model files and legacy agent-directory fallbacks are not merged.
 
 Claude Opus 5 is present in the generated Anthropic and Amazon Bedrock catalogs. Its metadata enables adaptive thinking, including `xhigh` where advertised. Bedrock uses its generated inference-profile ID, prompt-caching and strict-tool metadata, and preserves provider/AWS validation errors. Custom entries must reproduce those capabilities honestly rather than copying a display name alone.
 `openrouter` uses `reasoning: { effort }`. `together` uses `reasoning: { enabled }` and also `reasoning_effort` when `supportsReasoningEffort` is enabled. `qwen` uses top-level `enable_thinking`. Use `qwen-chat-template` for local Qwen-compatible servers that require `chat_template_kwargs.enable_thinking` and `preserve_thinking`. Use `chat-template` for vLLM/Hugging Face chat templates that need configurable `chat_template_kwargs`, such as `chatTemplateKwargs: { "thinking": { "$var": "thinking.enabled" } }` for DeepSeek V3.x templates. Use `thinkingFormat: "baseten"` with `chatTemplateArgs` for providers that expose toggle controls through `chat_template_args` and optionally support top-level `reasoning_effort`.

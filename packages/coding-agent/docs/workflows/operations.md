@@ -132,7 +132,6 @@ From interactive chat, named workflow launches run in the background so the pare
 
 The no-`runId` status listing includes bounded pending-stage rows after each run summary. Each row gives the display name, canonical stage ID, literal `pending` lifecycle, `pendingStageDeliveryAvailable`, and either the exact usable Intercom target or `unavailable`. Interactive status cards and run detail show the same identity/availability distinction within their width budgets. Status cards wrap exact targets onto continuation rows instead of rendering a partially truncated address; bounded omissions retain an explicit remaining-stage count.
 
-
 `workflow({ action: "models" })` returns the registry's configured-auth catalog snapshot in registry order. Each entry includes `provider`, `id`, `fullId`, an `isCurrent` marker, and `availableThinkingLevels` derived from the real model's `reasoning` and `thinkingLevelMap` metadata. This is not proof of credentials, entitlements, OAuth freshness, or live provider access, and it exposes no authentication details.
 
 Named launches wait only for **startup admission**, not for workflow completion. Atomic returns `status: "running"` after durable registration, reusable-worktree setup, and other pre-body setup succeed, while the workflow body and stages continue in the background. If setup fails before the workflow body is admitted — for example, `git_worktree_dir` points inside the invoking checkout — the original `workflow` tool call instead returns a structured `status: "failed"` result with the allocated full run id and concrete setup error. Ordinary setup failures retain no background-start claim or orphan run, so the caller can correct the inputs and retry. Database-unavailable admission instead preserves the failed local run and skips durable cleanup; follow the recovery guidance below before retrying. Failures after admission remain ordinary background lifecycle outcomes reported through status and lifecycle notices.
@@ -409,7 +408,7 @@ Quit stops admitting tool calls, cancels owned in-flight calls, and waits a boun
 
 If the database pause cannot be saved, the run remains locally paused. That is not proof of a durable pause. Preserve the run ID, restore database availability, and inspect status. After successful admission, repeating quit retries a failed pause write; during admission, later failures appear in status. Existing durable progress remains available, but a failed write does not create progress.
 
-Catching a tool cancellation cannot turn whole-run quit into completion. To abort one tool and continue the workflow, target the tool node instead. Admission, cancellation, and stale-callback mechanics are in [Workflow durability maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-durability.md).
+Catching a tool cancellation cannot turn whole-run quit into completion. To abort one tool and continue the workflow, target the tool node instead.
 
 When a paused stage interrupted an active model turn, Atomic preserves that turn's existing pause loop: a non-empty resume message is delivered exactly once through the resumed loop, and (if the stage has not finalized) Atomic injects `Continue where you left off. If you believe you are finished with your original task (or a redefined task if the user told you), stop.` before normal completion/readiness handling. A no-message interrupted-turn resume injects the same continuation directly. A different state applies when the stage was idle and waiting for a new stage-chat turn: resuming with a non-empty message starts exactly one fresh prompt containing the text, while an empty resume only releases the pause and does not fabricate a user turn or continuation.
 
@@ -440,7 +439,6 @@ The target receives the original ask and replies with ordinary `intercom.reply`.
 The target sees the original ask, and its normal `intercom.reply` remains correlated to the originating child session and message ID. The parent chat or another session cannot satisfy the waiter. Late-message routing uses single-owner claiming: after the workflow post-mortem router claims a completed-stage ask and assigns its completion promise, later listeners preserve that claim, making bundled extension registration order irrelevant.
 
 This reopens only the conversation. The workflow DAG and terminal stage snapshot remain completed and are never resumed or re-dispatched. If the target run or stage was deleted, lacks a valid retained conversation, is non-resumable, or fails to reopen, the caller receives a bounded actionable `intercom.ask` tool error instead of waiting indefinitely.
-
 
 Workflow stages and their subagent transcripts are excluded from ordinary `/resume`, `atomic -r`, `--continue`, and global history. Use workflow inspection and resume commands for stages; terminal subagents remain transcript artifacts, not resumable children. An explicit `--session` file path can still open a stage transcript. Older unmarked workflow sessions may remain in ordinary history.
 
@@ -473,7 +471,7 @@ Treat blocked runs as continuable by default: resume, answer a pending prompt, s
 
 Lifecycle notices appear once in main chat without interrupting current streaming text. Atomic also queues a model update so later responses can correct stale progress claims. Notices waiting for delivery survive recoverable delivery failures; session replacement does not send them to an unrelated chat.
 
-An awaiting-input workflow remains visible in status and connect views without waking the main model. Connect to the run to answer its question. Notice persistence and recovery history are in [Workflow lifecycle maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-lifecycle.md).
+An awaiting-input workflow remains visible in status and connect views without waking the main model. Connect to the run to answer its question.
 
 Resume of a recoverable block continues the same workflow ID and reuses completed checkpoints. It does not reroute, allocate a replacement instance or replay completed effects. Concurrent admission is refused while another executor or resume owns the instance. A fail-closed topology mismatch preserves the prior resumable snapshot and prompt answers for inspection and a corrected retry.
 
@@ -523,7 +521,6 @@ When an interactive, non-schema workflow stage calls `ask_user_question`, Atomic
 In this chat-answer flow, choosing the ready option completes the stage and releases dependent stages. Choosing the not-ready option keeps the stage open for a genuine stage-chat turn and brokers readiness again after that turn. A chat answer is never treated as an invisible stay decision. On the readiness gate, **Type something.** sends the typed text as the next stage-chat message (empty or whitespace-only text cannot be submitted). **Chat about this** is a plain option — it does not open an inline editor — and stays by sending `The user would like to chat more about this`.
 
 The readiness prompt can be answered in the attached stage UI or with `workflow({ action: "answer", ... })`. Ordinary structured-option answers retain their existing readiness behavior. A schema-backed stage that has successfully finalized through `structured_output` is terminal and does not reopen this readiness gate.
-
 
 ## Durable Workflows and Cross-Session Resume
 
@@ -579,7 +576,7 @@ If embedded provisioning fails without leaving retained-process cleanup pending,
 
 **Multiple concurrent Atomic sessions.** A workflow running in another process is not a resume target. Fresh-heartbeat rows are hidden from resume pickers and refused by direct resume. After a crash, the heartbeat becomes stale in about two minutes and inspection reports `crashed`. Concurrent attempts to resume the same run admit one executor; a stale request reports that the run changed.
 
-Independent root workflows persist independently. Nested workflows share their root's ordering. Database packaging, identity checks, liveness writes, and recovery mechanics are in [Workflow durability maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-durability.md).
+Independent root workflows persist independently. Nested workflows share their root's ordering.
 
 ### Inspecting and recovering the workflow database
 
@@ -751,7 +748,7 @@ After upgrading or applying a runtime fix, start a new Atomic process; `/workflo
 
 If saved state cannot prove safe replay, reconcile the original run and external effects before choosing recovery. Do not restart the original workflow from the beginning to bypass the error. A separately authorized recovery-only workflow may perform verified remaining operations, but must not repeat completed side effects or fabricate checkpoints.
 
-Local build/test commands and the historical release incident are retained in [Workflow recovery maintenance notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-c/workflow-recovery.md). That history does not authorize any live release action.
+That history does not authorize any live release action.
 
 ### Cancellation, failure, and retry semantics
 

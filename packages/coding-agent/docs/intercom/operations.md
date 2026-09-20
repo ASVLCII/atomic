@@ -57,13 +57,11 @@ Recoverable disconnects trigger retries; unrelated errors stop them. Cancellatio
 
 Intercom refuses new delivery when it cannot safely track duplicates, including capacity or storage failures. Do not delete its runtime files to force a resend when an outcome is unknown. Transport remains local to this machine.
 
-Broker framing, duplicate suppression, storage limits, and recovery ownership are documented in [maintainer broker notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/intercom-broker.md).
-
 Custom hosts may declare an optional `recipientPurpose` on session registration and workflow-stage roster entries. Only `"agent"` and `"control"` are accepted; omission preserves legacy agent behavior. Invalid strings, `null`, and non-string values are rejected, not silently treated as controls. Session purpose is immutable after registration; presence updates cannot change it. Workflow roster-update completion waits for a broker round trip on the announcing connection so subsequent discovery does not race an unprocessed update.
 
 Configuration and diagnostics live in `~/.atomic/agent/intercom/`, or under `ATOMIC_CODING_AGENT_DIR`. The legacy `PI_CODING_AGENT_DIR` applies when the Atomic variable is unset. Edit `config.json` for [Intercom settings](/intercom/reference#configuration).
 
-When startup fails, read the `broker.log` path printed in the error. The log is replaced on each broker spawn and ordinary broker diagnostics are capped at 8 KiB, so capture relevant output before retrying. Logging implementation and limits are in [bounded stderr notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/intercom-broker.md#bounded-stderr).
+When startup fails, read the `broker.log` path printed in the error. The log is replaced on each broker spawn and ordinary broker diagnostics are capped at 8 KiB, so capture relevant output before retrying.
 
 ## Workflow and Subagent Notifications
 
@@ -106,7 +104,7 @@ For live peer coordination, call `intercom({ action: "status" })` in the parent 
 
 Parallel communication does not cancel the batch. A blocking ask waits only in its requesting child; the correlated reply continues that same execution. Sends and progress updates remain nonblocking. Claimed single-child parent asks retain their terminal fresh-start handoff.
 
-Queued messages from a child arrive before its completion notice. Delivery retries do not rerun work or change its outcome. See [Subagents](/subagents) for coordination and [maintainer routing notes](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/intercom-broker.md#supervisor-and-completion-routing) for completion internals.
+Queued messages from a child arrive before its completion notice. Delivery retries do not rerun work or change its outcome.
 
 ## Keyboard Shortcuts
 
@@ -116,7 +114,6 @@ Queued messages from a child arrive before its completion notice. Delivery retri
 | ↑/↓ | Navigate session list |
 | Enter | Select session / Send message |
 | Escape | Cancel / Close overlay |
-
 
 ## Limitations
 

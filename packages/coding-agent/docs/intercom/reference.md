@@ -98,7 +98,7 @@ Every session belongs to a non-empty set of intercom **groups**. Sessions with n
 
 A session's home group is resolved with this precedence: explicit stage/task/subagent group > runtime-owned workflow invocation group or inherited launching-session group > env `ATOMIC_INTERCOM_GROUP` (legacy `PI_INTERCOM_GROUP`) > Intercom `config.json` `"group"` > `"default"`. Workflow stage named groups and `group: true` are namespaced under `workflow:<rootRunId>/...`, preventing cross-run collisions while preserving sibling isolation. `group: "default"` remains the explicit non-owned escape. The invocation group has asymmetric exact-target control over its owned subgroups; ownership does not grant reverse or lateral access.
 
-Supervisor coordination is granted by the launching parent and can cross groups only for that authorized relationship. Ordinary sends remain membership-isolated. Reconnects preserve authorized relationships; joining a group does not create one. See [supervisor routing mechanics](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/intercom-broker.md#supervisor-and-completion-routing).
+Supervisor coordination is granted by the launching parent and can cross groups only for that authorized relationship. Ordinary sends remain membership-isolated. Reconnects preserve authorized relationships; joining a group does not create one.
 
 ### send vs ask vs reply
 

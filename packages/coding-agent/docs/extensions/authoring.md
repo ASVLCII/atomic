@@ -34,7 +34,7 @@ Editable extensions and workflows support TypeScript without compilation. `/relo
 
 Imports from Atomic's supplied core packages keep the running host's classes and shared state across `/reload`, including on Windows. The supported `@earendil-works/pi-coding-agent` compatibility import shares those exports with `@bastani/atomic`, so class comparisons and `instanceof` checks work across both names after reload. Edits to your extension and its imported local helpers still take effect; restart Atomic after updating Atomic itself.
 
-In Bun single-file builds, installed builtin bundles retain module-scoped state across `/reload`. Restart Atomic to reload shipped code. See [loader mechanics](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-a/extension-runtime.md#lazy-initialization-and-reload) for the builtin optimization.
+In Bun single-file builds, installed builtin bundles retain module-scoped state across `/reload`. Restart Atomic to reload shipped code.
 
 If the factory returns a `Promise`, Atomic awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `pi.registerProvider()` are flushed.
 
@@ -205,7 +205,6 @@ export default function (pi: ExtensionAPI) {
 **Reload behavior.** `/reload` builds a new `pi.events` facade that still forwards to the same bus. Calling `sessionScopedExtensionState` again with the same namespaced key returns the existing object and does not invoke `create`. The reload transaction does not clone this object or roll back mutations that extension factory code makes to it. Keep factory setup idempotent, and mutate durable state only after the new generation starts when failed reloads must not affect it. Entries live exactly as long as that bus. They are not written to the session file; use `pi.appendEntry()` when the data must survive process restart.
 
 **Shutdown.** `session_shutdown` still runs for resources you opened. If the object holds sockets, watchers, or timers, close them there. The next `session_start` or first use can recreate them inside the same session-scoped object.
-
 
 ## Custom Tools
 

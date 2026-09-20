@@ -309,7 +309,6 @@ Response:
 
 `models` preserves the refreshed catalog order. `scopedModels` is optional. If authentication remains through an environment variable, `authStatus.source` is `"environment"` and `authStatus.label` names the variable.
 
-
 ### Thinking
 
 #### set_thinking_level
@@ -339,7 +338,7 @@ Current engines include the effective level after capability clamping and, when 
 {"type": "response", "command": "set_thinking_level", "success": true, "data": {"level": "high", "provider": "anthropic", "modelId": "claude-sonnet-4-20250514"}}
 ```
 
-Use the acknowledgement's provider/model when recording a persisted thinking override, not whichever model is active when your callback runs. Keep newer `thinking_level_changed` state if an older acknowledgement arrives later. `RpcClient.setThinkingLevel(level)` remains a one-argument `Promise<void>` method. Isolated-host implementation details are in [RPC transport internals](https://github.com/bastani-inc/atomic/blob/main/docs/maintainer/readability-b/rpc-transport.md).
+Use the acknowledgement's provider/model when recording a persisted thinking override, not whichever model is active when your callback runs. Keep newer `thinking_level_changed` state if an older acknowledgement arrives later. `RpcClient.setThinkingLevel(level)` remains a one-argument `Promise<void>` method.
 
 #### cycle_thinking_level
 
@@ -1157,7 +1156,6 @@ On final failure (max retries exceeded):
   "finalError": "529 overloaded_error: Overloaded"
 }
 ```
-
 
 ### summarization_retry_scheduled / summarization_retry_attempt_start / summarization_retry_finished
 
