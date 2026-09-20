@@ -36,6 +36,7 @@
 - Install/update telemetry pings now go to the Atomic version-adoption endpoint instead of pi.dev. First-interactive-launch triggers, opt-outs, and the independent update check are unchanged ([#2498](https://github.com/bastani-inc/atomic/issues/2498)).
 - Automatic subagent and workflow-stage model selection no longer includes system prompts as agent metadata, reducing routing input. Execution prompts are unchanged; self-contained subagents still use their system prompt as the task when no task is supplied.
 - SDK session creation now includes shipped Atomic builtin extensions and resources, shares CLI defaults, and completes extension startup before returning. Supply startup host bindings through the extensionBindings option; rebinding no longer repeats startup. Failed startup rolls back the partial session, and missing shipped packages report `code: "BuiltinUnavailable"` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
+- Main chat, workflow stages, and subagents now default to long prompt-cache retention where supported. Unset retention uses ordinary caching for OpenAI models without known extended-retention support, such as GPT-4o, and five-minute caching for older Bedrock Claude models, such as Claude 3.7. Explicit retention choices remain unchanged; use `PI_CACHE_RETENTION=short` to opt back into shorter caching. Anthropic one-hour cache writes cost more than five-minute writes, so savings depend on reuse.
 
 ### Fixed
 
@@ -95,6 +96,7 @@
 - Jev structured decisions no longer reject responses solely because their probabilities do not sum to one.
 - Jev SDK decisions retain their original model, provider and credentials across tournament rounds when callers mutate their model selection during inference.
 - `/logout` now autocompletes providers with stored API-key or subscription credentials and opens a filtered selector when a provider is supplied, instead of sending the command as a prompt.
+- Built-in Cloudflare AI Gateway, GitHub Copilot, and OpenCode routes now respect OpenAI model limits when choosing default cache retention, avoiding unsupported extended retention on models such as GPT-4o. Explicit retention overrides remain unchanged.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

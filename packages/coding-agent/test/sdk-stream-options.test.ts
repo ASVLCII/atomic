@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,13 +10,13 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 } from "@bastani/pi-ai";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage } from "../src/core/auth-storage.ts";
-import { createAgentSession } from "../src/core/sdk.ts";
-import { SessionManager } from "../src/core/session-manager.ts";
-import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
+import { afterEach, beforeEach, describe, it, vi } from "vitest";
+import { AuthStorage } from "../src/core/auth-storage.js";
+import { createAgentSession } from "../src/core/sdk.js";
+import { SessionManager } from "../src/core/session-manager.js";
+import { type Settings, SettingsManager } from "../src/core/settings-manager.js";
 
-import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
+import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.js";
 
 describe("createAgentSession stream options", () => {
 	let tempDir: string;
@@ -31,6 +32,7 @@ describe("createAgentSession stream options", () => {
 	});
 	afterEach(() => {
 		vi.restoreAllMocks();
+		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 	});
@@ -136,16 +138,68 @@ describe("createAgentSession stream options", () => {
 		}
 	}
 
+	it("defaults session prompt-cache retention to long", async () => {
+		vi.stubEnv("PI_CACHE_RETENTION", undefined);
+		const options = await captureStreamOptions("anthropic-messages", {});
+		assert.equal(options?.cacheRetention, "long");
+	});
+
+	it.each(["short", "none", "long"] as const)("honors PI_CACHE_RETENTION=%s", async (retention) => {
+		vi.stubEnv("PI_CACHE_RETENTION", retention);
+		const options = await captureStreamOptions("anthropic-messages", {});
+		assert.equal(options?.cacheRetention, retention);
+	});
+
+	it.each(["short", "none", "long"] as const)("preserves explicit %s over environment", async (retention) => {
+		vi.stubEnv("PI_CACHE_RETENTION", "short");
+		const requestOptions = { cacheRetention: retention, env: { PI_CACHE_RETENTION: "none" } };
+		const options = await captureStreamOptions("anthropic-messages", {}, requestOptions);
+		assert.equal(options?.cacheRetention, retention);
+		assert.deepEqual(requestOptions, { cacheRetention: retention, env: { PI_CACHE_RETENTION: "none" } });
+	});
+
+	it("resolves request env over auth env over process env", async () => {
+		vi.stubEnv("PI_CACHE_RETENTION", "long");
+		const auth: AuthResult = { auth: { apiKey: "test-key" }, env: { PI_CACHE_RETENTION: "none" } };
+		const authOptions = await captureStreamOptions("anthropic-messages", {}, {}, undefined, auth);
+		assert.equal(authOptions?.cacheRetention, "none");
+		const options = await captureStreamOptions(
+			"anthropic-messages",
+			{},
+			{ env: { PI_CACHE_RETENTION: "short" } },
+			undefined,
+			auth,
+		);
+		assert.equal(options?.cacheRetention, "short");
+		assert.deepEqual(auth.env, { PI_CACHE_RETENTION: "none" });
+	});
+
+	it.each([
+		["", "long"],
+		["unexpected", "short"],
+		[" LONG ", "short"],
+	])("preserves provider env fallback for %j", async (value, retention) => {
+		vi.stubEnv("PI_CACHE_RETENTION", value);
+		const options = await captureStreamOptions("anthropic-messages", {});
+		assert.equal(options?.cacheRetention, retention);
+	});
+
+	it("empty scoped env falls back to the process choice", async () => {
+		vi.stubEnv("PI_CACHE_RETENTION", "short");
+		const options = await captureStreamOptions("anthropic-messages", {}, { env: { PI_CACHE_RETENTION: "" } });
+		assert.equal(options?.cacheRetention, "short");
+	});
+
 	it("forwards httpIdleTimeoutMs as timeoutMs for OpenAI Codex", async () => {
 		const options = await captureStreamOptions("openai-codex-responses", { httpIdleTimeoutMs: 1234 });
 
-		expect(options?.timeoutMs).toBe(1234);
+		assert.equal(options?.timeoutMs, 1234);
 	});
 
 	it("defaults timeoutMs from httpIdleTimeoutMs for all providers", async () => {
 		const options = await captureStreamOptions("openai-completions", { httpIdleTimeoutMs: 1234 });
 
-		expect(options?.timeoutMs).toBe(1234);
+		assert.equal(options?.timeoutMs, 1234);
 	});
 
 	it("lets request timeoutMs override httpIdleTimeoutMs for OpenAI Codex", async () => {
@@ -155,13 +209,13 @@ describe("createAgentSession stream options", () => {
 			{ timeoutMs: 0 },
 		);
 
-		expect(options?.timeoutMs).toBe(0);
+		assert.equal(options?.timeoutMs, 0);
 	});
 
 	it("forwards websocketConnectTimeoutMs from settings", async () => {
 		const options = await captureStreamOptions("openai-codex-responses", { websocketConnectTimeoutMs: 1234 });
 
-		expect(options?.websocketConnectTimeoutMs).toBe(1234);
+		assert.equal(options?.websocketConnectTimeoutMs, 1234);
 	});
 
 	it("lets request websocketConnectTimeoutMs override settings", async () => {
@@ -171,13 +225,13 @@ describe("createAgentSession stream options", () => {
 			{ websocketConnectTimeoutMs: 0 },
 		);
 
-		expect(options?.websocketConnectTimeoutMs).toBe(0);
+		assert.equal(options?.websocketConnectTimeoutMs, 0);
 	});
 
 	it("forwards a duration-string stream deadline from settings", async () => {
 		const options = await captureStreamOptions("openai-completions", { streamDeadlineMs: "30s" });
 
-		expect(options?.streamDeadlineMs).toBe(30_000);
+		assert.equal(options?.streamDeadlineMs, 30_000);
 	});
 
 	it("lets request streamDeadlineMs zero disable the configured deadline", async () => {
@@ -187,12 +241,13 @@ describe("createAgentSession stream options", () => {
 			{ streamDeadlineMs: 0 },
 		);
 
-		expect(options?.streamDeadlineMs).toBe(0);
+		assert.equal(options?.streamDeadlineMs, 0);
 	});
 
 	it("rejects an unsupported stream deadline duration", () => {
-		expect(() => SettingsManager.inMemory({ streamDeadlineMs: "30d" }).getStreamDeadlineMs()).toThrow(
-			"Invalid streamDeadlineMs setting",
+		assert.throws(
+			() => SettingsManager.inMemory({ streamDeadlineMs: "30d" }).getStreamDeadlineMs(),
+			/Invalid streamDeadlineMs setting/,
 		);
 	});
 
@@ -201,8 +256,8 @@ describe("createAgentSession stream options", () => {
 			retry: { provider: { maxRetries: 2, maxRetryDelayMs: 3000 } },
 		});
 
-		expect(options?.maxRetries).toBe(2);
-		expect(options?.maxRetryDelayMs).toBe(3000);
+		assert.equal(options?.maxRetries, 2);
+		assert.equal(options?.maxRetryDelayMs, 3000);
 	});
 
 	it("forwards per-request sampling params to extension providers", async () => {
@@ -214,7 +269,7 @@ describe("createAgentSession stream options", () => {
 			},
 		);
 
-		expect(options?.samplingParams).toEqual({ top_p: 0.35, top_k: 40, vendor_sampler: "fast" });
+		assert.deepEqual(options?.samplingParams, { top_p: 0.35, top_k: 40, vendor_sampler: "fast" });
 	});
 
 	it("runs before_provider_headers on assembled headers without forwarding the transform", async () => {
@@ -233,13 +288,12 @@ describe("createAgentSession stream options", () => {
 			}`,
 		);
 
-		expect(options?.headers).toMatchObject({
-			"x-provider": "provider",
-			"x-model": "model",
-			"x-explicit": "explicit",
-			"x-hook": "provider:model:explicit",
-		});
-		expect(options).not.toHaveProperty("transformHeaders");
+		assert.equal(options?.headers?.["x-provider"], "provider");
+		assert.equal(options?.headers?.["x-model"], "model");
+		assert.equal(options?.headers?.["x-explicit"], "explicit");
+		assert.equal(options?.headers?.["x-hook"], "provider:model:explicit");
+		assert.ok(options);
+		assert.equal("transformHeaders" in options, false);
 	});
 
 	it("preserves null credential headers through extension-provider dispatch", async () => {
@@ -250,12 +304,10 @@ describe("createAgentSession stream options", () => {
 			},
 		});
 
-		expect(options?.apiKey).toBe("credential-key");
-		expect(options?.headers).toMatchObject({
-			Authorization: null,
-			"x-api-key": null,
-			"x-credential": "present",
-		});
+		assert.equal(options?.apiKey, "credential-key");
+		assert.equal(options?.headers?.Authorization, null);
+		assert.equal(options?.headers?.["x-api-key"], null);
+		assert.equal(options?.headers?.["x-credential"], "present");
 	});
 
 	it("uses a credential-derived endpoint and null headers for workflow and subagent SDK sessions", async () => {
@@ -276,9 +328,10 @@ describe("createAgentSession stream options", () => {
 			captured,
 		);
 
-		expect(captured.model?.baseUrl).toBe("https://credential.example/v1");
-		expect(options?.headers).toMatchObject({ Authorization: null, "x-credential": "present" });
-		expect(options?.env).toEqual({ HTTPS_PROXY: "https://credential-proxy.example" });
+		assert.equal(captured.model?.baseUrl, "https://credential.example/v1");
+		assert.equal(options?.headers?.Authorization, null);
+		assert.equal(options?.headers?.["x-credential"], "present");
+		assert.deepEqual(options?.env, { HTTPS_PROXY: "https://credential-proxy.example" });
 	});
 
 	it("uses a credential-derived baseUrl for native Codex fast-route dispatch", async () => {
@@ -325,7 +378,8 @@ describe("createAgentSession stream options", () => {
 		try {
 			const stream = await session.agent.streamFunction(model, { messages: [] });
 			await stream.result();
-			expect(dispatchedUrl).toMatch(/^https:\/\/credential\.example\/v1\//u);
+			assert.ok(typeof dispatchedUrl === "string");
+			assert.match(dispatchedUrl, /^https:\/\/credential\.example\/v1\//u);
 		} finally {
 			session.dispose();
 		}
@@ -354,10 +408,11 @@ describe("createAgentSession stream options", () => {
 		});
 
 		try {
-			await expect(session.agent.streamFunction(model, { messages: [] })).rejects.toThrow(
-				`No API key found for "${model.provider}"`,
-			);
-			expect(streamSimple).not.toHaveBeenCalled();
+			await assert.rejects(session.agent.streamFunction(model, { messages: [] }), (error: Error) => {
+				assert.ok(error.message.includes(`No API key found for "${model.provider}"`));
+				return true;
+			});
+			assert.equal(streamSimple.mock.calls.length, 0);
 		} finally {
 			session.dispose();
 			modelRuntime.unregisterProvider("openai");
@@ -380,9 +435,10 @@ describe("createAgentSession stream options", () => {
 		});
 
 		try {
-			await expect(session.agent.streamFunction(model, { messages: [] })).rejects.toThrow(
-				`No API key found for "${model.provider}"`,
-			);
+			await assert.rejects(session.agent.streamFunction(model, { messages: [] }), (error: Error) => {
+				assert.ok(error.message.includes(`No API key found for "${model.provider}"`));
+				return true;
+			});
 		} finally {
 			session.dispose();
 		}

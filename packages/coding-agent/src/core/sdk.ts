@@ -1,5 +1,6 @@
 import { basename, join, relative, sep } from "node:path";
 import { clampThinkingLevel, type Message, type ProviderHeaders, streamSimple } from "@bastani/pi-ai/compat";
+import { getProviderEnvValue } from "@bastani/pi-ai/utils/provider-env";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "../config.js";
 import { resolvePath } from "../utils/paths.ts";
@@ -9,6 +10,7 @@ import { restoreAnthropicReplayThinkingBlocks } from "./anthropic-thinking-guard
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
 import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
+import { getDefaultCacheRetention } from "./cache-retention.ts";
 import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
@@ -416,10 +418,23 @@ async function constructAgentSession(
 			if (fastRoute?.serviceTier !== undefined && !usesExtensionStream && !authResult) {
 				throw new Error(`No API key found for "${model.provider}"`);
 			}
+			const env = auth.env || streamOptions?.env ? { ...auth.env, ...streamOptions?.env } : undefined;
+			const cacheRetentionEnv = getProviderEnvValue("PI_CACHE_RETENTION", env);
+			// Shared by main chat, workflow stages and subagents; provider capability gates still apply.
+			const cacheRetention =
+				streamOptions?.cacheRetention ??
+				(cacheRetentionEnv === "none"
+					? "none"
+					: !cacheRetentionEnv
+						? getDefaultCacheRetention(requestModel)
+						: cacheRetentionEnv === "long"
+							? "long"
+							: "short");
 			const fastRouteStreamOptions = withFastRouteStreamOptions(fastRoute, {
 				...streamOptions,
 				apiKey: auth.apiKey,
-				env: auth.env || streamOptions?.env ? { ...auth.env, ...streamOptions?.env } : undefined,
+				env,
+				cacheRetention,
 				timeoutMs,
 				websocketConnectTimeoutMs,
 				streamDeadlineMs,
