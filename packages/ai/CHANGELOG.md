@@ -17,6 +17,8 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 - Derive Gemini thinking levels from model metadata, preserve renamed Anthropic/Vercel unsigned thinking replay and DeepSeek V4 effort, retry Cloudflare 520 and Azure peak-load errors, and scope bodyless overflow detection to Cerebras.
 
+- Documented Fireworks deferred tool loading against chronological system-message `toolsAdded`/`toolsRemoved` instead of the removed tool-result `addedToolNames` field.
+
 - Request-auth preparation now times out after 15 seconds when OAuth refresh, credential-store reads, or auth derivation ignore cancellation, and late refresh results cannot overwrite stored credentials. The timeout diagnostic is source-neutral and does not instruct you to log in ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 - Bedrock requests now honor explicit `maxRetries`, including zero for a single transport attempt, instead of silently using the AWS SDK retry default. Omitting the option preserves SDK/environment configuration ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).
 - Kept Kimi Coding models available after the upstream catalog split into regional coding plans, preserving Atomic's existing kimi.com endpoint.

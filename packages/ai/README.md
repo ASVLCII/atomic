@@ -578,7 +578,7 @@ context.messages.push({
 
 ### Fireworks deferred tools
 
-Fireworks models using the Anthropic Messages API support native deferred tool loading. Keep your discovery tool in `context.tools`, add discovered tool definitions there, and set `addedToolNames` on the discovery tool's result to the names you added. The adapter sends deferred schemas and `tool_reference` blocks while preserving ordinary result text and unsigned thinking during replay.
+Fireworks models using the Anthropic Messages API support native deferred tool loading. Keep your discovery tool in `context.tools`. After the discovery tool result, append a chronological system message with `toolsAdded` containing the newly discovered tool definitions (`toolsRemoved` when tools drop out). The adapter sends deferred schemas and `tool_reference` blocks while preserving ordinary result text and unsigned thinking during replay.
 
 Name the discovery tool `ToolSearch` or `tool_search` for Fireworks prompt-prefix deferral. Other discovery names serialize correctly but do not get that prefix optimization. Set `model.compat.supportsToolReferences` to `false` to send ordinary tool schemas instead. This feature does not apply to Fireworks Chat Completions models.
 

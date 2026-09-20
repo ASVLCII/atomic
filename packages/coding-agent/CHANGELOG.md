@@ -55,6 +55,9 @@
 - Anthropic thinking-drop notices are short, omit path details, and stay silent when the cumulative drop count is unchanged.
 - Isolated-engine prompts wait for the remote prompt RPC to settle, and stale kitty image conversions no longer replace a later tool result.
 
+- Skill invocation summaries expand and collapse on left-click, matching branch summaries and compaction boundaries.
+- Fireworks deferred-tool docs now describe chronological system-message `toolsAdded`/`toolsRemoved` instead of the removed `ToolResultMessage.addedToolNames` field.
+
 - Reload now releases unpublished preparation acquisitions, drains failed candidate callbacks before shutdown, and retains self-reload command continuations through final disposal, including cleanup failures ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Reload now retains retiring-generation shutdown and invalidation when postcommit runtime reconstruction fails, preserving both setup and cleanup causes and keeping the candidate owned for disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Custom messages received during tool execution now enter conversation history after the tool results and before the next assistant response, including when extension callbacks finish asynchronously ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
