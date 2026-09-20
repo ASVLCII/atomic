@@ -17,6 +17,14 @@ const OPENAI_EXTENDED_RETENTION_MODELS = [
 	"gpt-4.1",
 ];
 
+function isOpenAIEndpoint(baseUrl: string): boolean {
+	try {
+		return new URL(baseUrl).hostname === "api.openai.com";
+	} catch {
+		return false;
+	}
+}
+
 function supportsOpenAILongCache(model: Model<"openai-responses" | "openai-completions">): boolean {
 	const compat = model.compat;
 	if (compat?.supportsLongCacheRetention !== undefined) return compat.supportsLongCacheRetention;
@@ -35,7 +43,7 @@ function supportsOpenAILongCache(model: Model<"openai-responses" | "openai-compl
 	if (
 		model.provider !== "openai" &&
 		!gatewayOpenAI &&
-		!model.baseUrl.includes("api.openai.com") &&
+		!isOpenAIEndpoint(model.baseUrl) &&
 		!upstreamId.startsWith("openai/")
 	)
 		return true;
