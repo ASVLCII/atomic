@@ -10,6 +10,7 @@ import { restoreAnthropicReplayThinkingBlocks } from "./anthropic-thinking-guard
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
 import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
+import { getDefaultCacheRetention } from "./cache-retention.ts";
 import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
@@ -424,9 +425,11 @@ async function constructAgentSession(
 				streamOptions?.cacheRetention ??
 				(cacheRetentionEnv === "none"
 					? "none"
-					: !cacheRetentionEnv || cacheRetentionEnv === "long"
-						? "long"
-						: "short");
+					: !cacheRetentionEnv
+						? getDefaultCacheRetention(requestModel)
+						: cacheRetentionEnv === "long"
+							? "long"
+							: "short");
 			const fastRouteStreamOptions = withFastRouteStreamOptions(fastRoute, {
 				...streamOptions,
 				apiKey: auth.apiKey,
