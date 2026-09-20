@@ -14,7 +14,7 @@
 - Model-tool workflow launches now use `workflow route` with actual request/message/document text, then `workflow run` with the registered execution ID and inputs. Reservations retain one identity through admission and supported lifecycle operations; invalid inputs can be corrected without rerouting. Old run-as-router calls and duration values are rejected. Estimates use canonical quarter-hour labels through `1d`, plus `>1d`; budgets and approval gates remain unchanged ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
 - Renamed the TypeSafe Jev environment variable from `TYPESAFE_AI_API_KEY` to `TYPESAFE_API_KEY`. Update shell and deployment configuration; the old name is no longer recognized. Saved `/login typesafe-ai` credentials are unchanged.
 - Renamed the direct Jev decision model from `typesafe-ai/jev` to `typesafe-ai/jev-latest`. Update `routerModel` settings and explicit SDK selections; saved TypeSafe credentials are unchanged.
-- Workflow duration estimates no longer accept `unknown`; routers give their best estimate using the existing quarter-hour buckets or `>1d`.
+- Workflow duration estimates no longer accept the string value "unknown"; routers give their best estimate using the existing quarter-hour buckets or `>1d`.
 
 ### Added
 

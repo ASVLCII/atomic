@@ -3,7 +3,9 @@ import { createRequire } from "node:module";
 import { describe, it } from "vitest";
 
 // RFC #2884: the generated S1 supervisor, S2 command supervision and opaque capabilities are shipped exports.
+// `__napiBindingTarget` is a napi-rs 3.10.x loader diagnostic (which binding artifact loaded), not a domain export.
 const EXPECTED_NATIVE_EXPORTS = [
+	"__napiBindingTarget",
 	"AdmissionRefusalKind",
 	"AgentStatus",
 	"AgentTaskKind",
