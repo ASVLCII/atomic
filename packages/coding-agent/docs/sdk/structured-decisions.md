@@ -29,9 +29,11 @@ OpenRouter Jev reuses the registry's existing OpenRouter sign-in or saved API ke
 
 ### Router repair attempts
 
-`inferRouterDecision()` allows an initial attempt plus **up to three repair retries** when an answer is malformed or fails the decision schema. This applies to ordinary models and Jev, with all attempts sharing the same deadline (30 seconds by default), state, candidates, and selected provider. A valid answer stops retries immediately; a valid `none` is not retried. Repairs may increase latency and provider usage, but never start a workflow or child before final validation.
+By default, `inferRouterDecision()` gives each provider an initial attempt plus **up to three corrective retries** when an answer is malformed or fails the decision schema. This applies independently to Jev and the current-chat fallback: at most four attempts each, sharing one deadline of 30 seconds by default. A valid answer stops retries immediately; a valid `none` is not retried. Repairs may increase latency and provider usage, but never start a workflow or child before final validation.
 
-Input/configuration errors, authentication or provider failures, cancellation, timeout, and stale-catalog rejection are not repaired. There is no provider fallback or retry of an admitted action. Generic `inferStructuredOutput()` remains one-shot; it does not gain router repairs.
+Input/configuration errors, cancellation, timeout, and stale-catalog rejection are not repaired. Generic `inferStructuredOutput()` remains one-shot; it does not gain router repairs or provider fallback.
+
+When `routerModel` is empty, automatically selected Jev switches to the current chat model after exhausting its output repairs or encountering an HTTP or connection error. HTTP errors such as `max_tokens_exceeded` switch directly rather than repeating an unchanged request. A warning reports the safe failure reason and fallback model. The fallback gets its own initial attempt plus three corrective retries, using the original state, schema and constraints within the remaining deadline. The result includes `fallback: { from, to, reason }` and identifies the chat model in `model`. This can send routing context to your chat provider and incur its normal charges. An explicit `routerModel` disables provider fallback. Missing credentials, response-size violations, cancellation and timeout do not trigger fallback.
 
 ## Prepare a decision
 
@@ -109,18 +111,18 @@ Overflow requires multiple HTTP requests and can increase latency and billed inp
 
 Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Atomic estimates context when packing questions, but the estimate does not guarantee a fit; actual provider limits remain authoritative.
 
-Atomic never trims state, rejects solely on the estimate, or retries a rejected request. It sends indivisible oversized context once; HTTP 422 stops the operation. If context is rejected, explicitly supply concise context or choose an ordinary inference model with enough capacity.
+Atomic never trims state, rejects solely on the estimate, or retries a rejected Jev request. It sends indivisible oversized context once. A `max_tokens_exceeded` error means the provider rejected the context size. Default routing can then use the current chat model as described above; explicitly pinned Jev calls fail. Supply concise context or select a chat model with enough capacity when needed.
 
 Jev response bodies are limited to 1 MiB per request. Atomic validates answer types, choices, probability distributions and usage without imposing a confidence threshold.
 
 ## Cancellation and failures
 
-The default deadline is 30 seconds for the entire decision, including all router repair attempts, tournament rounds, authentication, transport and response reading. `timeoutMs` must be a positive integer no greater than 2147483647; zero does not disable it. Ordinary output is bounded by `maxTokens`, default 4096. Pass an `AbortSignal` to cancel. Cancellation or timeout rejects the whole call immediately; a failed batch yields no partial decision, and late responses cannot invoke the Jev mapper.
+The default deadline is 30 seconds for the entire decision, including all router repair attempts, any chat fallback, tournament rounds, authentication, transport and response reading. `timeoutMs` must be a positive integer no greater than 2147483647; zero does not disable it. Ordinary output is bounded by `maxTokens`, default 4096. Pass an `AbortSignal` to cancel. Cancellation or timeout rejects the whole call immediately; a failed batch yields no partial decision, and late responses cannot invoke the Jev mapper.
 
-No result is returned for missing state, invalid configuration, unrepaired malformed output or provider failure. Keep action admission after the awaited result and check cancellation again at that boundary. Fix configuration or context before making a new explicit attempt. Only router calls have bounded invalid-output repairs; neither API runs recursive agents, provider probes or hidden fallback inferences.
+No result is returned for missing state, invalid configuration, unrepaired malformed output or an unrecovered provider failure. Keep action admission after the awaited result and check cancellation again at that boundary. Neither API runs recursive agents or provider probes.
 
-Provider dispatch and response-reading failures return generic diagnostics rather than raw upstream errors, which may contain private input or credentials. Check provider configuration and connectivity before an explicit retry. Cancellation and timeout remain distinct errors.
+Jev errors report the SDK error class, HTTP status, recognized machine error codes such as `max_tokens_exceeded`, and a validated TypeSafe request ID when available. Raw error bodies, arbitrary messages and credentials are not exposed. SDK transport retries and body logging are disabled, including when `TYPESAFE_LOG_LEVEL` is set. Cancellation and timeout remain distinct failures.
 
-For direct Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_API_KEY`; for OpenRouter Jev, check `/login openrouter` or `OPENROUTER_API_KEY`. HTTP 422 means check the state/question contract; 429 and 529 mean wait before an explicit retry. Error messages omit upstream response bodies because they may echo private input.
+For direct Jev, HTTP 401 means check `/login typesafe-ai` or `TYPESAFE_API_KEY`; for OpenRouter Jev, check `/login openrouter` or `OPENROUTER_API_KEY`. HTTP 400 or 422 means check the state/question contract or reported context limit; 403 means access denied, 404 means check the endpoint/model, and 429 or 529 means wait before an explicit retry.
 
 Malformed Jev response errors include a static diagnostic code, without response values or routing context. For example, `probability_mass` means the returned probabilities failed the sum-to-one tolerance, `probability_keys` means the options did not match, and `choice_not_highest` means the selected option was not highest-probability. Include the code when reporting a failure. Router calls may repair these errors before returning a final failure; generic calls fail immediately. No invalid decision is accepted.

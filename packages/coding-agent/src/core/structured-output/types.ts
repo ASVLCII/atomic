@@ -59,4 +59,6 @@ export interface StructuredOutputResult<T> {
 	readonly model: string;
 	readonly responseModel: string;
 	readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
+	/** Present when default Jev routing failed and the current chat model supplied the validated result. */
+	readonly fallback?: { readonly from: string; readonly to: string; readonly reason: string };
 }

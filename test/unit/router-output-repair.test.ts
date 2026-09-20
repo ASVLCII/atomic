@@ -119,12 +119,15 @@ for (const kind of ["missing", "probability", "json"] as const)
 		});
 	});
 
-test("Jev HTTP authentication failure does not retry", async () => {
+test("pinned Jev HTTP authentication failure does not retry or fall back", async () => {
 	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
 	const fetch = vi.fn(async () => new Response("private", { status: 401 }));
 	vi.stubGlobal("fetch", fetch);
 	await assert.rejects(
-		inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
+		inferRouterDecision({
+			...decisionRequest(),
+			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
+		}),
 		/HTTP 401/,
 	);
 	assert.equal(fetch.mock.calls.length, 1);

@@ -33,13 +33,13 @@ The shared [`routerModel`](/settings#routermodel) setting chooses the model maki
 
 Neither routing nor child fallback changes the parent chat model or the `structured_output` tool.
 
-Routing has one 30-second deadline for the initial attempt and up to three repair retries for malformed or schema-invalid answers. A valid answer stops repairs.
+Routing has one 30-second deadline. By default, Jev and any current-chat fallback each get an initial attempt plus three corrective retries for malformed or schema-invalid answers. A valid answer stops repairs.
 
 The result is exactly `{ model, effort }`: an eligible provider/model ID and one supported effort, or `null` for a model with no configurable reasoning. A supported `"off"` is distinct from `null`. The catalog reflects configured authentication, not proof of valid credentials, quota, or entitlement.
 
-The child does not start if guides are missing, no candidates are eligible, model/effort pairs remain invalid, availability changes, or authentication/provider errors, timeout, or cancellation occur. Input, provider, cancellation, and stale-catalog failures are not repaired. Routing never falls back to another provider or launches a duplicate child. Correct the reported problem and retry explicitly, or select a concrete model.
+The child does not start if guides are missing, no candidates are eligible, model/effort pairs remain invalid, availability changes, or an unrecovered provider error, timeout, or cancellation occurs. With an empty `routerModel`, a Jev HTTP or connection failure, or exhausted output repairs, triggers a reported switch to the current chat model within the same deadline. The chat model gets its own output-repair allowance. Explicit router selections remain pinned. Invalid inputs, cancellation, timeout and stale-catalog failures do not trigger fallback. No partial decision can launch a child.
 
-For large eligible sets, Jev uses tournament requests within the same deadline. Every eligible pair enters a batch of at most 255; three per batch reach the finalist comparison. Exceeding 255 pairs needs no constraints or settings changes. Tournaments and repairs can increase latency and usage, and grouping can affect the winner. Context is unchanged, so a provider context rejection still stops routing. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits).
+For large eligible sets, Jev uses tournament requests within the same deadline. Every eligible pair enters a batch of at most 255; three per batch reach the finalist comparison. Exceeding 255 pairs needs no constraints or settings changes. Tournaments and repairs can increase latency and usage, and grouping can affect the winner. Context is unchanged; a provider context rejection can trigger the automatic chat fallback above. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits).
 
 After selection, normal execution fallback applies. Each fallback keeps its own effort, not the router's selected effort. Metadata records the original decision separately from the model and effort actually used.
 
