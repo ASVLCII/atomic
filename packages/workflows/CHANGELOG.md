@@ -60,6 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Retain registered model-tool instance ownership across reload and durable recovery, authorize normalized/default/bulk lifecycle targets before inspection or mutation, and enforce explicit inline preferences even against contrary routing judgments ([#3106](https://github.com/bastani-inc/atomic/issues/3106)).
 - Workflow `route` results now display their structured output in a rounded `WORKFLOW ROUTE` box, including inline decisions and routing failures.
 - Removed the redundant `ROUTER DECISION` box from workflow `run` output while preserving run status and identity.
+- Workflow node model labels now update immediately when a session applies a fallback, including successive fallbacks, without refreshing the graph ([#3110](https://github.com/bastani-inc/atomic/issues/3110)).
 
 ## [0.9.20-alpha.1] - 2026-09-14
 
