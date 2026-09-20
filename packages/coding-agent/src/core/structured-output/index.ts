@@ -223,13 +223,13 @@ async function inferDecision<T extends TSchema>(
 	try {
 		if (request.signal?.aborted) abort();
 		const usage = { inputTokens: 0, outputTokens: 0 };
-		for (let attempt = 0; ; attempt++) {
+		for (let attempt = 0; ; ) {
 			assertActive();
 			const current = {
 				...snapshot,
 				model: selected,
 				instructions:
-					attempt === 0 || fallback
+					attempt === 0
 						? snapshot.instructions
 						: `${snapshot.instructions}\n\nThe previous response failed output validation. Return a complete valid decision satisfying the original schema, candidates and constraints. Do not change the task or invent values.`,
 			};
@@ -263,31 +263,35 @@ async function inferDecision<T extends TSchema>(
 				return { ...result, value, usage, ...(fallback ? { fallback } : {}) };
 			} catch (error) {
 				assertActive();
-				if (error instanceof JevRequestError && selected.kind === "jev" && fallbackChat && !fallback) {
-					fallback = {
-						from: selected.fullId,
-						to: `${fallbackChat.provider}/${fallbackChat.id}`,
-						reason: error.message,
-					};
-					if (error.usage) {
-						usage.inputTokens += error.usage.inputTokens;
-						usage.outputTokens += error.usage.outputTokens;
-					}
-					console.warn(
-						`${error.message} Falling back to current chat model ${fallback.to} for this routing decision.`,
-					);
-					selected = { kind: "chat", fullId: fallback.to, model: fallbackChat };
-					continue;
-				}
-				if (!(error instanceof InvalidDecisionOutputError)) throw error;
+				if (!(error instanceof InvalidDecisionOutputError) && !(error instanceof JevRequestError)) throw error;
 				if (error.usage) {
 					usage.inputTokens += error.usage.inputTokens;
 					usage.outputTokens += error.usage.outputTokens;
 				}
-				if (fallback || attempt >= repairs)
-					throw new Error(
-						`${error.message} ${fallback ? "Chat fallback failed validation; no further attempt was made." : repairs ? "Routing output repair exhausted after 4 attempts." : "No repair request was made."}`,
+				if (error instanceof InvalidDecisionOutputError && attempt < repairs) {
+					attempt++;
+					continue;
+				}
+				const failure =
+					error instanceof InvalidDecisionOutputError
+						? new Error(
+								`${error.message} ${repairs ? `${fallback ? "Chat fallback" : "Routing"} output repair exhausted after ${repairs + 1} attempts.` : "No repair request was made."}`,
+							)
+						: error;
+				if (selected.kind === "jev" && fallbackChat && !fallback) {
+					fallback = {
+						from: selected.fullId,
+						to: `${fallbackChat.provider}/${fallbackChat.id}`,
+						reason: failure.message,
+					};
+					console.warn(
+						`${failure.message} Falling back to current chat model ${fallback.to} for this routing decision.`,
 					);
+					selected = { kind: "chat", fullId: fallback.to, model: fallbackChat };
+					attempt = 0;
+					continue;
+				}
+				throw failure;
 			}
 		}
 	} finally {

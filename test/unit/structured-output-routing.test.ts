@@ -351,7 +351,11 @@ for (const [kind, code] of Object.entries({
 		const request = decisionRequest();
 		const decode = vi.fn(request.jev.decode);
 		await assert.rejects(
-			inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
+			inferRouterDecision({
+				...request,
+				settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
+				jev: { ...request.jev, decode },
+			}),
 			(error: Error) => {
 				assert.match(error.message, /[Mm]alformed/);
 				assert.ok(error.message.includes(code));
@@ -372,7 +376,7 @@ test("Jev decoded result must still satisfy the normalized schema", async () => 
 	await assert.rejects(
 		inferRouterDecision({
 			...request,
-			settings: SettingsManager.inMemory(),
+			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
 			jev: { ...request.jev, decode: () => ({ route: "review" as const, limit: -1 }) },
 		}),
 		/Invalid structured output/,

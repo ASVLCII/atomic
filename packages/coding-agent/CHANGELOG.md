@@ -99,7 +99,7 @@
 - `/logout` now autocompletes providers with stored API-key or subscription credentials and opens a filtered selector when a provider is supplied, instead of sending the command as a prompt.
 - Built-in Cloudflare AI Gateway, GitHub Copilot, and OpenCode routes now respect OpenAI model limits when choosing default cache retention, avoiding unsupported extended retention on models such as GPT-4o. Explicit retention overrides remain unchanged.
 - Jev failures now report SDK error classes, recognized context-limit diagnostics and safe request IDs instead of generic provider-availability advice. Requests use the TypeSafe SDK without hidden retries or body logging.
-- Automatic routing falls back once from a Jev HTTP or connection failure to the current chat model, reports the switch, and preserves the original context, validation and deadline. Explicit router selections and general structured-output calls remain pinned.
+- Automatic routing switches from Jev to the current chat model after an HTTP/connection failure or exhausted output repairs. By default each provider gets an initial attempt plus three corrective retries for invalid output, with a reported switch and one shared context, validation contract and deadline. Explicit router selections and general structured-output calls remain pinned.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

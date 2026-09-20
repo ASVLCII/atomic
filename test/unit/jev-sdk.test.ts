@@ -110,7 +110,7 @@ for (const status of [400, 401, 403, 404, 422, 429, 500, 529]) {
 }
 
 for (const invalid of [false, true]) {
-	test(`chat fallback ${invalid ? "schema" : "correlated-field"} validation cannot admit an invalid decision or retry`, async () => {
+	test(`chat fallback ${invalid ? "schema" : "correlated-field"} validation exhausts three corrective retries`, async () => {
 		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-secret");
 		vi.spyOn(console, "warn").mockImplementation(() => {});
 		vi.stubGlobal("fetch", async () => Response.json({}, { status: 400 }));
@@ -127,9 +127,9 @@ for (const invalid of [false, true]) {
 				},
 				() => false,
 			),
-			/Chat fallback failed validation/,
+			/Chat fallback output repair exhausted after 4 attempts/,
 		);
-		assert.equal(dispatch.mock.calls.length, 1);
+		assert.equal(dispatch.mock.calls.length, 4);
 	});
 }
 
@@ -282,3 +282,42 @@ test("execution auto routing recovers from Jev context rejection and still check
 	available.length = 0;
 	assert.throws(result.assertCurrent, /no longer eligible/);
 });
+
+for (const succeeds of [true, false]) {
+	test(`Jev and chat fallback each get three corrective retries by default: final success=${succeeds}`, async () => {
+		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-secret");
+		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const transport = vi.fn(async (_url, init) => {
+			const body = JSON.parse(init.body);
+			assert.equal(
+				body.questions.route.instructions.includes("previous response failed"),
+				transport.mock.calls.length > 1,
+			);
+			return Response.json({ model: "jev-latest", answers: {}, usage: { input_tokens: 20, output_tokens: 10 } });
+		});
+		vi.stubGlobal("fetch", transport);
+		const request = decisionRequest();
+		const dispatch = vi.fn((_model, context) => {
+			assert.equal(transport.mock.calls.length, 4);
+			assert.equal(context.systemPrompt.includes("previous response failed"), dispatch.mock.calls.length > 1);
+			assert.deepEqual(JSON.parse(context.messages[0].content), { state: request.state });
+			return messageStream(
+				decisionMessage({ route: succeeds && dispatch.mock.calls.length === 4 ? "review" : "invalid" }),
+			);
+		});
+		const pending = inferRouterDecision({
+			...request,
+			settings: { getRouterModel: () => "" },
+			modelRegistry: { ...request.modelRegistry, streamSimple: dispatch },
+		});
+		if (succeeds) {
+			const result = await pending;
+			assert.deepEqual(result.value, { route: "review" });
+			assert.deepEqual(result.usage, { inputTokens: 160, outputTokens: 80 });
+			assert.match(result.fallback?.reason ?? "", /exhausted after 4 attempts/);
+		} else await assert.rejects(pending, /Chat fallback output repair exhausted after 4 attempts/);
+		assert.equal(transport.mock.calls.length, 4);
+		assert.equal(dispatch.mock.calls.length, 4);
+		assert.equal(warning.mock.calls.length, 1);
+	});
+}
