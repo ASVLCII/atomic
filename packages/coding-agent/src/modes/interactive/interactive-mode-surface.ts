@@ -360,7 +360,7 @@ declare module "./interactive-mode-base.ts" {
 		startProviderLogin(providerOption: AuthSelectorProvider): Promise<void>;
 		showLoginAuthTypeSelector(providerOptions?: AuthSelectorProvider[]): void;
 		showLoginProviderSelector(authType?: "oauth" | "api_key", initialSearchInput?: string): void;
-		showOAuthSelector(mode: "login" | "logout"): Promise<void>;
+		showOAuthSelector(mode: "login" | "logout", initialSearchInput?: string): Promise<void>;
 		completeProviderAuthentication(
 			providerId: string,
 			providerName: string,

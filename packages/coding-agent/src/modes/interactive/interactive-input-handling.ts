@@ -386,9 +386,9 @@ InteractiveModeBase.prototype.setupEditorSubmitHandler = function (this: Interac
 				await this.handleLoginCommand(text.slice("/login".length).trim() || undefined);
 				return;
 			}
-			if (text === "/logout") {
-				this.showOAuthSelector("logout");
+			if (/^\/logout(?:\s|$)/.test(text)) {
 				this.editor.setText("");
+				await this.showOAuthSelector("logout", text.slice("/logout".length).trim() || undefined);
 				return;
 			}
 			if (text === "/new") {

@@ -36,6 +36,8 @@ Escape or Ctrl+C quietly cancels the matching login, including immediate/pre-dev
 
 Use `/logout` to clear credentials. Logout immediately invalidates authentication in the active interactive engine and removes the selected provider from both `~/.atomic/agent/auth.json` and any effective legacy `~/.pi/agent/auth.json`, so the provider remains logged out after restart. Environment variables, command-line credentials, and `models.json` configuration cannot be cleared by Atomic; when one of those sources still authenticates the provider, the logout status names the remaining source.
 
+Type `/logout ` to autocomplete providers with stored credentials, or use `/logout kimi-coding` to open a filtered selector; press Enter in the selector to remove the credential, or Escape to cancel.
+
 ### Token Refresh
 
 A stored OAuth token is refreshed once fewer than **five minutes** of validity remain, rather than at expiry, so a long turn is not started on a credential that dies mid-request. The refresh runs inside the `auth.json` lock and re-checks the stored expiry after taking it, so concurrent sessions sharing one credential file — subagents, workflow stages, RPC children — refresh it once between them rather than once each, and a session that arrives after the rotation finds nothing to do. A token still outside the window is not touched.
