@@ -15,9 +15,8 @@ const defaultNpmRegistry = "https://registry.npmjs.org";
 const embeddedPostgresSymlinkReason =
 	"postinstall rehydrates Postgres native/lib symlinks that npm tarballs cannot contain; Atomic also hydrates them at runtime for script-less installs";
 const allowedInstallScriptPackages = new Map([
-	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
 	["@google/genai@2.21.0", "preinstall is a no-op in the published package"],
-	["esbuild@0.28.1", "postinstall selects the platform binary required by @earendil-works/chord facet bundling"],
+	["esbuild@0.28.2", "postinstall selects the platform binary required by @earendil-works/chord facet bundling"],
 	["protobufjs@7.6.6", "postinstall only warns about protobufjs version scheme mismatches"],
 	["@embedded-postgres/darwin-arm64@18.4.0-beta.17", embeddedPostgresSymlinkReason],
 	["@embedded-postgres/darwin-x64@18.4.0-beta.17", embeddedPostgresSymlinkReason],

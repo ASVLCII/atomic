@@ -234,6 +234,7 @@ export async function navigateTree(
 		// Update agent state
 		const sessionContext = this.sessionManager.buildSessionContext();
 		this.agent.state.messages = sessionContext.messages;
+		this._restoreToolsFromTranscript();
 
 		// Emit session_tree event
 		await this._extensionRunner.emit({

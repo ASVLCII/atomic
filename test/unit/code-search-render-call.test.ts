@@ -15,7 +15,9 @@ async function codeSearchTool() {
 	const tools = new Map<string, ToolDefinition>();
 	webAccess({
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
-		on() {},
+		on() {
+			return () => {};
+		},
 		registerShortcut() {},
 		registerCommand() {},
 	} as Pick<ExtensionAPI, "registerTool" | "on" | "registerShortcut" | "registerCommand"> as ExtensionAPI);

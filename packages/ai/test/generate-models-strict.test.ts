@@ -101,6 +101,7 @@ function runOpenRouterRetryFixture(
 			`  if (url === "https://ai-gateway.vercel.sh/v1/models") {\n` +
 			`    return new Response(JSON.stringify({ data: [] }), { status: 200 });\n` +
 			`  }\n` +
+			`  if (url === "https://radius.pi.dev/v1/config") return Response.json({ baseUrl: "https://radius.pi.dev", models: [{ id: "test", name: "Test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 4096 }] });\n` +
 			`  throw new Error(\`Unexpected fetch: \${url}\`);\n` +
 			`};\n`,
 	);

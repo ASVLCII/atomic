@@ -4,7 +4,6 @@ import type {
 	AssistantMessageEventStream,
 	AuthContext,
 	AuthResult,
-	Context,
 	Model,
 	ModelAuth,
 	OAuthAuth,
@@ -15,6 +14,7 @@ import type {
 	ProviderHeaders,
 	RefreshModelsContext,
 	SimpleStreamOptions,
+	TranscriptContext,
 } from "@bastani/pi-ai";
 import type { ModelsJsonModel, ModelsJsonModelOverride, ModelsJsonProvider } from "./model-config.ts";
 import {
@@ -48,7 +48,11 @@ export interface ProviderConfigInput {
 	baseUrl?: string;
 	apiKey?: string;
 	api?: Api;
-	streamSimple?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
+	streamSimple?: (
+		model: Model<Api>,
+		context: TranscriptContext,
+		options?: SimpleStreamOptions,
+	) => AssistantMessageEventStream;
 	headers?: Record<string, string>;
 	authHeader?: boolean;
 	oauth?: ExtensionOAuthConfig;
@@ -61,6 +65,7 @@ export interface ProviderConfigInput {
 		thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
 		input: Model<Api>["input"];
 		cost: Model<Api>["cost"];
+		promptCache?: Model<Api>["promptCache"];
 		contextWindow: number;
 		maxTokens: number;
 		samplingParams?: Record<string, unknown>;
@@ -103,6 +108,7 @@ function mergeCompat(
 export function applyModelOverride(model: Model<Api>, override: ModelsJsonModelOverride): Model<Api> {
 	return {
 		...model,
+		promptCache: override.promptCache ? { ...model.promptCache, ...override.promptCache } : model.promptCache,
 		name: override.name ?? model.name,
 		reasoning: override.reasoning ?? model.reasoning,
 		thinkingLevelMap: override.thinkingLevelMap
@@ -157,6 +163,7 @@ function modelFromJson(
 		thinkingLevelMap: definition.thinkingLevelMap,
 		input: (definition.input ?? ["text"]) as Model<Api>["input"],
 		cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		promptCache: definition.promptCache,
 		contextWindow: definition.contextWindow ?? 128000,
 		maxTokens: definition.maxTokens ?? 16384,
 		samplingParams: definition.samplingParams,

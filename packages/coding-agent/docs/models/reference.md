@@ -96,7 +96,9 @@ In `models.json`, `headers` values must be strings. A `null` suppression marker 
 | `samplingParams`   | No       | omitted           | Sampling parameters merged verbatim into every request body for OpenAI-compatible APIs (see below) |
 | `cost`             | No       | all zeros         | Complete base rates per million tokens plus optional request-wide `tiers` (see below)                    |
 | `compat`           | No       | provider `compat` | Provider compatibility overrides. Merged with provider-level `compat` when both are set.                   |
-| `deferredToolsMode` | No | omitted | Deferred tool-loading protocol; set to `"kimi"` for Kimi-compatible deferred tools |
+| `compat.supportsMidConvoSystemMessages` | No | model default | Accept system/developer messages after the conversation starts |
+| `compat.supportsMidConvoToolAdditions` | No | model default | OpenAI Completions: enable Kimi-style tool additions; requires mid-conversation system messages |
+| `compat.supportsMidConvoToolChanges` | No | model default | Anthropic: enable native tool additions/removals; requires mid-conversation system messages |
 
 Current behavior:
 - `/model`, `--list-models`, and the interactive footer display entries by model `id`.

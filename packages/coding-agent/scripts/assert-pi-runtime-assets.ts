@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 /** Remaining registry Pi packages (`pi-agent-core`, `pi-tui`, …) stay on this version. */
-export const expectedPiVersion = "0.85.1";
+export const expectedPiVersion = "0.86.0";
 export const expectedPiAiPackage = "@bastani/pi-ai";
 const requiredPiAiFiles = [
 	"package.json",
@@ -22,8 +22,9 @@ const requiredPiTuiFiles = [
 	"dist/index.js",
 	"dist/native-modifiers.js",
 	"dist/native-module-path.js",
-	"native/win32/prebuilds/win32-x64/win32-console-mode.node",
-	"native/win32/prebuilds/win32-arm64/win32-console-mode.node",
+	"dist/native-platform.js",
+	"native/win32/prebuilds/win32-x64/win32-platform.node",
+	"native/win32/prebuilds/win32-arm64/win32-platform.node",
 ] as const;
 const frozenNativeModifiersMarker = "@earendil-works/pi-tui/dist/native-modifiers.js";
 const barePiTuiRequirePattern = /require\((["'])@earendil-works\/pi-tui\1\)/u;
@@ -67,6 +68,7 @@ export function assertPiRuntimeAssets(options: PiRuntimeAssetOptions): void {
 		requireFile(appBundlePath);
 		requireFile(join(dirname(appBundlePath), "native-modifiers.js"));
 		requireFile(join(dirname(appBundlePath), "native-module-path.js"));
+		requireFile(join(dirname(appBundlePath), "native-platform.js"));
 		const appBundle = readFileSync(appBundlePath, "utf-8");
 		for (const marker of requiredAppMarkers) {
 			if (!appBundle.includes(marker)) throw new Error(`Pi runtime marker is absent from ${appBundlePath}: ${marker}`);

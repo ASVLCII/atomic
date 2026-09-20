@@ -16,20 +16,21 @@
  */
 
 import assert from "node:assert/strict";
+import { normalizeContext } from "@bastani/pi-ai";
 import { stream as streamAnthropicMessages } from "@bastani/pi-ai/api/anthropic-messages";
 import { stream as streamGoogleGenerativeAi } from "@bastani/pi-ai/api/google-generative-ai";
 import { stream as streamOpenAiCompletions } from "@bastani/pi-ai/api/openai-completions";
-import type { Api, AssistantMessage, Context, Model, StopReason } from "@bastani/pi-ai/compat";
+import type { Api, AssistantMessage, Model, StopReason } from "@bastani/pi-ai/compat";
 import { afterEach, test, vi } from "vitest";
 
 afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-const CONTEXT: Context = {
+const CONTEXT = normalizeContext({
 	systemPrompt: "",
 	messages: [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 }],
-};
+});
 
 function model<TApi extends Api>(api: TApi, baseUrl: string): Model<TApi> {
 	return {

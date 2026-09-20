@@ -180,7 +180,7 @@ test("routes eligible OpenRouter Claude models through anthropic-messages", () =
 	assert.equal(openrouter["openai/gpt-5"].api, "openai-completions");
 });
 
-test.each(["kimi-code-plan-cn", "kimi-for-coding"])(
+test.each(["kimi-code-plan-global", "kimi-code-plan-cn", "kimi-for-coding"])(
 	"keeps Kimi Coding models from the %s catalog source",
 	(source) => {
 		const catalog = {
@@ -192,9 +192,11 @@ test.each(["kimi-code-plan-cn", "kimi-for-coding"])(
 					"no-tools": { id: "no-tools", ...toolCapable, tool_call: false },
 				},
 			},
-			"kimi-code-plan-global": {
-				models: { "global-only": { id: "global-only", ...toolCapable } },
-			},
+			...(source === "kimi-code-plan-global"
+				? {
+						"kimi-code-plan-cn": { models: { "cn-only": { id: "cn-only", ...toolCapable } } },
+					}
+				: {}),
 		};
 		const models = generateProviderCatalogs(catalog, ["kimi-coding"])["kimi-coding"];
 		assert.deepEqual(Object.keys(models).sort(), ["k3", "kimi-for-coding"]);

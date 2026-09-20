@@ -87,7 +87,6 @@ describe("post-tool compaction preflight", () => {
 		const continueSpy = vi.spyOn(harness.agent, "continue");
 
 		await harness.session.prompt(longPrompt);
-
 		expect(harness.faux.callCount).toBe(2);
 		expect(harness.eventsOfType("compaction_start")).toEqual([
 			expect.objectContaining({ reason: "threshold", midTurn: true }),
@@ -97,12 +96,12 @@ describe("post-tool compaction preflight", () => {
 		]);
 		// The kept tail is concatenated into the boundary string instead of being replayed
 		// as separate assistant/toolResult blocks.
-		expect(harness.faux.contexts[1]?.messages.map((message) => message.role)).toEqual(["user"]);
-		expect(harness.faux.contexts[1]?.messages[0]).toMatchObject({
+		expect(harness.faux.contexts[1]?.messages.map((message) => message.role)).toEqual(["system", "user"]);
+		expect(harness.faux.contexts[1]?.messages.find((message) => message.role === "user")).toMatchObject({
 			role: "user",
 			content: [{ type: "text", text: expect.stringContaining("[User]: retained") }],
 		});
-		expect(harness.faux.contexts[1]?.messages[0]).toMatchObject({
+		expect(harness.faux.contexts[1]?.messages.find((message) => message.role === "user")).toMatchObject({
 			role: "user",
 			content: [{ type: "text", text: expect.stringContaining("[Tool result]: ") }],
 		});
@@ -293,6 +292,7 @@ describe("post-tool compaction preflight", () => {
 		expect(harness.eventsOfType("compaction_start")).toHaveLength(1);
 		// The turn after the boundary carries the new call and exactly one result for it.
 		expect(harness.faux.contexts[2]?.messages.map((message) => message.role)).toEqual([
+			"system",
 			"user",
 			"assistant",
 			"toolResult",
@@ -338,11 +338,13 @@ describe("post-tool compaction preflight", () => {
 		expect(harness.faux.callCount).toBe(2);
 		expect(harness.eventsOfType("compaction_start")).toHaveLength(0);
 		expect(harness.faux.contexts[1]?.messages.map((message) => message.role)).toEqual([
+			"system",
+			"system",
 			"user",
 			"assistant",
 			"toolResult",
 		]);
-		expect(harness.faux.contexts[1]?.messages[0]).toMatchObject({
+		expect(harness.faux.contexts[1]?.messages.find((message) => message.role === "user")).toMatchObject({
 			role: "user",
 			content: [{ type: "text", text: longPrompt }],
 		});

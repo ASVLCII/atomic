@@ -1,3 +1,4 @@
+import type { UserBashEventResult } from "../../core/extensions/types.ts";
 import type { FullscreenExitOutput } from "../../core/settings-manager.ts";
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import { BashExecutionComponent, type TruncationResult } from "./interactive-mode-deps.ts";
@@ -15,12 +16,18 @@ InteractiveModeBase.prototype.handleBashCommand = async function (
 	const extensionRunner = this.session.extensionRunner;
 
 	// Emit user_bash event to let extensions intercept
-	const eventResult = await extensionRunner.emitUserBash({
-		type: "user_bash",
-		command,
-		excludeFromContext,
-		cwd: this.sessionManager.getCwd(),
-	});
+	let eventResult: UserBashEventResult | undefined;
+	try {
+		eventResult = await extensionRunner.emitUserBash({
+			type: "user_bash",
+			command,
+			excludeFromContext,
+			cwd: this.sessionManager.getCwd(),
+		});
+	} catch {
+		// The runner reported the routing failure. Never execute locally as a fallback.
+		return;
+	}
 
 	// If extension returned a full result, use it directly
 	if (eventResult?.result) {

@@ -20,6 +20,7 @@ import {
 	decisionMessage,
 	decisionModel,
 	messageStream,
+	parseInferenceUserPayload,
 	registeredDecisionRuntime,
 } from "../helpers/structured-output.js";
 
@@ -171,9 +172,9 @@ test("parallel tasks do not share the first decision", async () => {
 	const second = { ...decisionModel, id: "other" };
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([decisionModel, second]);
 	f.infer.mockImplementation((_model, context) => {
-		const { state, questions } = JSON.parse(context.messages[0]!.content as string);
-		const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
-		const preferred = state.task.includes("second") ? "decision-test/other" : "decision-test/chat";
+		const { state, questions } = parseInferenceUserPayload(context);
+		const candidates = Object.values(questions?.pair?.criteria ?? {}).map((entry) => JSON.parse(entry as string));
+		const preferred = (state?.task ?? "").includes("second") ? "decision-test/other" : "decision-test/chat";
 		return messageStream(
 			decisionMessage({
 				model: candidates.find((pair) => pair.model === preferred)?.model ?? candidates[0].model,

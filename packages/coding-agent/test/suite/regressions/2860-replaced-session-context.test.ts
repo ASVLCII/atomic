@@ -198,6 +198,7 @@ describe("regression #2860: replaced session callbacks", () => {
 		expect(staleCtxThrows).toBe(true);
 		expect(stalePiThrows).toBe(true);
 		expect(runtime.session.messages.map((message) => `${message.role}:${getText(message)}`)).toEqual([
+			"system:",
 			"user:Hello from the new session!",
 			"assistant:hello reply",
 		]);
@@ -233,6 +234,7 @@ describe("regression #2860: replaced session callbacks", () => {
 		await runtime.session.prompt("/fork-it");
 
 		expect(runtime.session.messages.map((message) => `${message.role}:${getText(message)}`)).toEqual([
+			"system:",
 			"user:seed",
 			"assistant:seed reply",
 			"user:fork callback message",
@@ -270,6 +272,7 @@ describe("regression #2860: replaced session callbacks", () => {
 
 		expect(runtime.session.sessionFile).toBe(targetSessionPath);
 		expect(runtime.session.messages.map((message) => `${message.role}:${getText(message)}`)).toEqual([
+			"system:",
 			"user:target",
 			"assistant:target reply",
 			"user:switch callback message",

@@ -1,7 +1,7 @@
 import type { ProviderHeaders } from "@bastani/pi-ai";
 import type { Api, AssistantMessageEvent, ImageContent, Model, ToolResultMessage } from "@bastani/pi-ai/compat";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import type { NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
 import type { ExtensionMode } from "./context-types.ts";
 import type { ExtensionUIContext } from "./ui-types.js";
 
@@ -43,8 +43,8 @@ export interface BeforeAgentStartEvent {
 	images?: ImageContent[];
 	/** The fully assembled system prompt string. */
 	systemPrompt: string;
-	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Pi loaded without re-discovering resources. */
-	systemPromptOptions: BuildSystemPromptOptions;
+	/** Mutable prompt options for this run. Later handlers see earlier edits. */
+	systemPromptOptions: NormalizedBuildSystemPromptOptions;
 }
 
 /** Fired when an agent loop starts */

@@ -198,7 +198,7 @@ describe("buildSystemPrompt", () => {
 			skills: [],
 			cwd: process.cwd(),
 		});
-		const guidelines = prompt.slice(prompt.indexOf("Guidelines:\n"), prompt.indexOf("\n\nAtomic documentation"));
+		const guidelines = prompt.slice(prompt.indexOf("Guidelines:\n"), prompt.indexOf("\n</rules>"));
 
 		expect(guidelines).toBe(`Guidelines:
 - Be concise in your responses
@@ -213,7 +213,7 @@ describe("buildSystemPrompt", () => {
 			skills: [],
 			cwd: process.cwd(),
 		});
-		const guidelines = prompt.slice(prompt.indexOf("Guidelines:\n"), prompt.indexOf("\n\nAtomic documentation"));
+		const guidelines = prompt.slice(prompt.indexOf("Guidelines:\n"), prompt.indexOf("\n</rules>"));
 
 		expect(guidelines).toBe(`Guidelines:
 - **Workflows**: Workflow-specific sentinel.

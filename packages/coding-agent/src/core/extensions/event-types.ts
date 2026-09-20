@@ -1,3 +1,4 @@
+import type { CacheWarmingDecisionEvent } from "../cache-warmer.ts";
 import type {
 	AfterProviderResponseEvent,
 	AgentEndEvent,
@@ -29,6 +30,7 @@ import type { WorkflowEvent } from "./workflow-events.js";
 
 /** Union of all event types */
 export type ExtensionEvent =
+	| CacheWarmingDecisionEvent
 	| WorkflowEvent
 	| ResourcesDiscoverEvent
 	| SessionEvent

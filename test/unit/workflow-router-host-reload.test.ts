@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createAssistantMessageEventStream } from "@bastani/pi-ai";
+import { createAssistantMessageEventStream, getCurrentTools } from "@bastani/pi-ai";
 import { test, vi } from "vitest";
 import { DefaultResourceLoader } from "../../packages/coding-agent/src/core/resource-loader.js";
 import { createAgentSession } from "../../packages/coding-agent/src/core/sdk.js";
@@ -55,7 +55,7 @@ test(
 		let held: ReturnType<typeof createAssistantMessageEventStream> | undefined;
 		let entered: (() => void) | undefined;
 		const { runtime: modelRuntime } = await registeredDecisionRuntime((_model, context) => {
-			const request = JSON.parse(context.messages[0]!.content as string) as {
+			const request = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string) as {
 				questions: { workflow: { criteria: Record<string, string> } };
 			};
 			const snapshot: CapturedState = {
@@ -63,7 +63,7 @@ test(
 					.filter(([name]) => name !== "none")
 					.map(([, contract]) => JSON.parse(contract) as CatalogEntry),
 			};
-			const schema = context.tools![0]!.parameters as {
+			const schema = getCurrentTools(context.messages)[0]!.parameters as {
 				properties: { workflowType: { anyOf: Array<{ const: string }> } };
 			};
 			assert.deepEqual(

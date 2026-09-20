@@ -51,3 +51,21 @@ test("openai-responses compat declares supportsAdditionalTools and carries it th
 	const compat = config.getProvider("custom")?.models?.[0]?.compat;
 	assert.deepEqual(compat, responsesCompat);
 });
+
+test("models.json declares Anthropic mid-conversation prompt and tool changes", async () => {
+	const compat = { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } satisfies NonNullable<
+		ModelsJsonModel["compat"]
+	>;
+	const path = await writeModelsJson({
+		providers: {
+			custom: {
+				api: "anthropic-messages",
+				baseUrl: "https://example.test/v1",
+				models: [{ id: "custom-model", api: "anthropic-messages", compat }],
+			},
+		},
+	});
+	const config = await ModelConfig.load(path);
+	assert.equal(config.getError(), undefined);
+	assert.deepEqual(config.getProvider("custom")?.models?.[0]?.compat, compat);
+});

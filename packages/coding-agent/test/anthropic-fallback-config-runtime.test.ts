@@ -88,7 +88,8 @@ test("models.json fallbacks replace catalog defaults, reach the HTTP request and
 				).result();
 				assert.equal(requestCount, 1);
 				assert.equal(result.stopReason, "stop", result.errorMessage);
-				assert.equal(result.model, serving);
+				assert.equal(result.model, generated.id);
+				assert.equal(result.responseModel, fallbacks.length ? serving : undefined);
 				if (fallbacks.length) {
 					assert.ok(Math.abs(result.usage.cost.input - (100 * cost.input) / 1_000_000) < 1e-12);
 					assert.ok(Math.abs(result.usage.cost.output - (10 * cost.output) / 1_000_000) < 1e-12);

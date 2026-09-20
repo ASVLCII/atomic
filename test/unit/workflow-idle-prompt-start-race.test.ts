@@ -71,8 +71,14 @@ test("production prompt wiring holds idle admission until the first agent turn s
 		_findLastAssistantMessage: () => undefined,
 		_pendingNextTurnMessages: [] as AgentMessage[],
 		_baseSystemPrompt: "base",
-		_baseSystemPromptOptions: {},
-		_systemPromptOverride: undefined,
+		_baseSystemPromptOptions: { selectedTools: [] },
+		_runSystemPromptOptions: undefined,
+		_preparePromptAndToolLoadout() {
+			return undefined;
+		},
+		getActiveToolNames() {
+			return [];
+		},
 		async waitForRetry() {},
 		async _continueQueuedAgentMessages() {},
 		async _awaitPendingPostCompactionContinuation() {},

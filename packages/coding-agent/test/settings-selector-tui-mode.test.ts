@@ -16,6 +16,7 @@ function createSettingsConfig(): SettingsConfig {
 		followUpMode: "one-at-a-time",
 		transport: "auto",
 		httpIdleTimeoutMs: 300_000,
+		cacheWarming: "streaming",
 		bashInterceptorEnabled: false,
 		thinkingLevel: "off",
 		availableThinkingLevels: ["off"],
@@ -79,4 +80,19 @@ test("fullscreen scrollbar setting dispatches all three modes", () => {
 		createSettingsChangeHandler(callbacks)("fullscreen-scrollbar", mode);
 	}
 	expect(onFullscreenScrollbarChange.mock.calls.flat()).toEqual(["auto", "always", "hidden"]);
+});
+
+test("settings offers cache warming modes and dispatches them", () => {
+	const item = buildSettingsItems(createSettingsConfig(), {} as SettingsCallbacks).find(
+		({ id }) => id === "cache-warming",
+	);
+	expect(item).toMatchObject({
+		label: "Cache warming",
+		currentValue: "streaming",
+		values: ["off", "streaming", "idle"],
+	});
+	const onCacheWarmingChange = vi.fn();
+	const callbacks = { onCacheWarmingChange } as unknown as SettingsCallbacks;
+	createSettingsChangeHandler(callbacks)("cache-warming", "idle");
+	expect(onCacheWarmingChange).toHaveBeenCalledWith("idle");
 });

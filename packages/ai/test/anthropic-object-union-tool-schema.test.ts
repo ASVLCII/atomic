@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import type { Context, Model, Tool } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 import { validateToolArguments } from "../src/utils/validation.ts";
 
 const parameters = Type.Union([
@@ -89,7 +90,7 @@ it("projects a root object union into an Anthropic-compatible tool schema", asyn
 			messages: [{ role: "user", content: "Store the items", timestamp: Date.now() }],
 			tools,
 		};
-		const stream = streamAnthropic(createModel(`http://127.0.0.1:${address.port}`), context, {
+		const stream = streamAnthropic(createModel(`http://127.0.0.1:${address.port}`), normalizeContext(context), {
 			apiKey: "test-key",
 			cacheRetention: "none",
 		});
@@ -139,7 +140,10 @@ async function captureToolSchema(tool: Tool): Promise<{ advertised: CapturedSche
 	let wire: CapturedSchema | undefined;
 	await streamAnthropic(
 		createModel("https://localhost.invalid"),
-		{ messages: [{ role: "user", content: "Offline schema capture", timestamp: 1 }], tools: [tool] },
+		normalizeContext({
+			messages: [{ role: "user", content: "Offline schema capture", timestamp: 1 }],
+			tools: [tool],
+		}),
 		{
 			apiKey: "test-key",
 			cacheRetention: "none",
@@ -288,7 +292,12 @@ it("continues projecting object-only type arrays without changing original union
 	const call = { type: "toolCall" as const, id: "local", name: tool.name, arguments: { kind: "a", x: "  raw\n" } };
 	assert.deepEqual(validateToolArguments(tool, call), call.arguments);
 	assert.deepEqual(validateToolArguments(tool, { ...call, arguments: { kind: "b", y: 0 } }), { kind: "b", y: 0 });
-	for (const args of [{ kind: "a" }, { kind: "a", y: 0 }, { kind: "a", x: { bad: true } }]) {
+	const invalidArguments: import("../src/types.ts").JsonObject[] = [
+		{ kind: "a" },
+		{ kind: "a", y: 0 },
+		{ kind: "a", x: { bad: true } },
+	];
+	for (const args of invalidArguments) {
 		assert.throws(() => validateToolArguments(tool, { ...call, arguments: args }), /Validation failed/);
 	}
 	const { advertised, wire } = await captureToolSchema(tool);

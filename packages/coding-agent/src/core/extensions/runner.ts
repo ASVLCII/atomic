@@ -1,3 +1,9 @@
+import type {
+	CacheWarmingAction,
+	CacheWarmingDecisionEvent,
+	CacheWarmingDecisionEventResult,
+} from "../cache-warmer.ts";
+import { snapshotEventHandlers } from "./runner-events.ts";
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
@@ -13,6 +19,7 @@ import type { ScopedModel } from "../model-resolver.ts";
 import { lifecycleScopeForOwner, sessionLifecycleScopes } from "../session-lifecycle-scope.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import { normalizeBuildSystemPromptOptions } from "../system-prompt.ts";
 import { presentQuestionnaire } from "../tools/ask-user-question/ask-user-question.js";
 import {
 	assertExtensionAction,
@@ -210,7 +217,8 @@ export class ExtensionRunner {
 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	private compactFn: (options?: CompactOptions) => void = () => {};
 	private getSystemPromptFn: () => string = () => "";
-	private getSystemPromptOptionsFn: () => BuildSystemPromptOptions = () => ({ cwd: this.cwd });
+	private getSystemPromptOptionsFn: () => BuildSystemPromptOptions = () =>
+		normalizeBuildSystemPromptOptions({ cwd: this.cwd });
 	private getSkillCatalogFn: ExtensionContextActions["getSkillCatalog"] = undefined;
 	private getRouterModelFn: ExtensionContextActions["getRouterModel"] = undefined;
 	private newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
@@ -288,7 +296,8 @@ export class ExtensionRunner {
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.compactFn = contextActions.compact;
 		this.getSystemPromptFn = contextActions.getSystemPrompt;
-		this.getSystemPromptOptionsFn = contextActions.getSystemPromptOptions ?? (() => ({ cwd: this.cwd }));
+		this.getSystemPromptOptionsFn =
+			contextActions.getSystemPromptOptions ?? (() => normalizeBuildSystemPromptOptions({ cwd: this.cwd }));
 		this.getSkillCatalogFn = contextActions.getSkillCatalog;
 		this.getRouterModelFn = contextActions.getRouterModel;
 
@@ -854,10 +863,30 @@ export class ExtensionRunner {
 		);
 	}
 
+	async emitCacheWarmingDecision(event: CacheWarmingDecisionEvent): Promise<CacheWarmingAction> {
+		let action = event.action;
+		const ctx = this.createContext();
+		for (const { ext, handlers } of snapshotEventHandlers(this.extensions, event.type)) {
+			for (const handler of handlers) {
+				try {
+					const result = (await handler({ ...event, action }, ctx)) as CacheWarmingDecisionEventResult | undefined;
+					if (result?.action === "warm" || result?.action === "stop") action = result.action;
+				} catch (error) {
+					this.emitError({
+						extensionPath: ext.path,
+						event: event.type,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+		}
+		return action;
+	}
+
 	async emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders> {
 		return runResourceRegistrationBatch(this.runtime, async () => {
-			for (const extension of this.extensions) {
-				for (const handler of extension.handlers.get("before_provider_headers") ?? []) {
+			for (const { ext: extension, handlers } of snapshotEventHandlers(this.extensions, "before_provider_headers")) {
+				for (const handler of handlers) {
 					try {
 						await handler({ type: "before_provider_headers", headers }, this.createContext());
 					} catch (error) {
@@ -877,9 +906,8 @@ export class ExtensionRunner {
 	emitBeforeAgentStart(
 		prompt: string,
 		images: ImageContent[] | undefined,
-		systemPrompt: string,
 		systemPromptOptions: BuildSystemPromptOptions,
-	): Promise<BeforeAgentStartCombinedResult | undefined> {
+	): Promise<BeforeAgentStartCombinedResult> {
 		return runResourceRegistrationBatch(this.runtime, () =>
 			runBeforeAgentStartHandlers(
 				this.extensions,
@@ -887,7 +915,6 @@ export class ExtensionRunner {
 				() => this.assertActive(),
 				prompt,
 				images,
-				systemPrompt,
 				systemPromptOptions,
 				(error) => this.emitError(error),
 			),

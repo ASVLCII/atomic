@@ -92,6 +92,7 @@ export async function _applyVerbatimCompaction(
 ): Promise<VerbatimCompactionResult | undefined> {
 	assertCompactionOpen(this);
 	if (!this.model) throw new Error(formatNoModelSelectedMessage());
+	options.abortController.signal.throwIfAborted();
 	const model = this.model;
 	const pathEntries = this.sessionManager.getBranch();
 	const settings = this.settingsManager.getCompactionSettings(model);
@@ -161,7 +162,10 @@ export async function _applyVerbatimCompaction(
 		} satisfies SessionBeforeCompactEvent)) as SessionBeforeCompactResult | undefined;
 		assertCompactionOpen(this);
 		if (options.abortController.signal.aborted) throw new Error("Compaction cancelled");
-		if (hookResult?.cancel) throw new Error("Compaction cancelled");
+		if (hookResult?.cancel) {
+			options.abortController.abort();
+			throw new Error("Compaction cancelled");
+		}
 		if (hookResult?.compactedText !== undefined) {
 			if (hookResult.compactedText.trim().length === 0) throw new Error("No compacted text provided by extension");
 			compacted = {
@@ -284,7 +288,7 @@ async function emitManualCompactionFailure(
 	fromExtension: boolean,
 ): Promise<void> {
 	const message = error instanceof Error ? error.message : String(error);
-	const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
+	const aborted = controller.signal.aborted;
 	const errorMessage = aborted ? undefined : `Compaction failed: ${message}`;
 	clearOwnedManualCompactionState.call(this, controller);
 	this._emit({
@@ -312,6 +316,7 @@ async function runOwnedManualCompaction(
 	this._emit({ type: "compaction_start", reason: "manual" });
 	let fromExtension = false;
 	try {
+		controller.signal.throwIfAborted();
 		if (!this.model) throw new Error(formatNoModelSelectedMessage());
 		const result = await this._applyVerbatimCompaction({
 			// Caller parameters are projected explicitly, so no extra runtime
@@ -321,7 +326,7 @@ async function runOwnedManualCompaction(
 			...(options.compression_ratio === undefined ? {} : { compression_ratio: options.compression_ratio }),
 			...(options.preserve_recent === undefined ? {} : { preserve_recent: options.preserve_recent }),
 			...(options.query === undefined ? {} : { query: options.query }),
-			resolvePlannerAuth: (candidate) => this._getRequiredRequestAuth(candidate),
+			resolvePlannerAuth: (candidate) => this._getRequiredRequestAuth(candidate, controller.signal),
 			abortController: controller,
 			backupLabel: "compact",
 			reason: "manual",

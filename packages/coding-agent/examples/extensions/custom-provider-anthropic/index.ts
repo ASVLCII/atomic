@@ -5,9 +5,10 @@ import {
 	type Api,
 	type AssistantMessage,
 	type AssistantMessageEventStream,
-	type Context,
 	calculateCost,
 	createAssistantMessageEventStream,
+	getCurrentSystemPrompt,
+	getCurrentTools,
 	type ImageContent,
 	type Message,
 	type Model,
@@ -20,6 +21,7 @@ import {
 	type Tool,
 	type ToolCall,
 	type ToolResultMessage,
+	type TranscriptContext,
 } from "@bastani/pi-ai/compat";
 
 const decode = (s: string) => atob(s);
@@ -166,10 +168,11 @@ function convertContentBlocks(
 	}
 	return blocks;
 }
-function convertMessages(messages: Message[], isOAuth: boolean, _tools?: Tool[]): any[] {
+function convertMessages(messages: Message[], isOAuth: boolean): any[] {
 	const params: any[] = [];
 	for (let i = 0; i < messages.length; i++) {
 		const msg = messages[i];
+		if (msg.role === "system") continue;
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim()) {
@@ -276,7 +279,7 @@ function mapStopReason(reason: string): StopReason {
 }
 function streamCustomAnthropic(
 	model: Model<Api>,
-	context: Context,
+	context: TranscriptContext,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
@@ -325,9 +328,11 @@ function streamCustomAnthropic(
 				};
 			}
 			const client = new Anthropic(clientOptions);
+			const systemPrompt = getCurrentSystemPrompt(context.messages);
+			const tools = getCurrentTools(context.messages);
 			const params: MessageCreateParamsStreaming = {
 				model: model.id,
-				messages: convertMessages(context.messages, isOAuth, context.tools),
+				messages: convertMessages(context.messages, isOAuth),
 				max_tokens: options?.maxTokens || Math.floor(model.maxTokens / 3),
 				stream: true,
 			};
@@ -339,24 +344,24 @@ function streamCustomAnthropic(
 						cache_control: { type: "ephemeral" },
 					},
 				];
-				if (context.systemPrompt) {
+				if (systemPrompt) {
 					params.system.push({
 						type: "text",
-						text: sanitizeSurrogates(context.systemPrompt),
+						text: sanitizeSurrogates(systemPrompt),
 						cache_control: { type: "ephemeral" },
 					});
 				}
-			} else if (context.systemPrompt) {
+			} else if (systemPrompt) {
 				params.system = [
 					{
 						type: "text",
-						text: sanitizeSurrogates(context.systemPrompt),
+						text: sanitizeSurrogates(systemPrompt),
 						cache_control: { type: "ephemeral" },
 					},
 				];
 			}
-			if (context.tools) {
-				params.tools = convertTools(context.tools, isOAuth);
+			if (tools.length > 0) {
+				params.tools = convertTools(tools, isOAuth);
 			}
 			if (options?.reasoning && model.reasoning) {
 				const defaultBudgets: Record<string, number> = {

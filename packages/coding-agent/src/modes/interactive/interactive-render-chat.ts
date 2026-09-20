@@ -39,30 +39,38 @@ import {
 import type { InteractiveSubmission } from "./interactive-submission.ts";
 import { refreshInteractiveTasks } from "./interactive-task-projection.js";
 
+function countDroppedThinkingBlocks(message: AssistantMessage): number {
+	return (message.diagnostics ?? []).reduce((count, diagnostic) => {
+		if (diagnostic.type !== "anthropic_input_transformations") return count;
+		const dropped = diagnostic.details?.droppedBlockCount;
+		return count + (typeof dropped === "number" && dropped > 0 ? dropped : 0);
+	}, 0);
+}
+
 InteractiveModeBase.prototype.maybeShowAssistantDiagnostics = function (
 	this: InteractiveModeBase,
 	message: AssistantMessage,
 ): void {
 	if (!this.settingsManager.getShowCacheMissNotices()) return;
 
-	for (const diagnostic of message.diagnostics ?? []) {
-		if (diagnostic.type !== "anthropic_input_transformations") continue;
-		const count = diagnostic.details?.droppedBlockCount;
-		if (typeof count !== "number" || count <= 0) continue;
-		const reasons = Array.isArray(diagnostic.details?.reasons)
-			? diagnostic.details.reasons.filter((reason): reason is string => typeof reason === "string")
-			: [];
-		const paths = Array.isArray(diagnostic.details?.paths)
-			? diagnostic.details.paths.filter((path): path is string => typeof path === "string")
-			: [];
-		const noun = count === 1 ? "thinking block" : `${count} thinking blocks`;
-		const reason = reasons.length > 0 ? reasons.join(", ") : "unknown reason";
-		const location = paths.length > 0 ? ` at ${paths.join(", ")}` : "";
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(
-			new Text(theme.fg("warning", `Anthropic dropped ${noun}: ${reason}${location}`), 1, 0),
-		);
+	const count = countDroppedThinkingBlocks(message);
+	if (count === 0) return;
+	let previousCount = 0;
+	// The live message_end notification precedes persistence of this response.
+	const branch = this.sessionManager.getBranch();
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = branch[i];
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			previousCount = countDroppedThinkingBlocks(entry.message);
+			break;
+		}
 	}
+	if (count <= previousCount) return;
+	const noun = count === 1 ? "thinking block" : "thinking blocks";
+	this.chatContainer.addChild(new Spacer(1));
+	this.chatContainer.addChild(
+		new Text(theme.fg("warning", `Anthropic dropped ${count} ${noun} (details in session)`), 1, 0),
+	);
 };
 
 // Weak keys leave cleared/rebuilt transcripts collectible without separate lifecycle state.
@@ -481,13 +489,6 @@ InteractiveModeBase.prototype.renderSessionEntries = function (
 	}
 	flushMessages();
 	if (this.settingsManager.getShowCacheMissNotices()) {
-		for (const entry of sessionEntries) {
-			for (const message of sessionEntryToContextMessages(entry)) {
-				if (message.role === "assistant" && message.stopReason !== "aborted" && message.stopReason !== "error") {
-					this.maybeShowAssistantDiagnostics(message);
-				}
-			}
-		}
 		for (const miss of collectCacheMisses(sessionEntries, {
 			getModel: (provider, model) => this.session.modelRuntime.getModel(provider, model),
 		}).values()) {

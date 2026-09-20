@@ -120,6 +120,10 @@ test(
 				join(root, "node_modules/@earendil-works/pi-tui/dist/native-module-path.js"),
 				join(runtimeDir, "native-module-path.js"),
 			);
+			copyFileSync(
+				join(root, "node_modules/@earendil-works/pi-tui/dist/native-platform.js"),
+				join(runtimeDir, "native-platform.js"),
+			);
 
 			const launcherBuildCommand = [
 				bunExecutable(),

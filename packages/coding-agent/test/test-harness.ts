@@ -15,6 +15,7 @@ import type {
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
+	JsonObject,
 	Model,
 	SimpleStreamOptions,
 	StopReason,
@@ -68,7 +69,7 @@ export interface FauxResponse {
 	/** Text content blocks. String shorthand becomes a single text block. */
 	text?: string;
 	/** Tool calls to include in the response. */
-	toolCalls?: Array<{ id?: string; name: string; args: Record<string, unknown> }>;
+	toolCalls?: Array<{ id?: string; name: string; args: JsonObject }>;
 	/** Thinking content. */
 	thinking?: string;
 	/** Stop reason. Defaults to "stop", or "toolUse" if toolCalls are present, or "error" if error is set. */
@@ -80,7 +81,7 @@ export interface FauxResponse {
 	/** Delay in ms before the response starts. */
 	delayMs?: number;
 	/** Optional test hook that settles before the response stream emits. */
-	beforeEmit?: () => void | Promise<void>;
+	beforeEmit?: (signal?: AbortSignal) => void | Promise<void>;
 	/** Model overrides (provider, model id) for responses that should look like they came from a different model. */
 	model?: { provider?: string; id?: string };
 }
@@ -319,7 +320,7 @@ export function createFauxStreamFn(responses: FauxResponseInput[]): {
 		else options?.signal?.addEventListener("abort", onAbort, { once: true });
 
 		if (resp.beforeEmit) {
-			void Promise.resolve(resp.beforeEmit()).then(emit);
+			void Promise.resolve(resp.beforeEmit(options?.signal)).then(emit);
 		} else if (resp.delayMs && resp.delayMs > 0) {
 			setTimeout(emit, resp.delayMs);
 		} else {
@@ -462,12 +463,22 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	}
 
 	const tempDir = createTempDir();
-	return createHarnessWithResourceLoader(options, options.resourceLoader ?? createTestResourceLoader(), tempDir);
+	return createHarnessWithResourceLoader(
+		options,
+		options.resourceLoader ??
+			createTestResourceLoader({ systemPrompt: options.systemPrompt ?? "You are a test assistant." }),
+		tempDir,
+	);
 }
 
 export async function createHarnessWithExtensions(options: HarnessOptions = {}): Promise<Harness> {
 	const tempDir = createTempDir();
 	const extensionsResult = await createTestExtensionsResult(options.extensionFactories ?? [], tempDir);
-	const resourceLoader = options.resourceLoader ?? createTestResourceLoader({ extensionsResult });
+	const resourceLoader =
+		options.resourceLoader ??
+		createTestResourceLoader({
+			extensionsResult,
+			systemPrompt: options.systemPrompt ?? "You are a test assistant.",
+		});
 	return createHarnessWithResourceLoader(options, resourceLoader, tempDir);
 }

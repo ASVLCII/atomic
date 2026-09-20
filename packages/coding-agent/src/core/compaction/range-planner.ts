@@ -1,4 +1,4 @@
-import { type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@bastani/pi-ai";
+import { normalizeContext, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@bastani/pi-ai";
 import type { Api, AssistantMessage, Model, SimpleStreamOptions, Usage } from "@bastani/pi-ai/compat";
 import { isContextOverflow } from "@bastani/pi-ai/compat";
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -266,10 +266,10 @@ export async function planDeletedLineRanges(
 	if (signal?.aborted) throw new Error("Compaction cancelled");
 	const prompt = buildRangePlannerPrompt(region, parameters, targetKeepLines);
 	const model = plannerRequestModel(planner);
-	const context = {
+	const context = normalizeContext({
 		systemPrompt: RANGE_PLANNER_SYSTEM_PROMPT,
 		messages: [{ role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() }],
-	};
+	});
 	const reasoning = planner.budget.reasoning;
 	// No `maxTokens` property is constructed at all: pi-ai's context clamp is the
 	// only bound on planner output.

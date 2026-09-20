@@ -2,6 +2,7 @@ import type { Api, Model, Transport } from "@bastani/pi-ai/compat";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ScrollViewScrollbar } from "@earendil-works/pi-tui";
 import type {
+	CacheWarmingMode,
 	DefaultProjectTrust,
 	FullscreenExitOutput,
 	MermaidRenderingMode,
@@ -24,6 +25,7 @@ export interface SettingsConfig {
 	followUpMode: QueueDeliveryMode;
 	transport: Transport;
 	httpIdleTimeoutMs: number;
+	cacheWarming: CacheWarmingMode;
 	bashInterceptorEnabled: boolean;
 	thinkingLevel: ThinkingLevel;
 	availableThinkingLevels: ThinkingLevel[];
@@ -67,6 +69,7 @@ export interface SettingsCallbacks {
 	onFollowUpModeChange: (mode: QueueDeliveryMode) => void;
 	onTransportChange: (transport: Transport) => void;
 	onHttpIdleTimeoutChange: (timeoutMs: number) => void;
+	onCacheWarmingChange: (mode: CacheWarmingMode) => void;
 	onBashInterceptorEnabledChange: (enabled: boolean) => void;
 	onThinkingLevelChange: (level: ThinkingLevel) => void;
 	onRouterModelChange?: (model: string) => void;

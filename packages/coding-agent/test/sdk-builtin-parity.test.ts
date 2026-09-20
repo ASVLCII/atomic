@@ -2701,9 +2701,16 @@ test("closing preserves queued message persistence and completion hooks", async 
 		await Promise.all([turn, closing]);
 		assert.deepEqual(
 			session.sessionManager.buildSessionContext().messages.map((message) => message.role),
-			["user", "assistant"],
+			["system", "user", "assistant"],
 		);
-		assert.deepEqual(events, ["start:user", "end:user", "start:assistant", "end:assistant"]);
+		assert.deepEqual(events, [
+			"start:system",
+			"end:system",
+			"start:user",
+			"end:user",
+			"start:assistant",
+			"end:assistant",
+		]);
 	} finally {
 		release.resolve();
 		await session.dispose();

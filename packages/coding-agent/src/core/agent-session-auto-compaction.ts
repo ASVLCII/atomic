@@ -49,6 +49,7 @@ export async function _checkCompaction(
 	assistantMessage: AssistantMessage,
 	skipAbortedCheck = true,
 ): Promise<void> {
+	if (this._agentRunAbortRequested) return;
 	if (this._pendingPostToolCompactionGuard) {
 		const { result } = this._pendingPostToolCompactionGuard;
 		this._pendingPostToolCompactionGuard = undefined;
@@ -348,6 +349,7 @@ export function _schedulePostAutoCompactionContinuationProbe(
 	_reason: "overflow" | "threshold",
 	willRetry: boolean,
 ): void {
+	if (this._agentRunAbortRequested) return;
 	const token = this._postCompactionContinuationToken + 1;
 	this._postCompactionContinuationToken = token;
 	const fallbackScopeGeneration = this._fallbackOriginGeneration;
@@ -370,6 +372,7 @@ export function _schedulePostAutoCompactionContinuationProbe(
 					}
 				};
 				try {
+					if (this._agentRunAbortRequested) return;
 					if (willRetry) {
 						if (this._postCompactionContinuationToken !== token) return;
 						if (this.isCompacting || this.isStreaming) return;
@@ -494,6 +497,7 @@ export async function _runAutoCompaction(
 	}
 
 	try {
+		controller.signal.throwIfAborted();
 		if (!this.model) {
 			const manualTakeoverPending = hasPendingManualCompactionTakeover.call(this);
 			this._emit({
@@ -520,7 +524,7 @@ export async function _runAutoCompaction(
 		// before persistence or continuation, matching other provider-call failures.
 		const result = await this._applyVerbatimCompaction({
 			resolvePlannerAuth: async (candidate) => {
-				const authResult = await this._getRequiredRequestAuth(candidate);
+				const authResult = await this._getRequiredRequestAuth(candidate, controller.signal);
 				return authResult.apiKey || authResult.headers ? authResult : undefined;
 			},
 			abortController: controller,
@@ -572,8 +576,7 @@ export async function _runAutoCompaction(
 		return "compacted";
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : "compaction failed";
-		const aborted =
-			errorMessage === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
+		const aborted = controller.signal.aborted;
 		const manualTakeoverPending = hasPendingManualCompactionTakeover.call(this);
 		const formattedErrorMessage = aborted
 			? undefined

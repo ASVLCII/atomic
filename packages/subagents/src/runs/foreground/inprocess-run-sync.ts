@@ -21,6 +21,13 @@ import { buildModelCandidates } from "../shared/model-fallback.js";
 import { registerExecutionIntercomDetach } from "./execution-intercom-detach.js";
 import { registerExecutionParentAskHandoff } from "./execution-parent-ask-handoff.js";
 
+function defaultTestSession(): boolean {
+	if (process.env.NODE_TEST_CONTEXT !== undefined) return true;
+	// Bracket lookup so Bun.build cannot inline `process.env.NODE_ENV` at
+	// bundle time. Packed Node consumers must not inherit a compile-time stub.
+	return process.env["NODE_ENV"] === "test";
+}
+
 function emptyUsage(): Usage {
 	return {
 		input: 0,
@@ -256,8 +263,7 @@ export async function runSingleInProcess(
 		ensureArtifactsDir(artifactsDir);
 		writeArtifact(artifactPaths.inputPath, `# Task for ${agent.name}\n\n${task}`);
 	}
-	const testSession =
-		options.testSession ?? (process.env.NODE_TEST_CONTEXT !== undefined || process.env.NODE_ENV === "test");
+	const testSession = options.testSession ?? defaultTestSession();
 	const spec: ChildSpec = {
 		taskName: agent.name,
 		task,

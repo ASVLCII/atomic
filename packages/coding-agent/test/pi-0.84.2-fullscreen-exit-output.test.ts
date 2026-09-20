@@ -30,6 +30,7 @@ function createSettingsConfig(): SettingsConfig {
 		followUpMode: "one-at-a-time",
 		transport: "auto",
 		httpIdleTimeoutMs: 300_000,
+		cacheWarming: "streaming",
 		bashInterceptorEnabled: false,
 		thinkingLevel: "off",
 		availableThinkingLevels: ["off"],

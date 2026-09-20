@@ -67,6 +67,7 @@ export async function resumeQueuedMessages(this: AgentSession, beforeRelease?: (
 	const hold = this._activeInterruptQueueHold;
 	const released = hold !== undefined && (hold.steering.length > 0 || hold.followUp.length > 0);
 	this._queuedMessagesPaused = false;
+	this._agentRunAbortRequested = false;
 	this._queuedMessagesPauseAbortBoundary = undefined;
 	this._restoreAndClearActiveInterruptQueueHold();
 	return released;
@@ -83,6 +84,9 @@ export function abort(this: AgentSession): Promise<void> {
 /** Internal teardown never redirects cancellation into a replacement generation. */
 export function abortCurrentGeneration(this: AgentSession): Promise<void> {
 	this._extensionRunner.cancelHostInput();
+	this._agentRunAbortRequested = true;
+	this._cacheWarmer?.cancel();
+	this._postCompactionContinuationToken += 1;
 	if (this._subagentMessageAdmission) {
 		// Cancellation is terminal for a child. Hold even deliveries whose
 		// protocol-safe persistence is still pending so they cannot restart it.
@@ -94,8 +98,7 @@ export function abortCurrentGeneration(this: AgentSession): Promise<void> {
 		// A stage's generation remains host-owned; only explicit resume releases it.
 		this.pauseQueuedMessages();
 	}
-	this._retryAbortController?.abort();
-	this._resolveRetry();
+	this.abortRetry();
 	this._compactionAbortController?.abort();
 	this._autoCompactionAbortController?.abort();
 	this._branchSummaryAbortController?.abort();

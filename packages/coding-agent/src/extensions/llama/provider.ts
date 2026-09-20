@@ -8,7 +8,13 @@ import type {
 	RefreshModelsContext,
 } from "@bastani/pi-ai";
 import { stream, streamSimple } from "@bastani/pi-ai/compat";
-import { LlamaClient, type LlamaModelInfo, llamaInferenceUrl, normalizeLlamaServerUrl } from "./client.js";
+import {
+	LlamaClient,
+	type LlamaModelInfo,
+	type LlamaServerProps,
+	llamaInferenceUrl,
+	normalizeLlamaServerUrl,
+} from "./client.js";
 
 export const LLAMA_PROVIDER_ID = "llama.cpp";
 export const DEFAULT_LLAMA_SERVER_URL = "http://127.0.0.1:8080";
@@ -43,16 +49,20 @@ async function routerAutoloadEnabled(
 	}
 }
 
-function toPiModel(model: LlamaModelInfo, serverUrl: string): Model<"openai-completions"> {
+function toPiModel(model: LlamaModelInfo, serverUrl: string, props?: LlamaServerProps): Model<"openai-completions"> {
 	const reportedContextWindow = model.meta?.n_ctx ?? model.meta?.n_ctx_train;
 	const contextWindow = reportedContextWindow && reportedContextWindow > 0 ? reportedContextWindow : 128000;
+	const reasoning = props?.chat_template?.includes("enable_thinking") === true;
 	return {
 		id: model.id,
 		name: model.id,
 		api: "openai-completions",
 		provider: LLAMA_PROVIDER_ID,
 		baseUrl: llamaInferenceUrl(serverUrl),
-		reasoning: false,
+		reasoning,
+		...(reasoning && {
+			thinkingLevelMap: { off: "off", minimal: null, low: null, medium: "medium", high: null, xhigh: null },
+		}),
 		input: model.architecture?.input_modalities?.includes("image") ? ["text", "image"] : ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow,
@@ -64,6 +74,7 @@ function toPiModel(model: LlamaModelInfo, serverUrl: string): Model<"openai-comp
 			supportsUsageInStreaming: true,
 			supportsStrictMode: false,
 			maxTokensField: "max_tokens",
+			...(reasoning && { thinkingFormat: "qwen-chat-template" }),
 		},
 	};
 }
@@ -165,7 +176,16 @@ export function createLlamaProvider(): LlamaProviderController {
 			if (context.signal.aborted) return;
 			const routerAutoload = await routerAutoloadEnabled(client, catalog, context.signal);
 			if (context.signal.aborted) return;
-			const refreshed = toCatalog(catalog, serverUrl, routerAutoload);
+			const refreshed = await Promise.all(
+				catalog
+					.filter((model) => modelIsSelectable(model, routerAutoload))
+					.map(async (model) => {
+						// Query only loaded models: sleeping and autoload presets must not be woken by discovery.
+						if (model.status.value !== "loaded") return toPiModel(model, serverUrl);
+						return toPiModel(model, serverUrl, await client.props({ model: model.id, signal: context.signal }));
+					}),
+			);
+			if (context.signal.aborted) return;
 			await context.publish({
 				persist: { models: refreshed, checkedAt: Date.now() },
 				update: () => {

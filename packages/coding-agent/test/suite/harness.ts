@@ -153,7 +153,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		getApiKey: () => (withConfiguredAuth ? "faux-key" : undefined),
 		initialState: {
 			model,
-			systemPrompt: options.systemPrompt ?? "You are a test assistant.",
+			systemPrompt: options.systemPrompt ?? "",
 			tools: [],
 		},
 		convertToLlm,

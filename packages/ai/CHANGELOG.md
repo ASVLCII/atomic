@@ -1,10 +1,21 @@
 # Changelog
 
-This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at the audited Pi `main` sync point (`6671c604766b3670ed95f405aa7856835d0ca702`) lives in [earendil-works/pi](https://github.com/earendil-works/pi/blob/6671c604766b3670ed95f405aa7856835d0ca702/packages/ai/CHANGELOG.md).
+This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at the audited Pi `main` sync point (`d1230ea2000d876b479a69b8b061f9d670f262f5`) lives in [earendil-works/pi](https://github.com/earendil-works/pi/blob/d1230ea2000d876b479a69b8b061f9d670f262f5/packages/ai/CHANGELOG.md).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Provider implementations and direct API modules now consume `TranscriptContext`; use `normalizeContext()` at direct-call boundaries and replay helpers to read prompt/tool state. Durable tool arguments and results use JSON-value types.
+
+### Added
+
+- Chronological system messages with named prompt patches and tool additions/removals, including native provider transitions where supported and replay checkpoints elsewhere.
+- A static Radius catalog with authenticated dynamic refresh, refreshed image models, and prompt-cache lifetime metadata for direct Anthropic models.
+
 ### Fixed
+
+- Derive Gemini thinking levels from model metadata, preserve renamed Anthropic/Vercel unsigned thinking replay and DeepSeek V4 effort, retry Cloudflare 520 and Azure peak-load errors, and scope bodyless overflow detection to Cerebras.
 
 - Request-auth preparation now times out after 15 seconds when OAuth refresh, credential-store reads, or auth derivation ignore cancellation, and late refresh results cannot overwrite stored credentials. The timeout diagnostic is source-neutral and does not instruct you to log in ([#3085](https://github.com/bastani-inc/atomic/issues/3085), [#3087](https://github.com/bastani-inc/atomic/pull/3087)).
 - Bedrock requests now honor explicit `maxRetries`, including zero for a single transport attempt, instead of silently using the AWS SDK retry default. Omitting the option preserves SDK/environment configuration ([#3089](https://github.com/bastani-inc/atomic/issues/3089), [#3090](https://github.com/bastani-inc/atomic/issues/3090)).

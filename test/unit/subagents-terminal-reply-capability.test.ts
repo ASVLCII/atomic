@@ -26,6 +26,9 @@ for (const outcome of ["completed", "failed", "interrupted", "cancelled"] as con
 			{
 				on: (name: string, handler: (event: never, ctx: ExtensionContext) => void) => {
 					handlers.set(name, handler);
+					return () => {
+						handlers.delete(name);
+					};
 				},
 			} as Pick<ExtensionAPI, "on">,
 			() => ({

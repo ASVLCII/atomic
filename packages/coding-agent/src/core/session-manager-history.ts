@@ -92,6 +92,7 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 		const details = (entry as CompactionEntry<{ strategy?: string }>).details;
 		if (details?.strategy === "verbatim-lines") {
 			return [
+				...(entry.systemMessage ? [entry.systemMessage] : []),
 				createVerbatimCompactionMessage(
 					entry.summary,
 					entry.tokensBefore,
@@ -201,6 +202,7 @@ export function buildSessionContext(
 	const keptTail = firstKeptIndex >= 0 ? serializeKeptTail(path.slice(firstKeptIndex, boundaryIndex)) : [];
 	const separator: TranscriptChunk[] =
 		keptTail.length > 0 && boundary.summary.length > 0 ? [{ type: "text", text: "\n\n" }] : [];
+	if (boundary.systemMessage) messages.push(boundary.systemMessage);
 	messages.push(
 		createVerbatimCompactionMessage(boundary.summary, boundary.tokensBefore, boundary.timestamp, boundary.details, [
 			...separator,

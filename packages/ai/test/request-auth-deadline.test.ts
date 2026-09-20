@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 import type { ApiKeyAuth, OAuthAuth, OAuthCredential, ProviderAuth } from "../src/auth/types.ts";
-import { createModels, type Provider, REQUEST_AUTH_PREPARATION_TIMEOUT_MS, requestAuthTimeoutMessage } from "../src/models.ts";
+import {
+	createModels,
+	type Provider,
+	REQUEST_AUTH_PREPARATION_TIMEOUT_MS,
+	requestAuthTimeoutMessage,
+} from "../src/models.ts";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions, StreamOptions } from "../src/types.ts";
 import { AssistantMessageEventStream } from "../src/utils/event-stream.ts";
 

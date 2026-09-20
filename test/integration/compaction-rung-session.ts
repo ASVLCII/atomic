@@ -34,16 +34,28 @@ export interface PlannerCall {
 	keepTarget: number | undefined;
 }
 
+function plannerUserPrompt(context: { messages: Array<{ role?: string; content: unknown }> }): string {
+	const user = context.messages.find((message) => message.role === "user") ?? context.messages.at(-1);
+	const content = user?.content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) =>
+			block && typeof block === "object" && "text" in block && typeof block.text === "string" ? block.text : "",
+		)
+		.join("");
+}
+
 /** Answer each planner request from a per-provider script; the last entry repeats. */
 export function plannerScript(script: Record<string, ScriptedTurn[]>): { streamFn: StreamFn; calls: PlannerCall[] } {
 	const calls: PlannerCall[] = [];
 	const cursors = new Map<string, number>();
 	const streamFn = ((
 		model: Model<Api>,
-		context: { messages: Array<{ content: Array<{ text?: string }> }> },
+		context: { messages: Array<{ role?: string; content: unknown }> },
 		options?: { reasoning?: ThinkingLevel },
 	) => {
-		const prompt = context.messages[0]?.content?.[0]?.text ?? "";
+		const prompt = plannerUserPrompt(context);
 		const numbered = prompt.match(/^\d+→/gm)?.length ?? 0;
 		const keepTarget = prompt.match(/^Target lines to keep: (\d+)$/m)?.[1];
 		calls.push({

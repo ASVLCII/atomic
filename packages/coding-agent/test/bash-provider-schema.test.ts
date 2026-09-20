@@ -13,7 +13,13 @@ test("Grok receives object-typed bash alternatives without weakening local valid
 	let captured = false;
 	const result = await stream(
 		{ ...getModel("xai", "grok-4.6"), baseUrl: "http://127.0.0.1:9" },
-		{ messages: [{ role: "user", content: "Run bash", timestamp: 0 }], tools: [tool] },
+		{
+			messages: [
+				{ role: "system", content: "", toolsAdded: [tool], timestamp: 0 },
+				{ role: "user", content: "Run bash", timestamp: 0 },
+			],
+			tools: [tool],
+		},
 		{
 			apiKey: "test-key",
 			onPayload(payload) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import type { Context, Model } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * Anthropic gates newer models on the `claude-cli/<version>` user agent alone. Sending a version
@@ -62,7 +63,7 @@ function sseResponse(): Response {
 /** Runs one request through the real SDK and returns the headers it actually put on the wire. */
 async function captureWireHeaders(apiKey: string): Promise<Headers> {
 	let captured: Headers | undefined;
-	const result = streamAnthropic(fableModel, context, {
+	const result = streamAnthropic(fableModel, normalizeContext(context), {
 		apiKey,
 		fetch: async (input, init) => {
 			captured = new Request(input, init).headers;

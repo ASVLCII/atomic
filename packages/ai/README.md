@@ -47,6 +47,7 @@ Unified LLM API with provider collections, automatic auth resolution, token and 
   - [OpenAI Compatibility Settings](#openai-compatibility-settings)
 - [Faux Provider for Tests](#faux-provider-for-tests)
 - [Cross-Provider Handoffs](#cross-provider-handoffs)
+- [System Messages](#system-messages)
 - [Context Serialization](#context-serialization)
 - [Browser Usage](#browser-usage)
 - [Bundling and Tree Shaking](#bundling-and-tree-shaking)
@@ -323,7 +324,7 @@ await models.refresh();                            // refresh all providers conc
 const fresh = models.getModel('llamacpp', 'qwen3-30b');
 ```
 
-Static built-in providers are no-ops for `refresh()`. See [createProvider()](#createprovider) for building a dynamic provider.
+Static built-in providers are no-ops for `refresh()`. Radius ships a public static catalog and overlays cached and freshly fetched `/v1/config` models when refreshed with configured API-key or OAuth auth (`RADIUS_API_KEY` for environment authentication). See [createProvider()](#createprovider) for building a dynamic provider.
 
 ## Auth
 
@@ -1149,12 +1150,13 @@ const ollamaReasoningModel: Model<'openai-completions'> = {
 
 ### Calling API Implementations Directly
 
-The API implementations are importable on their own. Each module exports exactly `stream` and `streamSimple` with that API's full option typing. Direct calls bypass provider auth — pass `apiKey` explicitly:
+The API implementations are importable on their own. Each module exports exactly `stream` and `streamSimple` with that API's full option typing. Direct calls bypass provider auth and context normalization — pass `apiKey` explicitly and wrap the context in `normalizeContext()`:
 
 ```typescript
+import { normalizeContext } from '@bastani/pi-ai';
 import { stream } from '@bastani/pi-ai/api/anthropic-messages';
 
-const s = stream(claudeModel, context, {
+const s = stream(claudeModel, normalizeContext(context), {
   apiKey: process.env.ANTHROPIC_API_KEY,
   thinkingEnabled: true,
   thinkingBudgetTokens: 2048,
@@ -1354,6 +1356,25 @@ const geminiResponse = await models.complete(gemini, context);
 ```
 
 All providers can handle messages from other providers — text, tool calls and results (including images), thinking blocks (transformed to tagged text), and aborted messages with partial content. This enables flexible workflows: start with a fast model, switch to a more capable one for complex reasoning, or maintain continuity across provider outages.
+
+## System Messages
+
+Public entry points (`Models.stream()`, `streamSimple()`, `complete()`, and `completeSimple()`) accept `Context`. They normalize `systemPrompt` and `tools` into a leading system message. Provider implementations, `ProviderStreams`, and direct API modules receive a `TranscriptContext` containing only `messages`.
+
+```typescript
+interface SystemMessage {
+  role: "system";
+  content: string | TextContent[];
+  sections?: Record<string, string | null>;
+  toolsAdded?: Tool[];
+  toolsRemoved?: ToolReference[];
+  timestamp: number;
+}
+```
+
+Later system messages append instructions, patch named sections (`null` removes a section), and add or remove tools. Section text is opaque and rendered verbatim, joined by blank lines. `getCurrentSystemPrompt(context.messages)` and `getCurrentTools(context.messages)` replay these changes for custom providers; do not read `context.systemPrompt` or `context.tools` inside provider implementations.
+
+Models with `supportsMidConvoSystemMessages` receive updates in place. Other models receive the replayed prompt and tools as a leading checkpoint. Anthropic's `supportsMidConvoToolChanges`, OpenAI Responses' `supportsAdditionalTools`/`supportsToolSearch`, and OpenAI Completions' `supportsMidConvoToolAdditions` enable native tool transitions where representable. Unsupported transitions fall back to the current top-level tool list and may invalidate the cached prefix.
 
 ## Context Serialization
 

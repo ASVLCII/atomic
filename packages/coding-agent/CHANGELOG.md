@@ -4,6 +4,8 @@
 
 ### Breaking Changes
 
+- Provider implementations now receive transcript-only contexts. Read instructions and tools with `getCurrentSystemPrompt(context.messages)` and `getCurrentTools(context.messages)`. Extension prompt options are mutable; return a forced system prompt only for an unrecorded, complete per-run replacement.
+
 - Intercom now respects tool allowlists and exclusions. `tools: []` and `noTools: "all"` expose no tools; `noTools: "all"` also overrides nonempty allowlists. Select `"intercom"` explicitly when using an allowlist. The builtin selection flags in `CreateAgentSessionOptions` can disable individual shipped packages and resources without reload restoring them ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Extension dialogs without human-input support now reject with `code: "HumanInputUnavailable"` instead of returning empty defaults. Check `ctx.hasHumanInput` for questions; `ctx.hasUI` remains a presentation capability. Pending dialogs are cancelled on adapter withdrawal, abort, reload and disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Headless workflow launches now return an accepted run identity instead of waiting for completion. Inspect workflow status for results. Required durable gates remain pending even when no human host was initially bound; absent UI is no longer inferred as an execution restriction. Explicit runtime policies remain enforced ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
@@ -17,6 +19,10 @@
 - Workflow duration estimates no longer accept the string value "unknown"; routers give their best estimate using the existing quarter-hour buckets or `>1d`.
 
 ### Added
+
+- System instructions and tool changes are recorded as chronological transcript messages, with structured prompt patches and replay across resume, branches, and verbatim compaction. Supported providers preserve the cached prefix for mid-conversation updates.
+
+- Optional prompt-cache warming (`streaming`, `idle`, or `off`) refreshes replayable caches before TTL expiry, with owner/session cancellation and a `/settings` control. Default mode is streaming; prompt-cache retention still defaults to long where the model supports it.
 
 - Added workflow dependency status, doctor and safe managed-cluster recovery through `/workflow dependency`, the workflow tool and `workflowDependency()`, reporting verified identity, actual port, runtime versions, consumers, retained latest failure and recovery guidance without resetting data ([#3074](https://github.com/bastani-inc/atomic/issues/3074)).
 - Session, Workflow, and Intercom UUID selectors accept unique 8-character hexadecimal prefixes while preserving exact custom IDs and visibility boundaries ([#2603](https://github.com/bastani-inc/atomic/issues/2603)).
@@ -35,6 +41,7 @@
 ### Changed
 
 - Install/update telemetry pings now go to the Atomic version-adoption endpoint instead of pi.dev. First-interactive-launch triggers, opt-outs, and the independent update check are unchanged ([#2498](https://github.com/bastani-inc/atomic/issues/2498)).
+- Pi runtime dependencies (`pi-agent-core`, `pi-client`, `pi-protocol`, `pi-tui`, `pi-telemetry`, and transitive `chord`) are pinned to 0.86.0. Workspace package versions remain `0.0.0`.
 - Automatic subagent and workflow-stage model selection no longer includes system prompts as agent metadata, reducing routing input. Execution prompts are unchanged; self-contained subagents still use their system prompt as the task when no task is supplied.
 - SDK session creation now includes shipped Atomic builtin extensions and resources, shares CLI defaults, and completes extension startup before returning. Supply startup host bindings through the extensionBindings option; rebinding no longer repeats startup. Failed startup rolls back the partial session, and missing shipped packages report `code: "BuiltinUnavailable"` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Main chat, workflow stages, and subagents now default to long prompt-cache retention where supported. Unset retention uses ordinary caching for OpenAI models without known extended-retention support, such as GPT-4o, and five-minute caching for older Bedrock Claude models, such as Claude 3.7. Explicit retention choices remain unchanged; use `PI_CACHE_RETENTION=short` to opt back into shorter caching. Anthropic one-hour cache writes cost more than five-minute writes, so savings depend on reuse.
@@ -43,6 +50,10 @@
 - Automatic subagent and workflow-stage model selection now uses bounded excerpts of long tasks, preserving their beginning, end and protected `<keepContext>` spans. Execution prompts and hard model constraints remain unchanged; oversized protected content retains the existing router fallback behavior.
 
 ### Fixed
+
+- Automatic compaction cancelled from a `compaction_start` listener now aborts the auto controller before `session_before_compact` or planner auth.
+- Anthropic thinking-drop notices are short, omit path details, and stay silent when the cumulative drop count is unchanged.
+- Isolated-engine prompts wait for the remote prompt RPC to settle, and stale kitty image conversions no longer replace a later tool result.
 
 - Reload now releases unpublished preparation acquisitions, drains failed candidate callbacks before shutdown, and retains self-reload command continuations through final disposal, including cleanup failures ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Reload now retains retiring-generation shutdown and invalidation when postcommit runtime reconstruction fails, preserving both setup and cleanup causes and keeping the candidate owned for disposal ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).

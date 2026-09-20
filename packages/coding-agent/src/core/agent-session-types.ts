@@ -157,6 +157,7 @@ export interface AgentSessionConfig {
 	resourceLoader: ResourceLoader;
 	customTools?: ToolDefinition[];
 	modelRuntime: ModelRuntime;
+	cacheWarmer?: import("./cache-warmer.ts").CacheWarmer;
 	childSessionOptions?: import("./child-session-options.ts").ChildSessionOptionsResolver;
 	initialActiveToolNames?: string[];
 	allowedToolNames?: string[];

@@ -1,3 +1,5 @@
+export { CACHE_WARMING_MODES, type CacheWarmingMode } from "./settings-types.ts";
+
 import "./settings-manager-basic-accessors.ts";
 import "./settings-manager-resource-accessors.ts";
 import "./settings-manager-ui-accessors.ts";

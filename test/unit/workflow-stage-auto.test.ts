@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAssistantMessageEventStream } from "@bastani/pi-ai";
+import { createAssistantMessageEventStream, getCurrentTools } from "@bastani/pi-ai";
 import { convertResponsesTools } from "@bastani/pi-ai/api/openai-responses-shared";
 import { Compile } from "typebox/compile";
 import { afterEach, test, vi } from "vitest";
@@ -137,7 +137,9 @@ test("public stage auto uses actual prompt and shipped model-selection guide bef
 	assert.equal(f.infer.mock.calls.length, 1);
 	assert.deepEqual(f.store.runs()[0]?.stages[0]?.routerSelection, { model: "decision-test/chat", effort: null });
 	assert.equal(f.store.runs()[0]?.stages[0]?.model, "decision-test/chat");
-	const state = JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state;
+	const state = JSON.parse(
+		f.infer.mock.calls[0]![1].messages.find((message) => message.role === "user")!.content as string,
+	).state;
 	assert.equal(state.task, "  Solve this actual task verbatim.  ");
 	assert.deepEqual(state.agent, { name: "not the task", description: "Workflow stage" });
 	assert.deepEqual(Object.keys(state).sort(), ["agent", "model_selection_guide", "task"]);
@@ -249,7 +251,9 @@ test("chain and parallel inherit auto and route expanded previous context", asyn
 	});
 	const result = await run(def, {}, f);
 	assert.equal(result.status, "completed", result.error);
-	const tasks = f.infer.mock.calls.map((call) => JSON.parse(call[1].messages[0]!.content as string).state.task);
+	const tasks = f.infer.mock.calls.map(
+		(call) => JSON.parse(call[1].messages.find((message) => message.role === "user")!.content as string).state.task,
+	);
 	assert.deepEqual(tasks.slice(0, 2), ["First task", "Use done"]);
 	assert.deepEqual(tasks.slice(2).sort(), ["Third task\n\n---\nContext:\nProvided context", "Fourth task"].sort());
 	assert.equal(f.admissions.length, 4);
@@ -407,7 +411,7 @@ test("stage decisions survive the actual strict Responses schema conversion", as
 		makeOpts({ adapters: f.adapters, models: f.models, stageOptions: { model: "auto" } }),
 	);
 	await ctx.prompt("Actual task");
-	const tool = f.infer.mock.calls[0]![1].tools![0]!;
+	const tool = getCurrentTools(f.infer.mock.calls[0]![1].messages)[0]!;
 	const converted = convertResponsesTools([tool], { strict: true })[0]!;
 	assert.equal(converted.type, "function");
 	if (converted.type !== "function") throw new Error("Expected function");
@@ -436,7 +440,9 @@ test("reasoning fallback preserves explicit and inherited efforts and immutable 
 		const fallback = { ...primary, id: "fallback" };
 		vi.spyOn(f.modelRegistry, "getAvailable").mockReturnValue([decisionModel, primary, fallback]);
 		f.infer.mockImplementation((_model, context) => {
-			const { questions } = JSON.parse(context.messages[0]!.content as string);
+			const { questions } = JSON.parse(
+				context.messages.find((message) => message.role === "user")!.content as string,
+			);
 			const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
 			const model = candidates.some((pair) => pair.model === "decision-test/primary")
 				? "decision-test/primary"
@@ -595,7 +601,8 @@ test("parallel failure cancels no-longer-needed sibling routing before any child
 	const failure = createAssistantMessageEventStream();
 	let siblingSignal: AbortSignal | undefined;
 	f.infer.mockImplementation((_model, context, options) => {
-		const task = JSON.parse(context.messages[0]!.content as string).state.task;
+		const task = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string).state
+			.task;
 		if (task === "Fail") return failure;
 		siblingSignal = options?.signal;
 		failure.push({ type: "done", reason: "toolUse", message: decisionMessage({ model: "missing", effort: null }) });
@@ -638,7 +645,8 @@ test("stage routing receives interpolated workflow inputs, not the template or s
 	});
 	assert.equal((await run(def, { objective: "literal objective" }, f)).status, "completed");
 	assert.equal(
-		JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state.task,
+		JSON.parse(f.infer.mock.calls[0]![1].messages.find((message) => message.role === "user")!.content as string).state
+			.task,
 		"Analyze literal objective with the supplied context.",
 	);
 });

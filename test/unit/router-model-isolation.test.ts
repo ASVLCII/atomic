@@ -22,8 +22,10 @@ import {
 	decisionModel,
 	decisionRequest,
 	decisionSchema,
+	inferenceRequestTools,
 	jevResponse,
 	messageStream,
+	parseInferenceUserPayload,
 	registeredDecisionRuntime,
 } from "../helpers/structured-output.js";
 
@@ -87,7 +89,7 @@ test("ordinary routing keeps the complete candidate set beyond Jev's Choice limi
 	}));
 	const criteria = Object.fromEntries(candidates.map((candidate) => [candidate.id, candidate.description]));
 	const dispatch = vi.fn((_model, context) => {
-		assert.deepEqual(JSON.parse(context.messages[0].content).state.candidates, candidates);
+		assert.deepEqual(parseInferenceUserPayload(context).state?.candidates, candidates);
 		return messageStream(decisionMessage({ route: "review" }));
 	});
 	const { registry } = await registeredDecisionRuntime(dispatch);
@@ -124,7 +126,7 @@ for (const routerModel of ["typesafe-ai/jev-latest", "auto"]) {
 		const dispatch = vi.fn((model, context) => {
 			assert.equal(model.id, decisionModel.id);
 			assert.equal(model.provider, decisionModel.provider);
-			assert.ok(context.tools.some((tool: { name: string }) => tool.name === "structured_output"));
+			assert.ok(inferenceRequestTools(context).some((tool) => tool.name === "structured_output"));
 			return messageStream(decisionMessage({ route: "review" }));
 		});
 		const { runtime } = await registeredDecisionRuntime(dispatch);

@@ -1,3 +1,4 @@
+import { normalizeContext } from "@bastani/pi-ai";
 /**
  * Session summarization for the resume picker.
  *
@@ -101,7 +102,7 @@ export async function generateSessionSummary(
 
 	// Call LLM for summarization. Prefer the session stream function so SDK
 	// request behavior stays consistent without mutating agent state.
-	const context = { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages };
+	const context = normalizeContext({ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages });
 	const requestModel = baseUrl === undefined || baseUrl === model.baseUrl ? model : { ...model, baseUrl };
 	// No reasoning is requested. One sentence gains nothing from thinking tokens, and this
 	// request runs after every idle turn.

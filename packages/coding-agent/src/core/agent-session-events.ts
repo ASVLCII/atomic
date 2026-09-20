@@ -114,7 +114,7 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 }
 
 export function _createRetryPromiseForAgentEnd(this: AgentSession, event: AgentEvent): void {
-	if (event.type !== "agent_end" || this._retryPromise) {
+	if (event.type !== "agent_end" || this._retryPromise || this._agentRunAbortRequested) {
 		return;
 	}
 
@@ -211,6 +211,7 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 				);
 			}
 		} else if (
+			event.message.role === "system" ||
 			event.message.role === "user" ||
 			event.message.role === "assistant" ||
 			event.message.role === "toolResult"
@@ -272,6 +273,10 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 	if (event.type === "agent_end" && this._lastAssistantMessage) {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
+		if (this._agentRunAbortRequested) {
+			this._resolveRetry();
+			return;
+		}
 		const postToolPreflightFailed =
 			this._postToolCompactionPreflightError !== undefined &&
 			msg.errorMessage === this._postToolCompactionPreflightError;
@@ -307,10 +312,12 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			if (didRetry) return; // Retry was initiated, don't proceed to compaction
 			settleAfterTurn = true;
 		}
+		if (this._agentRunAbortRequested) return;
 
 		this._resolveRetry();
 		this._contextOverflowUnresolved = false;
 		await this._checkCompaction(msg);
+		if (this._agentRunAbortRequested) return;
 
 		// Compaction owns context overflow first. Only once it is disabled, fails,
 		// or reports the overflow unresolved may the chain spend a candidate on a
@@ -548,6 +555,7 @@ export function closeAgentSession(
 	});
 	const retired = { promise: retirement, resolve: resolveRetired, reject: rejectRetired };
 	session._disposed = true;
+	session._cacheWarmer?.cancel();
 	const closing = Promise.resolve().then(async () => {
 		const errors: Error[] = [];
 		const attempt = async (component: string, cleanup: () => void | Promise<void>) => {

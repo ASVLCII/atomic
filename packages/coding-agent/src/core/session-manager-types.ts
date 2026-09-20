@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent, Usage } from "@bastani/pi-ai/compat";
+import type { ImageContent, SystemMessage, TextContent, Usage } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionManager } from "./session-manager-core.ts";
 
@@ -60,6 +60,15 @@ export interface ModelChangeEntry extends SessionEntryBase {
 	modelId: string;
 }
 
+export interface UsageEntry extends SessionEntryBase {
+	type: "usage";
+	kind: string;
+	provider: string;
+	model: string;
+	usage: Usage;
+	note?: string;
+}
+
 /** Durable compaction boundary. Active entries carry `details.strategy === "verbatim-lines"`. */
 export interface CompactionEntry<T = unknown> extends SessionEntryBase {
 	type: "compaction";
@@ -72,6 +81,8 @@ export interface CompactionEntry<T = unknown> extends SessionEntryBase {
 	usage?: Usage;
 	/** True when the compacted text was supplied by an extension hook. */
 	fromHook?: boolean;
+	/** Replayed system instructions and tool state at this boundary. */
+	systemMessage?: SystemMessage;
 }
 
 /** @deprecated Legacy archival statistics; never produced or applied. */
@@ -199,6 +210,7 @@ export type SessionEntry =
 	| SessionMessageEntry
 	| ThinkingLevelChangeEntry
 	| ModelChangeEntry
+	| UsageEntry
 	| CompactionEntry
 	| ContextCompactionEntry
 	| BranchSummaryEntry
@@ -256,7 +268,7 @@ export interface SessionInfo {
 	messageColor?: "success" | "warning" | "accent" | "error";
 }
 
-export type SessionListProgress = (loaded: number, total: number) => void;
+export type SessionListProgress = (loaded: number, total: number, partialSessions?: readonly SessionInfo[]) => void;
 
 export type ReadonlySessionManager = Pick<
 	SessionManager,

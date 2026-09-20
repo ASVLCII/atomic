@@ -1,4 +1,5 @@
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
+import { buildSystemPrompt } from "./system-prompt.ts";
 
 export function installAgentSessionAccessors(prototype: AgentSession): void {
 	Object.defineProperties(prototype, {
@@ -34,7 +35,7 @@ export function installAgentSessionAccessors(prototype: AgentSession): void {
 		},
 		systemPrompt: {
 			get() {
-				return this.agent.state.systemPrompt;
+				return buildSystemPrompt(this._runSystemPromptOptions ?? this._baseSystemPromptOptions);
 			},
 		},
 		retryAttempt: {

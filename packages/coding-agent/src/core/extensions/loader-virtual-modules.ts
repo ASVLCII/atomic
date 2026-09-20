@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { createJiti } from "jiti/static";
+import type { createJiti } from "jiti";
 import { getExtensionTranspileCacheDir, isBunBinary, isBundledBuild } from "../../config.js";
 import { resolutionBaseUrl } from "../../utils/module-require.ts";
 import { resolvePath } from "../../utils/paths.ts";
@@ -18,6 +18,14 @@ export { getVirtualModules } from "./loader-host-modules.js";
 const require = createRequire(import.meta.url);
 let _aliases: Record<string, string> | null = null;
 let _transpileCacheDir: string | null = null;
+let createJitiPromise: Promise<typeof createJiti> | undefined;
+
+function getCreateJiti(): Promise<typeof createJiti> {
+	createJitiPromise ??= (
+		isBunBinary || isBundledBuild ? import("./jiti-static-loader.ts") : import("./jiti-loader.ts")
+	).then((module) => module.createJiti);
+	return createJitiPromise;
+}
 
 /**
  * Persistent on-disk cache for jiti-transpiled extension modules.
@@ -480,7 +488,8 @@ async function importExtensionModule(
 ): Promise<ExtensionFactory | undefined> {
 	const isWindows = process.platform === "win32";
 	const isSingleFileBuild = isBunBinary || isBundledBuild;
-	const jiti = createJiti(resolutionBaseUrl(import.meta.url), {
+	const createJitiImpl = await getCreateJiti();
+	const jiti = createJitiImpl(resolutionBaseUrl(import.meta.url), {
 		moduleCache: false,
 		...(forceTransformedImports
 			? { fsCache: getTranspileCacheDir(), tryNative: false }

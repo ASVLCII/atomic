@@ -1,3 +1,6 @@
+export const CACHE_WARMING_MODES = ["off", "streaming", "idle"] as const;
+export type CacheWarmingMode = (typeof CACHE_WARMING_MODES)[number];
+
 import type { Transport } from "@bastani/pi-ai/compat";
 import type { ScrollViewScrollbar } from "@earendil-works/pi-tui";
 
@@ -164,6 +167,7 @@ export interface Settings {
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY; global setting only
 	httpIdleTimeoutMs?: number | string; // HTTP idle timeout; 0 or "disabled" disables it
+	cacheWarming?: CacheWarmingMode; // Global only; each refresh costs money. Default: streaming.
 	websocketConnectTimeoutMs?: number | string; // WebSocket connect timeout; 0 or "disabled" disables it
 	streamDeadlineMs?: number | string; // Max idle gap between provider stream events; 0 or "disabled" disables it
 }

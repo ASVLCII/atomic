@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import { access as fsAccess, stat as fsStat } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
@@ -235,7 +236,8 @@ export function createLocalBashOperations(options?: {
 				if (timedOut) {
 					throw new Error(`timeout:${timeout}`);
 				}
-				return { exitCode };
+				const signalCode = child.signalCode;
+				return { exitCode: exitCode ?? (signalCode ? 128 + (osConstants.signals[signalCode] ?? 0) : 1) };
 			} finally {
 				if (child.pid) untrackDetachedChildPid(child.pid);
 				if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -342,13 +344,13 @@ class BashResultRenderComponent extends Container {
 	};
 }
 function formatDuration(ms: number): string {
-	const totalSeconds = Math.floor(Math.max(0, ms) / 1000);
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-	if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-	if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-	return `${seconds}s`;
+	const seconds = Math.max(0, ms) / 1000;
+	if (seconds < 60) return `${seconds.toFixed(1)}s`;
+	const totalSeconds = Math.floor(seconds);
+	const minutes = Math.floor(totalSeconds / 60);
+	const remainder = totalSeconds % 60;
+	if (minutes < 60) return `${minutes}m ${remainder}s`;
+	return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${remainder}s`;
 }
 function formatBashCall(
 	args: { command?: string; timeout?: number; action?: string; id?: string } | undefined,
@@ -712,7 +714,10 @@ export function createBashToolDefinition(
 						],
 						details: { ...withTiming(details), observation },
 					};
-				if (exitCode !== 0 && exitCode !== null) {
+				if (exitCode === null) {
+					throw new Error(appendStatus(outputText, "Command terminated without an exit code"));
+				}
+				if (exitCode !== 0) {
 					return {
 						content: [{ type: "text", text: appendStatus(outputText, `Command exited with code ${exitCode}`) }],
 						details: { ...withTiming(details), exitCode },

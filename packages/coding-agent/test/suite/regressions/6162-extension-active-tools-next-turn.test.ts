@@ -1,4 +1,4 @@
-import { fauxAssistantMessage, fauxToolCall } from "@bastani/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools } from "@bastani/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExtensionFactory } from "../../../src/index.ts";
@@ -52,11 +52,19 @@ describe("regression #6162: extension active tools next-turn refresh", () => {
 		const providerToolNames: string[][] = [];
 		harness.setResponses([
 			(context) => {
-				providerToolNames.push((context.tools ?? []).map((tool) => tool.name).sort());
+				providerToolNames.push(
+					getCurrentTools(context.messages)
+						.map((tool) => tool.name)
+						.sort(),
+				);
 				return fauxAssistantMessage(fauxToolCall("switch_tools", {}), { stopReason: "toolUse" });
 			},
 			(context) => {
-				providerToolNames.push((context.tools ?? []).map((tool) => tool.name).sort());
+				providerToolNames.push(
+					getCurrentTools(context.messages)
+						.map((tool) => tool.name)
+						.sort(),
+				);
 				return fauxAssistantMessage("done");
 			},
 		]);
@@ -113,13 +121,21 @@ describe("regression #6162: extension active tools next-turn refresh", () => {
 		const providerToolNames: string[][] = [];
 		harness.setResponses([
 			(context) => {
-				providerSystemPrompts.push(context.systemPrompt ?? "");
-				providerToolNames.push((context.tools ?? []).map((tool) => tool.name).sort());
+				providerSystemPrompts.push(getCurrentSystemPrompt(context.messages));
+				providerToolNames.push(
+					getCurrentTools(context.messages)
+						.map((tool) => tool.name)
+						.sort(),
+				);
 				return fauxAssistantMessage(fauxToolCall("switch_tools", {}), { stopReason: "toolUse" });
 			},
 			(context) => {
-				providerSystemPrompts.push(context.systemPrompt ?? "");
-				providerToolNames.push((context.tools ?? []).map((tool) => tool.name).sort());
+				providerSystemPrompts.push(getCurrentSystemPrompt(context.messages));
+				providerToolNames.push(
+					getCurrentTools(context.messages)
+						.map((tool) => tool.name)
+						.sort(),
+				);
 				return fauxAssistantMessage("done");
 			},
 		]);

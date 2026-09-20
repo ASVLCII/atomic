@@ -4,6 +4,7 @@ import { convertMessages } from "../src/api/openai-completions.ts";
 import { getModel, streamSimple } from "../src/compat.ts";
 import type { Api, AssistantMessage, Context, Model, Tool, ToolResultMessage, UserMessage } from "../src/types.ts";
 import { estimateContextTokens } from "../src/utils/estimate.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 interface AnthropicToolPayload {
 	name: string;
@@ -16,6 +17,7 @@ interface AnthropicContentBlock {
 	text?: string;
 	tool_use_id?: string;
 	content?: string | Array<{ type: string; tool_name?: string }>;
+	tool?: { type: string; name: string };
 	source?: {
 		type: string;
 		media_type: string;
@@ -112,22 +114,28 @@ function makeAssistantToolCall(): AssistantMessage {
 	};
 }
 
-function makeToolResult(addedToolNames: string[]): ToolResultMessage {
+function makeToolResult(_addedToolNames: string[]): ToolResultMessage {
 	return {
 		role: "toolResult",
 		toolCallId: "call_1",
 		toolName: "base_tool",
 		content: [{ type: "text", text: "done" }],
-		addedToolNames,
 		isError: false,
 		timestamp: 3,
 	};
 }
 
 function makeContext(tools: Tool[], addedToolNames = ["late_tool"]): Context {
+	const added = tools.filter((tool) => addedToolNames.some((name) => name.toLowerCase() === tool.name.toLowerCase()));
 	return {
-		messages: [makeUserMessage(1), makeAssistantToolCall(), makeToolResult(addedToolNames), makeUserMessage(4)],
-		tools,
+		messages: [
+			makeUserMessage(1),
+			makeAssistantToolCall(),
+			makeToolResult([]),
+			{ role: "system", content: "", toolsAdded: added, timestamp: 3 },
+			makeUserMessage(4),
+		],
+		tools: tools.filter((tool) => !added.includes(tool)),
 	};
 }
 
@@ -143,7 +151,9 @@ function makeKimiModel(deferredToolsMode?: "kimi"): Model<"openai-completions"> 
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 128000,
 		maxTokens: 4096,
-		compat: deferredToolsMode ? { deferredToolsMode } : undefined,
+		compat: deferredToolsMode
+			? { supportsMidConvoSystemMessages: true, supportsMidConvoToolAdditions: true }
+			: undefined,
 	};
 }
 
@@ -176,6 +186,19 @@ function findAnthropicToolResult(payload: AnthropicPayload): AnthropicContentBlo
 	return result;
 }
 
+function nativeAnthropic(): Model<"anthropic-messages"> {
+	return {
+		...getModel("anthropic", "claude-fable-5-1"),
+		compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true },
+	};
+}
+
+function toolAdditions(payload: AnthropicPayload): AnthropicContentBlock[] {
+	return payload.messages
+		.flatMap((message) => (typeof message.content === "string" ? [] : message.content))
+		.filter((block) => block.type === "tool_addition");
+}
+
 function openAIToolNames(payload: OpenAIPayload): string[] {
 	return (payload.tools ?? []).map((tool) => tool.name ?? tool.function?.name ?? "");
 }
@@ -185,15 +208,25 @@ function makeCodexToken(): string {
 }
 
 describe("deferred tools", () => {
-	it("loads an Anthropic tool at its tool-result marker", async () => {
+	it("loads an Anthropic tool at its transcript declaration", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
+		const payload = await capturePayload<AnthropicPayload>(nativeAnthropic(), context);
 
-		expect(payload.tools).toMatchObject([{ name: "base_tool" }, { name: "late_tool", defer_loading: true }]);
-		expect(findAnthropicToolResult(payload).content).toEqual([{ type: "tool_reference", tool_name: "late_tool" }]);
+		expect(payload.tools).toMatchObject([
+			{ name: "base_tool" },
+			{ name: "__pi_deferred_placeholder__", defer_loading: true },
+			{ name: "late_tool", defer_loading: true },
+		]);
+		expect(toolAdditions(payload)).toEqual([
+			{
+				type: "tool_addition",
+				tool: { type: "tool_reference", name: "late_tool" },
+				cache_control: { type: "ephemeral" },
+			},
+		]);
 	});
 
-	it("preserves tool output as sibling content after emitting references", async () => {
+	it("preserves tool output and images when declaring tools after a result batch", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
 		const assistant = context.messages[1] as AssistantMessage;
 		assistant.content = [
@@ -211,20 +244,18 @@ describe("deferred tools", () => {
 			content: [{ type: "text", text: "second result" }],
 		});
 
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
+		const payload = await capturePayload<AnthropicPayload>(nativeAnthropic(), context);
 
 		expect(findAnthropicToolResultContent(payload)).toMatchObject([
 			{
 				type: "tool_result",
 				tool_use_id: "call_1",
-				content: [{ type: "tool_reference", tool_name: "late_tool" }],
+				content: [
+					{ type: "text", text: "work completed" },
+					{ type: "image", source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" } },
+				],
 			},
 			{ type: "tool_result", tool_use_id: "call_2", content: "second result" },
-			{ type: "text", text: "work completed" },
-			{
-				type: "image",
-				source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
-			},
 		]);
 	});
 
@@ -235,13 +266,23 @@ describe("deferred tools", () => {
 		assistant.provider = "openai";
 		assistant.model = "gpt-5.4";
 
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-8"), context);
+		const payload = await capturePayload<AnthropicPayload>(nativeAnthropic(), context);
 
-		expect(payload.tools).toMatchObject([{ name: "base_tool" }, { name: "late_tool", defer_loading: true }]);
-		expect(findAnthropicToolResult(payload).content).toEqual([{ type: "tool_reference", tool_name: "late_tool" }]);
+		expect(payload.tools).toMatchObject([
+			{ name: "base_tool" },
+			{ name: "__pi_deferred_placeholder__", defer_loading: true },
+			{ name: "late_tool", defer_loading: true },
+		]);
+		expect(toolAdditions(payload)).toEqual([
+			{
+				type: "tool_addition",
+				tool: { type: "tool_reference", name: "late_tool" },
+				cache_control: { type: "ephemeral" },
+			},
+		]);
 	});
 
-	it("does not resurrect a marked tool missing from Context.tools", async () => {
+	it("does not invent definitions for unavailable tools", async () => {
 		const context = makeContext([makeTool("base_tool")]);
 		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
 
@@ -250,7 +291,7 @@ describe("deferred tools", () => {
 		expect(Array.isArray(content) && content.some((block) => block.type === "tool_reference")).toBe(false);
 	});
 
-	it("keeps a tool immediate when it was used before its marker", async () => {
+	it("keeps tools available after collapsing history for non-native models", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
 		const assistant = context.messages[1] as AssistantMessage;
 		assistant.content = [{ type: "toolCall", id: "call_1", name: "late_tool", arguments: {} }];
@@ -276,20 +317,22 @@ describe("deferred tools", () => {
 		expect(Array.isArray(content) && content.some((block) => block.type === "tool_reference")).toBe(false);
 	});
 
-	it("matches OAuth-canonicalized markers to active tools", async () => {
+	it("canonicalizes OAuth names in transcript tool additions", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("read")], ["Read"]);
-		const payload = await capturePayload<AnthropicPayload>(
-			getModel("anthropic", "claude-opus-4-6"),
-			context,
-			"sk-ant-oat-fake",
-		);
+		const payload = await capturePayload<AnthropicPayload>(nativeAnthropic(), context, "sk-ant-oat-fake");
 
-		expect(payload.tools).toMatchObject([{ name: "base_tool" }, { name: "Read", defer_loading: true }]);
-		const content = findAnthropicToolResult(payload).content;
-		expect(
-			Array.isArray(content) &&
-				content.some((block) => block.type === "tool_reference" && block.tool_name === "Read"),
-		).toBe(true);
+		expect(payload.tools).toMatchObject([
+			{ name: "base_tool" },
+			{ name: "__pi_deferred_placeholder__", defer_loading: true },
+			{ name: "Read", defer_loading: true },
+		]);
+		expect(toolAdditions(payload)).toEqual([
+			{
+				type: "tool_addition",
+				tool: { type: "tool_reference", name: "Read" },
+				cache_control: { type: "ephemeral" },
+			},
+		]);
 	});
 
 	it("deduplicates active tools after OAuth canonicalization", async () => {
@@ -334,7 +377,7 @@ describe("deferred tools", () => {
 		const model: Model<"anthropic-messages"> = {
 			...getModel("anthropic", "claude-opus-4-6"),
 			provider: "anthropic-proxy",
-			compat: { supportsToolReferences: true },
+			compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true },
 		};
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
 		const payload = await capturePayload<AnthropicPayload>(model, context);
@@ -360,11 +403,22 @@ describe("deferred tools", () => {
 			...makeToolResult(["later_tool"]),
 			toolCallId: "call_2",
 		});
+		context.messages.splice(4, 0, {
+			role: "system",
+			content: "",
+			toolsAdded: [makeTool("later_tool")],
+			timestamp: 3,
+		});
+		context.tools = [makeTool("base_tool")];
 
-		const messages = convertMessages(makeKimiModel("kimi"), context, {
+		const messages = convertMessages(makeKimiModel("kimi"), normalizeContext(context), {
 			supportsStore: false,
 			supportsDeveloperRole: false,
 			supportsReasoningEffort: false,
+			supportsTemperature: true,
+			supportsForcedToolChoice: true,
+			supportsThinkingTokenBudget: false,
+			thinkingTokenBudgetField: undefined,
 			supportsUsageInStreaming: true,
 			supportsFinishReason: true,
 			maxTokensField: "max_tokens",
@@ -382,16 +436,26 @@ describe("deferred tools", () => {
 			supportsOpenAIGrammarTools: false,
 			cacheControlFormat: undefined,
 			sendSessionAffinityHeaders: false,
-			deferredToolsMode: "kimi",
+			supportsMidConvoSystemMessages: true,
+			supportsMidConvoToolAdditions: true,
 			sessionAffinityFormat: "openai",
 			supportsLongCacheRetention: false,
 		});
 
-		expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool", "system", "user"]);
-		expect((messages[4] as { tools?: KimiTool[] }).tools?.map((tool) => tool.function.name)).toEqual([
-			"late_tool",
-			"later_tool",
+		expect(messages.map((message) => message.role)).toEqual([
+			"user",
+			"assistant",
+			"tool",
+			"tool",
+			"system",
+			"system",
+			"user",
 		]);
+		expect(
+			messages.flatMap(
+				(message) => (message as { tools?: KimiTool[] }).tools?.map((tool) => tool.function.name) ?? [],
+			),
+		).toEqual(["later_tool", "late_tool"]);
 	});
 
 	it("leaves OpenAI Completions tools unchanged without Kimi mode", async () => {
@@ -426,7 +490,7 @@ describe("deferred tools", () => {
 			provider: "openai",
 			model: "gpt-5.4",
 		};
-		context.messages.splice(3, 0, lateCall, {
+		context.messages.splice(4, 0, lateCall, {
 			...makeToolResult(["late_tool"]),
 			toolCallId: "call_late|fc_late",
 			toolName: "late_tool",
@@ -449,7 +513,7 @@ describe("deferred tools", () => {
 		const model: Model<"openai-responses"> = {
 			...getModel("openai", "gpt-5.4"),
 			provider: "openai-proxy",
-			compat: { supportsAdditionalTools: false, supportsToolSearch: true },
+			compat: { supportsMidConvoSystemMessages: true, supportsAdditionalTools: false, supportsToolSearch: true },
 		};
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
 		const payload = await capturePayload<OpenAIPayload>(model, context);
@@ -537,12 +601,17 @@ describe("deferred tools", () => {
 			},
 			stopReason: "stop",
 		};
-		const plain = estimateContextTokens({ messages: [assistant, makeUserMessage(4)], tools: [] });
+		const plain = estimateContextTokens(normalizeContext({ messages: [assistant, makeUserMessage(4)], tools: [] }));
 		const lateTool = { ...makeTool("late_tool"), description: "x".repeat(4000) };
-		const marked = estimateContextTokens({
-			messages: [assistant, makeToolResult(["late_tool"])],
-			tools: [lateTool],
-		});
+		const marked = estimateContextTokens(
+			normalizeContext({
+				messages: [
+					assistant,
+					makeToolResult([]),
+					{ role: "system", content: "", toolsAdded: [lateTool], timestamp: 3 },
+				],
+			}),
+		);
 
 		expect(marked.tokens).toBeGreaterThan(plain.tokens + 500);
 		expect(marked.trailingTokens).toBeGreaterThan(plain.trailingTokens + 500);

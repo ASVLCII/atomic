@@ -250,6 +250,15 @@ const proseNames = new Set([
 	"max",
 	"fast",
 	"medium",
+	// Prompt-cache warming modes in settings, not package-root exports.
+	"streaming",
+	"idle",
+	"off",
+	// Transitive pi runtime package name, not a package-root export.
+	"chord",
+	// Extension event names, not package-root exports.
+	"compaction_start",
+	"session_before_compact",
 	"enabledModels",
 	"buildBaseOptions",
 	"supportsMidConvoEffort",

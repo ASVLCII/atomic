@@ -53,7 +53,7 @@ import type { ModelRuntime } from "./model-runtime.js";
 import type { ResourceLoader } from "./resource-loader.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
-import type { BuildSystemPromptOptions } from "./system-prompt.ts";
+import type { NormalizedBuildSystemPromptOptions } from "./system-prompt.ts";
 import { scheduleSessionTempCleanup } from "./tools/session-temp-cleanup.ts";
 import { acquireProtectedPaths, type ProtectedPathLease, setActiveSessionTempId } from "./tools/session-temp-dir.ts";
 import { TOOL_RESULTS_SUBDIR } from "./tools/tool-limits.js";
@@ -117,6 +117,7 @@ class AgentSessionBase {
 	/** Priority input cancels the native operation, not the host-owned task. */
 	protected _priorityInterruptPending = false;
 	protected _activePromptCount = 0;
+	protected _agentRunAbortRequested = false;
 	protected _pendingNextTurnMessages: CustomMessage[] = [];
 	/** Context-only custom messages queued during a run, flushed after the current turn's tool results. */
 	protected _pendingCustomMessages: CustomMessage[] = [];
@@ -188,10 +189,9 @@ class AgentSessionBase {
 	protected _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	protected _toolPromptSnippets: Map<string, string> = new Map();
 	protected _toolPromptGuidelines: Map<string, string[]> = new Map();
-	protected _baseSystemPrompt = "";
-	protected _baseSystemPromptOptions!: BuildSystemPromptOptions;
+	protected _baseSystemPromptOptions!: NormalizedBuildSystemPromptOptions;
 	protected _systemPromptTransform?: (prompt: string) => string;
-	protected _systemPromptOverride?: string;
+	protected _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
 	protected _lastAssistantMessage: AssistantMessage | undefined = undefined;
 	/** Protection claim on this session's temp tree and tool-results directory. */
 	protected _tempStorageLease: ProtectedPathLease | undefined;
@@ -200,6 +200,15 @@ class AgentSessionBase {
 	protected _agentTaskHost: import("./tasks/agent-adapter.js").AgentTaskHost | undefined;
 	protected _taskCompletionOutbox: import("./tasks/completion.js").TaskCompletionOutbox | undefined;
 	protected _taskAdmission: WorkflowStageAdmissionBoundary | undefined;
+	protected _cacheWarmer?: import("./cache-warmer.ts").CacheWarmer;
+	get cacheWarmingStatus(): import("./cache-warmer.ts").CacheWarmingStatus | undefined {
+		return this._cacheWarmer?.status;
+	}
+	setCacheWarmingMode(mode: import("./settings-manager.ts").CacheWarmingMode): void {
+		this.settingsManager.setCacheWarmingMode(mode);
+		this._cacheWarmer?.onModeChanged();
+	}
+
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
@@ -211,6 +220,13 @@ class AgentSessionBase {
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
 		this._modelRuntime = config.modelRuntime;
+		this._cacheWarmer = config.cacheWarmer;
+		if (this._cacheWarmer)
+			this._cacheWarmer.onWarmed = (entry) =>
+				(this as unknown as import("./agent-session-methods.ts").AgentSessionInternalSurface)._emit({
+					type: "entry_appended",
+					entry,
+				});
 		this._extensionProviderIds = new Set(config.resourceLoader.getExtensions().runtime.extensionProviderIds);
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -304,6 +320,7 @@ class AgentSessionBase {
 				activeToolNames: this._initialActiveToolNames,
 				includeAllExtensionTools: true,
 			});
+			if (this._initialActiveToolNames === undefined) internals._restoreToolsFromTranscript();
 			if (this._workflowStageAdmission?.hasAgentTaskHost()) internals.getAgentTaskHost();
 		} catch (error) {
 			// No session escapes a failed constructor to release these acquisitions later.

@@ -72,6 +72,11 @@ test("binary payloads stage the runtime-relative modifier loader and Windows nat
 		),
 	);
 	assert.ok(
+		manifest.scripts["copy-binary-assets"]?.includes(
+			"../../node_modules/@earendil-works/pi-tui/dist/native-platform.js dist/",
+		),
+	);
+	assert.ok(
 		releaseBuild.includes(
 			'cp "$runtime_deps_dir/@earendil-works/pi-tui/dist/native-modifiers.js" "$shared_app_dir/native-modifiers.js"',
 		),
@@ -81,11 +86,17 @@ test("binary payloads stage the runtime-relative modifier loader and Windows nat
 			'cp "$runtime_deps_dir/@earendil-works/pi-tui/dist/native-module-path.js" "$shared_app_dir/native-module-path.js"',
 		),
 	);
-	assert.ok(releaseBuild.includes('cp "$shared_app_dir/native-modifiers.js" "binaries/$platform/"'));
-	assert.ok(releaseBuild.includes('cp "$shared_app_dir/native-module-path.js" "binaries/$platform/"'));
 	assert.ok(
 		releaseBuild.includes(
-			'console_src="../../node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-$console_arch/win32-console-mode.node"',
+			'cp "$runtime_deps_dir/@earendil-works/pi-tui/dist/native-platform.js" "$shared_app_dir/native-platform.js"',
+		),
+	);
+	assert.ok(releaseBuild.includes('cp "$shared_app_dir/native-modifiers.js" "binaries/$platform/"'));
+	assert.ok(releaseBuild.includes('cp "$shared_app_dir/native-module-path.js" "binaries/$platform/"'));
+	assert.ok(releaseBuild.includes('cp "$shared_app_dir/native-platform.js" "binaries/$platform/"'));
+	assert.ok(
+		releaseBuild.includes(
+			'console_src="../../node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-$console_arch/win32-platform.node"',
 		),
 	);
 	assert.ok(releaseBuild.includes('cp "$console_src" "$console_dst/"'));
@@ -141,6 +152,10 @@ test(
 			copyFileSync(
 				join(root, "node_modules/@earendil-works/pi-tui/dist/native-module-path.js"),
 				join(runtimeDir, "native-module-path.js"),
+			);
+			copyFileSync(
+				join(root, "node_modules/@earendil-works/pi-tui/dist/native-platform.js"),
+				join(runtimeDir, "native-platform.js"),
 			);
 
 			const launcherBuild = spawnSyncCollect(

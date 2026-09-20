@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getCurrentTools } from "@bastani/pi-ai";
 import { test, vi } from "vitest";
 import {
 	createAgentSession,
@@ -1145,7 +1146,7 @@ test.each([false, true])(
 			models: [model, fallbackModel],
 			streamSimple: (requestModel, context) => {
 				requestedModels.push(requestModel.id);
-				observed.push((context.tools ?? []).map((tool) => tool.name));
+				observed.push(getCurrentTools(context.messages).map((tool) => tool.name));
 				const stream = createAssistantMessageEventStream();
 				const message = {
 					role: "assistant" as const,

@@ -12,6 +12,7 @@ import { settingsWriteOwner } from "./settings-write-ownership.ts";
 export async function _getRequiredRequestAuth(
 	this: AgentSession,
 	model: Model<Api>,
+	signal?: AbortSignal,
 ): Promise<{
 	apiKey?: string;
 	headers?: ProviderHeaders;
@@ -20,7 +21,7 @@ export async function _getRequiredRequestAuth(
 }> {
 	let result: Awaited<ReturnType<AgentSession["_modelRuntime"]["getRequestAuth"]>>;
 	try {
-		result = await this._modelRuntime.getRequestAuth(model);
+		result = await this._modelRuntime.getRequestAuth(model, { signal });
 	} catch (error) {
 		const cause = error instanceof Error ? error.cause : undefined;
 		if (cause instanceof Error && cause.message === "authHeader requires a resolved API key") {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { getModel, getModels, getProviders } from "../src/compat.ts";
 import type { Api, Context, Model } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * Catalog regressions for Claude Fable 5.1.
@@ -30,7 +31,7 @@ async function capturePayload(model: Model<"anthropic-messages">): Promise<Anthr
 	let capturedPayload: AnthropicFallbackPayload | undefined;
 	const context: Context = { messages: [{ role: "user", content: "Hello", timestamp: Date.now() }] };
 
-	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, context, {
+	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, normalizeContext(context), {
 		apiKey: "fake-key",
 		onPayload: (payload) => {
 			capturedPayload = payload as AnthropicFallbackPayload;

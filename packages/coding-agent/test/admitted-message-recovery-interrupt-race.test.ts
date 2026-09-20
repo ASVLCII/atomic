@@ -74,6 +74,7 @@ describe("admitted-message recovery versus interrupt custom-message delivery", (
 		assert.deepEqual(
 			harness.session.messages.map((message) => `${message.role}:${getMessageText(message)}`),
 			[
+				"system:",
 				"user:start the turn",
 				"assistant:first reply",
 				"user:QUEUED-STEER",
@@ -82,7 +83,14 @@ describe("admitted-message recovery versus interrupt custom-message delivery", (
 				"assistant:interrupt reply",
 			],
 		);
-		assert.equal(getMessageText(harness.session.messages[2]), "QUEUED-STEER");
+		assert.equal(
+			getMessageText(
+				harness.session.messages.find(
+					(message) => message.role === "user" && getMessageText(message) === "QUEUED-STEER",
+				),
+			),
+			"QUEUED-STEER",
+		);
 	});
 
 	// The deciding case between the two candidate gates. A bare

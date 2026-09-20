@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
-import { Text, type TUI } from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache, setCapabilities, Text, type TUI } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { beforeAll, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { getReadmePath } from "../src/config.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import { type BashOperations, createBashToolDefinition } from "../src/core/tools/bash.ts";
@@ -10,6 +10,9 @@ import { createWriteToolDefinition } from "../src/core/tools/write.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
+
+const imageConvertMocks = vi.hoisted(() => ({ convertToPng: vi.fn() }));
+vi.mock("../src/utils/image-convert.ts", () => imageConvertMocks);
 
 function createBaseToolDefinition(name = "custom_tool"): ToolDefinition {
 	return {
@@ -33,6 +36,82 @@ function createFakeTui(): TUI {
 describe("ToolExecutionComponent parity", () => {
 	beforeAll(() => {
 		initTheme("dark");
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		resetCapabilitiesCache();
+		imageConvertMocks.convertToPng.mockReset();
+	});
+
+	// Upstream #8577/#8743: a partial conversion must not replace the final image.
+	test("keeps the final image when a partial conversion completes late", async () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		let finish!: (image: { data: string; mimeType: string }) => void;
+		const conversion = new Promise<{ data: string; mimeType: string }>((resolve) => {
+			finish = resolve;
+		});
+		imageConvertMocks.convertToPng.mockReturnValue(conversion);
+		const component = new ToolExecutionComponent(
+			"custom_tool",
+			"image-race",
+			{},
+			{},
+			undefined,
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{ content: [{ type: "image", data: "partial-jpeg", mimeType: "image/jpeg" }], isError: false },
+			true,
+		);
+		component.updateResult({
+			content: [{ type: "image", data: "final-png", mimeType: "image/png" }],
+			isError: false,
+		});
+		expect(component.render(120).join("\n")).toContain("final-png");
+		finish({ data: "converted-partial", mimeType: "image/png" });
+		await conversion;
+		const rendered = component.render(120).join("\n");
+		expect(rendered).toContain("final-png");
+		expect(rendered).not.toContain("converted-partial");
+		component.dispose();
+	});
+
+	// Upstream #9628: retain precision for short runs and all units for long runs.
+	test.each([
+		[0, "0.0s"],
+		[4_200, "4.2s"],
+		[59_999, "60.0s"],
+		[60_000, "1m 0s"],
+		[90_900, "1m 30s"],
+		[3_599_999, "59m 59s"],
+		[3_600_000, "1h 0m 0s"],
+		[7_384_900, "2h 3m 4s"],
+	])("formats bash duration %d as %s", (ms, formatted) => {
+		vi.useFakeTimers();
+		vi.setSystemTime(0);
+		const component = new ToolExecutionComponent(
+			"bash",
+			"duration",
+			{ command: "work" },
+			{},
+			createBashToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.markExecutionStarted();
+		component.updateResult({ content: [], isError: false }, true);
+		vi.advanceTimersByTime(ms);
+		component.invalidate();
+		expect(stripAnsi(component.render(120).join("\n"))).toContain(`Elapsed ${formatted}`);
+		component.updateResult({ content: [], isError: false }, false);
+		const completed = stripAnsi(component.render(120).join("\n"));
+		expect(completed).toContain(`Took ${formatted}`);
+		vi.advanceTimersByTime(1000);
+		component.invalidate();
+		expect(stripAnsi(component.render(120).join("\n"))).toBe(completed);
+		component.dispose();
 	});
 
 	test("stacks custom call and result renderers like the old implementation", () => {

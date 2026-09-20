@@ -1,11 +1,32 @@
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@bastani/pi-ai";
-import { createAssistantMessageEventStream } from "@bastani/pi-ai";
+import type { Api, AssistantMessage, JsonObject, Model, SimpleStreamOptions, TranscriptContext } from "@bastani/pi-ai";
+import { createAssistantMessageEventStream, getCurrentTools } from "@bastani/pi-ai";
 import { Type } from "typebox";
 import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.js";
 import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.js";
 import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
 import type { RouterDecisionRequest } from "../../packages/coding-agent/src/core/structured-output/index.js";
+
+/** 0.86 folds systemPrompt/tools into a leading system message before provider streamSimple. */
+export function inferenceUserContent(context: { messages: Array<{ role: string; content?: unknown }> }): unknown {
+	return context.messages.find((message) => message.role === "user")?.content;
+}
+
+export function parseInferenceUserPayload(context: { messages: Array<{ role: string; content?: unknown }> }): {
+	state?: { task?: string; candidates?: unknown };
+	questions?: Record<string, { criteria?: Record<string, unknown> }>;
+} {
+	const content = inferenceUserContent(context);
+	if (typeof content !== "string") throw new Error("structured-output user payload must be JSON text");
+	return JSON.parse(content) as ReturnType<typeof parseInferenceUserPayload>;
+}
+
+export function inferenceRequestTools(context: {
+	messages: Array<{ role: string }>;
+	tools?: Array<{ name: string }>;
+}): Array<{ name: string }> {
+	return context.tools ?? getCurrentTools(context.messages);
+}
 
 export const decisionModel: Model<Api> = {
 	provider: "decision-test",
@@ -67,9 +88,7 @@ export function decisionRequest(): RouterDecisionRequest<typeof decisionSchema> 
 		},
 	};
 }
-export function decisionMessage(
-	args: Record<string, unknown> = { route: "review", limit: 1.23456789 },
-): AssistantMessage {
+export function decisionMessage(args: JsonObject = { route: "review", limit: 1.23456789 }): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "toolCall", id: "result", name: "structured_output", arguments: args }],
@@ -110,7 +129,7 @@ export function jevResponse() {
 export async function registeredDecisionRuntime(
 	streamSimple: (
 		model: Model<Api>,
-		context: Context,
+		context: TranscriptContext,
 		options?: SimpleStreamOptions,
 	) => ReturnType<typeof createAssistantMessageEventStream>,
 ) {

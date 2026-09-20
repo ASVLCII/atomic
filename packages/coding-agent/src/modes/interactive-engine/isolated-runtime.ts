@@ -629,7 +629,16 @@ export class IsolatedInteractiveRuntime extends AgentSessionRuntime {
 			},
 			abortRetry: {
 				configurable: true,
-				value: () => this.dispatchBestEffort("abort retry", this.client.abortRetry()),
+				value: () => {
+					const retry = this.client.abortRetry?.();
+					if (retry !== undefined) {
+						this.dispatchBestEffort("abort retry", retry);
+						return;
+					}
+					if (typeof this.client.requestInternal === "function") {
+						this.dispatchBestEffort("abort retry", this.client.requestInternal<void>({ type: "abort_retry" }));
+					}
+				},
 			},
 			navigateTree: {
 				configurable: true,

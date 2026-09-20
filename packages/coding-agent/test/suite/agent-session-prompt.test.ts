@@ -35,8 +35,8 @@ describe("AgentSession prompt characterization", () => {
 
 		await harness.session.prompt("hi");
 
-		expect(harness.session.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-		expect(getMessageText(harness.session.messages[0]!)).toBe("hi");
+		expect(harness.session.messages.map((message) => message.role)).toEqual(["system", "user", "assistant"]);
+		expect(getMessageText(harness.session.messages.find((message) => message.role === "user"))).toBe("hi");
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
@@ -68,13 +68,14 @@ describe("AgentSession prompt characterization", () => {
 
 		expect(toolRuns).toEqual(["hello"]);
 		expect(harness.session.messages.map((message) => message.role)).toEqual([
+			"system",
 			"user",
 			"assistant",
 			"toolResult",
 			"assistant",
 		]);
-		expect(harness.session.messages[2]?.role).toBe("toolResult");
-		expect(harness.session.messages[3]?.role).toBe("assistant");
+		expect(harness.session.messages[3]?.role).toBe("toolResult");
+		expect(harness.session.messages[4]?.role).toBe("assistant");
 	});
 
 	it("executes multiple tool calls from one response and continues with a single follow-up response", async () => {
@@ -256,8 +257,10 @@ describe("AgentSession prompt characterization", () => {
 
 		await harness.session.sendUserMessage("from extension");
 
-		expect(harness.session.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-		expect(getMessageText(harness.session.messages[0]!)).toBe("from extension");
+		expect(harness.session.messages.map((message) => message.role)).toEqual(["system", "user", "assistant"]);
+		expect(getMessageText(harness.session.messages.find((message) => message.role === "user"))).toBe(
+			"from extension",
+		);
 	});
 
 	it("sendUserMessage sends a registered command literally by default", async () => {
@@ -282,7 +285,9 @@ describe("AgentSession prompt characterization", () => {
 		// Absent the option, every pre-existing caller keeps today's meaning:
 		// no dispatch, the raw text is sent to the model.
 		expect(commandRuns).toEqual([]);
-		expect(getMessageText(harness.session.messages[0])).toBe("/testcmd hello world");
+		expect(getMessageText(harness.session.messages.find((message) => message.role === "user"))).toBe(
+			"/testcmd hello world",
+		);
 	});
 
 	it("sendUserMessage dispatches extension commands with expandPromptTemplates", async () => {
@@ -316,8 +321,10 @@ describe("AgentSession prompt characterization", () => {
 
 		await harness.session.sendUserMessage("/nosuchcommand keep literal", { expandPromptTemplates: true });
 
-		expect(getMessageText(harness.session.messages[0])).toBe("/nosuchcommand keep literal");
-		expect(harness.session.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+		expect(getMessageText(harness.session.messages.find((message) => message.role === "user"))).toBe(
+			"/nosuchcommand keep literal",
+		);
+		expect(harness.session.messages.map((message) => message.role)).toEqual(["system", "user", "assistant"]);
 	});
 
 	it("sendUserMessage expands prompt templates with expandPromptTemplates", async () => {
@@ -341,7 +348,9 @@ describe("AgentSession prompt characterization", () => {
 
 		await harness.session.sendUserMessage("/review src/index.ts", { expandPromptTemplates: true });
 
-		expect(getMessageText(harness.session.messages[0])).toBe("Review this code: src/index.ts");
+		expect(getMessageText(harness.session.messages.find((message) => message.role === "user"))).toBe(
+			"Review this code: src/index.ts",
+		);
 	});
 
 	it("does not report streamingBehavior to input handlers while idle", async () => {

@@ -103,8 +103,9 @@ const OpenAICompletionsCompatSchema = Type.Object({
 	vercelGatewayRouting: Type.Optional(VercelGatewayRoutingSchema),
 	supportsOpenAIGrammarTools: Type.Optional(Type.Boolean()),
 	supportsStrictMode: Type.Optional(Type.Boolean()),
+	supportsMidConvoSystemMessages: Type.Optional(Type.Boolean()),
+	supportsMidConvoToolAdditions: Type.Optional(Type.Boolean()),
 	sendSessionAffinityHeaders: Type.Optional(Type.Boolean()),
-	deferredToolsMode: Type.Optional(Type.Literal("kimi")),
 	sessionAffinityFormat: Type.Optional(
 		Type.Union([Type.Literal("openai"), Type.Literal("openai-nosession"), Type.Literal("openrouter")]),
 	),
@@ -115,6 +116,7 @@ const OpenAICompletionsCompatSchema = Type.Object({
 
 const OpenAIResponsesCompatSchema = Type.Object({
 	supportsDeveloperRole: Type.Optional(Type.Boolean()),
+	supportsMidConvoSystemMessages: Type.Optional(Type.Boolean()),
 	sessionAffinityFormat: Type.Optional(
 		Type.Union([Type.Literal("openai"), Type.Literal("openai-nosession"), Type.Literal("openrouter")]),
 	),
@@ -140,6 +142,10 @@ const ModelCostSchema = Type.Object({
 	...ModelCostRatesSchema,
 	tiers: Type.Optional(Type.Array(ModelCostTierSchema)),
 });
+const ModelPromptCacheSchema = Type.Object({
+	short: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+	long: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+});
 
 const AnthropicMessagesCompatSchema = Type.Object({
 	supportsEagerToolInputStreaming: Type.Optional(Type.Boolean()),
@@ -151,8 +157,9 @@ const AnthropicMessagesCompatSchema = Type.Object({
 	allowEmptySignature: Type.Optional(Type.Boolean()),
 	supportsStrictTools: Type.Optional(Type.Boolean()),
 	supportsMidConvoEffort: Type.Optional(Type.Boolean()),
+	supportsMidConvoSystemMessages: Type.Optional(Type.Boolean()),
+	supportsMidConvoToolChanges: Type.Optional(Type.Boolean()),
 	enforcesPreservedThinkingBinding: Type.Optional(Type.Boolean()),
-	supportsToolReferences: Type.Optional(Type.Boolean()),
 	allowedFallbackModels: Type.Optional(
 		Type.Array(
 			Type.Object({
@@ -182,6 +189,7 @@ const ModelDefinitionSchema = Type.Object({
 	thinkingLevelMap: Type.Optional(ThinkingLevelMapSchema),
 	input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image"), Type.Literal("pdf")]))),
 	cost: Type.Optional(ModelCostSchema),
+	promptCache: Type.Optional(ModelPromptCacheSchema),
 	contextWindow: Type.Optional(Type.Number()),
 	maxTokens: Type.Optional(Type.Number()),
 	samplingParams: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
@@ -203,6 +211,7 @@ const ModelOverrideSchema = Type.Object({
 			tiers: Type.Optional(Type.Array(ModelCostTierSchema)),
 		}),
 	),
+	promptCache: Type.Optional(ModelPromptCacheSchema),
 	contextWindow: Type.Optional(Type.Number()),
 	maxTokens: Type.Optional(Type.Number()),
 	samplingParams: Type.Optional(Type.Record(Type.String(), Type.Unknown())),

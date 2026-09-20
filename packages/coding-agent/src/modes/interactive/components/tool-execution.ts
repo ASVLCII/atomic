@@ -55,7 +55,10 @@ export class ToolExecutionComponent extends Container {
 	private executionStarted = false;
 	private argsComplete = false;
 	private result?: RenderableToolResult;
-	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
+	private convertedImages: Map<
+		number,
+		{ sourceData: string; sourceMimeType: string; data: string; mimeType: string }
+	> = new Map();
 	private renderedImageSpecs: RenderedImageSpec[] = [];
 	private hideComponent = false;
 
@@ -212,16 +215,19 @@ export class ToolExecutionComponent extends Container {
 		for (let i = 0; i < imageBlocks.length; i++) {
 			const img = imageBlocks[i];
 			if (img === undefined || !img.data || !img.mimeType) continue;
-			if (img.mimeType === "image/png") continue;
-			if (this.convertedImages.has(i)) continue;
+			const sourceData = img.data;
+			const sourceMimeType = img.mimeType;
+			if (sourceMimeType === "image/png") continue;
+			const cached = this.convertedImages.get(i);
+			if (cached?.sourceData === sourceData && cached.sourceMimeType === sourceMimeType) continue;
 
 			const index = i;
-			convertToPng(img.data, img.mimeType).then((converted) => {
-				if (converted) {
-					this.convertedImages.set(index, converted);
-					this.updateDisplay();
-					this.ui.requestRender();
-				}
+			convertToPng(sourceData, sourceMimeType).then((converted) => {
+				const current = this.result?.content.filter((content) => content.type === "image")[index];
+				if (!converted || current?.data !== sourceData || current.mimeType !== sourceMimeType) return;
+				this.convertedImages.set(index, { sourceData, sourceMimeType, ...converted });
+				this.updateDisplay();
+				this.ui.requestRender();
 			});
 		}
 	}
@@ -372,7 +378,9 @@ export class ToolExecutionComponent extends Container {
 			const imageBlocks = this.result.content.filter((c): c is RenderableImageContent => c.type === "image");
 			for (const [index, image] of imageBlocks.entries()) {
 				if (!image.data || !image.mimeType) continue;
-				const converted = this.convertedImages.get(index);
+				const cached = this.convertedImages.get(index);
+				const converted =
+					cached?.sourceData === image.data && cached.sourceMimeType === image.mimeType ? cached : undefined;
 				const data = converted?.data ?? image.data;
 				const mimeType = converted?.mimeType ?? image.mimeType;
 				if (capabilities.images === "kitty" && mimeType !== "image/png") continue;

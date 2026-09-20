@@ -232,10 +232,16 @@ test("generates the documented Gemini 3.8 Flash entry for the Google Gemini API"
 	// the five models.dev input modalities collapse to text+image on the Gemini path.
 	assert.deepEqual(model.input, ["text", "image"]);
 	assert.deepEqual(model.cost, { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 });
-	// Gemini 3.x Flash cannot disable thinking, and Google states outright that "MINIMAL is
-	// unsupported for this model", so both levels are denied. `low`/`medium`/`high` stay unmapped
-	// and fall through to `resolveGoogleThinkingLevel`, exactly as for gemini-3.7-flash.
-	assert.deepEqual(model.thinkingLevelMap, { off: null, minimal: null });
+	// The catalog now declares every level from models.dev instead of relying on runtime defaults.
+	assert.deepEqual(model.thinkingLevelMap, {
+		off: null,
+		minimal: null,
+		low: "low",
+		medium: "medium",
+		high: "high",
+		xhigh: null,
+		max: null,
+	});
 });
 
 test("generates the Vertex Gemini 3.8 Flash entry without inventing non-Gemini mirrors", () => {
@@ -255,7 +261,15 @@ test("generates the Vertex Gemini 3.8 Flash entry without inventing non-Gemini m
 	assert.deepEqual(model.input, ["text", "image"]);
 	// Vertex accounts only cachedContentTokenCount, so cacheWrite is always 0 on this path.
 	assert.deepEqual(model.cost, { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 });
-	assert.deepEqual(model.thinkingLevelMap, { off: null, minimal: null });
+	assert.deepEqual(model.thinkingLevelMap, {
+		off: null,
+		minimal: null,
+		low: "low",
+		medium: "medium",
+		high: "high",
+		xhigh: null,
+		max: null,
+	});
 
 	// Negative controls: the Vertex provider serves only Gemini, and no unrelated provider
 	// gains a Gemini 3.8 Flash entry it does not publish.
@@ -283,8 +297,16 @@ test("denies minimal only for 3.8 Flash, leaving the 3.5 and 3.6 Flash entries a
 	const { google } = generateProviderCatalogs(catalog, ["google"]);
 
 	assert.equal(google["gemini-3.8-flash"].thinkingLevelMap?.minimal, null);
-	assert.equal(google["gemini-3.6-flash"].thinkingLevelMap?.minimal, undefined);
-	assert.deepEqual(google["gemini-3.6-flash"].thinkingLevelMap, { off: null });
+	assert.equal(google["gemini-3.6-flash"].thinkingLevelMap?.minimal, "minimal");
+	assert.deepEqual(google["gemini-3.6-flash"].thinkingLevelMap, {
+		off: null,
+		minimal: "minimal",
+		low: "low",
+		medium: "medium",
+		high: "high",
+		xhigh: null,
+		max: null,
+	});
 });
 
 test("generates the GitHub Copilot entry from models.dev metadata", () => {
@@ -342,8 +364,16 @@ test("pins the opencode, OpenRouter, and Vercel AI Gateway mirrors", () => {
 		cost: { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 65_536,
-		// opencode rides the same Google thinking path, so it gets the same two denials.
-		thinkingLevelMap: { off: null, minimal: null },
+		// opencode rides the same Google thinking path and published level map.
+		thinkingLevelMap: {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: null,
+			max: null,
+		},
 	});
 
 	const openrouter = catalogs.openrouter["google/gemini-3.8-flash"];

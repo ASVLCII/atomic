@@ -6,6 +6,7 @@
  */
 
 import {
+	normalizeContext,
 	type ProviderHeaders,
 	type RetryCallbacks,
 	type RetryPolicy,
@@ -362,7 +363,7 @@ export async function generateBranchSummary(
 
 	// Call LLM for summarization. Prefer the session stream function so SDK
 	// request behavior stays consistent without mutating agent state.
-	const context = { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages };
+	const context = normalizeContext({ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages });
 	const requestModel = baseUrl === undefined || baseUrl === model.baseUrl ? model : { ...model, baseUrl };
 	// Output is capped at 4096 tokens so reasoning cannot exhaust a 2048-token
 	// cap. `reserveTokens` keeps its input-side meaning above, unchanged.

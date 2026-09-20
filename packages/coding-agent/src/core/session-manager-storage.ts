@@ -150,17 +150,19 @@ export function findMostRecentSession(sessionDir: string, cwd?: string, includeI
 		const files = readdirSync(resolvedSessionDir)
 			.filter((f) => f.endsWith(".jsonl"))
 			.map((f) => join(resolvedSessionDir, f))
-			.map((path) => ({ path, header: readSessionHeader(path) }))
-			.filter(
-				(file): file is { path: string; header: SessionHeader } =>
-					file.header !== null &&
-					(!resolvedCwd || sessionCwdMatches(getSessionHeaderCwd(file.header), resolvedCwd)) &&
-					(includeInternal || !isInternalHeader(file.header)),
-			)
-			.map(({ path }) => ({ path, mtime: statSync(path).mtime }))
-			.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+			.map((path) => ({ path, mtime: statSync(path).mtimeMs }))
+			.sort((a, b) => b.mtime - a.mtime);
 
-		return files[0]?.path || null;
+		for (const { path } of files) {
+			const header = readSessionHeader(path);
+			if (
+				header &&
+				(!resolvedCwd || sessionCwdMatches(getSessionHeaderCwd(header), resolvedCwd)) &&
+				(includeInternal || !isInternalHeader(header))
+			)
+				return path;
+		}
+		return null;
 	} catch {
 		return null;
 	}

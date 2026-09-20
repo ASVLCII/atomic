@@ -565,7 +565,10 @@ function statsFor(session: AgentSession | undefined, fallbackSessionId: string):
 }
 
 function outputFor(session: AgentSession | undefined): string {
-	return session?.getLastAssistantText() ?? "";
+	return lastNonEmptyAssistantText(
+		session?.messages as Parameters<typeof lastNonEmptyAssistantText>[0],
+		session?.getLastAssistantText(),
+	);
 }
 
 function cancelledEnvelope(session: AgentSession | undefined, spec: ChildSpec, stats: AttemptStats): string {

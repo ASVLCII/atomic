@@ -73,7 +73,8 @@ export function setKeptTailTokenEstimate(preparation: VerbatimCompactionPreparat
 }
 
 function messageFromEntry(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "message") return entry.message;
+	// Prompt state is replayed separately at the boundary, never offered for deletion.
+	if (entry.type === "message") return entry.message.role === "system" ? undefined : entry.message;
 	if (entry.type === "custom_message") {
 		return createCustomMessage(
 			entry.customType,

@@ -138,6 +138,45 @@ describe("llama.cpp extension", () => {
 		expect(() => normalizeLlamaServerUrl("file:///tmp/llama")).toThrow("http or https");
 	});
 
+	// Upstream #9528: query loaded models without waking sleeping/autoload models.
+	it("discovers chat-template thinking support for loaded models", async () => {
+		const requests: string[] = [];
+		const { url } = await listen((request, response) => {
+			requests.push(request.url ?? "");
+			if (request.url === "/models") {
+				json(response, {
+					data: [
+						{ id: "qwen", status: { value: "loaded" } },
+						{ id: "sleeping", status: { value: "sleeping" } },
+					],
+				});
+			} else if (request.url === "/props?model=qwen&autoload=false") {
+				json(response, { chat_template: "{% if enable_thinking %}think{% endif %}" });
+			} else response.writeHead(404).end();
+		});
+		const controller = createLlamaProvider();
+		await controller.provider.refreshModels?.({
+			credential: { type: "api_key", key: "local", env: { LLAMA_BASE_URL: url } },
+			stored: undefined,
+			publish: async (publication) => {
+				publication.update?.();
+				return true;
+			},
+			allowNetwork: true,
+			signal: new AbortController().signal,
+		});
+		expect(requests).toEqual(["/models", "/props?model=qwen&autoload=false"]);
+		expect(controller.provider.getModels()).toEqual([
+			expect.objectContaining({
+				id: "qwen",
+				reasoning: true,
+				thinkingLevelMap: { off: "off", minimal: null, low: null, medium: "medium", high: null, xhigh: null },
+				compat: expect.objectContaining({ thinkingFormat: "qwen-chat-template" }),
+			}),
+			expect.objectContaining({ id: "sleeping", reasoning: false }),
+		]);
+	});
+
 	it("exposes loaded and sleeping models with router metadata", () => {
 		const controller = createLlamaProvider();
 		controller.setCatalog(
@@ -192,6 +231,10 @@ describe("llama.cpp extension", () => {
 						{ id: "unloaded", status: { value: "unloaded" } },
 					],
 				});
+				return;
+			}
+			if (request.url === "/props?model=loaded&autoload=false") {
+				json(response, {});
 				return;
 			}
 			response.writeHead(404).end();

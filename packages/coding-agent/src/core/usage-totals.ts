@@ -34,6 +34,10 @@ export function getUsageCostBreakdown(entries: SessionEntry[]): UsageCostBreakdo
 	for (const entry of entries) {
 		let key: string | undefined;
 		let usage: Usage | undefined;
+		if (entry.type === "usage") {
+			key = `${entry.provider}/${entry.model}`;
+			usage = entry.usage;
+		}
 		if (entry.type === "message" && entry.message.role === "assistant") {
 			key = `${entry.message.provider}/${entry.message.responseModel ?? entry.message.model}`;
 			usage = entry.message.usage;

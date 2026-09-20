@@ -345,6 +345,7 @@ export async function _trySwitchToFallbackModel(this: AgentSession, message: Ass
 
 		const fallbackGeneration = this._fallbackOriginGeneration;
 		setTimeout(() => {
+			if (this._agentRunAbortRequested) return;
 			void this.agent.continue().catch(async (error: unknown) => {
 				const finalError = error instanceof Error ? error.message : String(error);
 				if (this._fallbackOriginGeneration === fallbackGeneration) {
@@ -374,6 +375,7 @@ export async function _trySwitchToFallbackModel(this: AgentSession, message: Ass
 }
 
 export async function _handleRetryableError(this: AgentSession, message: AssistantMessage): Promise<boolean> {
+	if (this._agentRunAbortRequested) return false;
 	const settings = this.settingsManager.getRetrySettings();
 	const retryableError = this._isRetryableError?.(message) ?? true;
 	const fallbackableError = this._isFallbackableError?.(message) ?? retryableError;
@@ -430,6 +432,7 @@ export async function _handleRetryableError(this: AgentSession, message: Assista
 
 	const delayMs = decision.delayMs;
 
+	this._retryAbortController = new AbortController();
 	this._emit({
 		type: "auto_retry_start",
 		attempt: this._retryAttempt,
@@ -445,20 +448,13 @@ export async function _handleRetryableError(this: AgentSession, message: Assista
 	}
 
 	// Wait with exponential backoff (abortable)
-	this._retryAbortController = new AbortController();
+	if (this._agentRunAbortRequested) this._retryAbortController.abort();
 	try {
 		await sleep(delayMs, this._retryAbortController.signal);
 	} catch {
 		// Aborted during sleep - emit end event so UI can clean up
-		const attempt = this._retryAttempt;
-		this._retryAttempt = 0;
+		finishCancelledRetry.call(this);
 		this._retryAbortController = undefined;
-		this._emit({
-			type: "auto_retry_end",
-			success: false,
-			attempt,
-			finalError: "Retry cancelled",
-		});
 		this._resolveRetry();
 		return false;
 	}
@@ -466,6 +462,10 @@ export async function _handleRetryableError(this: AgentSession, message: Assista
 
 	// Retry via continue() - use setTimeout to break out of event handler chain
 	setTimeout(() => {
+		if (this._agentRunAbortRequested) {
+			finishCancelledRetry.call(this);
+			return;
+		}
 		this.agent.continue().catch(() => {
 			// Retry failed - will be caught by next agent_end
 		});
@@ -478,9 +478,16 @@ export async function _handleRetryableError(this: AgentSession, message: Assista
  * Cancel in-progress retry.
  */
 
+function finishCancelledRetry(this: AgentSession): void {
+	if (this._retryAttempt === 0) return;
+	const attempt = this._retryAttempt;
+	this._retryAttempt = 0;
+	this._emit({ type: "auto_retry_end", success: false, attempt, finalError: "Retry cancelled" });
+}
+
 export function abortRetry(this: AgentSession): void {
 	this._retryAbortController?.abort();
-	// Note: _retryAttempt is reset in the catch block of _autoRetry
+	finishCancelledRetry.call(this);
 	this._resolveRetry();
 }
 

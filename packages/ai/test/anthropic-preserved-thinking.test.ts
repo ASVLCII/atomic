@@ -12,6 +12,7 @@ import type {
 	TextContent,
 	ThinkingContent,
 } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * Preserved-thinking regressions for mid-conversation model switches.
@@ -290,7 +291,7 @@ function createSseResponse(events: Array<{ event: string; data: string }>): Resp
 
 function createFakeAnthropicClient(response: Response): Anthropic {
 	return {
-		messages: { create: () => ({ asResponse: async () => response }) },
+		beta: { messages: { create: () => ({ asResponse: async () => response }) } },
 	} as unknown as Anthropic;
 }
 
@@ -343,7 +344,9 @@ describe("dropped thinking blocks are observable", () => {
 				{ type: "thinking_dropped", path: "messages.3.content.0", reason: "model_binding_mismatch" },
 			]),
 		);
-		const result = await streamAnthropic(model, context, { client: createFakeAnthropicClient(response) }).result();
+		const result = await streamAnthropic(model, normalizeContext(context), {
+			client: createFakeAnthropicClient(response),
+		}).result();
 
 		// The request still succeeded: safe degradation, not a broken session.
 		expect(result.stopReason).toBe("stop");
@@ -357,7 +360,9 @@ describe("dropped thinking blocks are observable", () => {
 	it("records no diagnostic when the API reports no transformations", async () => {
 		const model = getModel("anthropic", "claude-fable-5-1");
 		const response = createSseResponse(eventsWithInputTransformations(undefined));
-		const result = await streamAnthropic(model, context, { client: createFakeAnthropicClient(response) }).result();
+		const result = await streamAnthropic(model, normalizeContext(context), {
+			client: createFakeAnthropicClient(response),
+		}).result();
 
 		expect(result.diagnostics?.some((d) => d.type === "anthropic_input_transformations") ?? false).toBe(false);
 	});
@@ -365,7 +370,9 @@ describe("dropped thinking blocks are observable", () => {
 	it("records no diagnostic for an empty input_transformations array", async () => {
 		const model = getModel("anthropic", "claude-fable-5-1");
 		const response = createSseResponse(eventsWithInputTransformations([]));
-		const result = await streamAnthropic(model, context, { client: createFakeAnthropicClient(response) }).result();
+		const result = await streamAnthropic(model, normalizeContext(context), {
+			client: createFakeAnthropicClient(response),
+		}).result();
 
 		expect(result.diagnostics?.some((d) => d.type === "anthropic_input_transformations") ?? false).toBe(false);
 	});
@@ -382,7 +389,9 @@ describe("dropped thinking blocks are observable", () => {
 				{ type: "thinking_dropped", path: "messages.2.content.0", reason: "model_binding_mismatch" },
 			]),
 		);
-		const result = await streamAnthropic(model, context, { client: createFakeAnthropicClient(response) }).result();
+		const result = await streamAnthropic(model, normalizeContext(context), {
+			client: createFakeAnthropicClient(response),
+		}).result();
 
 		expect(result.stopReason).toBe("stop");
 		const diagnostic = result.diagnostics?.find((d) => d.type === "anthropic_input_transformations");
@@ -401,7 +410,9 @@ describe("dropped thinking blocks are observable", () => {
 				[{ type: "thinking_dropped", path: "messages.3.content.0", reason: "model_binding_mismatch" }],
 			),
 		);
-		const result = await streamAnthropic(model, context, { client: createFakeAnthropicClient(response) }).result();
+		const result = await streamAnthropic(model, normalizeContext(context), {
+			client: createFakeAnthropicClient(response),
+		}).result();
 
 		const diagnostics = result.diagnostics?.filter((d) => d.type === "anthropic_input_transformations") ?? [];
 		expect(diagnostics).toHaveLength(1);
@@ -418,7 +429,9 @@ describe("dropped thinking blocks are observable", () => {
 				[],
 			),
 		);
-		const result = await streamAnthropic(model, context, { client: createFakeAnthropicClient(response) }).result();
+		const result = await streamAnthropic(model, normalizeContext(context), {
+			client: createFakeAnthropicClient(response),
+		}).result();
 
 		const diagnostics = result.diagnostics?.filter((d) => d.type === "anthropic_input_transformations") ?? [];
 		expect(diagnostics).toHaveLength(1);
@@ -431,7 +444,7 @@ describe("dropped thinking blocks are observable", () => {
 			{ type: "thinking_dropped", path: "messages.1.content.0", reason: "prefix_binding_mismatch" },
 		]);
 		events[1] = { event: "content_block_start", data: "{invalid" };
-		const result = await streamAnthropic(model, context, {
+		const result = await streamAnthropic(model, normalizeContext(context), {
 			client: createFakeAnthropicClient(createSseResponse(events)),
 		}).result();
 

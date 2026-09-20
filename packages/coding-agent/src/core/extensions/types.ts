@@ -1,3 +1,5 @@
+export type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../cache-warmer.ts";
+
 /**
  * Extension system types.
  *
@@ -17,7 +19,7 @@ export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode } from
 export type { ExecOptions, ExecResult } from "../exec.ts";
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
 export type { ScopedModel } from "../model-resolver.ts";
-export type { BuildSystemPromptOptions } from "../system-prompt.ts";
+export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
 export type * from "./agent-events.ts";
 export type * from "./api-types.ts";
 export type * from "./command-types.ts";
