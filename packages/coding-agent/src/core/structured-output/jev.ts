@@ -110,6 +110,7 @@ async function askJev<T extends TSchema>(
 	if (!selectedProvider) throw new Error("Invalid Jev model: use an exact structured-decision model ID.");
 	const authGuidance = `Use /login ${selectedProvider.id} or set ${selectedProvider.apiKeyEnv}.`;
 	const questions = compileQuestions(questionsToAsk, request.instructions);
+	assertRequestBudget(selectedProvider.wireModel, request.state, questions);
 	let apiKey: string | undefined;
 	try {
 		apiKey = request.modelRegistry.getProviderAuth
@@ -146,64 +147,67 @@ async function askJev<T extends TSchema>(
 	return parsed;
 }
 
-// No matching Jev tokenizer is published. This is deterministic packing guidance,
-// not validation: the provider owns actual token limits, and state is never trimmed.
-const estimateTokens = (value: object): number => Math.ceil(JSON.stringify(value).length / 4);
-const STATE_AND_QUESTION_TOKENS = 32_000;
-const STATE_AND_ALL_TOKENS = 64_000;
+// No Jev tokenizer is published. Charge every UTF-8 byte as a potential token,
+// with 25% headroom below the documented 32k/64k limits for provider framing.
+// This is deliberately conservative, not an exact token count. Never trim state.
+const STATE_AND_QUESTION_BYTES = 24_000;
+const STATE_AND_ALL_BYTES = 48_000;
+const PACKING_HEADROOM_BYTES = 512;
+const byteSize = (value: object): number => Buffer.byteLength(JSON.stringify(value), "utf8");
 const KEEP = 3;
+
+function contextLimit(): JevRequestError {
+	return new JevRequestError(
+		"Jev routing context exceeds the conservative input budget. No oversized request was sent. Supply less context or select a chat router model; task requirements were not truncated.",
+	);
+}
+
+function assertRequestBudget(model: string, state: object, questions: Questions): void {
+	if (
+		byteSize({ model, state, questions }) > STATE_AND_ALL_BYTES ||
+		Object.entries(questions).some(
+			([id, question]) => byteSize({ model, state, questions: { [id]: question } }) > STATE_AND_QUESTION_BYTES,
+		)
+	)
+		throw contextLimit();
+}
 
 type NamedQuestion = [string, StructuredChoiceQuestion];
 type ChoiceJob = { id: string; owner: string; question: StructuredChoiceQuestion; final: boolean };
-type QuestionTokens = (question: StructuredChoiceQuestion) => number;
+type QuestionFits = (question: StructuredChoiceQuestion) => boolean;
 
-function* partitionQuestion(question: StructuredChoiceQuestion, stateTokens: number, questionTokens: QuestionTokens) {
+function* partitionQuestion(question: StructuredChoiceQuestion, fits: QuestionFits) {
 	const entries = Object.entries(question.criteria);
 	for (let start = 0; start < entries.length; ) {
-		let size = Math.min(provider.capabilities.maxChoiceOptions, entries.length - start);
+		let high = Math.min(provider.capabilities.maxChoiceOptions, entries.length - start);
 		const batchOf = (length: number) => ({
 			...question,
 			criteria: Object.fromEntries(entries.slice(start, start + length)),
 		});
-		// Minimum five guarantees shrinking even with a retained key and a singleton tail.
-		// If unchanged state alone exceeds the estimate, splitting cannot fix it.
-		if (stateTokens < STATE_AND_QUESTION_TOKENS) {
-			let low = Math.min(KEEP + 2, size);
-			let high = size;
-			while (low < high) {
-				const mid = Math.ceil((low + high) / 2);
-				if (stateTokens + questionTokens(batchOf(mid)) <= STATE_AND_QUESTION_TOKENS) low = mid;
-				else high = mid - 1;
-			}
-			size = low;
+		// Five guarantees shrinking even with three survivors and a retained sentinel.
+		let low = Math.min(KEEP + 2, high);
+		if (!fits(batchOf(low))) throw contextLimit();
+		while (low < high) {
+			const mid = Math.ceil((low + high) / 2);
+			if (fits(batchOf(mid))) low = mid;
+			else high = mid - 1;
 		}
-		yield batchOf(size);
-		start += size;
+		yield batchOf(low);
+		start += low;
 	}
 }
 
-function planRound(
-	pending: NamedQuestion[],
-	overflowing: Set<string>,
-	stateTokens: number,
-	questionTokens: QuestionTokens,
-): ChoiceJob[] {
+function planRound(pending: NamedQuestion[], fits: QuestionFits): ChoiceJob[] {
 	const jobs: ChoiceJob[] = [];
 	const reserved = new Set(pending.map(([id]) => id));
 	let nextId = 0;
 	for (const [owner, question] of pending) {
-		const size = Object.keys(question.criteria).length;
-		const withinCap = size <= provider.capabilities.maxChoiceOptions;
-		const indivisible = size <= KEEP + 1 || stateTokens >= STATE_AND_QUESTION_TOKENS;
-		if (
-			withinCap &&
-			(!overflowing.has(owner) || indivisible || stateTokens + questionTokens(question) <= STATE_AND_QUESTION_TOKENS)
-		) {
-			// Keep the original wire ID for small choices and the final comparison.
+		if (Object.keys(question.criteria).length <= provider.capabilities.maxChoiceOptions && fits(question)) {
 			jobs.push({ id: owner, owner, question, final: true });
 			continue;
 		}
-		for (const batch of partitionQuestion(question, stateTokens, questionTokens)) {
+		if (Object.keys(question.criteria).length <= KEEP + 1) throw contextLimit();
+		for (const batch of partitionQuestion(question, fits)) {
 			while (reserved.has(`q${nextId}`)) nextId++;
 			jobs.push({ id: `q${nextId++}`, owner, question: batch, final: false });
 		}
@@ -211,18 +215,10 @@ function planRound(
 	return jobs;
 }
 
-function* packRequests(jobs: ChoiceJob[], stateTokens: number, questionTokens: QuestionTokens) {
+function* packRequests(jobs: ChoiceJob[], size: (group: ChoiceJob[]) => number) {
 	for (let offset = 0; offset < jobs.length; ) {
-		let end = offset;
-		let tokens = stateTokens;
-		while (end < jobs.length) {
-			const size = questionTokens(jobs[end].question);
-			const oversized = stateTokens + size > STATE_AND_QUESTION_TOKENS;
-			if (end > offset && (tokens + size > STATE_AND_ALL_TOKENS || oversized)) break;
-			tokens += size;
-			end++;
-			if (oversized) break;
-		}
+		let end = offset + 1;
+		while (end < jobs.length && size(jobs.slice(offset, end + 1)) <= STATE_AND_ALL_BYTES) end++;
 		yield jobs.slice(offset, end);
 		offset = end;
 	}
@@ -234,73 +230,67 @@ export async function inferJev<T extends TSchema>(
 	assertActive: () => void = () => signal.throwIfAborted(),
 ): Promise<StructuredOutputResult<Static<T>>> {
 	let pending = Object.entries(request.jev.questions);
-	const overflowing = new Set(
-		pending
-			.filter(([, q]) => Object.keys(q.criteria).length > provider.capabilities.maxChoiceOptions)
-			.map(([id]) => id),
-	);
-	if (!overflowing.size) {
-		const result = await askJev(request, request.jev.questions, signal, assertActive);
-		return {
-			value: request.jev.decode(result.choices),
-			model: request.model.fullId,
-			responseModel: result.responseModel,
-			usage: result.usage,
-		};
-	}
 	const choices: Record<string, string> = Object.create(null);
 	const usage = { inputTokens: 0, outputTokens: 0 };
 	let responseModel = "";
-	const stateTokens = estimateTokens(request.state);
-	const questionTokens = (q: StructuredChoiceQuestion) =>
-		estimateTokens(compileQuestions({ q }, request.instructions));
-	while (pending.length) {
-		assertActive();
-		const jobs = planRound(pending, overflowing, stateTokens, questionTokens);
-		const survivors = new Map<string, Set<string>>();
-		for (const group of packRequests(jobs, stateTokens, questionTokens)) {
+	const fits: QuestionFits = (q) =>
+		byteSize({ state: request.state, questions: compileQuestions({ q }, request.instructions) }) +
+			PACKING_HEADROOM_BYTES <=
+		STATE_AND_QUESTION_BYTES;
+	const requestSize = (group: ChoiceJob[]) =>
+		byteSize({
+			state: request.state,
+			questions: compileQuestions(
+				Object.fromEntries(group.map((job) => [job.id, job.question])),
+				request.instructions,
+			),
+		}) + PACKING_HEADROOM_BYTES;
+	try {
+		while (pending.length) {
 			assertActive();
-			const wire = Object.fromEntries(group.map((job) => [job.id, job.question]));
-			let result: Awaited<ReturnType<typeof askJev<T>>>;
-			try {
-				result = await askJev(request, wire, signal, assertActive);
-			} catch (error) {
-				if (error instanceof InvalidDecisionOutputError || error instanceof JevRequestError) {
-					error.usage = {
-						inputTokens: usage.inputTokens + (error.usage?.inputTokens ?? 0),
-						outputTokens: usage.outputTokens + (error.usage?.outputTokens ?? 0),
-					};
-				}
-				throw error;
-			}
-			responseModel = result.responseModel;
-			usage.inputTokens += result.usage.inputTokens;
-			usage.outputTokens += result.usage.outputTokens;
-			for (const job of group) {
-				if (job.final) choices[job.owner] = result.choices[job.id];
-				else {
-					const kept = survivors.get(job.owner) ?? new Set<string>();
-					result.ranked[job.id].slice(0, KEEP).forEach((key) => {
-						kept.add(key);
-					});
-					survivors.set(job.owner, kept);
+			const jobs = planRound(pending, fits);
+			const survivors = new Map<string, Set<string>>();
+			for (const group of packRequests(jobs, requestSize)) {
+				assertActive();
+				const wire = Object.fromEntries(group.map((job) => [job.id, job.question]));
+				const result = await askJev(request, wire, signal, assertActive);
+				responseModel = result.responseModel;
+				usage.inputTokens += result.usage.inputTokens;
+				usage.outputTokens += result.usage.outputTokens;
+				for (const job of group) {
+					if (job.final) choices[job.owner] = result.choices[job.id];
+					else {
+						const kept = survivors.get(job.owner) ?? new Set<string>();
+						result.ranked[job.id].slice(0, KEEP).forEach((key) => {
+							kept.add(key);
+						});
+						survivors.set(job.owner, kept);
+					}
 				}
 			}
+			pending = pending.flatMap(([id, question]) => {
+				const kept = survivors.get(id);
+				if (!kept) return [];
+				if (question.retainForFinal !== undefined) kept.add(question.retainForFinal);
+				return [
+					[
+						id,
+						{
+							...question,
+							criteria: Object.fromEntries(Object.entries(question.criteria).filter(([key]) => kept.has(key))),
+						},
+					],
+				];
+			});
 		}
-		pending = pending.flatMap(([id, question]) => {
-			const kept = survivors.get(id);
-			if (!kept) return [];
-			if (question.retainForFinal !== undefined) kept.add(question.retainForFinal);
-			return [
-				[
-					id,
-					{
-						...question,
-						criteria: Object.fromEntries(Object.entries(question.criteria).filter(([key]) => kept.has(key))),
-					},
-				],
-			];
-		});
+	} catch (error) {
+		if (error instanceof InvalidDecisionOutputError || error instanceof JevRequestError) {
+			error.usage = {
+				inputTokens: usage.inputTokens + (error.usage?.inputTokens ?? 0),
+				outputTokens: usage.outputTokens + (error.usage?.outputTokens ?? 0),
+			};
+		}
+		throw error;
 	}
 	assertActive();
 	return {

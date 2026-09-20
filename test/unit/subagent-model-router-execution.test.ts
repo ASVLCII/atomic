@@ -170,16 +170,17 @@ test("parallel tasks do not share the first decision", async () => {
 	const f = await fixture("auto");
 	const second = { ...decisionModel, id: "other" };
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([decisionModel, second]);
-	f.infer.mockImplementation((_model, context) =>
-		messageStream(
+	f.infer.mockImplementation((_model, context) => {
+		const { state, questions } = JSON.parse(context.messages[0]!.content as string);
+		const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
+		const preferred = state.task.includes("second") ? "decision-test/other" : "decision-test/chat";
+		return messageStream(
 			decisionMessage({
-				model: JSON.parse(context.messages[0]!.content as string).state.task.includes("second")
-					? "decision-test/other"
-					: "decision-test/chat",
+				model: candidates.find((pair) => pair.model === preferred)?.model ?? candidates[0].model,
 				effort: null,
 			}),
-		),
-	);
+		);
+	});
 	await f.call({
 		tasks: [
 			{ agent: "worker", task: "first task" },
@@ -190,7 +191,7 @@ test("parallel tasks do not share the first decision", async () => {
 		f.runSync.mock.calls.map((call) => call[4].modelOverride),
 		["decision-test/chat", "decision-test/other"],
 	);
-	assert.equal(f.infer.mock.calls.length, 2);
+	assert.equal(f.infer.mock.calls.length, 4);
 });
 test("invalid routing and conflicting constraints produce no child runs", async () => {
 	const f = await fixture("auto");

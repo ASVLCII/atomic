@@ -58,7 +58,7 @@ const result = await ctx.task("analyze", {
 });
 ```
 
-`ctx.stage("analyze", { model: "auto" }).prompt(text)` works too. Set `model: "auto"` in chain or parallel shared options to route each stage separately. The decision uses the actual supplied prompt after your input interpolation and chain context expansion, available models, supported reasoning efforts, and Atomic's shipped model-selection and evaluation guides. File references remain references, not guessed file contents.
+`ctx.stage("analyze", { model: "auto" }).prompt(text)` works too. Set `model: "auto"` in chain or parallel shared options to route each stage separately. The decision uses the actual supplied prompt after input interpolation and chain context expansion, eligible models and efforts, and compact dated evaluation evidence rather than full guides. It ranks up to three distinct models with an effort for each, trying them in order before remaining configured fallbacks and the current chat model. File references remain references, not guessed file contents. See [automatic model selection](/subagents/reference#automatic-model-selection) for ranking and limits.
 
 The shared `routerModel` setting chooses the decision provider. It does not choose which workflow to launch. Jev can make the decision but never executes the stage. See [automatic stage operation](/workflows/operations#automatic-stage-models) for failures and resume behavior.
 

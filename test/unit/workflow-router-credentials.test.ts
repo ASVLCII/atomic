@@ -96,12 +96,16 @@ test("credential-named schema properties preserve every candidate and complete c
 	const result = await f.route();
 	assert.equal(result.decision.workflowType, "none");
 	const context = f.infer.mock.calls[0]![1];
-	const snapshot = JSON.parse(context.messages[0]!.content as string).state;
+	const { questions } = JSON.parse(context.messages[0]!.content as string);
+	assert.deepEqual(Object.keys(questions.workflow.criteria), [
+		"none",
+		f.definition.normalizedName,
+		f.other.normalizedName,
+	]);
 	assert.deepEqual(
-		snapshot.workflows.map((entry: { name: string }) => entry.name),
-		[f.definition.normalizedName, f.other.normalizedName],
+		JSON.parse(questions.workflow.criteria[f.definition.normalizedName]).inputs,
+		JSON.parse(JSON.stringify(f.definition.inputs)),
 	);
-	assert.deepEqual(snapshot.workflows[0].inputs, JSON.parse(JSON.stringify(f.definition.inputs)));
 });
 
 test("supplied nested credential fields still fail before inference", async () => {

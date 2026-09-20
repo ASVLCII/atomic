@@ -1187,8 +1187,16 @@ export class StageSessionController {
 		if (!this.candidatesPromise) {
 			const resolved = buildModelCandidatesFromCatalog({
 				primaryModel: this.modelRoute?.modelOverride ?? this.explicitModel ?? this.effectiveStageOptions?.model,
-				fallbackModels: this.effectiveStageOptions?.fallbackModels,
-				fallbackThinkingLevels: this.effectiveStageOptions?.fallbackThinkingLevels,
+				fallbackModels: [
+					...(this.modelRoute?.fallbackModels ?? []),
+					...(this.effectiveStageOptions?.fallbackModels ?? []),
+				],
+				fallbackThinkingLevels: this.modelRoute?.fallbackModels?.length
+					? [
+							...this.modelRoute.fallbackModels.map(() => "off"),
+							...(this.effectiveStageOptions?.fallbackThinkingLevels ?? []),
+						]
+					: this.effectiveStageOptions?.fallbackThinkingLevels,
 				catalog: this.modelCatalog,
 			});
 			this.candidatesPromise = this.modelRoute
@@ -1196,12 +1204,19 @@ export class StageSessionController {
 						if (!this.modelRoute) return candidates;
 						this.modelRoute.assertCurrent();
 						const effort = this.modelRoute.routerSelection.effort ?? undefined;
+						const seenModels = new Set<string>();
 						const allowed = candidates
-							.filter(
-								(candidate) =>
-									typeof candidate.value !== "string" &&
-									this.modelRoute!.allowsModel(candidate.value, candidate.reasoningLevel ?? effort),
-							)
+							.filter((candidate) => {
+								if (
+									typeof candidate.value === "string" ||
+									!this.modelRoute!.allowsModel(candidate.value, candidate.reasoningLevel ?? effort)
+								)
+									return false;
+								const id = `${candidate.value.provider}/${candidate.value.id}`;
+								if (seenModels.has(id)) return false;
+								seenModels.add(id);
+								return true;
+							})
 							.map((candidate) => ({
 								...candidate,
 								...(candidate.reasoningLevel === undefined && effort !== undefined

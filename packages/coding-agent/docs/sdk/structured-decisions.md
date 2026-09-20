@@ -33,11 +33,13 @@ By default, `inferRouterDecision()` gives each provider an initial attempt plus 
 
 Input/configuration errors, cancellation, timeout, and stale-catalog rejection are not repaired. Generic `inferStructuredOutput()` remains one-shot; it does not gain router repairs or provider fallback.
 
-When `routerModel` is empty, automatically selected Jev switches to the current chat model after exhausting its output repairs or encountering an HTTP or connection error. HTTP errors such as `max_tokens_exceeded` switch directly rather than repeating an unchanged request. A warning reports the safe failure reason and fallback model. The fallback gets its own initial attempt plus three corrective retries, using the original state, schema and constraints within the remaining deadline. The result includes `fallback: { from, to, reason }` and identifies the chat model in `model`. This can send routing context to your chat provider and incur its normal charges. An explicit `routerModel` disables provider fallback. Missing credentials, response-size violations, cancellation and timeout do not trigger fallback.
+When `routerModel` is empty, automatically selected Jev switches to the current chat model after exhausting its output repairs, encountering an HTTP or connection error, or exceeding the local context budget. Context-budget failures switch before sending an oversized request; HTTP errors such as `max_tokens_exceeded` switch without repeating an unchanged request. A warning reports the safe failure reason and fallback model. The fallback gets its own initial attempt plus three corrective retries, using the original state, schema and constraints within the remaining deadline. The result includes `fallback: { from, to, reason }` and identifies the chat model in `model`. This can send routing context to your chat provider and incur its normal charges. An explicit `routerModel` disables provider fallback. Missing credentials, response-size violations, cancellation and timeout do not trigger fallback.
 
 ## Prepare a decision
 
-Supply both the ordinary result schema and Jev Choice questions so either provider path can serve the same request. Instructions describe the judgment. Named `state` fields contain the actual task, relevant conversation, explicit constraints, reference text and complete candidate identities. Paths and URLs may identify a source, but do not replace its content. Exclude secrets before building state.
+Supply both the ordinary result schema and Jev Choice questions so either provider path can serve the same request. Instructions describe the judgment. Named `state` fields contain the actual task, relevant conversation, explicit constraints and reference text. Paths and URLs may identify a source, but do not replace its content. Exclude secrets from state and criteria.
+
+Put candidate-specific descriptions and contracts in Choice criteria rather than repeating a complete catalog in state. Both chat and Jev receive the questions and criteria; Jev tournament batches contain only the options being compared. Keep shared state relevant to every comparison. Do not truncate requirements to fit.
 
 ```typescript
 import { Type } from "typebox";
@@ -93,7 +95,7 @@ console.log(result.value.category);
 
 Keep `decode` synchronous and side-effect-free. It maps validated Choice keys to exact canonical values. Do not perform inference, authorization, file writes, or launches there. Validate current policy and candidate availability again before any later action. A valid shape is not proof that the judgment is correct.
 
-For runtime catalogs, build schema, state and Choice candidates from the same snapshot. Use one Choice per coherent judgment. Encode a model and its supported reasoning effort as one valid-pair candidate, never independent choices. Encode exact numeric limits as finite candidates and map them back without rounding. Preserve zero and omitted fields distinctly. Include a no-match outcome when applicable and handle name collisions explicitly.
+For runtime catalogs, build schema, state and Choice candidates from the same snapshot. Use one Choice per coherent judgment. Encode a model and its supported reasoning effort as one valid-pair candidate, never independent choices. Keep fixed numeric limits in code and copy them in `decode`; a singleton question is unnecessary for a value already determined. Preserve zero and omitted fields distinctly. Include a no-match outcome when applicable and handle name collisions explicitly.
 
 ## Provider behavior and limits
 
@@ -103,15 +105,15 @@ Ordinary requests set `maxRetries: 0`, use HTTP/SSE rather than WebSocket transp
 
 [TypeSafe Jev](/providers#typesafe-jev) accepts shared state and typed questions instead of JSON-schema generation. Atomic packs independent questions together. Generic `inferStructuredOutput()` calls have no automatic retries; router calls can repair malformed or schema-invalid answers within their shared deadline. Question IDs are correlation keys, not instructions seen by Jev, so put complete semantics in each question's `instructions`. Describe the speculative premise of a conditional question and consume its answer only when that premise applies.
 
-Choices with up to 255 options keep their normal single comparison. Larger choices use a bounded tournament: every original option participates in stable batches of at most 255; each batch retains its top three by validated probabilities, with ties resolved by original order. Further shrinking rounds precede a final shared comparison. Probabilities are never compared across batches. Multiple named questions can mix small choices and tournaments; `decode` receives original option keys only after all judgments succeed. Empty choices fail; singletons still go to the provider.
+Choices with up to 255 options keep a single comparison when they fit the context budget. Larger or more verbose choices use a bounded tournament: every original option participates in stable batches of at most 255; each batch retains its top three by validated probabilities, with ties resolved by original order. Further shrinking rounds precede a final shared comparison. Probabilities are never compared across batches. Multiple named questions can mix small choices and tournaments; `decode` receives original option keys only after all judgments succeed. Empty choices fail; singletons still go to the provider when they fit.
 
 For an abstention option that must remain available, set the question's optional `retainForFinal` to one original option key. It participates normally and is also retained for the final comparison if eliminated; it does not replace any batch's top three. Workflow routing uses this for `none`.
 
 Overflow requires multiple HTTP requests and can increase latency and billed input tokens because each request repeats the unchanged state. Returned usage sums all successful requests; `responseModel` identifies the last response. Grouping can change the winner: this tournament does not guarantee the result of an unlimited flat Choice or a globally optimal selection.
 
-Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Atomic estimates context when packing questions, but the estimate does not guarantee a fit; actual provider limits remain authoritative.
+Jev documents limits of 32k tokens for state plus the longest question, and 64k for state plus all questions. Without an exact Jev tokenizer, Atomic uses conservative UTF-8 byte budgets of 24,000 and 48,000 respectively, reserving further framing headroom when packing. These checks include compiled instructions and criteria, apply even below 255 options, and may reject inputs the provider would accept.
 
-Atomic never trims state, rejects solely on the estimate, or retries a rejected Jev request. It sends indivisible oversized context once. A `max_tokens_exceeded` error means the provider rejected the context size. Default routing can then use the current chat model as described above; explicitly pinned Jev calls fail. Supply concise context or select a chat model with enough capacity when needed.
+Atomic never trims state or sends an indivisible comparison that exceeds its local budget. Default routing can use the original context with the current chat model; explicitly pinned Jev and general structured-output calls fail. A provider `max_tokens_exceeded` response still uses the same routing fallback policy without repeating the rejected request. Supply concise context or select a chat model with enough capacity when needed.
 
 Jev response bodies are limited to 1 MiB per request. Atomic validates answer types, choices, probability distributions and usage without imposing a confidence threshold.
 

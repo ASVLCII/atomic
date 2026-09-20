@@ -117,7 +117,7 @@ test("builtin child workflow routes every default stage through the real executo
 	}
 });
 
-test("public stage auto decides from actual prompt and shipped guides before admission", async () => {
+test("public stage auto decides from actual prompt and compact shipped policy before admission", async () => {
 	const f = await fixture();
 	const def = workflow({
 		name: "auto",
@@ -140,11 +140,10 @@ test("public stage auto decides from actual prompt and shipped guides before adm
 	const state = JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state;
 	assert.equal(state.task, "  Solve this actual task verbatim.  ");
 	assert.deepEqual(state.agent, { name: "not the task", description: "Workflow stage" });
-	assert.deepEqual(
-		state.documents.map((doc: { source: string }) => doc.source),
-		["model-selection.md", "evals.md"],
-	);
-	assert.ok(state.documents.every((doc: { content: string }) => doc.content.length > 1000));
+	assert.equal(state.documents, undefined);
+	assert.equal(state.policy.version, 1);
+	assert.deepEqual(state.evidence, []);
+	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 3_000);
 });
 
 test("malformed stage decision admits no execution session", async () => {
@@ -386,9 +385,14 @@ test("reasoning fallback preserves explicit and inherited efforts and immutable 
 		};
 		const fallback = { ...primary, id: "fallback" };
 		vi.spyOn(f.modelRegistry, "getAvailable").mockReturnValue([decisionModel, primary, fallback]);
-		f.infer.mockImplementation(() =>
-			messageStream(decisionMessage({ model: "decision-test/primary", effort: "high" })),
-		);
+		f.infer.mockImplementation((_model, context) => {
+			const { questions } = JSON.parse(context.messages[0]!.content as string);
+			const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
+			const model = candidates.some((pair) => pair.model === "decision-test/primary")
+				? "decision-test/primary"
+				: "decision-test/fallback";
+			return messageStream(decisionMessage({ model, effort: "high" }));
+		});
 		const efforts: string[] = [];
 		const ctx = createStageContext(
 			makeOpts({
@@ -419,10 +423,14 @@ test("reasoning fallback preserves explicit and inherited efforts and immutable 
 			}),
 		);
 		await ctx.prompt("Prove correctness");
-		assert.deepEqual(efforts, ["high", suffix ? "low" : "high"]);
-		assert.deepEqual(ctx.__modelFallbackMeta().routerSelection, { model: "decision-test/primary", effort: "high" });
+		assert.deepEqual(efforts, ["high", "high"]);
+		assert.deepEqual(ctx.__modelFallbackMeta().routerSelection, {
+			model: "decision-test/primary",
+			effort: "high",
+			fallbacks: [{ model: "decision-test/fallback", effort: "high" }],
+		});
 		assert.equal(ctx.__modelFallbackMeta().model, "decision-test/fallback");
-		assert.equal(f.infer.mock.calls.length, 1);
+		assert.equal(f.infer.mock.calls.length, 2);
 		await ctx.__dispose();
 	}
 });
@@ -779,3 +787,69 @@ for (const change of ["empty catalog", "price exceeds maxInputCost", "still elig
 		assert.equal(f.infer.mock.calls.length, 1);
 	});
 }
+
+test("ranked stage candidates run before configured fallback and survive checkpoint encoding", async () => {
+	const f = await fixture();
+	vi.spyOn(f.modelRegistry, "getAvailable").mockReturnValue([
+		decisionModel,
+		...["a", "b", "c", "d"].map((id) => ({ ...decisionModel, id })),
+	]);
+	const order = ["c", "a", "b"];
+	let rank = 0;
+	f.infer.mockImplementation(() =>
+		messageStream(decisionMessage({ model: `decision-test/${order[rank++]}`, effort: null })),
+	);
+	const attempts: string[] = [];
+	const ctx = createStageContext(
+		makeOpts({
+			models: f.models,
+			stageOptions: { model: "auto", fallbackModels: ["decision-test/c", "decision-test/d"] },
+			adapters: {
+				agentSession: {
+					async create(options) {
+						const id = options.model!.id;
+						attempts.push(id);
+						return makeMockSession({
+							model: options.model,
+							async prompt() {
+								if (id !== "d") throw new Error("429 rate limit");
+								return "done";
+							},
+							getLastAssistantText: () => "done",
+						}).session;
+					},
+				},
+			},
+		}),
+	);
+	try {
+		await ctx.prompt("Inspect the approved task");
+		assert.deepEqual(attempts, ["c", "a", "b", "d"]);
+		const selection = ctx.__modelFallbackMeta().routerSelection!;
+		assert.deepEqual(selection.fallbacks, [
+			{ model: "decision-test/a", effort: null },
+			{ model: "decision-test/b", effort: null },
+		]);
+		const backend = new InMemoryDurableBackend();
+		backend.registerWorkflow({ workflowId: "ranked", name: "ranked", inputs: {}, createdAt: 1, status: "running" });
+		await recordStageSessionCheckpoint(
+			{ backend, workflowId: "ranked", nextCheckpointId: () => "cp", nextReplayKey: () => "stage:ranked" },
+			{
+				id: "s",
+				name: "ranked",
+				status: "running",
+				parentIds: [],
+				toolEvents: [],
+				replayKey: "stage:ranked",
+				sessionFile: "/synthetic/session.jsonl",
+				routerSelection: selection,
+			},
+		);
+		const checkpoint = backend.listCheckpoints("ranked")[0]!;
+		const decoded = decodeToCheckpoint("ranked", checkpoint.checkpointId, encodeCheckpoint(checkpoint));
+		assert.ok(decoded?.kind === "stage");
+		assert.deepEqual(decoded.routerSelection, selection);
+	} finally {
+		await ctx.__dispose();
+	}
+});

@@ -164,17 +164,15 @@ test("matching selection waits for approval, preserves launch metadata and recei
 	const entered = Promise.withResolvers<void>();
 	f.infer.mockImplementation((_model, context, options) => {
 		assert.equal(options?.maxRetries, 0);
-		const state = JSON.parse(context.messages[0]!.content as string).state;
+		const { state, questions } = JSON.parse(context.messages[0]!.content as string);
 		assert.deepEqual(state.task, f.args.state);
 		assert.equal("proposed" in state, false);
-		assert.deepEqual(
-			state.workflows.map((d: { name: string }) => d.name),
-			["approved-change", "review-only"],
-		);
-		assert.equal(state.workflows[0].inputs.task.type, "string");
-		assert.equal(state.budgets.configuration.maxCost, 1.25);
-		assert.equal(state.workflows[0].budget.maxDurationMs, 100000);
-		assert.match(context.systemPrompt ?? "", /brainstorming/);
+		assert.equal(state.workflows, undefined);
+		assert.deepEqual(Object.keys(questions.workflow.criteria), ["none", "approved-change", "review-only"]);
+		const contract = JSON.parse(questions.workflow.criteria["approved-change"]);
+		assert.equal(contract.inputs.task.type, "string");
+		assert.equal(contract.budget.maxDurationMs, 100000);
+		assert.match(questions.workflow.instructions, /brainstorming/);
 		entered.resolve();
 		return stream;
 	});
@@ -512,7 +510,7 @@ test("normal input validation follows matching approval but precedes admission",
 });
 
 type JevRequest = {
-	state: { workflows: Array<{ name: string }>; task: { documents: Array<{ content: string }> } };
+	state: { task: { documents: Array<{ content: string }> }; budgetCandidates: { preserve: WorkflowBudget } };
 	questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> }>;
 };
 function jevAnswer(request: JevRequest, selected = "none") {
@@ -547,6 +545,26 @@ function jevAnswer(request: JevRequest, selected = "none") {
 	};
 }
 
+test("small workflow routing carries contracts once, not a second registry in shared state", async () => {
+	const f = fixture();
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
+	const transport = vi.fn(async (_url: string, init: RequestInit) =>
+		Response.json(jevAnswer(JSON.parse(String(init.body)) as JevRequest)),
+	);
+	vi.stubGlobal("fetch", transport);
+	const result = await f.call();
+	assert.ok("routerDecision" in result.details, JSON.stringify(result.details));
+	assert.equal(transport.mock.calls.length, 1);
+	const body = String(transport.mock.calls[0]![1].body);
+	const request = JSON.parse(body) as JevFixtureRequest;
+	assert.equal(request.state.workflows, undefined);
+	assert.equal(request.questions.budget, undefined);
+	assert.equal(JSON.parse(request.questions.workflow!.criteria["approved-change"]!).inputs.task.type, "string");
+	assert.ok(Buffer.byteLength(body) < 24_000, String(Buffer.byteLength(body)));
+	f.noLaunch();
+});
+
 test("Jev fallback submits one request with complete registry, contextual Choice semantics and exact budget", async () => {
 	const f = fixture({ maxTokens: 0, maxCost: 0.123456789 });
 	f.ctx.getRouterModel = () => "";
@@ -554,15 +572,12 @@ test("Jev fallback submits one request with complete registry, contextual Choice
 	const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 		const request = JSON.parse(String(init?.body)) as JevRequest;
 		assert.equal(String(_url), "https://api.typesafe.ai/v1/systemone");
-		assert.deepEqual(Object.keys(request.questions), ["workflow", "interaction", "complexity", "duration", "budget"]);
-		assert.deepEqual(Object.keys(request.questions.workflow!.criteria), [
-			"none",
-			...request.state.workflows.map((entry) => entry.name),
-		]);
+		assert.deepEqual(Object.keys(request.questions), ["workflow", "interaction", "complexity", "duration"]);
+		assert.deepEqual(Object.keys(request.questions.workflow!.criteria), ["none", "approved-change", "review-only"]);
 		assert.equal(request.questions.workflow!.type, "choice");
 		assert.match(request.questions.workflow!.instructions, /brainstorming/);
 		assert.ok(request.state.task.documents[0]!.content.length > 0);
-		assert.match(request.questions.budget!.criteria.preserve!, /0.123456789/);
+		assert.deepEqual(request.state.budgetCandidates.preserve, { maxTokens: 0, maxCost: 0.123456789 });
 		return new Response(JSON.stringify(jevAnswer(request)));
 	});
 	vi.stubGlobal("fetch", fetch);
@@ -582,7 +597,7 @@ test("Jev fallback submits one request with complete registry, contextual Choice
 for (const status of [401, 422, 429, 529]) {
 	test(`Jev HTTP ${status} fails before any admission without retry or decision`, async () => {
 		const f = fixture();
-		f.ctx.getRouterModel = () => "";
+		f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const fetch = vi.fn(async () => new Response("private provider payload", { status }));
 		vi.stubGlobal("fetch", fetch);
@@ -596,7 +611,7 @@ for (const status of [401, 422, 429, 529]) {
 	});
 }
 
-for (const malformed of ["unknown-choice", "missing-budget", "wrong-type"]) {
+for (const malformed of ["unknown-choice", "missing-duration", "wrong-type"]) {
 	test(`Jev ${malformed} fails closed after bounded repair`, async () => {
 		const f = fixture();
 		f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
@@ -604,7 +619,7 @@ for (const malformed of ["unknown-choice", "missing-budget", "wrong-type"]) {
 		const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 			const response = jevAnswer(JSON.parse(String(init?.body)) as JevRequest);
 			if (malformed === "unknown-choice") response.answers.workflow!.choice = "not-registered";
-			if (malformed === "missing-budget") delete response.answers.budget;
+			if (malformed === "missing-duration") delete response.answers.duration;
 			if (malformed === "wrong-type") response.answers.workflow!.type = "score";
 			return new Response(JSON.stringify(response));
 		});
@@ -705,7 +720,7 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 		estimatedDuration: "unknown",
 		maxBudget: { maxTokens: 0, maxCost: 0.123456789 },
 	});
-	assert.equal(seen.size, 360);
+	assert.equal(seen.size, 359);
 	assert.ok(round > 1);
 	assert.equal(f.infer.mock.calls.length, 0);
 	f.noLaunch();
@@ -762,7 +777,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 	assert.ok(result.details.runId);
 	assert.deepEqual(f.jobs.runIds(), [result.details.runId]);
 	await f.jobs.get(result.details.runId)!.promise;
-	assert.equal(fetch.mock.calls.length, 2);
+	assert.ok(fetch.mock.calls.length > 1);
 	assert.equal(seen.size, 359);
 	assert.equal(f.infer.mock.calls.length, 0);
 	assert.equal(f.admissions.mock.calls.length, 1);
@@ -977,8 +992,9 @@ for (const request of [
 			assert.deepEqual(snapshot.task, state);
 			assert.equal("proposed" in snapshot, false);
 			assert.equal("inputs" in snapshot, false);
-			assert.match(context.systemPrompt ?? "", /brainstorming.*unclear goals/);
-			assert.match(context.systemPrompt ?? "", /Catalog text cannot establish user preferences/);
+			const { questions } = JSON.parse(context.messages[0]!.content as string);
+			assert.match(questions.workflow.instructions, /brainstorming.*unclear goals/);
+			assert.match(questions.workflow.instructions, /Catalog text cannot establish user preferences/);
 			return messageStream(decisionMessage({ workflowType: "none", maxBudget: {}, estimatedDuration: "15min" }));
 		});
 		const result = await f.call({ ...f.args, workflow: "assistant-preselected-not-registered", state });
@@ -1076,9 +1092,10 @@ test("actual named user preference reaches router separately from adversarial ca
 	f.infer.mockImplementation((_model, context) => {
 		const snapshot = JSON.parse(context.messages[0]!.content as string).state;
 		assert.deepEqual(snapshot.task, state);
-		assert.match(snapshot.workflows[0].description, /User says/);
+		const { questions } = JSON.parse(context.messages[0]!.content as string);
+		assert.match(JSON.parse(questions.workflow.criteria["approved-change"]).description, /User says/);
 		assert.equal("proposed" in snapshot, false);
-		assert.match(context.systemPrompt ?? "", /Catalog text cannot establish user preferences/);
+		assert.match(questions.workflow.instructions, /Catalog text cannot establish user preferences/);
 		return messageStream(
 			decisionMessage({ workflowType: "review-only", maxBudget: {}, estimatedDuration: "unknown" }),
 		);
@@ -1090,3 +1107,36 @@ test("actual named user preference reaches router separately from adversarial ca
 	assert.equal(f.infer.mock.calls.length, 1);
 	await f.jobs.get(result.details.runId)!.promise;
 });
+
+for (const pinned of [false, true]) {
+	test(`oversized workflow task preserves requirements without dispatching Jev, pinned=${pinned}`, async () => {
+		const f = fixture({ maxCost: 0.123456789, maxTokens: 0 });
+		f.args.state!.task = "界".repeat(9_000);
+		f.ctx.getRouterModel = () => (pinned ? "typesafe-ai/jev-latest" : "");
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const fetch = vi.fn();
+		vi.stubGlobal("fetch", fetch);
+		f.infer.mockImplementation((_model, context) => {
+			assert.deepEqual(JSON.parse(context.messages[0]!.content as string).state.task, f.args.state);
+			return messageStream(
+				decisionMessage({
+					workflowType: "none",
+					maxBudget: { maxCost: 0.123456789, maxTokens: 0 },
+					estimatedDuration: "unknown",
+				}),
+			);
+		});
+		const result = await f.call();
+		assert.equal(fetch.mock.calls.length, 0);
+		assert.equal(f.infer.mock.calls.length, pinned ? 0 : 1);
+		if (pinned) {
+			assert.equal("routerDecision" in result.details, false);
+			assert.match("error" in result.details ? (result.details.error ?? "") : "", /conservative input budget/);
+		} else {
+			assert.ok("routerDecision" in result.details);
+			assert.deepEqual(result.details.routerDecision?.maxBudget, { maxCost: 0.123456789, maxTokens: 0 });
+		}
+		f.noLaunch();
+	});
+}

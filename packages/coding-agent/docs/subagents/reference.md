@@ -21,7 +21,7 @@ The same value works on individual parallel tasks and in an agent definition's `
 
 Workflow stages also support [prompt-based `model: "auto"`](/workflows/authoring#automatic-stage-model-selection), using the same decision provider and evaluation guidance. Stage model selection is separate from choosing which workflow to launch.
 
-Put requirements that should influence model selection in the task. Atomic supplies the task, agent name and description, available provider-qualified models, supported efforts, and the model-selection and evaluation guides shipped with your installed version. You do not need to attach the guides yourself.
+Put requirements that should influence model selection in the task. Atomic supplies the task, agent name and description, eligible provider-qualified models and efforts, compact role guidance, and dated benchmark records for matching model identities. The full model-selection and evaluation guides are not sent. You do not need to attach them yourself.
 
 The agent's system prompt is not routing metadata. For a self-contained agent with no task, it remains the task fallback. The router weighs task-relevant evidence, cost, and latency rather than always choosing a benchmark winner or maximum effort. Benchmark measurement effort does not prescribe execution effort.
 
@@ -35,13 +35,13 @@ Neither routing nor child fallback changes the parent chat model or the `structu
 
 Routing has one 30-second deadline. By default, Jev and any current-chat fallback each get an initial attempt plus three corrective retries for malformed or schema-invalid answers. A valid answer stops repairs.
 
-The result is exactly `{ model, effort }`: an eligible provider/model ID and one supported effort, or `null` for a model with no configurable reasoning. A supported `"off"` is distinct from `null`. The catalog reflects configured authentication, not proof of valid credentials, quota, or entitlement.
+The result records a primary `{ model, effort }` and up to two ordered `fallbacks`, each with its own model and effort. Atomic ranks three distinct eligible provider/model IDs, or all available IDs when fewer than three qualify. It selects each rank from the remaining models, excluding all efforts of earlier choices. A supported `"off"` is distinct from `null`, which means no configurable reasoning. The catalog reflects configured authentication, not proof of valid credentials, quota, or entitlement.
 
-The child does not start if guides are missing, no candidates are eligible, model/effort pairs remain invalid, availability changes, or an unrecovered provider error, timeout, or cancellation occurs. With an empty `routerModel`, a Jev HTTP or connection failure, or exhausted output repairs, triggers a reported switch to the current chat model within the same deadline. The chat model gets its own output-repair allowance. Explicit router selections remain pinned. Invalid inputs, cancellation, timeout and stale-catalog failures do not trigger fallback. No partial decision can launch a child.
+The child does not start if no candidates are eligible, model/effort pairs remain invalid, availability changes, or an unrecovered provider error, timeout, or cancellation occurs. With an empty `routerModel`, oversized Jev context, a Jev HTTP or connection failure, or exhausted output repairs triggers a reported switch to the current chat model within the same deadline. The chat model gets its own output-repair allowance. Explicit router selections remain pinned. Invalid inputs, cancellation, timeout and stale-catalog failures do not trigger fallback. No partial decision can launch a child.
 
-For large eligible sets, Jev uses tournament requests within the same deadline. Every eligible pair enters a batch of at most 255; three per batch reach the finalist comparison. Exceeding 255 pairs needs no constraints or settings changes. Tournaments and repairs can increase latency and usage, and grouping can affect the winner. Context is unchanged; a provider context rejection can trigger the automatic chat fallback above. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits).
+For large eligible sets, Jev uses tournament requests within the same deadline. Every eligible pair enters a batch of at most 255; three per batch reach the finalist comparison. Verbose choices can split below 255 options to respect context budgets. Each batch contains only its candidate descriptions; task requirements remain unchanged. Tournaments and repairs can increase latency and usage, and grouping can affect the winner. If the task or a comparison cannot fit, automatic routing can use chat; pinned Jev fails with guidance to reduce context or select a chat router. See [structured decision limits](/sdk/structured-decisions#provider-behavior-and-limits).
 
-After selection, normal execution fallback applies. Each fallback keeps its own effort, not the router's selected effort. Metadata records the original decision separately from the model and effort actually used.
+Execution tries the ranked models in order before remaining configured fallbacks and the current chat model, subject to normal retry rules and hard constraints. Duplicate model IDs are attempted only at their first position. Each ranked candidate retains its selected effort. Ranking can require up to three selection passes within the shared deadline. Metadata preserves the ordered decision separately from the model and effort actually used; workflow checkpoints restore that order without rerouting.
 
 Choose a router provider permitted to receive the task and agent name/description. Do not put secrets in them.
 
@@ -73,7 +73,7 @@ For a persistent builtin override, put this in your user or project settings:
 }
 ```
 
-Existing builtin overrides using the legacy `thinking` field restrict the primary automatic selection to that effort. They intersect with `modelConstraints`; conflicting restrictions stop before launch. Explicit fallback suffixes still override the legacy default, so `thinking: "low"` can fall back to `provider/model:high` when that model supports it. Actual `modelConstraints.allowedEfforts` restrictions apply to every candidate, including suffixed fallbacks. A concrete model suffix still wins when you pin a model. User-authored agent definitions retain their existing behavior; use `modelConstraints.allowedEfforts` to constrain their automatic routing.
+Existing builtin overrides using the legacy `thinking` field restrict automatic ranking to that effort. They intersect with `modelConstraints`; conflicting restrictions stop before launch. Remaining configured fallbacks can still use explicit suffixes that override the legacy default, but cannot reinsert an already-ranked model at another effort. Actual `modelConstraints.allowedEfforts` restrictions apply to every candidate. A concrete model suffix still wins when you pin a model. User-authored agent definitions retain their existing behavior; use `modelConstraints.allowedEfforts` to constrain their automatic routing.
 
 Set a builtin override's `thinking` to `""` or `false` to clear an inherited legacy effort and let the router choose. This does not clear `modelConstraints.allowedEfforts`.
 
@@ -84,6 +84,8 @@ Define ordered `fallbackModels` to recover from retryable provider or model fail
 1. The requested primary model.
 2. Configured fallbacks, in order.
 3. The current user-selected model, appended when available.
+
+With `model: "auto"`, the ranked second and third models come immediately after the primary, before steps 2 and 3. Fewer than three eligible models produce a shorter ranked list.
 
 Retryable causes include rate limits, quota/usage-limit exhaustion, auth problems, unavailable models, network timeouts, and 5xx errors. Quota signals include `The usage limit has been reached`, `usage_limit_reached`, and `insufficient_quota`. Main chat and workflow stages share one classifier for auth, model availability, request incompatibility, and transport failures.
 

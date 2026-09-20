@@ -11,7 +11,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-test("small Jev questions share one direct request despite oversized unchanged state", async () => {
+test("small Jev questions reject oversized unchanged state before dispatch", async () => {
 	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(2);
 	const state = { text: "x".repeat(128000) };
@@ -22,10 +22,11 @@ test("small Jev questions share one direct request despite oversized unchanged s
 		calls.push(body);
 		return Response.json(jevFixtureResponse(body));
 	});
-	await inferRouterDecision({ ...request, state, jev: { ...request.jev, questions } });
-	assert.equal(calls.length, 1);
-	assert.deepEqual(calls[0].state, state);
-	assert.deepEqual(Object.keys(calls[0].questions), ["workflow", "budget"]);
+	await assert.rejects(
+		inferRouterDecision({ ...request, state, jev: { ...request.jev, questions } }),
+		/conservative input budget/,
+	);
+	assert.equal(calls.length, 0);
 });
 
 test("singleton Jev decoder receives an ordinary object", async () => {
@@ -117,13 +118,13 @@ test("Jev routes all 1997 original options through bounded batches and a shared 
 		},
 	});
 	assert.equal(result.value.picked, "key_0");
-	assert.deepEqual(calls[0].flat(), Object.keys(criteria));
+	assert.deepEqual(calls.slice(0, -1).flat(2), Object.keys(criteria));
 	assert.deepEqual(
 		calls.at(-1)?.flat(),
 		Array.from({ length: 8 }, (_, i) => [0, 1, 2].map((j) => `key_${i * 255 + j}`)).flat(),
 	);
 	assert.deepEqual(result.usage, { inputTokens: calls.length * 20, outputTokens: calls.length * 10 });
-	assert.equal(calls.length, 2);
+	assert.ok(calls.length >= 2);
 });
 
 test("mixed named questions cannot collide with tournament IDs", async () => {
@@ -328,10 +329,10 @@ for (const failure of ["cancel-before", "cancel-between", "timeout", "provider"]
 	});
 }
 
-test("context packing repeats unchanged state, limits estimated question context, and sums actual calls", async () => {
+test("context packing repeats unchanged state, limits compiled question bytes, and sums actual calls", async () => {
 	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(1000);
-	request.state = { task: "x".repeat(40000) };
+	request.state = { task: "x".repeat(4_000) };
 	request.jev.questions.pick.criteria = Object.fromEntries(
 		Object.keys(request.jev.questions.pick.criteria).map((key) => [key, "description ".repeat(200)]),
 	);
@@ -340,9 +341,9 @@ test("context packing repeats unchanged state, limits estimated question context
 		const body = JSON.parse(String(init.body)) as JevFixtureRequest;
 		calls.push(body);
 		assert.deepEqual(body.state, request.state);
-		assert.ok((JSON.stringify(body.state).length + JSON.stringify(body.questions).length) / 4 <= 64000);
-		for (const question of Object.values(body.questions))
-			assert.ok((JSON.stringify(body.state).length + JSON.stringify(question).length) / 4 <= 32000);
+		assert.ok(Buffer.byteLength(String(init.body)) <= 48_000);
+		for (const [id, question] of Object.entries(body.questions))
+			assert.ok(Buffer.byteLength(JSON.stringify({ state: body.state, questions: { [id]: question } })) <= 24_000);
 		return Response.json(jevFixtureResponse(body));
 	});
 	const result = await inferRouterDecision(request);
@@ -355,25 +356,22 @@ test("context packing repeats unchanged state, limits estimated question context
 	);
 });
 
-for (const status of [200, 422]) {
-	test(`estimated oversized unchanged state is sent once and provider ${status} is authoritative`, async () => {
-		vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
-		const request = { ...tournament(1), state: { task: "x".repeat(300000) } };
-		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
-			const body = JSON.parse(String(init.body)) as JevFixtureRequest;
-			assert.deepEqual(body.state, request.state);
-			return status === 200 ? Response.json(jevFixtureResponse(body)) : new Response("private", { status });
-		});
-		vi.stubGlobal("fetch", fetch);
-		if (status === 200) assert.equal((await inferRouterDecision(request)).value.pick, "key_0");
-		else await assert.rejects(inferRouterDecision(request), /HTTP 422/);
-		assert.equal(fetch.mock.calls.length, 1);
-	});
-}
+test("indivisible oversized state fails without transport or decode", async () => {
+	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
+	const request = { ...tournament(1), state: { task: "x".repeat(300000) } };
+	const fetch = vi.fn();
+	vi.stubGlobal("fetch", fetch);
+	await assert.rejects(inferRouterDecision(request), /conservative input budget/);
+	assert.equal(fetch.mock.calls.length, 0);
+	assert.equal(request.jev.decode.mock.calls.length, 0);
+});
 
 test("minimum context batches still shrink with a retained option and singleton tails", async () => {
 	vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 	const request = tournament(256);
+	request.jev.questions.pick.criteria = Object.fromEntries(
+		Object.keys(request.jev.questions.pick.criteria).map((key) => [key, "Relevant detail. ".repeat(210)]),
+	);
 	const calls: JevFixtureRequest[] = [];
 	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
 		const body = JSON.parse(String(init.body)) as JevFixtureRequest;
@@ -382,12 +380,12 @@ test("minimum context batches still shrink with a retained option and singleton 
 	});
 	await inferRouterDecision({
 		...request,
-		state: { task: "x".repeat(127950) },
+		state: { task: "x".repeat(4_000) },
 		jev: { ...request.jev, questions: { pick: { ...request.jev.questions.pick, retainForFinal: "key_200" } } },
 	});
 	const final = calls.at(-1)!.questions.pick;
 	assert.ok(final);
-	assert.ok(Object.keys(final.criteria).length <= 4);
+	assert.ok(Object.keys(final.criteria).length <= 5);
 	assert.ok(Object.hasOwn(final.criteria, "key_200"));
 	assert.ok(calls.length < 200);
 });

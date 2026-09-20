@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentConfig } from "../../agents/agent-types.js";
 import { ensureArtifactsDir, getArtifactPaths, writeArtifact } from "../../shared/artifacts.js";
+import { splitKnownThinkingSuffix } from "../../shared/model-info.js";
 import type {
 	AgentProgress,
 	ArtifactPaths,
@@ -175,21 +176,27 @@ export async function runSingleInProcess(
 	if (!existsSync(cwd)) return refusedResult(agent, task, `cwd does not exist: ${cwd}`);
 	if (!statSync(cwd).isDirectory()) return refusedResult(agent, task, `cwd is not a directory: ${cwd}`);
 	options.modelRoute?.assertCurrent();
+	const seenModels = new Set<string>();
 	const rawCandidates = buildModelCandidates(
 		options.modelOverride ?? agent.model,
-		agent.fallbackModels,
+		[...(options.modelRoute?.fallbackModels ?? []), ...(agent.fallbackModels ?? [])],
 		options.availableModels,
 		options.preferredModelProvider,
 		options.modelRoute && options.currentModel && options.currentThinkingLevel
 			? `${options.currentModel}:${options.currentThinkingLevel}`
 			: options.currentModel,
-		agent.fallbackThinkingLevels,
-	).filter(
-		// Unsuffixed fallbacks inherit the routed session effort; null starts nonreasoning sessions at off.
-		(candidate) =>
-			!options.modelRoute ||
-			options.modelRoute.allowsCandidate(candidate, options.modelRoute.routerSelection.effort ?? "off"),
-	);
+		options.modelRoute?.fallbackModels?.length
+			? [...options.modelRoute.fallbackModels.map(() => "off"), ...(agent.fallbackThinkingLevels ?? [])]
+			: agent.fallbackThinkingLevels,
+	).filter((candidate) => {
+		if (!options.modelRoute) return true;
+		if (!options.modelRoute.allowsCandidate(candidate, options.modelRoute.routerSelection.effort ?? "off"))
+			return false;
+		const { baseModel } = splitKnownThinkingSuffix(candidate);
+		if (seenModels.has(baseModel)) return false;
+		seenModels.add(baseModel);
+		return true;
+	});
 	const filteredCandidates = filterSpawnableModelCandidates({
 		candidates: rawCandidates,
 		availableModels: options.availableModels,

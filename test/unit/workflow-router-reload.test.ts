@@ -112,6 +112,15 @@ type CapturedState = {
 };
 type CapturedRequest = { state: CapturedState; questions: Record<string, { criteria: Record<string, string> }> };
 
+function captureState(content: string): CapturedState {
+	const request = JSON.parse(content) as CapturedRequest;
+	return {
+		...request.state,
+		workflows: Object.entries(request.questions.workflow!.criteria)
+			.filter(([name]) => name !== "none")
+			.map(([, contract]) => JSON.parse(contract) as CapturedWorkflow),
+	};
+}
 type RoutingHarness = {
 	execute: (args: WorkflowToolArgs, ctx: PiExecuteContext) => Promise<WorkflowRegisteredToolResult>;
 	registryNames: () => readonly string[];
@@ -123,7 +132,7 @@ async function inspectRoutes(f: RoutingHarness, _target: string) {
 	let ordinaryState: CapturedState | undefined;
 	let choices: string[] = [];
 	ctx.modelRegistry!.streamSimple = (_model, context) => {
-		ordinaryState = JSON.parse(context.messages[0]!.content as string).state;
+		ordinaryState = captureState(context.messages[0]!.content as string);
 		const schema = context.tools![0]!.parameters as { properties: { workflowType: { anyOf: { const: string }[] } } };
 		choices = schema.properties.workflowType.anyOf.map((option) => option.const);
 		return messageStream(decisionMessage({ estimatedDuration: "unknown", workflowType: "none", maxBudget: {} }));
@@ -141,11 +150,18 @@ async function inspectRoutes(f: RoutingHarness, _target: string) {
 	);
 	assert.match(ordinaryState.task.documents[0]!.content, /Implement the change/);
 	let jev: CapturedRequest | undefined;
+	const seenContracts = new Map<string, CapturedWorkflow>();
 	vi.stubEnv("TYPESAFE_API_KEY", "fixture-jev-key");
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(async (_url: string, init: RequestInit) => {
 			jev = JSON.parse(init.body as string) as CapturedRequest;
+			for (const question of Object.values(jev.questions)) {
+				for (const [name, contract] of Object.entries(question.criteria)) {
+					if (name !== "none" && expected.includes(name))
+						seenContracts.set(name, JSON.parse(contract) as CapturedWorkflow);
+				}
+			}
 			const answers = Object.fromEntries(
 				Object.entries(jev.questions).map(([id, question]) => {
 					const keys = Object.keys(question.criteria);
@@ -171,10 +187,9 @@ async function inspectRoutes(f: RoutingHarness, _target: string) {
 	assert.equal(jevResult.action, "route");
 	assert.equal(jevResult.status, "not_launched", jevResult.error);
 	assert.ok(jev);
-	assert.deepEqual(Object.keys(jev.questions.workflow!.criteria), expected);
-	assert.deepEqual(jev.state.workflows, ordinaryState.workflows);
-	for (const workflow of ordinaryState.workflows)
-		assert.ok(jev.questions.workflow!.criteria[workflow.name]!.includes(workflow.description));
+	assert.ok(Object.hasOwn(jev.questions.workflow!.criteria, "none"));
+	assert.deepEqual([...seenContracts.keys()], expected.slice(1));
+	assert.deepEqual([...seenContracts.values()], ordinaryState.workflows);
 	f.noAdmission();
 	return ordinaryState;
 }
@@ -321,7 +336,7 @@ test("overlapping in-flight decisions cannot launch a removed or same-name chang
 	const captured: CapturedState[] = [];
 	const ctx = workflowRouterContext("none");
 	ctx.modelRegistry!.streamSimple = (_model, context) => {
-		captured.push(JSON.parse(context.messages[0]!.content as string).state as CapturedState);
+		captured.push(captureState(context.messages[0]!.content as string));
 		if (captured.length === 2) entered.resolve();
 		return streams[captured.length - 1]!;
 	};
@@ -416,7 +431,7 @@ for (const mutation of ["add", "remove", "rename", "same-name replacement"] as c
 		const snapshots: CapturedState[] = [];
 		const ctx = workflowRouterContext("none");
 		ctx.modelRegistry!.streamSimple = (_model, context) => {
-			snapshots.push(JSON.parse(context.messages[0]!.content as string).state as CapturedState);
+			snapshots.push(captureState(context.messages[0]!.content as string));
 			if (snapshots.length === targets.length) entered.resolve();
 			return streams[snapshots.length - 1]!;
 		};
