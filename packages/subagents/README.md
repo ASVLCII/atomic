@@ -125,7 +125,7 @@ There is no generic `reviewer` or `planner` agent; pick the specialist whose ang
 
 ## Changing a builtin agent's model
 
-Builtin agents declare role-specific models and ordered fallbacks. The debugger starts with `openai-codex/gpt-6-astra:medium`, with Astra/Fable fallbacks at `medium` and Sol/Opus fallbacks at `high`. See the [bundled defaults](../coding-agent/docs/subagents.md#bundled-agents) for the other roles. If you want a role to use a specific model, set an override instead of copying the bundled agent file.
+Every builtin agent defaults to `model: "auto"`, with no pinned fallback chain. The router chooses from your available model/effort pairs before launch. To pin a role, set an override instead of copying the bundled file. See [automatic model selection](../coding-agent/docs/subagents/reference.md#automatic-model-selection) for router settings, effort constraints and troubleshooting.
 
 For one run, pass `model` on the `subagent` call:
 

@@ -8,6 +8,7 @@ import type { ExtensionContext } from "@bastani/atomic";
 import { createAssistantMessageEventStream } from "@bastani/pi-ai";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { AgentTaskHost } from "../../packages/coding-agent/src/core/tasks/agent-adapter.js";
+import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import type { AgentConfig } from "../../packages/subagents/src/agents/agents.js";
 import { createSubagentExecutor } from "../../packages/subagents/src/runs/foreground/subagent-executor.js";
 import type {
@@ -136,6 +137,25 @@ for (const mode of ["single-explicit", "single-default", "parallel-explicit", "p
 		assert.deepEqual(options.modelRoute?.routerSelection, { model: "decision-test/chat", effort: null });
 	});
 }
+test("discovered builtin defaults route on single and parallel execution without a model argument", async () => {
+	const { agents } = loadAgentsFromDirWithDiagnostics(join(process.cwd(), "packages/subagents/agents"), "builtin");
+	const worker = agents.find((candidate) => candidate.name === "worker");
+	assert.ok(worker);
+	for (const parallel of [false, true]) {
+		const f = await fixture();
+		Object.assign(f.agent, worker);
+		const task = { agent: "worker", task: "Inspect the approved patch", context: "fresh" as const };
+		const result = await f.call(parallel ? { tasks: [task], context: "fresh" } : task);
+		assert.notEqual(result.isError, true, JSON.stringify(result));
+		assert.equal(f.infer.mock.calls.length, 1);
+		assert.equal(f.runSync.mock.calls[0]?.[4].modelOverride, "decision-test/chat");
+		assert.equal(f.ctx.model, decisionModel);
+		await f.call({ ...task, model: "decision-test/chat:off" });
+		assert.equal(f.infer.mock.calls.length, 1);
+		assert.equal(f.runSync.mock.calls[1]?.[4].modelOverride, "decision-test/chat:off");
+	}
+});
+
 test("concrete overrides and ordinary omission bypass inference with existing effort intact", async () => {
 	const f = await fixture("auto");
 	await f.call({ agent: "worker", task: "Inspect", model: "decision-test/chat:off" });

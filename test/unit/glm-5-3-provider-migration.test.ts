@@ -8,31 +8,10 @@ import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.t
 import { resolveCliModel } from "../../packages/coding-agent/src/core/model-resolver.ts";
 import { defaultModelPerProvider } from "../../packages/coding-agent/src/core/model-resolver-defaults.ts";
 import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.ts";
-import {
-	orchestratorModelConfig as goalOrchestratorModelConfig,
-	reviewerModelConfig as goalReviewerModelConfig,
-} from "../../packages/workflows/builtin/goal-models.js";
-import {
-	promptEngineerModelConfig,
-	orchestratorModelConfig as ralphOrchestratorModelConfig,
-	researchModelConfig,
-	reviewerAModelConfig,
-	reviewerBModelConfig,
-} from "../../packages/workflows/builtin/ralph-models.js";
 import { moduleDir } from "../helpers/runtime.js";
 
 const root = resolve(moduleDir(import.meta.url), "../..");
 const read = (relativePath: string): string => readFileSync(join(root, relativePath), "utf8");
-
-const workflowConfigs = [
-	["Goal orchestrator", goalOrchestratorModelConfig],
-	["Goal reviewer", goalReviewerModelConfig],
-	["Ralph prompt engineer", promptEngineerModelConfig],
-	["Ralph research", researchModelConfig],
-	["Ralph orchestrator", ralphOrchestratorModelConfig],
-	["Ralph reviewer A", reviewerAModelConfig],
-	["Ralph reviewer B", reviewerBModelConfig],
-] as const;
 
 const EXPECTED_GLM_FALLBACKS = [
 	"zai/glm-5.3:high",
@@ -47,34 +26,6 @@ const EXPECTED_GLM_FALLBACKS = [
 
 type GlmProvider = "zai" | "zai-coding-cn" | "baseten" | "openrouter";
 
-function extractGlmReferences(text: string): string[] {
-	return text.match(/(?:(?:zai|zai-coding-cn)\/glm|openrouter\/z-ai\/glm|baseten\/zai-org\/GLM)-[^"\s,]+/gu) ?? [];
-}
-
-function workflowGlmChains(): Array<{ name: string; references: string[] }> {
-	const chains = workflowConfigs.map(([name, config]) => ({
-		name,
-		references: config.fallbackModels.filter((reference) => extractGlmReferences(reference).length > 0),
-	}));
-	return [
-		...chains,
-		{
-			name: "Open Claude Design",
-			references: extractGlmReferences(read("packages/workflows/builtin/open-claude-design-runner.ts")),
-		},
-	];
-}
-
-function workflowModelReferences(): string[] {
-	return workflowGlmChains().flatMap(({ references }) => references);
-}
-
-function subagentFrontmatter(): Array<{ name: string; text: string }> {
-	const agentsDir = join(root, "packages/subagents/agents");
-	return readdirSync(agentsDir)
-		.filter((name) => name.endsWith(".md"))
-		.map((name) => ({ name, text: readFileSync(join(agentsDir, name), "utf8").split("---", 2)[1] ?? "" }));
-}
 function recursivelyListFiles(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
 		const path = join(directory, entry.name);
@@ -94,15 +45,8 @@ test("builtin workflow and subagent sources contain no stale GLM-5.2 references"
 	}
 });
 
-test("builtin workflow GLM fallback chains include every provider mirror in order", () => {
-	for (const { name, references } of workflowGlmChains()) {
-		assert.deepEqual(references, EXPECTED_GLM_FALLBACKS, name);
-	}
-});
-
-test("workflow GLM references use catalog-supported thinking levels", () => {
-	const references = [...new Set(workflowModelReferences())];
-	assert.deepEqual(references, EXPECTED_GLM_FALLBACKS);
+test("GLM provider mirrors support the explicitly selectable high effort", () => {
+	const references = EXPECTED_GLM_FALLBACKS;
 
 	for (const reference of references) {
 		const match = /^(zai|zai-coding-cn|baseten|openrouter)\/(.+):([^:]+)$/u.exec(reference);
@@ -122,15 +66,6 @@ test("workflow GLM references use catalog-supported thinking levels", () => {
 			getSupportedThinkingLevels(model).map(String).includes(thinkingLevel),
 			`${reference} uses a thinking level unsupported by the ${provider}/${modelId} catalog entry`,
 		);
-	}
-});
-
-test("builtin subagent fallback chains include every GLM-5.3 provider mirror in order", () => {
-	const agents = subagentFrontmatter();
-	assert.ok(agents.length > 0, "expected builtin subagent definitions");
-	for (const { name, text } of agents) {
-		assert.doesNotMatch(text, /glm-5\.2/iu, name);
-		assert.deepEqual(extractGlmReferences(text), EXPECTED_GLM_FALLBACKS, name);
 	}
 });
 

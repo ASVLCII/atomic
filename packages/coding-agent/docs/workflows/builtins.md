@@ -98,21 +98,11 @@ All builtin workflows allow Intercom coordination, including stages with narrow 
 
 Builtin stages report evidence and bounded results. Give each run a concrete objective and acceptance criteria; do not treat a completion claim as proof that validation passed.
 
-The current `goal`, `ralph`, and `open-claude-design` defaults are:
+All nine builtins default to `model: "auto"` for every model stage, including review, scoring, repair and final handoff stages. This also applies when you import a builtin as a child with `ctx.workflow(...)`. Each stage routes independently from its actual prompt; reviewers may select the same model. Builtins no longer ship concrete fallback chains.
 
-| Role | Primary model |
-|---|---|
-| Goal and Ralph orchestrators | `openai-codex/gpt-6-astra:medium` |
-| Goal reviewers | `openai-codex/gpt-6-astra:high` |
-| Ralph prompt engineer | `openai-codex/gpt-6-astra:high` |
-| Ralph research | `openai-codex/gpt-6-astra:medium` |
-| Ralph reviewer A | `anthropic/claude-fable-5-1:high` |
-| Ralph reviewer B | `openai-codex/gpt-6-astra:high` |
-| Open Claude Design model stages | `anthropic/claude-fable-5-1:medium` |
+Use `/settings` → **Router model** to choose the decision provider without changing your main-chat model. Routing failures stop that stage before execution; inspect `/workflow status <run-id>` and correct the reported router, credentials or eligibility problem before retrying. See [automatic stage models](/workflows/operations#automatic-stage-models) for failure and resume behavior.
 
-Astra-led chains try GitHub Copilot Astra, OpenAI Astra, Anthropic Fable 5.1, then GitHub Copilot Fable 5.1 before older models. Ralph reviewer A starts with GitHub Copilot Fable 5.1, then Codex, Copilot, and OpenAI Astra at `high`. Open Claude Design starts with Anthropic and Copilot Fable 5.1, then Codex, Copilot, and OpenAI Astra, all at `medium`; its OpenRouter group also puts Fable 5.1 before Astra.
-
-Goal and Ralph orchestration, Ralph research, and design use Fable 5.1/Fable 5 at `medium` and Sol at `high` in their fallbacks. Goal and Ralph reviewers use Astra/Sol at `high`. Ralph prompt refinement keeps its Fable `high` and Sol `xhigh` fallbacks. Later fallback order remains role-specific: Ralph research puts Fable 5 before Sol, while the orchestrators put Sol before Fable 5. Reviewer A puts Kimi before Sol; Goal reviewers and Ralph reviewer B put Sol before Kimi. OpenRouter mirrors follow direct-provider candidates. These are configured preferences, not guarantees of provider or account availability.
+Explicit `tournament` `models` inputs still assign attempt models in their supplied order, round-robin; an omitted or empty list uses automatic routing. Custom workflow definitions keep their existing defaults. For an explicit model, effort or capability requirement in your own stages, use the [stage model options](/workflows/authoring#automatic-stage-model-selection).
 
 ### Six composable pattern builtins
 
@@ -177,7 +167,7 @@ Declared outputs include `result`, `status`, `approved`, `goal_id`, `objective`,
 
 ### `ralph`
 
-Ralph starts from the raw task, refines it into a research question, runs codebase research, delegates implementation from the research artifact, and sends the patch to independent model-family reviewers. It repeats research, orchestration, and review until reviewers approve or `max_loops` is exhausted.
+Ralph starts from the raw task, refines it into a research question, runs codebase research, delegates implementation from the research artifact, and sends the patch to independent reviewers. It repeats research, orchestration, and review until reviewers approve or `max_loops` is exhausted.
 
 Ralph uses the same canonical reviewer evidence and convergence contracts as Goal. Its reviewer prompt receives artifacts first and the review objective last, requires independently derived probes before implementation-authored evidence, and preserves unresolved findings when the bounded loop ends. Forked continuation prompts send only changed state and artifact paths instead of repeating the full established contract.
 

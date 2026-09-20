@@ -56,7 +56,7 @@ The catalog uses the same effective discovery rules as execution, so overridden 
 
 ## Let Atomic choose the child model
 
-Use `model: "auto"` on a subagent call, parallel task, or agent definition to select a model and reasoning effort from your available catalog. Atomic injects its shipped evaluation guidance and makes one decision before launching the child. Ordinary omitted or concrete model selections retain their existing behavior. See [Automatic model selection](/subagents/reference#automatic-model-selection) for examples, routing configuration, and failure handling.
+All builtin subagents default to `model: "auto"`. Atomic selects a model and reasoning effort from your available catalog using its shipped evaluation guidance before launching each child. You can also set `auto` on a custom agent or call. A concrete per-call model overrides the builtin default. Custom agents with no model keep their existing inheritance. See [Automatic model selection](/subagents/reference#automatic-model-selection) for configuration and failure handling.
 
 ## Subagent execution is non-interactive
 
@@ -132,7 +132,7 @@ Atomic currently bundles these agents from `@bastani/subagents`:
 | `code-simplifier` | Simplify recently changed code under its behavior-preservation “doors” rubric. | Yes |
 | `worker` | Implement an approved task or handoff, validate the narrow change, and escalate product, architecture, or scope decisions to its supervisor. | Yes |
 
-The bundled `debugger` defaults to `openai-codex/gpt-6-astra:medium`. Its Astra, Fable 5.1, and Fable 5 candidates use `medium`; Sol and Opus candidates use `high`. Other defaults are unchanged: the three locator roles use `openai-codex/gpt-5.6-luna:xhigh`, while the remaining agents use `openai-codex/gpt-6-astra:low`. Ordinary agents use Astra/Fable 5.1 at `low`, with Sol and GPT-5.5 fallbacks at `medium`, including the locator roles. Debugger's fallback chain starts with GitHub Copilot Astra, OpenAI Astra, Anthropic Fable 5.1, then GitHub Copilot Fable 5.1. Later candidates retain provider-specific reasoning levels and identifiers; OpenRouter mirrors follow the direct-provider candidates. Each agent definition contains its complete ordered chain.
+Every bundled agent uses `model: "auto"`, without a pinned fallback chain. To pin a role, set `subagents.agentOverrides.<name>.model` in user or project settings, or pass a concrete `model` on one call. To restrict automatic choices, use `modelConstraints`, for example `{ "allowedEfforts": ["high"] }`. Routing and execution fallback do not change your main-chat model.
 
 Read-oriented agents inspect and report. `debugger`, `code-simplifier`, and `worker` can edit files, so give them an explicit scope and validation target. The debugger should apply and validate an in-scope fix, not stop at a proposed patch.
 

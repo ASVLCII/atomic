@@ -8,15 +8,11 @@ import {
 	reviewerModelConfig as goalReviewerModelConfig,
 } from "../../packages/workflows/builtin/goal-models.js";
 import { reviewDecisionSchema } from "../../packages/workflows/builtin/goal-schemas.js";
-import {
-	orchestratorModelConfig as ralphOrchestratorModelConfig,
-	reviewerAModelConfig,
-} from "../../packages/workflows/builtin/ralph-models.js";
+import { orchestratorModelConfig as ralphOrchestratorModelConfig } from "../../packages/workflows/builtin/ralph-models.js";
 import type { WorkflowDefinition } from "../../packages/workflows/src/types.js";
 import { makeMockCtx } from "./builtin-workflows-helpers.js";
-import { orchestratorFallbacks, reviewerFallbacks } from "./latest-model-config-expectations.js";
 
-test("Goal orchestrator uses a local copy of Ralph's exact Astra medium model config", async () => {
+test("Goal orchestrator routes automatically with the same restrictions as Ralph", async () => {
 	const mod = await import("../../packages/workflows/builtin/goal.js");
 	const workflow = mod.default as unknown as WorkflowDefinition;
 	const ctx = makeMockCtx({
@@ -28,17 +24,15 @@ test("Goal orchestrator uses a local copy of Ralph's exact Astra medium model co
 
 	const options = ctx.calls.taskOptions["orchestrator-1"]?.[0];
 	assert.ok(options, "missing Goal orchestrator options");
-	assert.equal(options.model, "openai-codex/gpt-6-astra:medium");
-	assert.deepEqual(options.fallbackModels, orchestratorFallbacks);
+	assert.equal(options.model, "auto");
+	assert.equal(options.fallbackModels, undefined);
 	assert.equal(options.model, ralphOrchestratorModelConfig.model);
-	assert.deepEqual(options.fallbackModels, ralphOrchestratorModelConfig.fallbackModels);
 	assert.deepEqual(options.excludedTools, ralphOrchestratorModelConfig.excludedTools);
 	assert.deepEqual(goalOrchestratorModelConfig, ralphOrchestratorModelConfig);
 	assert.notEqual(goalOrchestratorModelConfig, ralphOrchestratorModelConfig);
-	assert.notEqual(goalOrchestratorModelConfig.fallbackModels, ralphOrchestratorModelConfig.fallbackModels);
 });
 
-test("Goal reviewers prioritize GPT-5.6 within direct and OpenRouter groups", async () => {
+test("Goal reviewers route automatically and retain their schema and tool restrictions", async () => {
 	const mod = await import("../../packages/workflows/builtin/goal.js");
 	const workflow = mod.default as unknown as WorkflowDefinition;
 	const ctx = makeMockCtx({
@@ -54,19 +48,10 @@ test("Goal reviewers prioritize GPT-5.6 within direct and OpenRouter groups", as
 		assert.equal(options.context, undefined, name);
 		assert.equal(options.forkFromSessionFile, undefined, name);
 		assert.equal(options.model, goalReviewerModelConfig.model, name);
-		assert.equal(options.model, "openai-codex/gpt-6-astra:high", name);
-		assert.deepEqual(options.fallbackModels, goalReviewerModelConfig.fallbackModels, name);
+		assert.equal(options.model, "auto", name);
+		assert.equal(options.fallbackModels, undefined, name);
 		assert.deepEqual(options.excludedTools, goalReviewerModelConfig.excludedTools, name);
-		const fallbacks = options.fallbackModels ?? [];
-		assert.deepEqual(fallbacks, reviewerFallbacks, name);
-		assert.ok(fallbacks.indexOf("openai-codex/gpt-5.6-sol:high") < fallbacks.indexOf("kimi-coding/k3:max"), name);
-		assert.ok(
-			fallbacks.indexOf("openrouter/openai/gpt-5.6-sol:high") <
-				fallbacks.indexOf("openrouter/moonshotai/kimi-k3:max"),
-			name,
-		);
 		assert.equal(options.schema, reviewDecisionSchema, name);
-		assert.notDeepEqual(options.fallbackModels, reviewerAModelConfig.fallbackModels, name);
 	}
 });
 

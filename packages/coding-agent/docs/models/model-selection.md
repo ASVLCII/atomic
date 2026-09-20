@@ -11,7 +11,7 @@ Use this page to choose models for workflow roles:
 - Which model should it use for judgment gates, debugging, planning, research, cheap worker loops, and fallback diversity?
 - Which models are dominated on cost/accuracy and should be avoided unless they have a specific role fit?
 
-This is a **static reference**, not a live benchmark query. Opt-in [subagent automatic model selection](/subagents/reference#automatic-model-selection) uses the copy shipped with your installed Atomic version, together with the current available model catalog. Treat the recommendations as a starting point and validate against your own task evaluations.
+This is a **static reference**, not a live benchmark query. [Automatic model selection](/subagents/reference#automatic-model-selection), the default for builtin workflows and subagents, uses the copy shipped with your installed Atomic version, together with the current available model catalog. Treat the recommendations as a starting point and validate against your own task evaluations.
 
 <Note>
 The table below uses the [DeepSWE](https://deepswe.datacurve.ai/) v1.1 snapshot of 113 tasks, updated **September 3, 2026**, at each model's highest published effort. It reports `pass@1` and average dollars per task. The site's default **Best** view instead selects each model's best-scoring effort; four rows differ, as noted below. Treat live leaderboards as authoritative when prices or results change. See [Evals](/models/evals). **Last compiled: 2026-09-03.**

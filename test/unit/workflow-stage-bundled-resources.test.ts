@@ -31,11 +31,6 @@ import {
 	prepareAtomicStageSessionOptions,
 } from "../../packages/workflows/src/extension/wiring.js";
 import type { StageSessionRuntime } from "../../packages/workflows/src/runs/foreground/stage-runner.js";
-import {
-	debuggerFallbacks,
-	locatorAgentFallbacks,
-	ordinaryAgentFallbacks,
-} from "./latest-model-config-expectations.js";
 
 const REAL_WORKFLOW_STAGE_RESOURCE_TIMEOUT_MS = 120_000;
 const tempDirs: string[] = [];
@@ -255,23 +250,8 @@ describe("workflow stage bundled resources", () => {
 				assert.ok(builtinNames.has(name), `expected bundled subagent ${name}`);
 				const agent = builtinAgents.find((entry) => entry.name === name);
 				assert.ok(agent, name);
-				const isLocator = ["codebase-locator", "codebase-pattern-finder", "codebase-research-locator"].includes(
-					name,
-				);
-				assert.equal(
-					agent.model,
-					name === "debugger"
-						? "openai-codex/gpt-6-astra:medium"
-						: isLocator
-							? "openai-codex/gpt-5.6-luna:xhigh"
-							: "openai-codex/gpt-6-astra:low",
-					name,
-				);
-				assert.deepEqual(
-					agent.fallbackModels,
-					name === "debugger" ? debuggerFallbacks : isLocator ? locatorAgentFallbacks : ordinaryAgentFallbacks,
-					name,
-				);
+				assert.equal(agent.model, "auto", name);
+				assert.equal(agent.fallbackModels, undefined, name);
 			}
 			const debuggerAgent = builtinAgents.find((agent) => agent.name === "debugger");
 			const workerAgent = builtinAgents.find((agent) => agent.name === "worker");
@@ -370,6 +350,8 @@ describe("workflow stage bundled resources", () => {
 					"stage-delegation",
 					{
 						agent: "worker",
+						// This fixture exercises child admission, not provider inference.
+						model: "anthropic/claude-sonnet-4-5",
 						task: "complete this test task",
 						context: "fresh",
 						wait: { kind: "foreground", budgetMs: 60_000 },

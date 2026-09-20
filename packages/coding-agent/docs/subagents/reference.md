@@ -7,7 +7,7 @@ description: Fallback model resolution and reasoning-level contracts.
 
 ## Automatic model selection
 
-Set `model: "auto"` to choose a concrete model and supported reasoning effort for a task before the child starts:
+Builtin agents default to `model: "auto"`, choosing a concrete model and supported reasoning effort before each child starts. Custom agents can opt in with the same value:
 
 ```ts
 subagent({
@@ -58,6 +58,22 @@ For automatic routing, optional `modelConstraints` on a call, parallel task, or 
 | `allowedEfforts` | Permitted supported effort values, including `null` for non-reasoning models |
 
 Unknown keys and invalid limits fail validation. An empty eligible set stops the launch. These constraints do not turn a concrete model call into an automatic one. The catalog does not establish a latency SLA or a provider's privacy guarantees. Express hard provider restrictions through `allowedModels`; describe softer preferences in the task.
+
+For a persistent builtin override, put this in your user or project settings:
+
+```json
+{
+  "subagents": {
+    "agentOverrides": {
+      "worker": {
+        "modelConstraints": { "allowedEfforts": ["high"] }
+      }
+    }
+  }
+}
+```
+
+Existing builtin overrides using the legacy `thinking` field also restrict automatic selection to that effort. They intersect with `modelConstraints`; conflicting restrictions stop before launch. A concrete model suffix still wins when you pin a model. User-authored agent definitions retain their existing behavior; use `modelConstraints.allowedEfforts` to constrain their automatic routing.
 
 ## Fallback models
 

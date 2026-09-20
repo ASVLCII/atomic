@@ -10,6 +10,7 @@ import { Value } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import { applyAgentConfig } from "../../packages/subagents/src/agents/agent-management-helpers.js";
+import { applyBuiltinOverrides } from "../../packages/subagents/src/agents/agent-overrides.js";
 import { serializeAgent } from "../../packages/subagents/src/agents/agent-serializer.js";
 import type { AgentConfig } from "../../packages/subagents/src/agents/agents.js";
 import { parseFrontmatter } from "../../packages/subagents/src/agents/frontmatter.js";
@@ -138,6 +139,42 @@ const reasoningModel: Model<Api> = {
 	cost: { input: 2, output: 8, cacheRead: 0, cacheWrite: 0 },
 	thinkingLevelMap: { off: "off", minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: null },
 };
+test("explicit legacy effort constrains automatic selection and intersects hard constraints", async () => {
+	const f = await fixture();
+	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([decisionModel, reasoningModel]);
+	f.infer.mockImplementation((_model, context) => {
+		const state = JSON.parse(context.messages[0]!.content as string).state;
+		assert.deepEqual(
+			state.catalog.map((entry: { efforts: string[] }) => entry.efforts),
+			[["high"]],
+		);
+		return messageStream(decisionMessage({ model: "second-provider/reasoner", effort: "high" }));
+	});
+	const { agents } = loadAgentsFromDirWithDiagnostics(join(process.cwd(), "packages/subagents/agents"), "builtin");
+	const overridden = applyBuiltinOverrides(
+		agents,
+		{ overrides: { worker: { thinking: "low" } } },
+		{ overrides: { worker: { thinking: "high" } } },
+		"user-settings.json",
+		"project-settings.json",
+	);
+	const builtinAgent = overridden.find((candidate) => candidate.name === "worker");
+	assert.ok(builtinAgent);
+	const route = await routeSubagentModel({ ctx: f.ctx, agent: builtinAgent });
+	assert.equal(route.modelOverride, "second-provider/reasoner:high");
+	assert.equal(route.allowsCandidate("second-provider/reasoner:low"), false);
+	assert.equal(route.allowsCandidate("second-provider/reasoner:high"), true);
+	await assert.rejects(
+		routeSubagentModel({
+			ctx: f.ctx,
+			agent: builtinAgent,
+			modelConstraints: { allowedEfforts: ["low"] },
+		}),
+		/no eligible/,
+	);
+	assert.equal(f.infer.mock.calls.length, 1);
+});
+
 test("full provider catalog preserves supported off, independent task decisions and fallback effort", async () => {
 	const f = await fixture();
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([decisionModel, reasoningModel]);

@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { workflow } from "../src/authoring/workflow.js";
-import { withSteeringPropagationContext } from "./steering-context.js";
+import { withBuiltinContext } from "./builtin-context.js";
 import { runLoopUntilDone } from "./loop-until-done-runner.js";
 
 export default workflow({
@@ -47,5 +47,5 @@ export default workflow({
     ),
     progress_disclaimer: Type.String({ description: "Calibration disclaimer for the advisory progress signal." }),
   },
-  run: async (ctx) => await runLoopUntilDone(withSteeringPropagationContext(ctx)),
+  run: async (ctx) => await runLoopUntilDone(withBuiltinContext(ctx)),
 });

@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added prompt-based workflow-stage `model: "auto"` selection for stages, chains, and parallel tasks, with hard model constraints, shared router settings, and retained selection metadata across fallback and resume.
 - Workflow input and durable approvals can use SDK human-input callbacks without terminal rendering, including nested stage questionnaires with original previews, selections and notes. Pending approvals survive host withdrawal and can be re-presented or resumed under another host without accepting stale answers ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 
+### Changed
+
+- All builtin workflow model stages now default to `model: "auto"`, including composed child runs, scoring, reviews and final handoffs. Removed pinned fallback chains while preserving explicit tournament model assignments and custom-workflow defaults.
+
 ### Fixed
 
 - After DBOS initialization, bound database-dependent root admission to 10 seconds and stop cancelled admission writes from retrying or starting workflow code later. Unavailable admission skips database cleanup, preserving the failure diagnostic and run identity even when PostgreSQL stops answering. Database readiness lost during admission is rechecked before the next admission without switching existing durable runs to memory. First-time provisioning and initialization are outside this bound ([#3072](https://github.com/bastani-inc/atomic/issues/3072)).

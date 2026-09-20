@@ -28,6 +28,11 @@ export async function routeSubagentModel(input: {
 		constraints: [
 			parseModelConstraints(agent.modelConstraints),
 			parseModelConstraints(input.modelConstraints),
+			// Builtin thinking comes from a user override, not a shipped role default.
+			// Keep custom auto agents' existing router-controlled effort behavior.
+			...(agent.source !== "builtin" || agent.thinking === undefined
+				? []
+				: [parseModelConstraints({ allowedEfforts: [agent.thinking] })]),
 		].filter((c): c is ModelConstraints => c !== undefined),
 		signal: input.signal,
 	});

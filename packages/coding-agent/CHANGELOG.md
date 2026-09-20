@@ -37,6 +37,7 @@
 - Automatic subagent and workflow-stage model selection no longer includes system prompts as agent metadata, reducing routing input. Execution prompts are unchanged; self-contained subagents still use their system prompt as the task when no task is supplied.
 - SDK session creation now includes shipped Atomic builtin extensions and resources, shares CLI defaults, and completes extension startup before returning. Supply startup host bindings through the extensionBindings option; rebinding no longer repeats startup. Failed startup rolls back the partial session, and missing shipped packages report `code: "BuiltinUnavailable"` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Main chat, workflow stages, and subagents now default to long prompt-cache retention where supported. Unset retention uses ordinary caching for OpenAI models without known extended-retention support, such as GPT-4o, and five-minute caching for older Bedrock Claude models, such as Claude 3.7. Explicit retention choices remain unchanged; use `PI_CACHE_RETENTION=short` to opt back into shorter caching. Anthropic one-hour cache writes cost more than five-minute writes, so savings depend on reuse.
+- All bundled workflows and subagents now default to `model: "auto"`, selecting task-specific models and efforts instead of fixed fallback chains. Explicit model/effort selections remain supported; main-chat defaults and user-authored resources are unchanged.
 
 ### Fixed
 

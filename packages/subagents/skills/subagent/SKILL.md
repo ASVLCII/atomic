@@ -77,7 +77,7 @@ Builtin agents load at the lowest priority. Project agents override user agents,
 | `debugger` | Reproduce, diagnose, and fix failing behavior | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Can coordinate with the parent; inspect-only mode requires an explicit instruction. |
 | `worker` | Implement normal tasks and approved orchestrator handoffs | read, edit, write, search, find, ls, bash, web_search, fetch_content, get_search_content, intercom, contact_supervisor, todo | **Writer.** Has the `tdd`, `playwright-cli`, and `tmux` skills. Defaults to forked context; escalates unapproved decisions instead of guessing. |
 
-Each builtin declares its model, reasoning level, and ordered fallback chain in its agent definition. Inspect the current configuration with `subagent({ action: "get", agent: "debugger" })` rather than relying on a fixed list of defaults. The current user-selected model is automatically appended as the last fallback and de-duplicated. Override per run with inline config:
+Each builtin defaults to `model: "auto"`, with no pinned fallback chain. The router selects a model and effort before launch. Inspect effective configuration with `subagent({ action: "get", agent: "debugger" })`. Normal execution fallback remains subject to routing constraints and does not change the main-chat model. Override per run with a concrete model:
 
 ```typescript
 subagent({ agent: "codebase-analyzer", task: "Trace the auth flow", model: "anthropic/claude-sonnet-4" })
@@ -601,5 +601,7 @@ subagent({ action: "list" })
 ## Suffix-first reasoning levels
 
 Prefer encoding reasoning levels directly in model strings with the `model_name:thinking_effort` syntax: `model: claude-sonnet-4:high` and `fallbackModels: [claude-sonnet-4:medium, gpt-5:low, claude-haiku-4:off]`. Valid efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; `xhigh` and `max` remain model-capability-dependent. The separate `thinking` field is deprecated but still works as a legacy default when a candidate has no suffix; suffixes take precedence. If you see a legacy `thinking` override, migrate it by appending the effort to `model` and each `fallbackModels` entry instead (e.g. `thinking: high` + `model: gpt-5` → `model: gpt-5:high`).
+
+For `model: "auto"`, constrain effort with `modelConstraints: { allowedEfforts: ["high"] }` instead of adding a suffix to `auto`. Existing builtin `thinking` overrides remain supported and intersect with hard routing constraints.
 
 `fallbackThinkingLevels` is an optional compatibility helper aligned positionally with `fallbackModels`. It only applies to fallback entries without their own suffix and should not be preferred over suffix-first entries.
