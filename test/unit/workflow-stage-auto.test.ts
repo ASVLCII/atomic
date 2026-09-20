@@ -117,7 +117,7 @@ test("builtin child workflow routes every default stage through the real executo
 	}
 });
 
-test("public stage auto uses actual prompt and shipped model-selection guide before admission", async () => {
+test("public stage auto uses actual prompt and shipped evals before admission", async () => {
 	const f = await fixture();
 	const def = workflow({
 		name: "auto",
@@ -142,12 +142,12 @@ test("public stage auto uses actual prompt and shipped model-selection guide bef
 	).state;
 	assert.equal(state.task, "  Solve this actual task verbatim.  ");
 	assert.deepEqual(state.agent, { name: "not the task", description: "Workflow stage" });
-	assert.deepEqual(Object.keys(state).sort(), ["agent", "model_selection_guide", "task"]);
+	assert.deepEqual(Object.keys(state).sort(), ["agent", "evals", "task"]);
 	assert.equal(state.policy, undefined);
 	assert.equal(state.evidence, undefined);
-	assert.match(state.model_selection_guide, /# Model Selection/);
-	assert.match(state.model_selection_guide, /claude-sonnet-5/);
-	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 9_000);
+	assert.match(state.evals, /# Evals/);
+	assert.match(state.evals, /DeepSWE/);
+	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 16_000);
 });
 
 test("long stage prompts are excerpted only for routing, never for execution", async () => {
@@ -156,7 +156,7 @@ test("long stage prompts are excerpted only for routing, never for execution", a
 	const task = `Review this implementation.\n${"reference ".repeat(20_000)}\n<keepContext>Read-only review.</keepContext>\nReport defects.`;
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
 		const body = JSON.parse(String(init.body));
-		assert.ok(Buffer.byteLength(String(init.body)) < 24_000);
+		assert.ok(Buffer.byteLength(String(init.body)) < 30_000);
 		assert.match(body.state.task, /omitted/);
 		assert.match(body.state.task, /<keepContext>Read-only review.<\/keepContext>/);
 		return Response.json(jevFixtureResponse(body));

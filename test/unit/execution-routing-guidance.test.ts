@@ -138,16 +138,17 @@ describe("route-then-registered-run guidance", () => {
 		}
 	});
 
-	test("requires consulting the model-selection guide and configured catalog when pinning stage models", () => {
+	test("requires consulting factual evals and configured catalog when pinning stage models", () => {
 		const authoringGuidance = workflowGuidance.join("\n");
 		for (const phrase of [
 			"packages/coding-agent/docs/models/model-selection.md",
 			"packages/coding-agent/docs/models/evals.md",
+			"factual per-evaluation benchmark records",
 			'workflow({ action: "models" })',
 			"returned `fullId` values as model strings",
 			"availableThinkingLevels",
 			"treat an absent or empty `availableThinkingLevels` as no suffix support",
-			"try another guide-recommended model that is present in the catalog",
+			"no catalog model matches the documented evidence and role constraints",
 			"leave the stage unpinned rather than inventing a substitute",
 			"state that no configured models were returned, and do not fabricate model IDs",
 			"Do not inspect or infer credentials, environment variables, auth files, token validity, entitlements",
@@ -166,9 +167,9 @@ describe("route-then-registered-run guidance", () => {
 		);
 
 		for (const phrase of [
-			"measurement configuration used for that benchmark result",
-			"not a universal workflow default",
-			"`max` is usually overkill and is not preferred in practice.",
+			"Benchmark results are measurements under named harnesses",
+			"measurement configuration for that row",
+			"`max` is an exception, not a default.",
 			"| Coding, implementation, routine fixes | `low` or `medium` |",
 			"| Code review, test design, failure analysis, security, identity, adversarial challenge, final approval | `high` or `xhigh` |",
 			"| Codebase mapping, lifecycle analysis, compatibility, planning, synthesis, triage | `high` |",
@@ -198,11 +199,10 @@ describe("route-then-registered-run guidance", () => {
 		}
 
 		for (const phrase of [
-			"`max` is an exception, not a role default.",
-			"Consider it only when task-specific evidence justifies the extra effort or the user explicitly requests it.",
-			"An explicit request wins over these defaults, but the requested level still must appear in the configured catalog; do not invent an unsupported suffix.",
-			"For each primary and fallback, choose a supported level for the same stage role independently.",
-			"If `xhigh` is unavailable, use `high` rather than automatically promoting to `max`; choose another catalog model or leave the stage unpinned if neither is supported.",
+			"`max` is an exception, not a default.",
+			"An explicit user request wins over these defaults, but the requested level must exist for the selected catalog entry.",
+			"Do not invent unsupported suffixes.",
+			"If `xhigh` is unavailable, use `high` rather than automatically promoting to `max`; choose another catalog model or leave the stage unpinned if neither fits.",
 		]) {
 			expect(modelSelection).toContain(phrase);
 		}
@@ -645,9 +645,11 @@ describe("route-then-registered-run guidance", () => {
 			"Do not choose an ad hoc model merely for diversity",
 			"packages/coding-agent/docs/models/model-selection.md",
 			"packages/coding-agent/docs/models/evals.md",
+			"factual per-evaluation benchmark records",
 			'workflow({ action: "models" })',
 			"Pin only a returned fullId",
 			"thinking level listed for that entry",
+			"no catalog model matches the documented evidence and role constraints",
 			"leave the child unpinned",
 			"Do not inspect credentials",
 			"Workflow stages automatically receive their invocation-scoped Intercom group",

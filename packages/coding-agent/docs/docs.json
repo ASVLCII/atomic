@@ -148,7 +148,6 @@
             "pages": [
               "models",
               "models/model-selection",
-              "models/pareto-efficiency",
               "models/evals",
               "custom-provider",
               "custom-provider/override",
@@ -222,8 +221,7 @@
             "group": "Project",
             "pages": [
               "development",
-              "changelog",
-              "models/artificial-analysis-index"
+              "changelog"
             ]
           }
         ]
@@ -264,6 +262,14 @@
     {
       "source": "/mcp",
       "destination": "/mcp-servers"
+    },
+    {
+      "source": "/models/artificial-analysis-index",
+      "destination": "/models/evals"
+    },
+    {
+      "source": "/models/pareto-efficiency",
+      "destination": "/models/evals"
     }
   ]
 }

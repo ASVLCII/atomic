@@ -343,7 +343,7 @@ test("context packing repeats unchanged state, limits compiled question bytes, a
 		assert.deepEqual(body.state, request.state);
 		assert.ok(Buffer.byteLength(String(init.body)) <= 48_000);
 		for (const [id, question] of Object.entries(body.questions))
-			assert.ok(Buffer.byteLength(JSON.stringify({ state: body.state, questions: { [id]: question } })) <= 24_000);
+			assert.ok(Buffer.byteLength(JSON.stringify({ state: body.state, questions: { [id]: question } })) <= 30_000);
 		return Response.json(jevFixtureResponse(body));
 	});
 	const result = await inferRouterDecision(request);
