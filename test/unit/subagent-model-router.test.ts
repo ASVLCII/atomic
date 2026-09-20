@@ -9,6 +9,7 @@ import { type Api, createAssistantMessageEventStream, type Model } from "@bastan
 import { Value } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { routeExecutionModel } from "../../packages/coding-agent/src/core/execution-model-router.js";
+import { MODEL_ROUTING_POLICY } from "../../packages/coding-agent/src/core/model-routing-evidence.js";
 import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
 import { applyAgentConfig } from "../../packages/subagents/src/agents/agent-management-helpers.js";
 import {
@@ -72,7 +73,7 @@ test("tiny tasks use compact shipped policy without human guides or unrelated ev
 	assert.equal(state.task, "Fix the approved defect");
 	assert.deepEqual(state.agent, { name: agent.name, description: agent.description });
 	assert.equal(state.documents, undefined);
-	assert.equal(state.policy.version, 1);
+	assert.deepEqual(state.policy, MODEL_ROUTING_POLICY);
 	assert.deepEqual(state.evidence, []);
 	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 8_000);
 	assert.equal(options?.maxRetries, 0);
