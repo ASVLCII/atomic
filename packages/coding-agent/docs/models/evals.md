@@ -7,7 +7,7 @@ description: "The external evals that inform Atomic model selection — Artifici
 
 Atomic's model-selection docs use two live external evaluation sources. This page records what each evaluation measures, results for models in Atomic's catalog, and when to use it for a workflow role. Choose by task-specific evidence, not aggregate rank.
 
-For `model: "auto"`, Atomic supplies compact dated benchmark records for eligible models rather than this entire page. Keep using the tables and methodology below for interactive model comparisons; you do not need to paste them into routing tasks.
+For `model: "auto"`, Atomic supplies the concise [Model Selection](/models/model-selection) guide verbatim, including measured results and caveats. This page retains the detailed tables and methodology for interactive comparisons; you do not need to paste either guide into routing tasks.
 
 <Warning>
 No single benchmark is the source of truth. Validate these inputs against Atomic's own workflow evals. Artificial Analysis was retrieved on **2026-09-08**, after its **September 7 Intelligence Index v4.3** announcement. The AA tables and charts below use that read; source pages show no separate per-measurement publication date. DeepSWE retains its **2026-09-03** snapshot, read on **2026-09-05**, and was not revalidated in this refresh. Values preserve the displayed source precision; a rounded lead is not a significance claim.
@@ -53,7 +53,7 @@ DeepSWE is the closest public proxy for what Atomic actually does. Tasks are wri
 
 ### Live leaderboard, Best view
 
-DeepSWE's default table is the **Best** view: the best-scoring effort configuration per model. These are the 21 rows it displayed on 2026-09-05 for the September 3, 2026 snapshot. [Model Selection](/models/model-selection) instead tabulates the highest published effort per model, so four rows differ there (`gpt-6-astra [max]`, `claude-fable-5 [max]`, `grok-4.6 [xhigh]`, `gemini-3.7-flash [high]`). Confidence intervals are DeepSWE's displayed ±.
+DeepSWE's default table is the **Best** view: the best-scoring effort configuration per model. These are the 21 rows it displayed on 2026-09-05 for the September 3, 2026 snapshot. [Model Selection](/models/model-selection) uses the same Best-view rows. Highest-effort configurations differ for Astra, Fable 5, Grok 4.6 and Gemini 3.7 Flash; a higher effort does not necessarily score better. Confidence intervals are DeepSWE's displayed ±.
 
 | Model [effort] | pass@1 | Avg $/task | Output tokens | Steps |
 | --- | --- | --- | --- | --- |

@@ -117,7 +117,7 @@ test("builtin child workflow routes every default stage through the real executo
 	}
 });
 
-test("public stage auto decides from actual prompt and compact shipped policy before admission", async () => {
+test("public stage auto uses actual prompt and shipped model-selection guide before admission", async () => {
 	const f = await fixture();
 	const def = workflow({
 		name: "auto",
@@ -140,10 +140,12 @@ test("public stage auto decides from actual prompt and compact shipped policy be
 	const state = JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state;
 	assert.equal(state.task, "  Solve this actual task verbatim.  ");
 	assert.deepEqual(state.agent, { name: "not the task", description: "Workflow stage" });
-	assert.equal(state.documents, undefined);
-	assert.equal(state.policy.version, 1);
-	assert.deepEqual(state.evidence, []);
-	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 3_000);
+	assert.deepEqual(Object.keys(state).sort(), ["agent", "model_selection_guide", "task"]);
+	assert.equal(state.policy, undefined);
+	assert.equal(state.evidence, undefined);
+	assert.match(state.model_selection_guide, /# Model Selection/);
+	assert.match(state.model_selection_guide, /claude-sonnet-5/);
+	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 9_000);
 });
 
 test("long stage prompts are excerpted only for routing, never for execution", async () => {
