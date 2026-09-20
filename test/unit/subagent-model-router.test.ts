@@ -66,6 +66,30 @@ async function fixture() {
 	} as ExtensionContext;
 	return { ctx, infer, route: (task = "Fix the approved defect") => routeSubagentModel({ ctx, agent, task }) };
 }
+
+function jevPayloadBytes(body: string): { total: number; stateAndLongestQuestion: number } {
+	const request = JSON.parse(body) as JevFixtureRequest & { model?: string };
+	return {
+		total: Buffer.byteLength(body, "utf8"),
+		stateAndLongestQuestion: Math.max(
+			...Object.entries(request.questions).map(([id, question]) =>
+				Buffer.byteLength(
+					JSON.stringify({ model: request.model, state: request.state, questions: { [id]: question } }),
+					"utf8",
+				),
+			),
+		),
+	};
+}
+
+function taskNearRoutingLimit(): string {
+	const seed = 'Route this exact task; preserve JSON characters {"quoted":"value\\n"} and Unicode Ω界. ';
+	const protectedRequirement =
+		"<keepContext>Keep this exact protected requirement Ω and do not drop it.</keepContext>";
+	let task = `${seed}${"context ".repeat(1000)}${protectedRequirement}`;
+	while (Buffer.byteLength(JSON.stringify(`${task} tail`), "utf8") <= 11_900) task = `${task} tail`;
+	return task;
+}
 test("auto routing receives the shipped evals document verbatim", async () => {
 	const f = await fixture();
 	const selected = await f.route();
@@ -382,7 +406,7 @@ for (const evalsCase of ["missing", "empty", "oversized"] as const) {
 		if (evalsCase === "oversized") read.mockResolvedValueOnce("evals ".repeat(2_000));
 		await assert.rejects(
 			f.route(),
-			/Auto routing requires a nonempty evals\.md document within 8,000 JSON-encoded bytes/,
+			/Auto routing requires a nonempty evals\.md document within 11,000 JSON-encoded bytes/,
 		);
 		assert.equal(f.infer.mock.calls.length, 0);
 	});
@@ -586,6 +610,67 @@ test("hello-world routing receives evals and fits one small Jev request", async 
 	assert.equal(payload.state.evidence, undefined);
 });
 
+test("maximal real eval routing payload preserves prompt and stays under conservative Jev bytes", async () => {
+	const f = await fixture();
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	const models = [
+		{ ...decisionModel, id: "small-a" },
+		{ ...decisionModel, id: "small-b", cost: { ...decisionModel.cost, input: 0.25, output: 0.5 } },
+	];
+	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(models);
+	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
+	const task = taskNearRoutingLimit();
+	assert.ok(Buffer.byteLength(JSON.stringify(task), "utf8") > 11_800);
+	const transport = vi.fn(async (_url: string, init: RequestInit) => {
+		const body = String(init.body);
+		const bytes = jevPayloadBytes(body);
+		assert.ok(bytes.stateAndLongestQuestion <= 24_000, String(bytes.stateAndLongestQuestion));
+		assert.ok(bytes.total <= 48_000, String(bytes.total));
+		const request = JSON.parse(body) as JevFixtureRequest & { model: string };
+		assert.equal(request.state.task, task);
+		assert.equal(request.state.evals, evals);
+		assert.match(String(request.state.task), /{"quoted":"value\\n"}/);
+		assert.match(String(request.state.task), /Ω界/);
+		assert.ok(Object.keys(request.questions.pair.criteria).length <= 2);
+		return Response.json(jevFixtureResponse(request, (keys) => keys[1] ?? keys[0]!));
+	});
+	vi.stubGlobal("fetch", transport);
+	const result = await f.route(task);
+	assert.equal(result.modelOverride, "decision-test/small-b");
+	assert.equal(transport.mock.calls.length, 2);
+	assert.equal(f.infer.mock.calls.length, 0);
+});
+
+test("real eval routing tournament preserves evals in every Jev request", async () => {
+	const f = await fixture();
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(
+		Array.from({ length: 9 }, (_, index) => ({ ...decisionModel, id: `candidate-${index}` })),
+	);
+	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
+	const seen = new Set<string>();
+	const transport = vi.fn(async (_url: string, init: RequestInit) => {
+		const body = String(init.body);
+		const bytes = jevPayloadBytes(body);
+		assert.ok(bytes.stateAndLongestQuestion <= 24_000, String(bytes.stateAndLongestQuestion));
+		assert.ok(bytes.total <= 48_000, String(bytes.total));
+		const request = JSON.parse(body) as JevFixtureRequest;
+		assert.equal(request.state.evals, evals);
+		for (const question of Object.values(request.questions)) {
+			for (const criterion of Object.values(question.criteria)) seen.add(JSON.parse(criterion).model as string);
+		}
+		return Response.json(jevFixtureResponse(request));
+	});
+	vi.stubGlobal("fetch", transport);
+	const result = await f.route("Select among a practical tournament catalog without editing the execution prompt.");
+	assert.equal(result.modelOverride, "decision-test/candidate-0");
+	assert.equal(seen.size, 9);
+	assert.ok(transport.mock.calls.length > 1);
+	assert.equal(f.infer.mock.calls.length, 0);
+});
+
 test("long auto-routing tasks fit Jev while preserving protected requirements and both ends", async () => {
 	const f = await fixture();
 	const notice = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -674,8 +759,7 @@ test("auto ranks three distinct models, excludes their other efforts, and replay
 	);
 });
 
-// PR #3129 omitted all measurements; evals prose now explains provider uncertainty.
-test("auto routing retains evaluation context without claiming provider-specific measurements", async () => {
+test("auto routing keeps exact benchmark identity and provenance distinctions", async () => {
 	const f = await fixture();
 	const models = ["anthropic", "github-copilot"].map((provider) => ({
 		...decisionModel,
@@ -686,8 +770,19 @@ test("auto routing retains evaluation context without claiming provider-specific
 	let rank = 0;
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
-		assert.match(state.evals, /claude-fable-5/i);
-		assert.match(state.evals, /provider|configuration|model/i);
+		assert.match(state.evals, /Fable 5 fallback=Opus 4\.8/);
+		assert.match(state.evals, /Fable 5\.1 fallback=source default fallback/);
+		assert.match(state.evals, /Inkling `0\.99` is an unexplained source key/);
+		assert.match(state.evals, /Harness aliases: cc=claude-code, gb=grok-build, msa=mini-swe-agent/);
+		assert.match(state.evals, /`—` is source null, not 0/);
+		assert.match(
+			state.evals,
+			/F03 G6Astra\[max;codex\] 53\.3\/58\.8\/—\/4\.59\/30\.1\|64\.5\/70\.6\/—\/3\.93\/26\.0/,
+		);
+		assert.match(
+			state.evals,
+			/F04 Fable5\.1\[medium;cc\] 50\.9\/55\.5\/0\.0\/3\.28\/26\.1\|63\.6\/68\.8\/0\.0\/2\.68\/21\.4/,
+		);
 		assert.equal(state.model_selection_guide, undefined);
 		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
 	});

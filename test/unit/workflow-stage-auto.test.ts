@@ -147,7 +147,7 @@ test("public stage auto uses actual prompt and shipped evals before admission", 
 	assert.equal(state.evidence, undefined);
 	assert.match(state.evals, /# Evals/);
 	assert.match(state.evals, /DeepSWE/);
-	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 10_000);
+	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 13_500);
 });
 
 test("long stage prompts are excerpted only for routing, never for execution", async () => {

@@ -25,14 +25,7 @@ Long tasks may be excerpted for routing so the decision fits the decision provid
 
 ## Benchmarks are evidence, not policy
 
-Benchmark results are measurements under named harnesses, dates, models, efforts, agents, tools, prompts, prices, and scoring rules. Treat a bracketed effort level as the measurement configuration for that row, not a command to run every task at that effort.
-
-Use benchmark evidence by matching the work to the benchmark's measured capability:
-
-- implementation and debugging work should look for coding-agent and terminal evidence,
-- planning and research work should look for long-context, document, and knowledge-work evidence,
-- narrow domain tasks should use the domain's own eval when one exists,
-- unmeasured work needs conservative validation rather than inherited scores.
+Benchmark results are measurements under named harnesses, dates, models, efforts, agents, tools, prompts, prices, and scoring rules. Treat a bracketed effort level as the measurement configuration for that row, not a command to run every task at that effort. Compare only records whose measured setup resembles the decision at hand, and keep unmeasured work under ordinary validation rather than inheriting a score.
 
 Missing evidence is unknown, not zero. A rounded lead is not proof of significance. A result for one provider, model version, effort, agent, fallback setting, or benchmark harness does not transfer to another identity.
 

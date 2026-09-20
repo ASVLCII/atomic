@@ -32,17 +32,20 @@ export interface ModelRoute {
 const instructions =
 	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals`. Consider task fit, measured effort, dates, caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
 
+const MODEL_SELECTION_EVALS_JSON_BYTES = 11_000;
+
 async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {
 		const evals = await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
-		// Reserve room for the 12 KB task excerpt, instructions and candidate batches
-		// within Jev's conservative 24 KB per-comparison budget. Never trim scores.
-		if (!evals.trim() || Buffer.byteLength(JSON.stringify(evals), "utf8") > 8_000) throw new Error("Invalid evals");
+		// Complete default-source rows fit with the 12 KB task excerpt under Jev's
+		// conservative 24 KB state+longest-question proof. Never trim scores.
+		if (!evals.trim() || Buffer.byteLength(JSON.stringify(evals), "utf8") > MODEL_SELECTION_EVALS_JSON_BYTES)
+			throw new Error("Invalid evals");
 		return evals;
 	} catch {
 		signal?.throwIfAborted();
 		throw new Error(
-			"Auto routing requires a nonempty evals.md document within 8,000 JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.",
+			`Auto routing requires a nonempty evals.md document within ${MODEL_SELECTION_EVALS_JSON_BYTES.toLocaleString("en-US")} JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.`,
 		);
 	}
 }
