@@ -1,7 +1,6 @@
 // Dated, compact extracts of docs/models/evals.md, not a live leaderboard or a
 // provider entitlement claim. The parity test checks these rows against that guide.
 export const MODEL_ROUTING_POLICY = {
-	version: 1,
 	effort: {
 		trivial: "Use the least reasoning sufficient for a literal response or mechanical task.",
 		implementation: "Usually low or medium; validate with tools.",

@@ -6,6 +6,7 @@ import { createAssistantMessageEventStream } from "@bastani/pi-ai";
 import { convertResponsesTools } from "@bastani/pi-ai/api/openai-responses-shared";
 import { Compile } from "typebox/compile";
 import { afterEach, test, vi } from "vitest";
+import { MODEL_ROUTING_POLICY } from "../../packages/coding-agent/src/core/model-routing-evidence.js";
 import classifyAndAct from "../../packages/workflows/builtin/classify-and-act.js";
 import { InMemoryDurableBackend } from "../../packages/workflows/src/durable/backend.js";
 import { decodeToCheckpoint, encodeCheckpoint } from "../../packages/workflows/src/durable/dbos-envelope.js";
@@ -141,7 +142,7 @@ test("public stage auto decides from actual prompt and compact shipped policy be
 	assert.equal(state.task, "  Solve this actual task verbatim.  ");
 	assert.deepEqual(state.agent, { name: "not the task", description: "Workflow stage" });
 	assert.equal(state.documents, undefined);
-	assert.equal(state.policy.version, 1);
+	assert.deepEqual(state.policy, MODEL_ROUTING_POLICY);
 	assert.deepEqual(state.evidence, []);
 	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 3_000);
 });
