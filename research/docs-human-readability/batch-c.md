@@ -127,3 +127,7 @@ Destinations are under `docs/maintainer/readability-c/`. Each destination states
 - Research measurements moved to maintenance notes lack an identifiable source citation in the original text. Recover the citation before publishing performance claims.
 - Windows ARM64 runtime coverage remains unverified; relocation preserves the explicit gap and does not claim hardware validation.
 - No maintainer relocation is deferred. Long public API/authoring examples and operational restrictions remain deliberately public, not because literal retention overrode the amendment.
+
+## Review-round correction
+
+The earlier preservation review missed operator guidance in `workflows/operations.md:432`. The audience edit replaced post-mortem Escape and subsequent submission behavior with a duplicate host-invalidation paragraph. All three consolidated P2 findings identify this one defect. Restored conversation-only interruption, editor restoration, continued queue hold, and ordinary-submission release without resuming terminal workflow execution. These are user actions, not maintainer mechanics. See [the correction record](review-round-correction.md) for the red/green regression, runtime test, rendered checks and scope reconciliation. The original per-page ledger remains historical; its scope and disposition counts are unchanged.

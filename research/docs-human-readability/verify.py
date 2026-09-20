@@ -57,7 +57,28 @@ def inline_literals(text):
     return {match[2] for match in re.finditer(r"(?<!`)(`+)([^\n]*?)\1(?!`)", text)}
 
 
+def check_post_mortem_guidance():
+    # PR #3120: structural preservation alone missed these operator actions.
+    text = (DOCS / "workflows/operations.md").read_text()
+    section = text.split("### Post-mortem chat vs. execution resume\n", 1)[1].split("\n## ", 1)[0]
+    section = re.sub(r"\s+", " ", section)
+    requirements = {
+        "Escape aborts only the retained conversation": r"Escape[^.]*aborts only[^.]*retained conversation",
+        "queued steering/follow-up text returns to the editor": r"restores queued steering/follow-up text to the editor",
+        "the conversation queue stays held": r"conversation queue remains held",
+        "clearing/restoring visible items does not release the hold": r"[Cc]learing or restoring[^.]*queued[^.]*does not release[^.]*hold",
+        "ordinary submission releases the queue before the new turn": r"ordinary submission releases[^.]*conversation queue before[^.]*new turn",
+        "neither action resumes terminal workflow execution": r"[Nn]either action pauses, resumes, or changes[^.]*terminal workflow",
+    }
+    missing = [label for label, pattern in requirements.items() if not re.search(pattern, section)]
+    invalidations = re.findall(r"[^.]*host[^.]*invalidates post-mortem[^.]*\.", section)
+    if len(invalidations) != 1:
+        missing.append(f"expected one host-invalidation explanation, found {len(invalidations)}")
+    assert not missing, "Post-mortem operator guidance: " + "; ".join(missing)
+
+
 def main():
+    check_post_mortem_guidance()
     pages = sorted(p for p in DOCS.rglob("*") if p.suffix in (".md", ".mdx"))
     assert len(pages) == 92
     ledger = {}

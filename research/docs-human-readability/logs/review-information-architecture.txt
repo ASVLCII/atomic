@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 /Users/tonystark/Documents/projects/atomic-docs-human-readability
+
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  18:05:33
+   Duration  619ms (transform 35ms, setup 33ms, import 15ms, tests 474ms, environment 0ms)

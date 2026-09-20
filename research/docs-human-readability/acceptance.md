@@ -13,13 +13,14 @@ Review all recursive Markdown/MDX pages under `packages/coding-agent/docs` in th
 | Revise all pages needing improvement; shorter coherent sentences/paragraphs, less repetition, useful sections/bullets; avoid cosmetic churn | `coverage.json` records actual diff status and initial/audience reasons | Passed: 74 revised, 18 unchanged |
 | Account for every page as revised or reviewed/unchanged with a concrete reason outside user-facing docs | `coverage.json`, `batch-{a,b,c}.md`; no duplicate or missing rows | Passed |
 | Revisit workflows/operations.md, workflows/api-reference.md, sdk.md, subagents/reference.md | Batch B/C audience records; integration technical review in `final-validation.md` | Passed |
-| Preserve meaning, warnings, examples, configuration/API names, navigation/anchors | Baseline audit plus technical prose/inline-literal review in `final-validation.md`; factual disputes remain explicitly deferred | Passed within documented scope |
+| Preserve meaning, warnings, examples, configuration/API names, navigation/anchors | Earlier semantic-preservation claim missed post-mortem Escape/queue guidance. All three review findings repaired; focused red/green check and runtime corroboration in `review-round-correction.md` | Corrected for reviewed omission; structural checks are not proof of complete semantic equivalence |
 | Keep code examples intact unless accurate prose context requires change | 889 ordered public fences and 16 explicitly mapped maintainer fences, byte-identical | Passed |
 | Docs-only plus necessary docs checks, no runtime changes or released changelog edits | Scoped diff and immutable changelog assertion | Passed |
 | Run docs checks | `logs/docs-check.txt`, `logs/information-architecture.txt`; 29 tests | Passed |
 | Run link/anchor checks | Docs check, IA, Mintlify broken-links, 74 locally validated repository links/anchors | Passed |
 | Run Mintlify validation | Cached mint 4.2.731 on Node 22; `logs/mintlify-validate.txt` | Passed |
 | Representative desktop/mobile browser checks spanning edited categories | Ten edited routes at both sizes; DOM/screenshots, overflow, mobile navigation, deep workflow anchor; `browser/` | Passed; representative, not full rendered review |
+| Repair consolidated review findings without reducing all-page scope | `review-round-correction.md`; focused regression, unchanged coverage comparison, affected-section desktop/mobile DOM and screenshots | All three P2 findings share one repaired root cause; 92 reviewed, 74 revised, 18 unchanged, 21 maintainer docs |
 | Cohesive batches with checks and preservation review; integration owns reconciliation | Three disjoint lexical batches; repeatable integration audit and final validation | Passed |
 | Read repository instructions and unslop; follow conventions, hooks and model attribution | Repository/skill reads, signed conventional commit, `Assistant-model: GPT-6-Astra`, and enabled hooks; `logs/commit-checks.txt` | Passed |
 | No internal audit reports in user-facing docs | Evidence restricted to `research/docs-human-readability`; maintainer knowledge in `docs/maintainer` | Passed |

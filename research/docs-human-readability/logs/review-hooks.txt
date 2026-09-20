@@ -1,0 +1,14 @@
+Command: prek run
+Exit: 0
+check for added large files..............................................Passed
+check for case conflicts.................................................Passed
+check illegal windows names..........................(no files to check)Skipped
+check json...........................................(no files to check)Skipped
+check for merge conflicts................................................Passed
+check toml...........................................(no files to check)Skipped
+check yaml...............................................................Passed
+detect private key.......................................................Passed
+cargo fmt --check....................................(no files to check)Skipped
+cargo clippy.........................................(no files to check)Skipped
+biome check --write..................................(no files to check)Skipped
+npm run check............................................................Passed

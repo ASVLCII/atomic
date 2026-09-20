@@ -2,6 +2,8 @@
 
 Candidate: uncommitted documentation changes on `docs/human-readable-guides`, based on `2175058c1e1dfd5850a61914566ab45110a65ef4`. The final signed commit is identified by the integration receipt and Git history. No runtime files or released changelogs changed.
 
+Review-round correction: the preservation review below missed the post-mortem Escape and queue-release instructions. Structural checks passed despite that omission. [The correction record](review-round-correction.md) supersedes the earlier semantic-preservation claim for this section and records the focused failing/passing check, runtime corroboration, and repeated validation. The 92-page accounting and previous broad browser evidence remain in scope.
+
 ## Coverage and preservation
 
 Run from the repository root:
