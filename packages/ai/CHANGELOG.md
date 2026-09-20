@@ -24,6 +24,8 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 - Kept Kimi Coding models available after the upstream catalog split into regional coding plans, preserving Atomic's existing kimi.com endpoint.
 - Model catalog declarations preserve JSON import attributes for strict NodeNext consumers without requiring `skipLibCheck` ([#3105](https://github.com/bastani-inc/atomic/issues/3105)).
 - Credential screening now recognizes `TYPESAFE_API_KEY` instead of `TYPESAFE_AI_API_KEY`, matching the renamed TypeSafe Jev environment variable.
+- Fixed z.ai `Prompt too long` errors not being recognized as context overflow ([earendil-works/pi#9805](https://github.com/earendil-works/pi/issues/9805)).
+- Fixed Cerebras models advertising unsupported strict tool schemas, which caused HTTP 400 errors when strict and non-strict tools were mixed ([earendil-works/pi#9804](https://github.com/earendil-works/pi/pull/9804) by [@EdenGottlieb](https://github.com/EdenGottlieb)).
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

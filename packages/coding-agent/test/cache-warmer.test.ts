@@ -54,6 +54,49 @@ describe("cache warming", () => {
 		expect(warmer.status).toMatchObject({ state: "inactive", reason: "inactive" });
 	});
 
+	it("does not issue refreshes after their safe deadline", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(0);
+		const streamSimple = vi.fn();
+		const warmer = new CacheWarmer({ streamSimple }, sessionManager(), () => "idle");
+		warmer.start({ model, context, options: { cacheRetention: "short" } }, () => true);
+
+		// A five-minute cache is scheduled for 4m30s and retains 15 seconds of
+		// the 30-second expiry margin. Simulate a timer delayed by sleep.
+		vi.setSystemTime(285_001);
+		vi.clearAllTimers();
+		const internal = warmer as unknown as { run: object | undefined; refresh: (run: object) => Promise<void> };
+		if (!internal.run) throw new Error("expected an active cache-warming run");
+		await internal.refresh(internal.run);
+
+		expect(streamSimple).not.toHaveBeenCalled();
+		expect(warmer.status).toMatchObject({ state: "inactive", reason: "cache refresh deadline missed" });
+	});
+
+	it("rechecks the deadline after an extension decision", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(0);
+		const streamSimple = vi.fn();
+		const warmer = new CacheWarmer(
+			{ streamSimple },
+			sessionManager(),
+			() => "idle",
+			async () => {
+				await Promise.resolve();
+				vi.setSystemTime(285_001);
+				return "warm";
+			},
+		);
+		warmer.start({ model, context, options: { cacheRetention: "short" } }, () => true);
+		vi.clearAllTimers();
+		const internal = warmer as unknown as { run: object | undefined; refresh: (run: object) => Promise<void> };
+		if (!internal.run) throw new Error("expected an active cache-warming run");
+		await internal.refresh(internal.run);
+
+		expect(streamSimple).not.toHaveBeenCalled();
+		expect(warmer.status).toMatchObject({ state: "inactive", reason: "cache refresh deadline missed" });
+	});
+
 	it("formats an inactive status without leaking economics", () => {
 		expect(formatCacheWarmingStatus({ state: "inactive", reason: "cache warming disabled" })).toBe(
 			"Inactive (cache warming disabled)",
