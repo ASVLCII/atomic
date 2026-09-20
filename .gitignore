@@ -290,9 +290,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-# Pier/Harbor eval job artifacts (local only; not tracked)
-evals/jobs/
-
 # CI flake-retry and duration-headroom artifacts (uploaded from CI, never tracked)
 .ci-diagnostics/
 

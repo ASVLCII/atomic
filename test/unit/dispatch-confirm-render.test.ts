@@ -2,7 +2,7 @@
  * Unit tests for the `/workflow <name> …` dispatch confirmation
  * (`src/tui/dispatch-confirm.ts`).
  *
- * Visual contract — ui/dispatch-mockup.html §1 (full-id identity rows):
+ * Visual contract (full-id identity rows):
  *  - One rounded dispatched panel with the full UUID on its own identity row.
  *  - Workflow name and running status follow on the next row.
  *  - Inputs render in the body and the connect hint keeps the complete UUID.
@@ -10,7 +10,6 @@
  *    hold them; the body row uses the same overflow rules.
  *
  * cross-ref: src/tui/dispatch-confirm.ts · src/tui/chat-surface.ts
- *            · ui/dispatch-mockup.html
  */
 
 import assert from "node:assert/strict";

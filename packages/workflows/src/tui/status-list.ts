@@ -16,7 +16,6 @@
  *   - `/workflow status` chat output
  *
  * cross-ref:
- *  - ui/mockups.html §2 (run list), §4 (truncation)
  *  - src/tui/chat-surface.ts shared primitives
  *  - src/tui/run-detail.ts per-run drill-down surface (unchanged)
  */

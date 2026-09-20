@@ -9,14 +9,13 @@
  *      row 2: dim "inputs"  ·  signature
  *  - Hint rows pointing at `/workflow <name> …` and `/workflow inputs <name>`.
  *
- * Truncation policy (ui/mockups.html §4):
+ * Truncation policy:
  *  - workflow name in tag end-truncates with `…`;
  *  - description end-truncates to the row width;
  *  - input signature renders the first 3 inputs inline, then `+N more`.
  *  - optional inputs are marked with a trailing `?`.
  *
  * cross-ref:
- *  - ui/mockups.html §3, §4 (long-description policy)
  *  - src/tui/chat-surface.ts shared primitives
  *  - src/extension/dispatcher.ts list result with `items` metadata
  */

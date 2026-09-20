@@ -2,7 +2,7 @@
  * Unit tests for the chat-surface primitives — flat band, tagged card,
  * progress strip, hint rows.
  *
- * cross-ref: src/tui/chat-surface.ts · ui/mockups.html
+ * cross-ref: src/tui/chat-surface.ts
  */
 
 import assert from "node:assert/strict";
@@ -506,7 +506,7 @@ describe("chatWidth", () => {
 		// pi's `customMessage` surface wraps our string in a `Text` component
 		// with `paddingX = 1`, so the renderable width is `columns - 2`. The
 		// fallback path must pre-shrink the width to avoid pi-tui wrapping the
-		// trailing badge onto a second visual row (see ui/Screenshot 2026-05-12).
+		// trailing badge onto a second visual row.
 		const original = process.stdout.columns;
 		Object.defineProperty(process.stdout, "columns", {
 			value: 132,

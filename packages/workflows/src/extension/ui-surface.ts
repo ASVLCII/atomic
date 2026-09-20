@@ -90,8 +90,7 @@ export interface PiOverlayHandle {
  * Workflow pickers (`session-overlays.ts`, `inputs-overlay.ts`) mount
  * with `overlay: false`, which causes the host to REPLACE the editor
  * with the picker inline at the editor's natural position — see
- * those files for rationale and `ui/workflows/Screenshot 2026-05-13
- * at 1.11.49 AM.png` for the target spacing.
+ * those files for the placement rationale.
  *
  * `onHandle` is honoured today only by the full-screen graph overlay
  * (`overlay-adapter.ts`); inline pickers leave it unset and dismiss
