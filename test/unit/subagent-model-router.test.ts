@@ -162,7 +162,7 @@ test("explicit legacy effort constrains automatic selection and intersects hard 
 	assert.ok(builtinAgent);
 	const route = await routeSubagentModel({ ctx: f.ctx, agent: builtinAgent });
 	assert.equal(route.modelOverride, "second-provider/reasoner:high");
-	assert.equal(route.allowsCandidate("second-provider/reasoner:low"), false);
+	assert.equal(route.allowsCandidate("second-provider/reasoner:low"), true);
 	assert.equal(route.allowsCandidate("second-provider/reasoner:high"), true);
 	await assert.rejects(
 		routeSubagentModel({
@@ -172,6 +172,24 @@ test("explicit legacy effort constrains automatic selection and intersects hard 
 		}),
 		/no eligible/,
 	);
+	assert.equal(f.infer.mock.calls.length, 1);
+});
+
+test("builtin primary and fallback checks retain the same hard-constraint snapshot during inference", async () => {
+	const f = await fixture();
+	const allowedEfforts = ["low"];
+	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([reasoningModel]);
+	f.infer.mockImplementation(() => {
+		allowedEfforts.push("high");
+		return messageStream(decisionMessage({ model: "second-provider/reasoner", effort: "low" }));
+	});
+	const route = await routeSubagentModel({
+		ctx: f.ctx,
+		agent: { ...agent, source: "builtin", thinking: "low" },
+		modelConstraints: { allowedEfforts },
+	});
+	assert.equal(route.modelOverride, "second-provider/reasoner:low");
+	assert.equal(route.allowsCandidate("second-provider/reasoner:high"), false);
 	assert.equal(f.infer.mock.calls.length, 1);
 });
 

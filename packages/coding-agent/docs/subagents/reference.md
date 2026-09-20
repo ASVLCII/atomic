@@ -73,7 +73,7 @@ For a persistent builtin override, put this in your user or project settings:
 }
 ```
 
-Existing builtin overrides using the legacy `thinking` field also restrict automatic selection to that effort. They intersect with `modelConstraints`; conflicting restrictions stop before launch. A concrete model suffix still wins when you pin a model. User-authored agent definitions retain their existing behavior; use `modelConstraints.allowedEfforts` to constrain their automatic routing.
+Existing builtin overrides using the legacy `thinking` field restrict the primary automatic selection to that effort. They intersect with `modelConstraints`; conflicting restrictions stop before launch. Explicit fallback suffixes still override the legacy default, so `thinking: "low"` can fall back to `provider/model:high` when that model supports it. Actual `modelConstraints.allowedEfforts` restrictions apply to every candidate, including suffixed fallbacks. A concrete model suffix still wins when you pin a model. User-authored agent definitions retain their existing behavior; use `modelConstraints.allowedEfforts` to constrain their automatic routing.
 
 ## Fallback models
 

@@ -130,9 +130,9 @@ Business and enterprise tokens sent to the individual host return `421 Misdirect
 
 Run `/login xai`, then select **Use a subscription**. `XAI_API_KEY` remains available through **Use an API key**.
 
-Atomic defaults xAI sessions to `grok-4.6`. Built-in workflow and subagent fallback chains use `xai/grok-4.6:xhigh`, `github-copilot/grok-4.6:xhigh`, and `openrouter/x-ai/grok-4.6:xhigh`; GitHub Copilot also exposes Grok 4.6 when the account's model policy enables it. Network-backed catalogs refresh and cache these newer entries independently of the bundled catalog snapshot.
+Atomic defaults xAI sessions to `grok-4.6`. GitHub Copilot also exposes Grok 4.6 when the account's model policy enables it. Network-backed catalogs refresh and cache these newer entries independently of the bundled catalog snapshot.
 
-The `codebase-locator`, `codebase-pattern-finder`, and `codebase-research-locator` agents use GPT-5.6 Luna at `xhigh` and Grok fallbacks at `medium` instead. Goal and Ralph orchestration, Ralph research, and the debugger use GPT-6 Astra at `medium`; Ralph prompt refinement remains at `high`. Open Claude Design starts with Anthropic Fable 5.1 at `medium`, then GitHub Copilot Fable 5.1 and Codex, Copilot, and OpenAI Astra at `medium`.
+Builtin workflows and subagents default to `model: "auto"`, selecting an available model and supported effort for each task rather than using fixed role models or shipped fallback chains. This does not change your main-chat model. To choose the decision provider, use `/settings` → **Router model**. For explicit child models, fallback lists or provider restrictions, see [Subagent reference](/subagents/reference#automatic-model-selection) and [builtin workflow model options](/workflows/builtins#built-in-workflows).
 
 ### Radius
 
@@ -198,7 +198,7 @@ Catalog failures preserve the last usable models for each provider. See [catalog
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY`                                           | `xiaomi-token-plan-ams`      |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY`                                           | `xiaomi-token-plan-sgp`      |
 
-Z.AI and Z.AI Coding Plan (China) default to `glm-5.3` (`zai/glm-5.3` and `zai-coding-cn/glm-5.3`), and both direct providers also expose the multimodal `glm-5.3-flash`. Baseten defaults to its directly selectable `zai-org/GLM-5.3` and also exposes `zai-org/GLM-5.3-Fast` and the multimodal `zai-org/GLM-5.3-Flash`; OpenRouter exposes `z-ai/glm-5.3` and `z-ai/glm-5.3-flash`. The full and Flash entries support `low`, `high`, and `max` reasoning; Baseten's Fast entry also supports `off`. Built-in workflow and subagent chains include the Z.AI, Z.AI Coding Plan, Baseten, and OpenRouter routes at `:high`. Use Baseten's `zai-org/GLM-5.2` or `zai-org/GLM-5.3-Fast` when fully disabled reasoning is required. Qwen Token Plan Individual defaults to `qwen3.8-max` and uses the international `QWEN_TOKEN_PLAN_API_KEY` shared with the existing Qwen Token Plan provider. These catalogs follow their upstream providers, so use `--list-models` for the current entries.
+Z.AI and Z.AI Coding Plan (China) default to `glm-5.3` (`zai/glm-5.3` and `zai-coding-cn/glm-5.3`), and both direct providers also expose the multimodal `glm-5.3-flash`. Baseten defaults to its directly selectable `zai-org/GLM-5.3` and also exposes `zai-org/GLM-5.3-Fast` and the multimodal `zai-org/GLM-5.3-Flash`; OpenRouter exposes `z-ai/glm-5.3` and `z-ai/glm-5.3-flash`. The full and Flash entries support `low`, `high`, and `max` reasoning; Baseten's Fast entry also supports `off`. Use Baseten's `zai-org/GLM-5.2` or `zai-org/GLM-5.3-Fast` when fully disabled reasoning is required. Qwen Token Plan Individual defaults to `qwen3.8-max` and uses the international `QWEN_TOKEN_PLAN_API_KEY` shared with the existing Qwen Token Plan provider. These catalogs follow their upstream providers, so use `--list-models` for the current entries.
 
 Use the table above for environment-variable and `auth.json` names.
 

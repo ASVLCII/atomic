@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import type { ExtensionContext } from "@bastani/atomic";
 import { test, vi } from "vitest";
+import { loadAgentsFromDirWithDiagnostics } from "../../packages/subagents/src/agents/agent-loaders.js";
+import { applyBuiltinOverrides } from "../../packages/subagents/src/agents/agent-overrides.js";
 import type { AgentConfig } from "../../packages/subagents/src/agents/agent-types.ts";
 import { runSingleInProcess } from "../../packages/subagents/src/runs/foreground/inprocess-run-sync.ts";
 import type { ChildSpec } from "../../packages/subagents/src/runs/inprocess/runner.ts";
@@ -24,6 +27,7 @@ async function dispatch(
 	effort: "low" | "off" | null,
 	overrides: Partial<AgentConfig> = {},
 	routed = true,
+	restrictEffort = true,
 ): Promise<ChildSpec> {
 	const primary = { ...decisionModel, id: "primary", reasoning: effort !== null };
 	const models = [
@@ -62,7 +66,9 @@ async function dispatch(
 				} as unknown as ExtensionContext,
 				agent,
 				task: "Inspect synthetic data",
-				modelConstraints: { allowedEfforts: effort === null ? [null, "off"] : [effort] },
+				modelConstraints: restrictEffort
+					? { allowedEfforts: effort === null ? [null, "off"] : [effort] }
+					: undefined,
 			})
 		: undefined;
 	capture.spec = undefined;
@@ -118,4 +124,29 @@ test("ordinary dispatch retains agent effort and the unfiltered parent fallback"
 	const spec = await dispatch("low", {}, false);
 	assert.equal(spec.thinkingLevel, "high");
 	assert.deepEqual(spec.fallbackModels, ["decision-test/fallback", "decision-test/parent"]);
+});
+
+test("builtin legacy effort preserves explicit fallback suffixes unless hard constraints exclude them", async () => {
+	const { agents } = loadAgentsFromDirWithDiagnostics(join(process.cwd(), "packages/subagents/agents"), "builtin");
+	const overridden = applyBuiltinOverrides(
+		agents,
+		{ overrides: { worker: { thinking: "high" } } },
+		{ overrides: { worker: { thinking: "low", fallbackModels: ["decision-test/fallback:high"] } } },
+		"user-settings.json",
+		"project-settings.json",
+	);
+	const worker = overridden.find((agent) => agent.name === "worker");
+	assert.ok(worker);
+	const spec = await dispatch("low", worker, true, false);
+	assert.equal(spec.thinkingLevel, "low");
+	assert.ok(spec.fallbackModels?.includes("decision-test/fallback:high"));
+	const restricted = await dispatch("low", worker);
+	assert.deepEqual(restricted.fallbackModels, []);
+	const agentRestricted = await dispatch(
+		"low",
+		{ ...worker, modelConstraints: { allowedEfforts: ["low"] } },
+		true,
+		false,
+	);
+	assert.deepEqual(agentRestricted.fallbackModels, []);
 });

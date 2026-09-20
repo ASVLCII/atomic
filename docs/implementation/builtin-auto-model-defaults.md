@@ -12,7 +12,7 @@ Make every builtin workflow and subagent default to `model: "auto"` through the 
 | All builtin subagents default to `model: "auto"` | Loader-based inventory asserts all nine shipped definitions, no fallback chains | Passed |
 | Defaults actually use the new router | `subagent-model-router-execution.test.ts` loads the shipped worker and exercises single/parallel execution without model arguments; `workflow-stage-auto.test.ts` runs a composed builtin child through the actual executor, structured router and artifact output | Passed, inference and child session responses are deterministic fixtures |
 | Explicit user model selections remain effective | Concrete per-call override bypasses inference; task/chain/parallel precedence and tournament explicit ordered assignments tested | Passed |
-| Explicit user effort selections remain effective | Actual builtin loader plus user/project override merge proves project `thinking: high` wins over user `low`, restricts selection/fallback and intersects hard constraints; existing suffix tests remain green | Passed |
+| Explicit user effort selections remain effective | Actual builtin loader plus user/project override merge proves project thinking wins for primary selection; real dispatch retains explicit fallback suffixes, while agent/call hard constraints still filter them | Passed after review repair; earlier execution-wide legacy-effort restriction was incorrect |
 | Meaningful supported router safety/capability constraints remain | Existing cost/context/input/effort, empty eligibility, conflict, cancellation and fallback tests; preserved Goal/Ralph tool exclusions and reviewer schema identity | Passed |
 | No concrete fallback pins accidentally bypass auto | Removed chains from nine agents, Goal/Ralph role configurations and design; inventory rejects builtin fallback declarations; invalid routing admits no child | Passed |
 | Do not change main-chat defaults | No diff in main-chat model-default source; full unit run's main-chat fallback and router-isolation tests pass | Passed |
@@ -20,9 +20,9 @@ Make every builtin workflow and subagent default to `model: "auto"` through the 
 | Work only in the designated separate checkout, with distinct branch before edits; independent of caching task | Parent preflight created `feat/builtin-auto-model-defaults` from clean detached `4c332f6f32abc34fb8575316deafe5c839a0985d`; all implementation commands use `/Users/tonystark/Documents/projects/atomic-auto-model-defaults` | Preserved |
 | Inspect instructions, history/contributor conventions and workflow/subagent/routing docs before implementation | Parent/initial worker inspected AGENTS, CLAUDE, DESIGN, PRODUCT, CONTRIBUTING, setup/manifests, recent Git signatures and merged PRs; guide reads covered workflows, subagents, authoring/operations/builtins/API/verification/reliable-design and model-selection/evaluation references | Recorded in worker transcripts; relevant routing references rechecked during implementation |
 | Add durable regression coverage | New inventory and default/override tests demonstrated failure on the old concrete/omitted defaults; effort test failed before constraint handling; existing integration wiring fixtures now supply the router rather than bypass it | Passed |
-| Actionable user docs and appropriate shipped changelogs consistent | Updated subagent guide/reference, builtin workflow guide, model-selection guide, subagent README/skill; Changed entries in coding-agent, workflows and subagents Unreleased sections | Passed |
-| Run appropriate repository checks and report truthful evidence/limitations | Check/build passed; full integration passed; full unit leaves only six independently proven baseline documentation failures | See commands below |
-| Verify and independently review | Writer validation below; fresh independent review is parent-owned | Independent review pending |
+| Actionable user docs and appropriate shipped changelogs consistent | Updated guides and Unreleased entries; review repair adds provider-guide consistency regression and clarifies fallback effort precedence | Passed after correcting provider-guide omissions |
+| Run appropriate repository checks and report truthful evidence/limitations | Repair check/build passed; full integration passed; final full unit has 9965 passes and only the six baseline documentation failures | Repair results below supersede initial results |
+| Verify and independently review | Initial independent review missed two defects subsequently found by workflow reviewers; both repaired with red/green regressions | Parent owns independent review of this correction |
 | Local descriptive commit and clean tree, no PR | Signed conventional commit with `Assistant-model: GPT-6-Astra`; exact SHA and final porcelain result belong in the completion receipt | Commit performed after this note's final update |
 | Parent-owned TODO-05a15d29 | Not modified by implementation worker | Parent closes after completion |
 
@@ -36,11 +36,11 @@ The internal builtin context defaults only absent models. Step model wins over s
 
 No public return or field shapes change. Optional fields remain optional; tournament omitted `models` leaves `model_assignment` absent, empty models produces `{}`, and duplicates/order remain intact. No new normalization, deduplication or error family was added. Router selection remains exactly `{ model, effort }`, with supported `off` distinct from `null`.
 
-Builtin `thinking` values originate in user overrides after removal of shipped pins. The narrow routing intersection applies only to `source: "builtin"`. Existing tests explicitly require custom user-authored auto agents' legacy thinking to remain router-controlled; that behavior is preserved. User/project builtin override precedence is unchanged. Explicit concrete suffixes still use the existing non-auto path.
+Builtin `thinking` values originate in user overrides after removal of shipped pins. The narrow primary-selection intersection applies only to `source: "builtin"`. Fallback eligibility uses only actual model constraints, so explicit candidate suffixes retain precedence over legacy thinking. The recorded primary selection is reused to build this eligibility check without another inference. Existing tests require custom user-authored auto agents' legacy thinking to remain router-controlled; that behavior is preserved. User/project builtin override precedence is unchanged. Explicit concrete primary suffixes still use the existing non-auto path.
 
 Routing states remain pending selection, validated concrete selection, execution and terminal result. Invalid/no-eligible/stale/provider/cancelled selection starts no child. Fallback is constrained and does not reroute or change main chat. Replay/resume retain the recorded selection and revalidate eligibility. Existing workflow-stage-auto and subagent router suites exercise these transitions, including cancellation and fallback restrictions.
 
-## Commands and results
+## Initial implementation commands and results
 
 Environment: macOS arm64, Node `v26.8.2`, Bun `1.4.2`, qlty `0.642.0`.
 
@@ -72,6 +72,39 @@ Parent's read-only debugger reproduced six failures in unchanged files and compa
 Reproduce with `npm run test:unit -- test/unit/workflow-extension-hook-guidance.test.ts test/unit/execution-routing-guidance.test.ts test/unit/package-metadata.test.ts test/unit/pi-0.84.2-docs-contract.test.ts test/unit/workflow-docs-host-portability.test.ts --reporter=dot`. Debugger result: six failed, 95 passed; final full run confirms exactly these six remain. They do not concern model defaults and were not fixed in this change.
 
 Setup/contributor documentation also contains stale minimum-release-age and SQLite guidance. Follow AGENTS.md and current manifests; unrelated corrections are deferred.
+
+## Review repair and corrected claims
+
+The latest consolidated review contained three findings with two root causes. The two provider-guide findings describe the same stale paragraphs. Both root causes are fixed; the earlier blanket claims of complete effort preservation and documentation consistency were incorrect.
+
+1. `providers.md` still promised fixed Grok/GLM chains and Luna/Astra/Fable role defaults. Its builtin policy now describes auto and links to override/constraint instructions. Main-chat xAI, Z.AI and Baseten defaults are unchanged. The new provider-guidance test failed on the obsolete Grok-chain sentence before the edit and passes afterward; it checks all five obsolete claims and retention of session defaults.
+2. Builtin legacy thinking was incorrectly included in fallback hard constraints. Primary routing still intersects that requested effort with real constraints. The existing recorded-selection path now validates fallback eligibility using only real constraints, with no second inference. The real loader/override/dispatch regression failed when `thinking: "low"` dropped `decision-test/fallback:high`, then passed after repair. Its call-level and agent-level `allowedEfforts: ["low"]` cases still remove that fallback. Existing custom-agent effort behavior and primary conflict rejection remain covered. The previous test asserting that legacy thinking alone rejects a suffixed fallback was corrected, not suppressed.
+
+Repair checks, all in the designated feature checkout:
+
+- `npm run test:unit -- test/unit/subagent-routed-fallback-effort.test.ts`: red, 1 failed and 6 passed; the added builtin dispatch assertion failed before repair.
+- `npm run test:unit -- test/unit/builtin-auto-model-defaults.test.ts`: red, 1 failed and 7 passed; provider-guide contradiction reproduced before repair. Green, all 8 passed afterward.
+- `npm run test:unit -- test/unit/builtin-auto-model-defaults.test.ts test/unit/subagent-model-router.test.ts test/unit/subagent-model-router-execution.test.ts test/unit/subagent-routed-fallback-effort.test.ts test/unit/workflow-stage-auto.test.ts`: 5 files, 87 passed. The final constraint-snapshot regression also failed before its correction, then passed; mutation during inference cannot widen fallback eligibility and inference still runs once.
+- Final `npm run test:unit`: 9965 passed, 23 skipped, six previously proven baseline docs failures; 897 files passed, 5 failed. Exit 1. The default-tools timeout did not recur in either full repair run.
+- `npm run check` and `npm run build`: exit 0.
+- `npm run test:integration`: 1161 passed, 12 skipped; 83 files passed, 2 skipped. Exit 0.
+- Compiled Node smoke imports nine workflow definitions and the subagent extension; all nine packaged agent definitions declare auto without fallback pins. Passed.
+- `qlty smells packages/subagents/src/runs/shared/model-router.ts`: exit 0, no smells. `qlty metrics --functions` completed. Existing configuration preserved; qlty fmt had no applicable formatter, so repository Biome formatted the four changed TypeScript files and `npm run check` supplied lint/typecheck coverage. No plugin-lint claim.
+- `git diff --check`: passed. No changes to main-chat defaults, user resources, test timeout policy or unrelated loader behavior.
+
+Logs and diagnostic artifacts are retained in the workflow artifact directory's `repair-evidence/`, including `auto-repair-{effort-red,effort-green,docs-red,docs-green,snapshot-red,focused-final,unit-final,check,build,integration-final}.log`. The artifact directory is `/Users/tonystark/.atomic/workflows/runs/2b322c89-0b20-4343-9d51-3af0f75cece9/artifact-4f0d021e-5f71-45ed-ad9f-22123b90f6ab`.
+
+### Default-tools timeout diagnosis
+
+Review observed `defaultTools setting > preserves explicit tool option precedence over the setting` timing out at 30017ms. A focused passing retry alone did not identify its cause. This repair investigated its execution:
+
+- The test constructs three real sessions sequentially; each SDK session composes mandatory builtin extensions even with a supplied resource loader. This behavior was introduced by `64e6f83b2`, before this change.
+- Temporary phase instrumentation measured the three session creations at 3893ms, 3986ms and 3978ms, versus 3–4ms for each initial empty resource reload. Every session had zero messages. The test passed at 11869ms.
+- A repeatable V8 CPU/precise-coverage probe passed at 14584ms. Of 14481ms profiled time, the largest entries were Jiti resolution at 5310ms and `node:fs` `statSync` at 4569ms, plus Jiti alias normalization at 589ms. Coverage recorded zero calls to `routeExecutionModel`, `routeSubagentModel` and `withBuiltinContext`. This is session-loading work, not a slow automatic model decision or child execution.
+- Byte comparisons against base `4c332f6f3` confirmed the test, SDK factory, builtin resource loader, general resource loader, mandatory resource loader and package lock are unchanged. The expensive loader/dependency path predates the patch. Temporary instrumentation was removed and the original test's bytes restored.
+- The full unit run now completes without the timeout. We classify the additional review failure as an existing session-loader load-sensitivity issue, not an auto-default behavior regression. The exact historical scheduler/filesystem pressure is not reconstructable and is not claimed proven. Optimizing unrelated Jiti loading is deferred; no timeout, concurrency or suite-serialization change was made.
+
+To repeat the diagnostic from this checkout, run `python3 <artifact-directory>/repair-evidence/auto-profile-default-tools.py`. The script copies only this one test into a temporary sibling, enables Node's inspector profiler around the exact precedence case, runs the normal Vitest command with its unchanged budget, and removes the scratch test in `finally`. It writes `/tmp/auto-default-tools-profile.json` and `/tmp/auto-default-tools-coverage.json`. The retained script, profile, coverage and logs make the diagnosis inspectable without editing production files or creating another checkout.
 
 ## Contract amendments received
 
