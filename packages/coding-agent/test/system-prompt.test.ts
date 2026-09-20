@@ -201,6 +201,7 @@ describe("buildSystemPrompt", () => {
 		const guidelines = prompt.slice(prompt.indexOf("Guidelines:\n"), prompt.indexOf("\n</rules>"));
 
 		expect(guidelines).toBe(`Guidelines:
+- Write self-describing code and do not add comments unless the user explicitly asks for them or the task instructions call for them. Code that needs a comment to be understood is a smell: restructure it with clearer names, smaller units, or explicit types instead
 - Be concise in your responses
 - Show file paths clearly when working with files`);
 	});
@@ -217,6 +218,7 @@ describe("buildSystemPrompt", () => {
 
 		expect(guidelines).toBe(`Guidelines:
 - **Workflows**: Workflow-specific sentinel.
+- Write self-describing code and do not add comments unless the user explicitly asks for them or the task instructions call for them. Code that needs a comment to be understood is a smell: restructure it with clearer names, smaller units, or explicit types instead
 - Be concise in your responses
 - Show file paths clearly when working with files`);
 	});
