@@ -10,8 +10,8 @@ vi.mock("jiti/static", () => {
 
 // Upstream #9540: inline extensions do not require the TypeScript transformer.
 test("loads an inline factory without importing either jiti entry", async () => {
-	const { createExtensionRuntime, loadExtensionFromFactory } = await import("../src/core/extensions/loader.ts");
-	const { createEventBus } = await import("../src/core/event-bus.ts");
+	const { createExtensionRuntime, loadExtensionFromFactory } = await import("../src/core/extensions/loader.js");
+	const { createEventBus } = await import("../src/core/event-bus.js");
 	const extension = await loadExtensionFromFactory(
 		(pi) => {
 			pi.registerCommand("lazy", { description: "fixture", handler: async () => {} });

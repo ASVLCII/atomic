@@ -5,8 +5,8 @@ import {
 	formatCacheWarmingStatus,
 	getCacheWarmingDelayMs,
 	isReplayable,
-} from "../src/core/cache-warmer.ts";
-import type { SessionEntry } from "../src/core/session-manager.ts";
+} from "../src/core/cache-warmer.js";
+import type { SessionEntry } from "../src/core/session-manager.js";
 
 const model = {
 	id: "claude-sonnet-4-5",

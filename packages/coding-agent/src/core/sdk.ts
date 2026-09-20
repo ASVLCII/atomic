@@ -371,7 +371,13 @@ async function constructAgentSession(
 		},
 		sessionManager,
 		() => settingsManager.getCacheWarmingMode(),
-		async (event) => extensionRunnerRef.current?.emitCacheWarmingDecision(event) ?? event.action,
+		async (event) => {
+			const runner = extensionRunnerRef.current;
+			if (!runner) {
+				return event.action;
+			}
+			return (await runner.emitCacheWarmingDecision(event)) ?? event.action;
+		},
 		(refresh) => trackSessionWork(session, refresh),
 	);
 
