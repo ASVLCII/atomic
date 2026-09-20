@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { routingEvidence } from "../../packages/coding-agent/src/core/model-routing-evidence.js";
+import { benchmarkEvidence, routingEvidence } from "../../packages/coding-agent/src/core/model-routing-evidence.js";
 import { readText } from "../helpers/runtime.js";
 
 const ids = [
@@ -43,7 +43,7 @@ test("compact routing measurements preserve documented configuration, units and 
 				.slice(1, -1)
 				.map((cell) => cell.trim()),
 		);
-	const [deepSwe, aa] = routingEvidence(ids);
+	const [deepSwe, aa] = benchmarkEvidence();
 	assert.ok(deepSwe && aa);
 	assert.equal(deepSwe.date, "2026-09-03");
 	assert.equal(aa.retrieved, "2026-09-08");
@@ -76,8 +76,10 @@ test("unavailable identities and unmeasured variants do not acquire predecessor 
 		routingEvidence(["custom", "gpt-6-astra-fast", "claude-fable-latest", "anthropic/claude-opus-5"]),
 		[],
 	);
-	const selected = routingEvidence(["gpt-6-astra"]);
-	assert.ok(selected.every((dataset) => dataset.rows.every(([id]) => id === "gpt-6-astra")));
-	assert.ok(Buffer.byteLength(JSON.stringify(selected)) < 4_000);
-	assert.ok(Buffer.byteLength(JSON.stringify(routingEvidence(ids))) < 12_000);
+	assert.deepEqual(routingEvidence(ids), []);
+	assert.deepEqual(
+		routingEvidence(["anthropic/claude-fable-5", "github-copilot/claude-fable-5", "openai/gpt-6-astra"]),
+		[],
+	);
+	assert.ok(Buffer.byteLength(JSON.stringify(benchmarkEvidence())) < 12_000);
 });

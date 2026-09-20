@@ -158,7 +158,7 @@ describe("pi 0.84.2 docs contract — every shipped door is documented", () => {
 	test("usage and CLI reference docs document --use-theme and the exit output setting", () => {
 		const usage = doc("usage.md") + doc("reference/cli.md");
 		assert.match(usage, /\| `--use-theme <name\[\/name\]>` \|/u);
-		assert.match(usage, /`fullscreenExitOutput`/u);
+		assert.match(usage, /`fullscreenExitOutput(?::\s*"transcript")?`/u);
 		assert.match(usage, /"resume-hint"/u);
 	});
 
@@ -173,7 +173,7 @@ describe("pi 0.84.2 docs contract — every shipped door is documented", () => {
 		assert.doesNotMatch(keybindings, /\| `tui\.altScreen\.search` \|/u);
 		assert.match(keybindings, /does not ship a find-in-transcript shortcut/u);
 		assert.match(keybindings, /\[Terminal setup\]\(\/terminal-setup\)/u);
-		assert.match(keybindings, /pi-tui 0\.85\.1/u);
+		assert.match(keybindings, /`tui\.altScreen\.search\*`[^\n]+no default keys and do nothing/u);
 	});
 
 	test("environment-variables.md documents PI_TUI_ESC_TIMEOUT, the AI_AGENT marker, and the experimental gate", () => {

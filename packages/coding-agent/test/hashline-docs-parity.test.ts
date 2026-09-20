@@ -23,6 +23,10 @@ import { loadNativeSearchBinding } from "../src/core/tools/search-native.ts";
 
 const docs = readTextSync(join(dirname(fileURLToPath(import.meta.url)), "../docs/tools.md"), "utf8");
 const normalizedDocs = docs.replace(/\s+/g, " ");
+const internals = readTextSync(
+	join(dirname(fileURLToPath(import.meta.url)), "../../../docs/implementation/hashline-diagnostics.md"),
+	"utf8",
+);
 
 describe("hashline edit reference documentation", () => {
 	test("keeps exported diagnostics and generated anchor examples aligned with the engine", () => {
@@ -34,13 +38,15 @@ describe("hashline edit reference documentation", () => {
 			DELETE_TAKES_NO_BODY,
 			DELETE_BLOCK_TAKES_NO_BODY,
 			BLOCK_RESOLVER_UNAVAILABLE,
-			UNRESOLVED_BLOCK_INTERNAL,
 			BARE_BODY_AUTO_PIPED_WARNING,
 			HUNK_LIKE_LITERAL_WARNING,
-			EMPTY_REPLACE,
 		]) {
 			assert.ok(docs.includes(diagnostic), `reference docs omitted or changed: ${diagnostic}`);
 		}
+		for (const diagnostic of [UNRESOLVED_BLOCK_INTERNAL, EMPTY_REPLACE]) {
+			assert.ok(internals.includes(diagnostic), `maintenance reference omitted or changed: ${diagnostic}`);
+		}
+		assert.match(docs, /internal apply error[^\n]+Report the exact diagnostic/);
 	});
 
 	test("documents the exact condition for hash-comment skipping", () => {
@@ -92,8 +98,8 @@ describe("hashline edit reference documentation", () => {
 			message = error.message;
 		}
 		assert.ok(message);
-		assert.ok(docs.includes(message), `reference docs omitted or changed: ${message}`);
-		assert.ok(normalizedDocs.includes("currently have no caller in Atomic"));
+		assert.ok(internals.includes(message), `maintenance reference omitted or changed: ${message}`);
+		assert.match(internals, /parseTag[^\n]+no active caller from `edit`/);
 	});
 
 	test("pins which leading nodes tree-sitter sweeps into their construct", () => {

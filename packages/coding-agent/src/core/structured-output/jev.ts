@@ -184,8 +184,8 @@ function* partitionQuestion(question: StructuredChoiceQuestion, fits: QuestionFi
 			...question,
 			criteria: Object.fromEntries(entries.slice(start, start + length)),
 		});
-		// Five guarantees shrinking even with three survivors and a retained sentinel.
-		let low = Math.min(KEEP + 2, high);
+		// Four options can eliminate one while retaining the top three.
+		let low = Math.min(KEEP + 1, high);
 		if (!fits(batchOf(low))) throw contextLimit();
 		while (low < high) {
 			const mid = Math.ceil((low + high) / 2);
@@ -272,6 +272,9 @@ export async function inferJev<T extends TSchema>(
 				const kept = survivors.get(id);
 				if (!kept) return [];
 				if (question.retainForFinal !== undefined) kept.add(question.retainForFinal);
+				// A retained sentinel can undo the only elimination in a four-item
+				// batch. Stop rather than repeating an identical round until timeout.
+				if (kept.size >= Object.keys(question.criteria).length) throw contextLimit();
 				return [
 					[
 						id,

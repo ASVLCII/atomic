@@ -154,3 +154,63 @@ test("automatic Jev with no current chat fails closed on oversized state", async
 	);
 	assert.equal(transport.mock.calls.length, 0);
 });
+
+// PR #3129: four candidates fit even when five exceed the budget.
+for (const pinned of [true, false]) {
+	test(`four-candidate batches finish without chat fallback, pinned=${pinned}`, async () => {
+		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
+		const seen = new Set<string>();
+		const transport = vi.fn(async (_url: string, init: RequestInit) => {
+			const request = JSON.parse(String(init.body)) as JevFixtureRequest;
+			for (const question of Object.values(request.questions)) {
+				assert.ok(Object.keys(question.criteria).length <= 4);
+				for (const key of Object.keys(question.criteria)) seen.add(key);
+			}
+			return Response.json(jevFixtureResponse(request));
+		});
+		vi.stubGlobal("fetch", transport);
+		const result = await inferRouterDecision({
+			...decisionRequest(),
+			settings: { getRouterModel: () => (pinned ? "typesafe-ai/jev-latest" : "") },
+			jev: {
+				questions: {
+					route: {
+						instructions: "Choose a route",
+						criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`c${i}`, "x".repeat(4_800)])),
+					},
+				},
+				decode: () => ({ route: "review" as const }),
+			},
+		});
+		assert.equal(result.fallback, undefined);
+		assert.equal(seen.size, 5);
+		assert.equal(transport.mock.calls.length, 2);
+	});
+}
+
+test("a retained sentinel cannot cause a four-candidate tournament to repeat forever", async () => {
+	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
+	vi.spyOn(console, "warn").mockImplementation(() => {});
+	const transport = vi.fn(async (_url: string, init: RequestInit) =>
+		Response.json(jevFixtureResponse(JSON.parse(String(init.body)) as JevFixtureRequest)),
+	);
+	vi.stubGlobal("fetch", transport);
+	const result = await inferRouterDecision({
+		...decisionRequest(),
+		modelRegistry: { ...decisionRequest().modelRegistry, streamSimple: () => messageStream(decisionMessage()) },
+		settings: { getRouterModel: () => "" },
+		jev: {
+			questions: {
+				route: {
+					instructions: "Choose a route",
+					retainForFinal: "c3",
+					criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`c${i}`, "x".repeat(4_800)])),
+				},
+			},
+			decode: () => ({ route: "review" as const }),
+		},
+	});
+	assert.equal(transport.mock.calls.length, 1);
+	assert.equal(result.fallback?.to, "decision-test/chat");
+	assert.match(result.fallback?.reason ?? "", /conservative input budget/);
+});

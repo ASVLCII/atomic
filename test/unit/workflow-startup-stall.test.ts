@@ -275,8 +275,14 @@ test("paused and quit startup stays observable; owner cancellation terminates st
 		const detail = inspectRun(runId, deps);
 		assert.ok(detail.ok);
 		const text = renderRunDetail(detail.detail, { now: Date.now() + 20_000, width: 120 });
-		assert.match(text, /startup reload-active \(20s total, 20s on current step; active\)/);
-		assert.match(text, /startup reload-queued/);
+		// Startup diagnostics remain inspectable, but stage rows show only execution status/duration (#3129).
+		assert.deepEqual(
+			detail.detail.stages.map((stage) => stage.startup?.phase),
+			["reload-active", "reload-queued"],
+		);
+		assert.match(text, /reviewer-a\s+pending/);
+		assert.match(text, /reviewer-b\s+pending/);
+		assert.doesNotMatch(text, /startup reload-|current step/);
 		assert.equal((await pauseRun(runId, deps)).ok, true);
 		assert.equal(store.runs().find((r) => r.id === runId)?.status, "paused");
 		assert.equal((await resumeRun(runId, deps)).ok, true);

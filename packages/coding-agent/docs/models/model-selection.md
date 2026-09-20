@@ -23,6 +23,8 @@ Artificial Analysis uses a separate **2026-09-08** retrieval of the **September 
 
 With `model: "auto"`, Atomic uses compact role guidance and dated benchmark records for eligible models, not the full text or charts of this guide and [Evals](/models/evals). You do not need to attach either guide. It does not browse leaderboards or probe providers during routing. The decision must use a current eligible provider/model and a supported effort; benchmark rows cannot add unavailable models or imply credentials work. The [`routerModel`](/settings#routermodel) setting selects the inference provider, separately from the child model it chooses. For interactive model-choice advice, use the live-source process below.
 
+Benchmark evidence must identify the exact serving provider as well as the model. The current snapshots do not record that provider identity, so automatic routing omits their measurements rather than attributing them to direct, proxy, or subscription providers. Routing still uses task fit, compact role guidance, catalog costs, supported efforts, and hard constraints. The tables remain available for human comparison.
+
 ## Answering model-choice questions
 
 For any task-specific model recommendation, not just workflow authoring, read the [task-type picker](/models/evals#pick-by-task-type) and its per-benchmark charts, then consult [Artificial Analysis](https://artificialanalysis.ai/) for the relevant live evaluation and methodology. Recommend a task-fit candidate and explain the cost or latency tradeoff. Cite the benchmark version, retrieval date and exact model/effort configuration. An aggregate leaderboard winner is not a winner on every task.

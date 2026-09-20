@@ -290,6 +290,84 @@ test("the real sequential workflow reload declaration keeps its explicit timeout
 	assert.deepEqual(scored.failures, []);
 });
 
+// #3129: the test passed on Windows; the gate ignored its existing 60s + 5s budget.
+test("built Node MCP ownership is scored against its declared timeout expression", () => {
+	const scored = evaluateDurations(
+		report([
+			{
+				file: "test/integration/sdk-builtin-host-parity.test.ts",
+				tests: [{ title: "built Node lazy MCP HTTP ownership", status: "passed", duration: 25_265 }],
+			},
+		]),
+		30_000,
+		root,
+	);
+	assert.equal(scored.samples[0]?.timeoutMs, 65_000);
+	assert.equal(scored.samples[0]?.explicit, true);
+	assert.deepEqual(scored.warnings, []);
+	assert.deepEqual(scored.failures, []);
+});
+
+// #3129: a curried test.each call still has a per-test third-argument budget.
+test("built Node table cases retain their existing structural budgets", () => {
+	const cases = [
+		[
+			"built Node shared-subclass sibling reload and disposal preserve a pending workflow and exit naturally",
+			28_140,
+			60_000,
+		],
+		["built Node MCP diagnostics are quiet withoutSink=false", 23_414, 65_000],
+		["built Node MCP diagnostics are quiet withoutSink=true", 23_328, 65_000],
+	] as const;
+	const scored = evaluateDurations(
+		report([
+			{
+				file: "test/integration/sdk-builtin-host-parity.test.ts",
+				tests: cases.map(([title, duration]) => ({ title, duration, status: "passed" })),
+			},
+		]),
+		30_000,
+		root,
+	);
+	for (const [name, duration, budget] of cases) {
+		const sample = scored.samples.find((entry) => entry.name === name);
+		assert.equal(sample?.timeoutMs, budget);
+		assert.equal(sample?.explicit, true);
+		assert.equal(sample?.ratio, duration / budget);
+	}
+	assert.deepEqual(scored.failures, []);
+});
+
+test("literal table budgets stay scoped and dynamic tables cannot borrow them", () => {
+	const source = [
+		"const PROCESS_TIMEOUT = 60_000;",
+		'describe("explicit", () => {',
+		"  test.each(",
+		'    ["node", "bun"] as const,',
+		"  )(",
+		'    "host %s",',
+		"    async () => {",
+		"    },",
+		"    PROCESS_TIMEOUT + 5_000,",
+		"  );",
+		"});",
+		'describe("default", () => {',
+		'  test.each(["node", "bun"])("host %s", async () => {});',
+		"});",
+		'test.each(computeRows())("dynamic %s", async () => {',
+		"}, 90_000);",
+		'test("unresolved sum", async () => {',
+		"}, PROCESS_TIMEOUT + UNKNOWN);",
+	].join("\n");
+	assert.deepEqual(
+		[...declaredTimeouts(source)],
+		[
+			["explicit > host node", 65_000],
+			["explicit > host bun", 65_000],
+		],
+	);
+});
+
 test("real edited-flow CLI cases keep their structural budgets without lending them to other tests", () => {
 	const file = "test/integration/workflow-tool-node-quit-cli.test.ts";
 	const titles = [
@@ -344,7 +422,7 @@ test("real edited-flow CLI cases keep their structural budgets without lending t
 
 test("unsupported wrappers and lookalike members do not donate timeout budgets", () => {
 	const source = [
-		"test.each([1])(",
+		"test.each(dynamicRows)(",
 		'  "table wrapper",',
 		"  async () => {",
 		"  },",

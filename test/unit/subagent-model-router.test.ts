@@ -582,3 +582,22 @@ test("auto ranks three distinct models, excludes their other efforts, and replay
 		/distinct models/,
 	);
 });
+
+// PR #3129: a shared bare model ID is not evidence of a shared serving configuration.
+test("auto routing does not attribute provider-unspecified Fable measurements to either provider", async () => {
+	const f = await fixture();
+	const models = ["anthropic", "github-copilot"].map((provider) => ({
+		...decisionModel,
+		provider,
+		id: "claude-fable-5",
+	}));
+	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(models);
+	let rank = 0;
+	f.infer.mockImplementation((_model, context) => {
+		const { state } = JSON.parse(context.messages[0]!.content as string);
+		assert.deepEqual(state.evidence, []);
+		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
+	});
+	await f.route();
+	assert.equal(rank, 2);
+});

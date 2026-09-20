@@ -77,7 +77,7 @@ export async function routeExecutionModel(input: {
 			task: input.task,
 			agent: { name: input.agent.name, description: input.agent.description },
 			policy: MODEL_ROUTING_POLICY,
-			evidence: routingEvidence(available.map(({ model }) => model.id)),
+			evidence: routingEvidence(available.map(({ model }) => `${model.provider}/${model.id}`)),
 		};
 		if (!state.task.trim()) throw new Error("Auto routing requires task instructions.");
 		const serialized = JSON.stringify({ state, criteria: allCriteria, constraints });

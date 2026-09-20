@@ -75,10 +75,7 @@ const aaRows: readonly (readonly [string, string, ...number[]])[] = [
 	["deepseek-v4-flash-0731", "DeepSeek V4 Flash 0731 (max)", 38, 48, 54, 12, 50, 39, 17, 11, 40, 8, 80],
 ];
 
-export function routingEvidence(modelIds: readonly string[]) {
-	// Only exact catalog IDs match. Do not infer identity from display names, aliases,
-	// provider prefixes, dated variants or fast suffixes.
-	const ids = new Set(modelIds);
+export function benchmarkEvidence() {
 	return [
 		{
 			benchmark: "DeepSWE v1.1, Best view",
@@ -89,7 +86,7 @@ export function routingEvidence(modelIds: readonly string[]) {
 			columns: ["model", "measured effort", "pass@1 %", "interval ±", "USD/task", "output ktokens", "steps"],
 			caveats:
 				"mini-swe-agent, 113 tasks. Astra costs use expected launch pricing, not billed rates. Sol promotional pricing; DeepSeek peak rates. Not Atomic or AA agent results.",
-			rows: deepSweRows.filter(([id]) => ids.has(id)).map((row) => [...row]),
+			rows: deepSweRows.map((row) => [...row]),
 		},
 		{
 			benchmark: "Artificial Analysis Intelligence Index v4.3 components",
@@ -114,7 +111,18 @@ export function routingEvidence(modelIds: readonly string[]) {
 			],
 			caveats:
 				"Source has no per-measurement date. Fable includes default fallback, not arbitrary no-fallback configurations. Normalized Elo is not pass rate. Non-hallucination counts partial/unattempted among non-correct answers, not all answers. Missing effort labels remain unspecified. Not Coding Agent Index or Datacurve results.",
-			rows: aaRows.filter(([id]) => ids.has(id)).map((row) => [...row]),
+			rows: aaRows.map((row) => [...row]),
 		},
-	].filter((dataset) => dataset.rows.length > 0);
+	];
+}
+
+export function routingEvidence(fullIds: readonly string[]) {
+	// The recorded snapshots identify models but not serving providers. Keep them
+	// for source parity; do not attribute them to a provider by guessing from a
+	// model name. Only explicitly provider-qualified measurement identities may
+	// enter routing. Until provenance is recorded, missing evidence stays unknown.
+	const ids = new Set(fullIds.filter((id) => id.includes("/")));
+	return benchmarkEvidence()
+		.map((dataset) => ({ ...dataset, rows: dataset.rows.filter(([id]) => typeof id === "string" && ids.has(id)) }))
+		.filter((dataset) => dataset.rows.length > 0);
 }

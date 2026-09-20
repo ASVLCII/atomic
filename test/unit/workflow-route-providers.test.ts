@@ -52,7 +52,12 @@ for (const provider of ["structured", "jev"] as const) {
 					const request = JSON.parse(String(init.body)) as JevFixtureRequest;
 					assert.deepEqual(request.state.task, state);
 					assert.deepEqual(Object.keys(request.questions.duration!.criteria), estimatedDurations);
-					assert.equal(Object.keys(request.questions).length, 5);
+					assert.deepEqual(Object.keys(request.questions).sort(), [
+						"complexity",
+						"duration",
+						"interaction",
+						"workflow",
+					]);
 					assert.match(request.questions.interaction!.instructions, /approval gate/);
 					return Response.json(
 						jevFixtureResponse(
@@ -63,7 +68,6 @@ for (const provider of ["structured", "jev"] as const) {
 									duration,
 									interaction: "executable",
 									complexity: "workflow_beneficial",
-									budget: "preserve",
 								})[id]!,
 						),
 					);
@@ -155,7 +159,6 @@ for (const scenario of [
 										duration: "15min",
 										interaction: scenario.interaction,
 										complexity: scenario.complexity,
-										budget: "preserve",
 									})[id]!,
 							),
 						);

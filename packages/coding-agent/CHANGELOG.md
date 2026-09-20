@@ -102,6 +102,7 @@
 - Jev failures now report SDK error classes, recognized context-limit diagnostics and safe request IDs instead of generic provider-availability advice. Requests use the TypeSafe SDK without hidden retries or body logging.
 - Automatic routing switches from Jev to the current chat model after an HTTP/connection failure or exhausted output repairs. By default each provider gets an initial attempt plus three corrective retries for invalid output, with a reported switch and one shared context, validation contract and deadline. Explicit router selections and general structured-output calls remain pinned.
 - Reduced automatic model and workflow routing context by using compact benchmark records and per-candidate contracts instead of full guides and repeated catalogs. Jev now checks every request against conservative context budgets, splits verbose choices even below 255 options, and avoids sending oversized inputs without truncating task requirements.
+- Extension imports of provider environment helpers now resolve correctly during workflow loading and reload instead of failing with `compat.js/utils/provider-env` module errors.
 
 ## [0.9.20-alpha.3] - 2026-09-16
 

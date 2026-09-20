@@ -71,10 +71,10 @@ describe("workflow extension-hook authoring guidance", () => {
 				"only when cross-stage or cross-workflow event control is materially clearer",
 				"make that dependency explicit and package and document the extension with the workflow",
 				"include any custom tools provided by the extension",
-				"A developer reading the entry file from top to bottom",
-				"monolithic prompt blobs",
+				/top to bottom[^.]*branches, gates, artifacts, and stop conditions/,
+				/monolithic prompt (?:blobs|blocks)/,
 			]) {
-				expect(content, path).toContain(phrase);
+				expect(content, path).toMatch(phrase);
 			}
 		}
 	});
