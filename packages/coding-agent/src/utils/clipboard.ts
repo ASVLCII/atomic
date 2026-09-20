@@ -189,7 +189,9 @@ export async function copyToClipboard(text: string): Promise<void> {
 	}
 
 	let osc52Emitted = false;
-	if (!copied && p === "linux" && isWSL(env)) {
+	// A remote session skips the Windows clipboard: the copied text belongs on the connected
+	// client, which the OSC 52 fallback below reaches, not on the remote host.
+	if (!copied && !remote && p === "linux" && isWSL(env)) {
 		// Windows Terminal supports OSC 52; prefer it over the slower PowerShell round trip.
 		if (env.WT_SESSION) osc52Emitted = emitOsc52(text);
 		copied = osc52Emitted || copyViaWindowsClipboard(text);

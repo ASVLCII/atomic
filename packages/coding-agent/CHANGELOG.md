@@ -61,6 +61,7 @@
 - Isolated-engine prompts wait for the remote prompt RPC to settle, and stale kitty image conversions no longer replace a later tool result.
 - Fixed idle prompt-cache warming rebuilding expired caches when its timer or an extension decision is delayed.
 - Fixed clipboard copy failing in containers and WSL without WSLg by restoring the OSC 52 fallback when no display is available, and added a verified Windows clipboard backend for WSL ([earendil-works/pi#9688](https://github.com/earendil-works/pi/issues/9688)).
+- Clipboard copy from an SSH or Mosh session into WSL now emits only OSC 52 for the connected client instead of also writing the remote host's Windows clipboard.
 - Fixed inherited z.ai `Prompt too long` errors not being recognized as context overflow ([earendil-works/pi#9805](https://github.com/earendil-works/pi/issues/9805)).
 - Fixed inherited Cerebras models advertising unsupported strict tool schemas, which caused HTTP 400 errors when strict and non-strict tools were mixed ([earendil-works/pi#9804](https://github.com/earendil-works/pi/pull/9804) by [@EdenGottlieb](https://github.com/EdenGottlieb)).
 
