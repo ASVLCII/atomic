@@ -1626,6 +1626,11 @@ export class StageSessionController {
 		}
 		this.unsubscribeTerminateWatcher?.();
 		this.unsubscribeTerminateWatcher = result.session.subscribe((event) => {
+			// SDK fallbacks apply model and effort before model_changed, not fallback_start.
+			if (event.type === "model_changed" && event.source === "fallback") {
+				this.selectedModel = workflowModelId(event.model);
+				this.notifyModelFallbackMetaChange();
+			}
 			this.artifactCapture.onEvent(result.session, event);
 			const terminatingId = terminatingToolCallId(event);
 			if (terminatingId !== undefined) this.terminatingToolCallIds.add(terminatingId);
