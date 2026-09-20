@@ -1,5 +1,7 @@
+import type { Questions, SystemOneResult } from "@typesafe-ai/sdk";
 import type { Static, TSchema } from "typebox";
 import { InvalidDecisionOutputError } from "./invalid-output.js";
+import { createJevClient, JevRequestError } from "./jev-client.js";
 import { getStructuredOutputProviders, JEV_STRUCTURED_OUTPUT_PROVIDER as provider } from "./resolver.js";
 import type { StructuredChoiceQuestion, StructuredOutputRequest, StructuredOutputResult } from "./types.js";
 
@@ -9,7 +11,10 @@ export const STRUCTURED_DECISION_POLICY =
 	"Make only the requested semantic judgments; code owns exact values, validation and execution.";
 
 /** Hard wire limit: overflow is partitioned before compilation, never truncated. */
-function compileQuestions(questions: Readonly<Record<string, StructuredChoiceQuestion>>, instructions: string) {
+function compileQuestions(
+	questions: Readonly<Record<string, StructuredChoiceQuestion>>,
+	instructions: string,
+): Questions {
 	return Object.fromEntries(
 		Object.entries(questions).map(([id, question]) => {
 			if (Object.keys(question.criteria).length > provider.capabilities.maxChoiceOptions) {
@@ -92,49 +97,6 @@ function parseResponse(value: unknown, questions: Readonly<Record<string, Struct
 	};
 }
 
-const MAX_RESPONSE_BYTES = 1024 * 1024;
-async function readResponse(response: Response, signal: AbortSignal): Promise<unknown> {
-	const reader = response.body?.getReader();
-	if (!reader) throw new InvalidDecisionOutputError("Jev returned an empty response.");
-	let bytes = 0;
-	let text = "";
-	const decoder = new TextDecoder();
-	const cancel = () => {
-		void reader.cancel().catch(() => {});
-	};
-	signal.addEventListener("abort", cancel, { once: true });
-	try {
-		while (true) {
-			signal.throwIfAborted();
-			let part: Awaited<ReturnType<typeof reader.read>>;
-			try {
-				part = await reader.read();
-			} catch {
-				signal.throwIfAborted();
-				throw new Error(
-					"Jev response reading failed. Check connectivity and retry explicitly; no automatic retry was made.",
-				);
-			}
-			if (part.done) break;
-			bytes += part.value.byteLength;
-			if (bytes > MAX_RESPONSE_BYTES) {
-				cancel();
-				throw new Error("Jev response exceeded the 1 MiB structured decision limit.");
-			}
-			text += decoder.decode(part.value, { stream: true });
-		}
-		signal.throwIfAborted();
-		try {
-			return JSON.parse(text + decoder.decode());
-		} catch {
-			throw new InvalidDecisionOutputError("Jev returned malformed JSON; no decision was accepted.");
-		}
-	} finally {
-		signal.removeEventListener("abort", cancel);
-		reader.releaseLock();
-	}
-}
-
 async function askJev<T extends TSchema>(
 	request: StructuredOutputRequest<T>,
 	questionsToAsk: Readonly<Record<string, StructuredChoiceQuestion>>,
@@ -159,38 +121,27 @@ async function askJev<T extends TSchema>(
 	}
 	if (!apiKey) throw new Error(`${selectedProvider.fullId} requires an API key. ${authGuidance}`);
 	assertActive();
-	let response: Response;
+	const { client, failure } = createJevClient({
+		apiKey,
+		endpoint: selectedProvider.endpoint,
+		model: selectedProvider.wireModel,
+		signal,
+		timeoutMs: request.timeoutMs ?? 30_000,
+		authGuidance,
+	});
+	let response: SystemOneResult<Questions>;
 	try {
-		// Direct fetch has no SDK retries. Reject redirects so credentials/state cannot change destinations.
-		response = await fetch(selectedProvider.endpoint, {
-			method: "POST",
-			redirect: "error",
-			signal,
-			headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ model: selectedProvider.wireModel, state: request.state, questions }),
-		});
-	} catch {
-		signal.throwIfAborted();
-		throw new Error("Jev request failed. Check connectivity and retry explicitly; no automatic retry was made.");
+		response = await client.systemOne(
+			{ model: selectedProvider.wireModel, state: request.state, questions },
+			{ signal },
+		);
+	} catch (error) {
+		throw failure(error);
 	}
-	if (signal.aborted) {
-		void response.body?.cancel().catch(() => {});
-		signal.throwIfAborted();
-	}
-	if (!response.ok) {
-		void response.body?.cancel().catch(() => {});
-		const guidance =
-			response.status === 401
-				? authGuidance
-				: response.status === 422
-					? "Check the state and Choice question contract."
-					: response.status === 429 || response.status === 529
-						? "Wait before retrying explicitly."
-						: "Check provider availability.";
-		// Never include the body: upstream error text can echo state or credentials.
-		throw new Error(`Jev HTTP ${response.status}. ${guidance} No automatic retry was made.`);
-	}
-	const parsed = parseResponse(await readResponse(response, signal), questionsToAsk);
+	assertActive();
+	if (typeof response === "string")
+		throw new InvalidDecisionOutputError("Jev returned malformed JSON; no decision was accepted.");
+	const parsed = parseResponse(response, questionsToAsk);
 	assertActive();
 	return parsed;
 }
@@ -314,7 +265,7 @@ export async function inferJev<T extends TSchema>(
 			try {
 				result = await askJev(request, wire, signal, assertActive);
 			} catch (error) {
-				if (error instanceof InvalidDecisionOutputError) {
+				if (error instanceof InvalidDecisionOutputError || error instanceof JevRequestError) {
 					error.usage = {
 						inputTokens: usage.inputTokens + (error.usage?.inputTokens ?? 0),
 						outputTokens: usage.outputTokens + (error.usage?.outputTokens ?? 0),

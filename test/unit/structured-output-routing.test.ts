@@ -262,12 +262,15 @@ test("Jev entrypoint sends both Choice judgments together and maps exact values 
 });
 
 for (const status of [401, 422, 429, 529]) {
-	test(`Jev HTTP ${status} fails once without leaking the response body`, async () => {
+	test(`pinned Jev HTTP ${status} fails once without leaking the response body`, async () => {
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const transport = vi.fn(async () => new Response("private echoed context and mock-key", { status }));
 		vi.stubGlobal("fetch", transport);
 		await assert.rejects(
-			inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
+			inferRouterDecision({
+				...decisionRequest(),
+				settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
+			}),
 			(error: Error) => {
 				assert.match(error.message, new RegExp(`HTTP ${status}`));
 				assert.equal(error.message.includes("private"), false);
@@ -298,7 +301,11 @@ test("Jev body reader failure is private and never retried or decoded", async ()
 	const request = decisionRequest();
 	const decode = vi.fn(request.jev.decode);
 	await assert.rejects(
-		inferRouterDecision({ ...request, settings: SettingsManager.inMemory(), jev: { ...request.jev, decode } }),
+		inferRouterDecision({
+			...request,
+			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
+			jev: { ...request.jev, decode },
+		}),
 		(error: Error) => {
 			assert.doesNotMatch(String(error.stack), /private upstream payload|mock-secret/);
 			assert.equal(error.cause, undefined);

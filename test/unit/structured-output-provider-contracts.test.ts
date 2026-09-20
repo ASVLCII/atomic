@@ -226,7 +226,10 @@ test("Jev network errors do not leak transport messages or retry", async () => {
 	});
 	vi.stubGlobal("fetch", transport);
 	await assert.rejects(
-		inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() }),
+		inferRouterDecision({
+			...decisionRequest(),
+			settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
+		}),
 		/Jev request failed/,
 	);
 	assert.equal(transport.mock.calls.length, 1);

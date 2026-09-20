@@ -9,6 +9,7 @@ import {
 } from "../tools/structured-output.ts";
 import { InvalidDecisionOutputError } from "./invalid-output.js";
 import { inferJev, STRUCTURED_DECISION_POLICY } from "./jev.js";
+import { JevRequestError } from "./jev-client.js";
 import { resolveRouterModel } from "./resolver.js";
 import type { RouterDecisionRequest, StructuredOutputRequest, StructuredOutputResult } from "./types.js";
 
@@ -153,6 +154,7 @@ async function inferDecision<T extends TSchema>(
 	request: StructuredOutputRequest<T>,
 	repairs: number,
 	validateDecision?: (value: Static<T>) => boolean,
+	fallbackModel?: Model<Api>,
 ): Promise<StructuredOutputResult<Static<T>>> {
 	request.signal?.throwIfAborted();
 	const timeoutMs = request.timeoutMs ?? DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS;
@@ -184,7 +186,7 @@ async function inferDecision<T extends TSchema>(
 		}
 	}
 	// Own immutable input data across awaits, including schema and candidates. The mapper is trusted code.
-	const selected = request.model ? structuredClone(request.model) : request.model;
+	let selected = request.model ? structuredClone(request.model) : request.model;
 	const snapshot = {
 		...request,
 		model: selected,
@@ -201,6 +203,8 @@ async function inferDecision<T extends TSchema>(
 	) {
 		throw new Error("Structured output requires a concrete chat model or the decision-only Jev adapter.");
 	}
+	const fallbackChat = fallbackModel ? structuredClone(fallbackModel) : undefined;
+	let fallback: StructuredOutputResult<Static<T>>["fallback"];
 	const controller = new AbortController();
 	const abort = () => controller.abort(new Error("Structured output cancelled; no decision was accepted."));
 	request.signal?.addEventListener("abort", abort, { once: true });
@@ -221,13 +225,14 @@ async function inferDecision<T extends TSchema>(
 		const usage = { inputTokens: 0, outputTokens: 0 };
 		for (let attempt = 0; ; attempt++) {
 			assertActive();
-			const current =
-				attempt === 0
-					? snapshot
-					: {
-							...snapshot,
-							instructions: `${snapshot.instructions}\n\nThe previous response failed output validation. Return a complete valid decision satisfying the original schema, candidates and constraints. Do not change the task or invent values.`,
-						};
+			const current = {
+				...snapshot,
+				model: selected,
+				instructions:
+					attempt === 0 || fallback
+						? snapshot.instructions
+						: `${snapshot.instructions}\n\nThe previous response failed output validation. Return a complete valid decision satisfying the original schema, candidates and constraints. Do not change the task or invent values.`,
+			};
 			try {
 				const result = await raceWithAbortSignal(
 					selected.kind === "jev"
@@ -255,17 +260,33 @@ async function inferDecision<T extends TSchema>(
 						"Invalid structured output: response does not match the decision schema.",
 					);
 				assertActive();
-				return { ...result, value, usage };
+				return { ...result, value, usage, ...(fallback ? { fallback } : {}) };
 			} catch (error) {
 				assertActive();
+				if (error instanceof JevRequestError && selected.kind === "jev" && fallbackChat && !fallback) {
+					fallback = {
+						from: selected.fullId,
+						to: `${fallbackChat.provider}/${fallbackChat.id}`,
+						reason: error.message,
+					};
+					if (error.usage) {
+						usage.inputTokens += error.usage.inputTokens;
+						usage.outputTokens += error.usage.outputTokens;
+					}
+					console.warn(
+						`${error.message} Falling back to current chat model ${fallback.to} for this routing decision.`,
+					);
+					selected = { kind: "chat", fullId: fallback.to, model: fallbackChat };
+					continue;
+				}
 				if (!(error instanceof InvalidDecisionOutputError)) throw error;
 				if (error.usage) {
 					usage.inputTokens += error.usage.inputTokens;
 					usage.outputTokens += error.usage.outputTokens;
 				}
-				if (attempt >= repairs)
+				if (fallback || attempt >= repairs)
 					throw new Error(
-						`${error.message} ${repairs ? "Routing output repair exhausted after 4 attempts." : "No repair request was made."}`,
+						`${error.message} ${fallback ? "Chat fallback failed validation; no further attempt was made." : repairs ? "Routing output repair exhausted after 4 attempts." : "No repair request was made."}`,
 					);
 			}
 		}
@@ -284,5 +305,15 @@ export async function inferRouterDecision<T extends TSchema>(
 	request.signal?.throwIfAborted();
 	const { settings, currentModel, ...inference } = request;
 	const model = resolveRouterModel({ settings, currentModel, modelRegistry: request.modelRegistry });
-	return inferDecision({ ...inference, model }, 3, validateDecision);
+	// A concrete routerModel is a provider pin. Only default, automatically selected Jev may switch.
+	const fallback =
+		model.kind === "jev" &&
+		!settings.getRouterModel() &&
+		currentModel &&
+		currentModel.id !== "auto" &&
+		currentModel.provider !== "typesafe-ai" &&
+		currentModel.id !== "~typesafe/jev-latest"
+			? currentModel
+			: undefined;
+	return inferDecision({ ...inference, model }, 3, validateDecision, fallback);
 }
