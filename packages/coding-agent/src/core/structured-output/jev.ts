@@ -1,6 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { InvalidDecisionOutputError } from "./invalid-output.js";
-import { JEV_STRUCTURED_OUTPUT_PROVIDER as provider } from "./resolver.js";
+import { getStructuredOutputProviders, JEV_STRUCTURED_OUTPUT_PROVIDER as provider } from "./resolver.js";
 import type { StructuredChoiceQuestion, StructuredOutputRequest, StructuredOutputResult } from "./types.js";
 
 export const STRUCTURED_DECISION_POLICY =
@@ -142,27 +142,32 @@ async function askJev<T extends TSchema>(
 	assertActive: () => void,
 ) {
 	assertActive();
+	const selectedProvider = getStructuredOutputProviders().find(
+		(candidate) => candidate.fullId === request.model.fullId,
+	);
+	if (!selectedProvider) throw new Error("Invalid Jev model: use an exact structured-decision model ID.");
+	const authGuidance = `Use /login ${selectedProvider.id} or set ${selectedProvider.apiKeyEnv}.`;
 	const questions = compileQuestions(questionsToAsk, request.instructions);
 	let apiKey: string | undefined;
 	try {
 		apiKey = request.modelRegistry.getProviderAuth
-			? (await request.modelRegistry.getProviderAuth(provider.id, { signal }))?.auth.apiKey?.trim()
-			: process.env.TYPESAFE_API_KEY?.trim();
+			? (await request.modelRegistry.getProviderAuth(selectedProvider.id, { signal }))?.auth.apiKey?.trim()
+			: process.env[selectedProvider.apiKeyEnv]?.trim();
 	} catch {
 		signal.throwIfAborted();
-		throw new Error("Jev credential resolution failed. Check /login typesafe-ai or TYPESAFE_API_KEY.");
+		throw new Error(`Jev credential resolution failed. ${authGuidance}`);
 	}
-	if (!apiKey) throw new Error("typesafe-ai/jev requires an API key. Use /login typesafe-ai or set TYPESAFE_API_KEY.");
+	if (!apiKey) throw new Error(`${selectedProvider.fullId} requires an API key. ${authGuidance}`);
 	assertActive();
 	let response: Response;
 	try {
 		// Direct fetch has no SDK retries. Reject redirects so credentials/state cannot change destinations.
-		response = await fetch(provider.endpoint, {
+		response = await fetch(selectedProvider.endpoint, {
 			method: "POST",
 			redirect: "error",
 			signal,
 			headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ model: provider.wireModel, state: request.state, questions }),
+			body: JSON.stringify({ model: selectedProvider.wireModel, state: request.state, questions }),
 		});
 	} catch {
 		signal.throwIfAborted();
@@ -176,7 +181,7 @@ async function askJev<T extends TSchema>(
 		void response.body?.cancel().catch(() => {});
 		const guidance =
 			response.status === 401
-				? "Check /login typesafe-ai or TYPESAFE_API_KEY."
+				? authGuidance
 				: response.status === 422
 					? "Check the state and Choice question contract."
 					: response.status === 429 || response.status === 529
@@ -287,7 +292,7 @@ export async function inferJev<T extends TSchema>(
 		const result = await askJev(request, request.jev.questions, signal, assertActive);
 		return {
 			value: request.jev.decode(result.choices),
-			model: provider.fullId,
+			model: request.model.fullId,
 			responseModel: result.responseModel,
 			usage: result.usage,
 		};
@@ -349,7 +354,7 @@ export async function inferJev<T extends TSchema>(
 	assertActive();
 	return {
 		value: request.jev.decode(Object.fromEntries(Object.keys(request.jev.questions).map((id) => [id, choices[id]]))),
-		model: provider.fullId,
+		model: request.model.fullId,
 		responseModel,
 		usage,
 	};

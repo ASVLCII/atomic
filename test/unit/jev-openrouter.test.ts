@@ -1,0 +1,273 @@
+import assert from "node:assert/strict";
+import { afterEach, test, vi } from "vitest";
+import { AuthStorage } from "../../packages/coding-agent/src/core/auth-storage.js";
+import { ModelRegistry } from "../../packages/coding-agent/src/core/model-registry.js";
+import { ModelRuntime } from "../../packages/coding-agent/src/core/model-runtime.js";
+import {
+	inferRouterDecision,
+	inferStructuredOutput,
+} from "../../packages/coding-agent/src/core/structured-output/index.js";
+import { decisionRequest, jevResponse } from "../helpers/structured-output.js";
+
+const fullId = "openrouter/~typesafe/jev-latest" as const;
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
+});
+
+for (const method of ["api_key", "oauth", "environment", "interpolated"] as const) {
+	test(`OpenRouter Jev uses existing ${method} auth and the Decisions API`, async () => {
+		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-wrong-provider");
+		vi.stubEnv("OPENROUTER_API_KEY", "synthetic-env");
+		vi.stubEnv("JEV_OPENROUTER_TEST_KEY", "synthetic-interpolated");
+		const credentials = AuthStorage.inMemory({
+			"typesafe-ai": { type: "api_key", key: "synthetic-wrong-stored" },
+			...(method === "environment"
+				? {}
+				: {
+						openrouter:
+							method === "oauth"
+								? {
+										type: "oauth" as const,
+										access: "synthetic-oauth",
+										refresh: "",
+										expires: Date.now() + 3600000,
+									}
+								: {
+										type: "api_key" as const,
+										key: method === "interpolated" ? "$JEV_OPENROUTER_TEST_KEY" : "synthetic-api_key",
+									},
+					}),
+		});
+		const runtime = await ModelRuntime.create({ modelsPath: null, credentials, allowModelNetwork: false });
+		const registry = new ModelRegistry(runtime);
+		const transport = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			assert.equal(url, "https://openrouter.ai/api/alpha/decisions");
+			assert.equal(init?.redirect, "error");
+			assert.equal(
+				new Headers(init?.headers).get("Authorization"),
+				`Bearer synthetic-${method === "environment" ? "env" : method}`,
+			);
+			const body = JSON.parse(String(init?.body));
+			assert.equal(body.model, "~typesafe/jev-latest");
+			assert.deepEqual(body.state, decisionRequest().state);
+			assert.equal(body.questions.route.type, "choice");
+			assert.equal(body.messages, undefined);
+			assert.equal(body.tools, undefined);
+			assert.doesNotMatch(String(init?.body), /synthetic-/);
+			// Official https://openrouter.ai/openapi.json DecisionsResponse envelope.
+			return Response.json({
+				...jevResponse(),
+				id: "gen-dec-fixture",
+				provider: "TypeSafe",
+				model: "typesafe/jev-1.13-20260917",
+			});
+		});
+		vi.stubGlobal("fetch", transport);
+		const request = { ...decisionRequest(), modelRegistry: registry, settings: { getRouterModel: () => fullId } };
+		const routed = await inferRouterDecision(request);
+		assert.equal(routed.model, fullId);
+		assert.equal(routed.responseModel, "typesafe/jev-1.13-20260917");
+		assert.deepEqual(routed.value, { route: "review", limit: 1.23456789 });
+		assert.equal((await inferStructuredOutput({ ...request, model: { kind: "jev", fullId } })).model, fullId);
+		assert.equal(transport.mock.calls.length, 2);
+	});
+}
+
+test("OpenRouter Jev does not use TypeSafe credentials when OpenRouter auth is missing", async () => {
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-wrong-provider");
+	vi.stubEnv("OPENROUTER_API_KEY", "");
+	const runtime = await ModelRuntime.create({
+		modelsPath: null,
+		credentials: AuthStorage.inMemory({ "typesafe-ai": { type: "api_key", key: "synthetic-wrong-stored" } }),
+		allowModelNetwork: false,
+	});
+	const transport = vi.fn();
+	vi.stubGlobal("fetch", transport);
+	await assert.rejects(
+		inferRouterDecision({
+			...decisionRequest(),
+			modelRegistry: new ModelRegistry(runtime),
+			settings: { getRouterModel: () => fullId },
+		}),
+		/openrouter\/.*requires an API key.*\/login openrouter.*OPENROUTER_API_KEY/,
+	);
+	assert.equal(transport.mock.calls.length, 0);
+});
+
+test("minimal adapters use only OpenRouter environment auth", async () => {
+	vi.stubEnv("OPENROUTER_API_KEY", "synthetic-openrouter");
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-typesafe");
+	const transport = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+		assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer synthetic-openrouter");
+		return Response.json(jevResponse());
+	});
+	vi.stubGlobal("fetch", transport);
+	await inferStructuredOutput({ ...decisionRequest(), model: { kind: "jev", fullId } });
+	assert.equal(transport.mock.calls.length, 1);
+});
+
+test("OpenRouter logout falls back to its environment key, not TypeSafe", async () => {
+	vi.stubEnv("OPENROUTER_API_KEY", "synthetic-env");
+	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-wrong-provider");
+	const runtime = await ModelRuntime.create({
+		modelsPath: null,
+		credentials: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "synthetic-stored" } }),
+		allowModelNetwork: false,
+	});
+	await runtime.logout("openrouter");
+	const transport = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+		assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer synthetic-env");
+		return Response.json(jevResponse());
+	});
+	vi.stubGlobal("fetch", transport);
+	await inferRouterDecision({
+		...decisionRequest(),
+		modelRegistry: new ModelRegistry(runtime),
+		settings: { getRouterModel: () => fullId },
+	});
+	assert.equal(transport.mock.calls.length, 1);
+});
+
+for (const status of [401, 429, 529]) {
+	test(`OpenRouter HTTP ${status} is redacted and never retried`, async () => {
+		vi.stubEnv("OPENROUTER_API_KEY", "synthetic-key");
+		const transport = vi.fn(async () => new Response("private-upstream-material", { status }));
+		vi.stubGlobal("fetch", transport);
+		await assert.rejects(
+			inferRouterDecision({ ...decisionRequest(), settings: { getRouterModel: () => fullId } }),
+			(error: Error) => {
+				assert.match(error.message, new RegExp(`Jev HTTP ${status}`));
+				assert.doesNotMatch(error.message, /private-upstream-material|typesafe-ai|TYPESAFE_API_KEY/);
+				if (status === 401) assert.match(error.message, /\/login openrouter.*OPENROUTER_API_KEY/);
+				return true;
+			},
+		);
+		assert.equal(transport.mock.calls.length, 1);
+	});
+}
+
+test("OpenRouter malformed decisions have bounded router repairs but generic calls remain one-shot", async () => {
+	vi.stubEnv("OPENROUTER_API_KEY", "synthetic-key");
+	const transport = vi.fn(async () => Response.json({ ...jevResponse(), answers: {} }));
+	vi.stubGlobal("fetch", transport);
+	await assert.rejects(
+		inferRouterDecision({ ...decisionRequest(), settings: { getRouterModel: () => fullId } }),
+		/answer_keys/,
+	);
+	assert.equal(transport.mock.calls.length, 4);
+	transport.mockClear();
+	await assert.rejects(inferStructuredOutput({ ...decisionRequest(), model: { kind: "jev", fullId } }), /answer_keys/);
+	assert.equal(transport.mock.calls.length, 1);
+});
+
+test("OpenRouter cancellation during auth cannot dispatch or decode a late result", async () => {
+	const controller = new AbortController();
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const request = decisionRequest();
+	const decode = vi.fn(request.jev.decode);
+	let authSignal: AbortSignal | undefined;
+	const transport = vi.fn();
+	vi.stubGlobal("fetch", transport);
+	const result = inferRouterDecision({
+		...request,
+		settings: { getRouterModel: () => fullId },
+		signal: controller.signal,
+		jev: { ...request.jev, decode },
+		modelRegistry: {
+			...request.modelRegistry,
+			getProviderAuth: async (provider, options) => {
+				assert.equal(provider, "openrouter");
+				authSignal = options?.signal;
+				entered.resolve();
+				await release.promise;
+				return undefined;
+			},
+		},
+	});
+	await entered.promise;
+	controller.abort();
+	await assert.rejects(result, /cancelled/);
+	release.resolve();
+	assert.equal(authSignal?.aborted, true);
+	assert.equal(transport.mock.calls.length, 0);
+	assert.equal(decode.mock.calls.length, 0);
+});
+
+test("OpenRouter auth errors are redacted without bypassing the resolver through environment fallback", async () => {
+	vi.stubEnv("OPENROUTER_API_KEY", "synthetic-env");
+	const request = decisionRequest();
+	const transport = vi.fn();
+	vi.stubGlobal("fetch", transport);
+	await assert.rejects(
+		inferRouterDecision({
+			...request,
+			settings: { getRouterModel: () => fullId },
+			modelRegistry: {
+				...request.modelRegistry,
+				getProviderAuth: async () => {
+					throw new Error("private-auth-material");
+				},
+			},
+		}),
+		(error: Error) => {
+			assert.match(error.message, /Jev credential resolution failed.*\/login openrouter/);
+			assert.doesNotMatch(String(error.stack), /private-auth-material/);
+			return true;
+		},
+	);
+	assert.equal(transport.mock.calls.length, 0);
+});
+
+// #3118: Jev may return rounded probabilities that do not sum to one.
+for (const selected of ["typesafe-ai/jev-latest", fullId] as const) {
+	test(`${selected} preserves non-normalized probability acceptance and provider isolation`, async () => {
+		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-typesafe");
+		vi.stubEnv("OPENROUTER_API_KEY", "synthetic-openrouter");
+		const transport = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			const direct = selected === "typesafe-ai/jev-latest";
+			assert.equal(
+				url,
+				direct ? "https://api.typesafe.ai/v1/systemone" : "https://openrouter.ai/api/alpha/decisions",
+			);
+			assert.equal(
+				new Headers(init?.headers).get("Authorization"),
+				direct ? "Bearer synthetic-typesafe" : "Bearer synthetic-openrouter",
+			);
+			assert.equal(JSON.parse(String(init?.body)).model, direct ? "jev-latest" : "~typesafe/jev-latest");
+			const response = jevResponse();
+			response.answers.route.probabilities = { none: 0.2, review: 0.7 };
+			return Response.json(response);
+		});
+		vi.stubGlobal("fetch", transport);
+		const result = await inferStructuredOutput({ ...decisionRequest(), model: { kind: "jev", fullId: selected } });
+		assert.equal(result.model, selected);
+		assert.deepEqual(result.value, { route: "review", limit: 1.23456789 });
+		assert.equal(transport.mock.calls.length, 1);
+	});
+}
+
+test("OpenRouter auth shares the explicit decision deadline", async () => {
+	const request = decisionRequest();
+	let signal: AbortSignal | undefined;
+	const transport = vi.fn();
+	vi.stubGlobal("fetch", transport);
+	await assert.rejects(
+		inferStructuredOutput({
+			...request,
+			model: { kind: "jev", fullId },
+			timeoutMs: 20,
+			modelRegistry: {
+				...request.modelRegistry,
+				getProviderAuth: async (_provider, options) => {
+					signal = options?.signal;
+					return new Promise(() => {});
+				},
+			},
+		}),
+		/timed out/,
+	);
+	assert.equal(signal?.aborted, true);
+	assert.equal(transport.mock.calls.length, 0);
+});

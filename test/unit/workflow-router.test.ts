@@ -599,7 +599,7 @@ for (const status of [401, 422, 429, 529]) {
 for (const malformed of ["unknown-choice", "missing-budget", "wrong-type"]) {
 	test(`Jev ${malformed} fails closed after bounded repair`, async () => {
 		const f = fixture();
-		f.ctx.getRouterModel = () => "typesafe-ai/jev";
+		f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 			const response = jevAnswer(JSON.parse(String(init?.body)) as JevRequest);
@@ -665,7 +665,7 @@ test("Jev overflowing registry retains none for final comparison and exact budge
 	for (let i = 0; i < 254; i++)
 		registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
 	f.replace(registry);
-	f.ctx.getRouterModel = () => "typesafe-ai/jev";
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const seen = new Set<string>();
 	let round = 0;
@@ -719,7 +719,7 @@ test("Jev overflowing registry launches the selected registered workflow once wi
 		registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
 	f.replace(registry);
 	assert.equal(f.runtime.registry.get("approved-change"), f.definition);
-	f.ctx.getRouterModel = () => "typesafe-ai/jev";
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const seen = new Set<string>();
 	const fetch = vi.fn(async (_url: string, init: RequestInit) => {
@@ -838,7 +838,7 @@ for (const failure of ["registry", "provider", "cancel"] as const) {
 		for (let i = 0; i < 254; i++)
 			registry = registry.register({ ...f.other, name: `extra-${i}`, normalizedName: `extra-${i}` });
 		f.replace(registry);
-		f.ctx.getRouterModel = () => "typesafe-ai/jev";
+		f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 		vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 		const controller = new AbortController();
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {

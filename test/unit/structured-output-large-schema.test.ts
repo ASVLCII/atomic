@@ -70,7 +70,7 @@ for (const valid of [true, false]) {
 	test(`Jev decoded output is ${valid ? "accepted" : "rejected"} against the full 1997-pair schema`, async () => {
 		const value = { ...pairs.at(-1)!, effort: valid ? "high" : "low" };
 		const { request, dispatch } = requestFor(value);
-		request.settings = { getRouterModel: () => "typesafe-ai/jev" };
+		request.settings = { getRouterModel: () => "typesafe-ai/jev-latest" };
 		request.jev.decode = () => value;
 		const fetch = vi.fn(async () =>
 			Response.json({

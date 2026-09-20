@@ -236,7 +236,7 @@ test("expired Jev auth cannot start a transport even before the timer callback",
 			inferRouterDecision({
 				...request,
 				timeoutMs: 50,
-				settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" }),
+				settings: SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" }),
 				modelRegistry: {
 					...request.modelRegistry,
 					getProviderAuth: async () => {

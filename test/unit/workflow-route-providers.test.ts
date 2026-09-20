@@ -43,7 +43,7 @@ for (const provider of ["structured", "jev"] as const) {
 		let duration = "15min";
 		let calls = 0;
 		if (provider === "jev") {
-			ctx.getRouterModel = () => "typesafe-ai/jev";
+			ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 			vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 			vi.stubGlobal(
 				"fetch",
@@ -139,7 +139,7 @@ for (const scenario of [
 			const runtime = createExtensionRuntime({ registry: createRegistry().register(definition) });
 			const ctx = workflowRouterContext("actual-name");
 			if (provider === "jev") {
-				ctx.getRouterModel = () => "typesafe-ai/jev";
+				ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 				vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 				vi.stubGlobal(
 					"fetch",
@@ -208,7 +208,7 @@ for (const provider of ["structured", "jev"] as const) {
 		const ctx = workflowRouterContext("none");
 		let received: object | undefined;
 		if (provider === "jev") {
-			ctx.getRouterModel = () => "typesafe-ai/jev";
+			ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 			vi.stubEnv("TYPESAFE_API_KEY", "fixture-key");
 			vi.stubGlobal(
 				"fetch",

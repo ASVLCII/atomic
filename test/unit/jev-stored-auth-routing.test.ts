@@ -113,10 +113,10 @@ for (const environmentKey of ["", "mock-env-jev-key"]) {
 		vi.stubGlobal("fetch", transport);
 		const request = { ...decisionRequest(), settings: SettingsManager.inMemory(), modelRegistry: registry };
 		assert.equal(resolveRouterModel(request).kind, "jev");
-		assert.equal((await inferRouterDecision(request)).model, "typesafe-ai/jev");
+		assert.equal((await inferRouterDecision(request)).model, "typesafe-ai/jev-latest");
 		assert.equal(
-			(await inferStructuredOutput({ ...request, model: { kind: "jev", fullId: "typesafe-ai/jev" } })).model,
-			"typesafe-ai/jev",
+			(await inferStructuredOutput({ ...request, model: { kind: "jev", fullId: "typesafe-ai/jev-latest" } })).model,
+			"typesafe-ai/jev-latest",
 		);
 		assert.equal(transport.mock.calls.length, 2);
 		assert.equal(
@@ -151,7 +151,7 @@ test("Jev logout removes stored routing preference and falls back to environment
 	const transport = vi.fn(async () => Response.json(jevResponse()));
 	vi.stubGlobal("fetch", transport);
 	await assert.rejects(
-		inferStructuredOutput({ ...request, model: { kind: "jev", fullId: "typesafe-ai/jev" } }),
+		inferStructuredOutput({ ...request, model: { kind: "jev", fullId: "typesafe-ai/jev-latest" } }),
 		/requires an API key/,
 	);
 	assert.equal(transport.mock.calls.length, 0);
@@ -175,7 +175,7 @@ test("saved Jev key interpolation uses ordinary auth resolution", async () => {
 	await inferStructuredOutput({
 		...decisionRequest(),
 		modelRegistry: registry,
-		model: { kind: "jev", fullId: "typesafe-ai/jev" },
+		model: { kind: "jev", fullId: "typesafe-ai/jev-latest" },
 	});
 	assert.equal(transport.mock.calls.length, 1);
 });
@@ -194,7 +194,7 @@ test("Jev auth failures are redacted and cannot fall back to environment credent
 					throw new Error("private-key-material");
 				},
 			},
-			model: { kind: "jev", fullId: "typesafe-ai/jev" },
+			model: { kind: "jev", fullId: "typesafe-ai/jev-latest" },
 		}),
 		(error: Error) => {
 			assert.match(error.message, /Jev credential resolution failed/);
@@ -221,7 +221,7 @@ test("Jev credential resolution receives the bounded decision signal", async () 
 					return new Promise(() => {});
 				},
 			},
-			model: { kind: "jev", fullId: "typesafe-ai/jev" },
+			model: { kind: "jev", fullId: "typesafe-ai/jev-latest" },
 			timeoutMs: 20,
 		}),
 		/timed out/,

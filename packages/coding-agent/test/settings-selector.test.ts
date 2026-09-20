@@ -135,21 +135,34 @@ test("router settings offer Jev without a chat catalog and save exact values via
 	const done = vi.fn();
 	const submenu = openRouterSubmenu(config, changed, done);
 	expect(render(submenu)).toContain("Automatic");
-	expect(render(submenu)).toContain("typesafe-ai/jev");
+	expect(render(submenu)).toContain("typesafe-ai/jev-latest");
+	expect(render(submenu)).toContain("OpenRouter structured decisions");
 	submenu.handleInput?.("\x1b[B");
 	expect(changed).not.toHaveBeenCalled();
 	submenu.handleInput?.("\r");
-	expect(changed).toHaveBeenCalledExactlyOnceWith("typesafe-ai/jev");
-	expect(done).toHaveBeenCalledWith("typesafe-ai/jev");
-	expect(config.routerModel).toBe("typesafe-ai/jev");
+	expect(changed).toHaveBeenCalledExactlyOnceWith("typesafe-ai/jev-latest");
+	expect(done).toHaveBeenCalledWith("typesafe-ai/jev-latest");
+	expect(config.routerModel).toBe("typesafe-ai/jev-latest");
 	expect(config.availableDefaultModels).toEqual([]);
 
 	const reopened = openRouterSubmenu(config, changed);
-	expect(render(reopened)).toContain("→ ✓ typesafe-ai/jev");
+	expect(render(reopened)).toContain("→ ✓ typesafe-ai/jev-latest");
 	reopened.handleInput?.("\x1b[A");
 	reopened.handleInput?.("\r");
 	expect(changed).toHaveBeenLastCalledWith("");
 	expect(config.routerModel).toBe("");
+});
+
+test("router settings select the exact OpenRouter Jev ID through search without changing chat defaults", () => {
+	const config = settingsConfig({ routerModel: "", availableDefaultModels: [] });
+	const changed = vi.fn();
+	const submenu = openRouterSubmenu(config, changed);
+	for (const character of "openrouter/~typesafe/jev-latest") submenu.handleInput?.(character);
+	submenu.handleInput?.("\r");
+	expect(changed).toHaveBeenCalledExactlyOnceWith("openrouter/~typesafe/jev-latest");
+	expect(config.routerModel).toBe("openrouter/~typesafe/jev-latest");
+	expect(config.availableDefaultModels).toEqual([]);
+	expect(config.thinkingLevel).toBe("off");
 });
 
 test("router settings search exact provider/model IDs without changing chat defaults", () => {
@@ -197,8 +210,8 @@ test("router menu saves settings.json and Automatic clears only the router selec
 		menu.handleInput?.("\x1b[B");
 		menu.handleInput?.("\r");
 		await manager.flush();
-		expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...defaults, routerModel: "typesafe-ai/jev" });
-		expect(SettingsManager.create(directory, directory).getRouterModel()).toBe("typesafe-ai/jev");
+		expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...defaults, routerModel: "typesafe-ai/jev-latest" });
+		expect(SettingsManager.create(directory, directory).getRouterModel()).toBe("typesafe-ai/jev-latest");
 		const reopened = openRouterSubmenu(config, change);
 		reopened.handleInput?.("\x1b[A");
 		reopened.handleInput?.("\r");
@@ -211,11 +224,11 @@ test("router menu saves settings.json and Automatic clears only the router selec
 });
 
 test("router setter rejects malformed values without changing saved selection", () => {
-	const manager = SettingsManager.inMemory({ routerModel: "typesafe-ai/jev" });
-	for (const value of ["auto", " typesafe-ai/jev", "typesafe-ai/jev "]) {
+	const manager = SettingsManager.inMemory({ routerModel: "typesafe-ai/jev-latest" });
+	for (const value of ["auto", " typesafe-ai/jev-latest", "typesafe-ai/jev-latest "]) {
 		expect(() => manager.setRouterModel(value)).toThrow(/Invalid routerModel/);
 	}
-	expect(manager.getRouterModel()).toBe("typesafe-ai/jev");
+	expect(manager.getRouterModel()).toBe("typesafe-ai/jev-latest");
 });
 
 test("router menu edits the project override including Automatic without changing global defaults", async () => {
@@ -226,7 +239,7 @@ test("router menu edits the project override including Automatic without changin
 		const projectFile = join(directory, ".atomic", "settings.json");
 		const global = { routerModel: "global/model", theme: "dark" };
 		writeFileSync(globalFile, JSON.stringify(global));
-		writeFileSync(projectFile, JSON.stringify({ routerModel: "typesafe-ai/jev", quietStartup: true }));
+		writeFileSync(projectFile, JSON.stringify({ routerModel: "typesafe-ai/jev-latest", quietStartup: true }));
 		const manager = SettingsManager.create(directory, directory);
 		for (const next of ["", "test/nested/model"]) {
 			const scope = manager.getProjectSettings().routerModel !== undefined ? "project" : "global";

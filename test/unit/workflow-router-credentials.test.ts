@@ -126,7 +126,7 @@ test("known credential text in task documents still fails before inference", asy
 test("TypeSafe none preserves exact budget limits alongside credential-named contracts", async () => {
 	const f = fixture();
 	const budget = { maxTokens: 0, maxCost: 0.123456789, warnAtPercent: 12.345 };
-	f.ctx.getRouterModel = () => "typesafe-ai/jev";
+	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
 	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
 	const transport = vi.fn(jevNone);
 	vi.stubGlobal("fetch", transport);
@@ -218,7 +218,7 @@ for (const action of ["route"] as const) {
 					const text = `Context ${key} end`;
 					const f = registeredFixture({ field: location, text });
 					f.args.action = action;
-					f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev" : "decision-test/chat");
+					f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev-latest" : "decision-test/chat");
 					const state = f.args.state!;
 					switch (location) {
 						case "literal request":
@@ -273,7 +273,7 @@ for (const action of ["route"] as const) {
 				vi.stubEnv("TYPESAFE_API_KEY", key);
 				const f = registeredFixture();
 				f.args.action = action;
-				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev" : "decision-test/chat");
+				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev-latest" : "decision-test/chat");
 				const result = await f.call();
 				assert.ok("status" in result.details);
 				assert.equal(result.details.status, "not_launched");
@@ -367,7 +367,7 @@ for (const provider of ["ordinary", "jev"] as const) {
 				const registry = new ModelRegistry(runtime);
 				const f = registeredFixture();
 				f.ctx.modelRegistry!.containsConfiguredCredential = registry.containsConfiguredCredential.bind(registry);
-				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev" : "decision-test/chat");
+				f.ctx.getRouterModel = () => (provider === "jev" ? "typesafe-ai/jev-latest" : "decision-test/chat");
 				f.args.state!.conversation![0]!.text = `Context ${key} end`;
 				const result = await f.call();
 				assert.equal(f.infer.mock.calls.length, 0);
