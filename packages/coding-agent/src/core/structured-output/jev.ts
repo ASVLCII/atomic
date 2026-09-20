@@ -158,7 +158,7 @@ const KEEP = 3;
 
 function contextLimit(): JevRequestError {
 	return new JevRequestError(
-		"Jev's conservative input budget is still exceeded for this comparison. Reduce the supplied context or choose another router model.",
+		"Jev's conservative input budget is still exceeded for this comparison. Reduce the supplied context or choose another model.",
 	);
 }
 
