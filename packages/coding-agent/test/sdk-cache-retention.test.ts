@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@bastani/pi-ai/compat";
 import { afterEach, it, vi } from "vitest";
-import { AuthStorage } from "../src/core/auth-storage.ts";
-import { ModelRuntime } from "../src/core/model-runtime.ts";
-import { createAgentSession } from "../src/core/sdk.ts";
-import { SessionManager } from "../src/core/session-manager.ts";
-import { SettingsManager } from "../src/core/settings-manager.ts";
-import { createTestResourceLoader } from "./utilities.ts";
+import { AuthStorage } from "../src/core/auth-storage.js";
+import { ModelRuntime } from "../src/core/model-runtime.js";
+import { createAgentSession } from "../src/core/sdk.js";
+import { SessionManager } from "../src/core/session-manager.js";
+import { SettingsManager } from "../src/core/settings-manager.js";
+import { createTestResourceLoader } from "./utilities.js";
 
 interface CachePayload {
 	system: Array<{ cache_control?: { type: "ephemeral"; ttl?: "1h" } }>;
