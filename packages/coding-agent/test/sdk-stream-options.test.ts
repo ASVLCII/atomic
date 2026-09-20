@@ -31,6 +31,7 @@ describe("createAgentSession stream options", () => {
 	});
 	afterEach(() => {
 		vi.restoreAllMocks();
+		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 	});
@@ -135,6 +136,58 @@ describe("createAgentSession stream options", () => {
 			modelRegistry.unregisterProvider(model.provider);
 		}
 	}
+
+	it("defaults session prompt-cache retention to long", async () => {
+		vi.stubEnv("PI_CACHE_RETENTION", undefined);
+		const options = await captureStreamOptions("anthropic-messages", {});
+		expect(options?.cacheRetention).toBe("long");
+	});
+
+	it.each(["short", "none", "long"] as const)("honors PI_CACHE_RETENTION=%s", async (retention) => {
+		vi.stubEnv("PI_CACHE_RETENTION", retention);
+		const options = await captureStreamOptions("anthropic-messages", {});
+		expect(options?.cacheRetention).toBe(retention);
+	});
+
+	it.each(["short", "none", "long"] as const)("preserves explicit %s over environment", async (retention) => {
+		vi.stubEnv("PI_CACHE_RETENTION", "short");
+		const requestOptions = { cacheRetention: retention, env: { PI_CACHE_RETENTION: "none" } };
+		const options = await captureStreamOptions("anthropic-messages", {}, requestOptions);
+		expect(options?.cacheRetention).toBe(retention);
+		expect(requestOptions).toEqual({ cacheRetention: retention, env: { PI_CACHE_RETENTION: "none" } });
+	});
+
+	it("resolves request env over auth env over process env", async () => {
+		vi.stubEnv("PI_CACHE_RETENTION", "long");
+		const auth: AuthResult = { auth: { apiKey: "test-key" }, env: { PI_CACHE_RETENTION: "none" } };
+		const authOptions = await captureStreamOptions("anthropic-messages", {}, {}, undefined, auth);
+		expect(authOptions?.cacheRetention).toBe("none");
+		const options = await captureStreamOptions(
+			"anthropic-messages",
+			{},
+			{ env: { PI_CACHE_RETENTION: "short" } },
+			undefined,
+			auth,
+		);
+		expect(options?.cacheRetention).toBe("short");
+		expect(auth.env).toEqual({ PI_CACHE_RETENTION: "none" });
+	});
+
+	it.each([
+		["", "long"],
+		["unexpected", "short"],
+		[" LONG ", "short"],
+	])("preserves provider env fallback for %j", async (value, retention) => {
+		vi.stubEnv("PI_CACHE_RETENTION", value);
+		const options = await captureStreamOptions("anthropic-messages", {});
+		expect(options?.cacheRetention).toBe(retention);
+	});
+
+	it("empty scoped env falls back to the process choice", async () => {
+		vi.stubEnv("PI_CACHE_RETENTION", "short");
+		const options = await captureStreamOptions("anthropic-messages", {}, { env: { PI_CACHE_RETENTION: "" } });
+		expect(options?.cacheRetention).toBe("short");
+	});
 
 	it("forwards httpIdleTimeoutMs as timeoutMs for OpenAI Codex", async () => {
 		const options = await captureStreamOptions("openai-codex-responses", { httpIdleTimeoutMs: 1234 });

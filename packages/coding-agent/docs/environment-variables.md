@@ -15,11 +15,25 @@ Atomic accepts environment variables for configuration, provider credentials, an
 | `ATOMIC_REDUCED_MOTION` | `PI_REDUCED_MOTION` | Use static reduced-motion presentation |
 | `ATOMIC_EXPERIMENTAL` | `PI_EXPERIMENTAL` | Set to `1` to enable experimental features and preferred strict JSON-schema constrained sampling for additional built-in tools; `read`, `edit`, `write`, `bash`, and PowerShell already prefer strict sampling by default. The footer shows an `xp` badge |
 
-`PI_CACHE_RETENTION=long` is a provider/upstream prompt-cache option and intentionally has no Atomic-prefixed alias. `VISUAL` and `EDITOR` select the Ctrl+G external editor when `externalEditor` is unset.
+`VISUAL` and `EDITOR` select the Ctrl+G external editor when `externalEditor` is unset.
 
 `PI_TUI_ESC_TIMEOUT` sets how many milliseconds the renderer waits after a lone `ESC` before treating it as Escape. It belongs to the installed pi-tui renderer and keeps its upstream name. The default is `100` over SSH and `10` otherwise. Increase it if Alt-key input is misread as Escape.
 
 The renderer also owns `PI_HYPERLINKS`, `PI_IMAGE_PROTOCOL`, and `PI_TRUE_COLOR`. `PI_HYPERLINKS=1|0|auto` and `PI_TRUE_COLOR=1|0|auto` override or preserve detection; `PI_IMAGE_PROTOCOL=kitty|iterm2|none|auto` selects, disables, or preserves image-protocol detection. Explicit JSON values under `terminal.hyperlinks`, `terminal.images`, and `terminal.trueColor` take precedence. These renderer-owned names intentionally have no `ATOMIC_*` aliases.
+
+## Prompt-cache retention
+
+Atomic defaults to **long** prompt-cache retention in main chat, workflow stages, and subagents wherever the provider/model supports it. `PI_CACHE_RETENTION` intentionally has no `ATOMIC_*` alias. Set it before launching Atomic to choose `short`, `none`, or `long`:
+
+```bash
+PI_CACHE_RETENTION=short atomic
+```
+
+Use `short` to opt back into shorter caching (five minutes on Anthropic), `none` to disable Atomic's optional cache controls where supported, or `long` to explicitly request extended retention (one hour on Anthropic). Providers can still perform automatic caching; supported durations and cache eligibility vary by provider/model.
+
+For SDK session requests, explicit `cacheRetention` takes precedence over `PI_CACHE_RETENTION`. Request-scoped `env` overrides credential-scoped environment, then the process environment is used. Requests that explicitly disable caching, such as compaction summaries, remain uncached by Atomic.
+
+[Anthropic's prompt-caching pricing](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing) charges **2× base input price for one-hour writes**, versus **1.25× for five-minute writes**. Long retention can avoid rewrites when reusable prefixes are revisited after five minutes, but savings are not guaranteed. Short retention can be preferable when requests consistently reuse the cache within five minutes (hits refresh its lifetime without another write charge), or when prompts are unlikely to be reused. Compare your cache reads, writes, and billed usage before choosing.
 
 ## Subprocess attribution
 
