@@ -52,7 +52,7 @@ import type { PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, SessionManager } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
-import type { BuildSystemPromptOptions } from "./system-prompt.ts";
+import type { NormalizedBuildSystemPromptOptions } from "./system-prompt.ts";
 import type { BashOperations } from "./tools/bash.js";
 
 export interface VerbatimCompactionApplyOptions {
@@ -138,6 +138,7 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	_handleAgentEvent(event: AgentEvent): Promise<void> | void;
 	_getRequiredRequestAuth(
 		model: Model<Api>,
+		signal?: AbortSignal,
 	): Promise<{ apiKey?: string; headers?: ProviderHeaders; baseUrl?: string }>;
 	_installAgentToolHooks(): void;
 	_installAgentNextTurnRefresh(): void;
@@ -169,7 +170,12 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	setScopedModels(scopedModels: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>): void;
 	_normalizePromptSnippet(text: string | undefined): string | undefined;
 	_normalizePromptGuidelines(guidelines: string[] | undefined): string[];
-	_rebuildSystemPrompt(toolNames: string[]): string;
+	_rebuildSystemPrompt(toolNames: string[]): void;
+	_preparePromptAndToolLoadout(
+		options: NormalizedBuildSystemPromptOptions,
+		messages?: AgentMessage[],
+	): import("@bastani/pi-ai").SystemMessage | undefined;
+	_restoreToolsFromTranscript(): void;
 	_refreshBaseSystemPromptFromActiveTools(): void;
 
 	prompt(text: string, options?: PromptOptions): Promise<void>;
@@ -456,6 +462,8 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_pendingInterruptDeliveries: number;
 	_priorityInterruptPending: boolean;
 	_activePromptCount: number;
+	_agentRunAbortRequested: boolean;
+	_cacheWarmer?: import("./cache-warmer.ts").CacheWarmer;
 	_activeInterruptQueueHold: InterruptQueueHold | undefined;
 	_queuedMessagesPaused: boolean;
 	_queuedMessagesPauseAbortBoundary: Promise<void> | undefined;
@@ -522,10 +530,9 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_toolDefinitions: Map<string, ToolDefinitionEntry>;
 	_toolPromptSnippets: Map<string, string>;
 	_toolPromptGuidelines: Map<string, string[]>;
-	_baseSystemPrompt: string;
-	_baseSystemPromptOptions: BuildSystemPromptOptions;
+	_baseSystemPromptOptions: NormalizedBuildSystemPromptOptions;
 	_systemPromptTransform?: (prompt: string) => string;
-	_systemPromptOverride?: string;
+	_runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
 	_lastAssistantMessage: AssistantMessage | undefined;
 	_tempStorageLease: import("./tools/session-temp-dir.ts").ProtectedPathLease | undefined;
 	_workflowStageAdmission: import("./workflow-stage-admission.ts").WorkflowStageAdmissionBoundary | undefined;

@@ -1,6 +1,7 @@
 // Single-inference transport regression coverage for #3089 / #3090.
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
+import { normalizeContext } from "@bastani/pi-ai";
 import type { HttpRequest } from "@smithy/types";
 import { afterEach, test, vi } from "vitest";
 import { inferRouterDecision } from "../../packages/coding-agent/src/core/structured-output/index.js";
@@ -59,7 +60,7 @@ function bedrockFailure() {
 test("Bedrock router inference performs only one SDK transport attempt on a retryable failure", async () => {
 	bedrockFailure();
 	vi.stubEnv("AWS_MAX_ATTEMPTS", "3");
-	const model = { ...decisionModel, api: "bedrock-converse-stream" as const };
+	const model = { ...decisionModel, api: "bedrock-converse-stream" as const, compat: undefined };
 	await assert.rejects(
 		inferRouterDecision({
 			...decisionRequest(),
@@ -67,7 +68,7 @@ test("Bedrock router inference performs only one SDK transport attempt on a retr
 			modelRegistry: {
 				getAll: () => [model],
 				streamSimple: (_model, context, options) =>
-					bedrockStream(model, context, { ...options, apiKey: "mock-key" }),
+					bedrockStream(model, normalizeContext(context), { ...options, apiKey: "mock-key" }),
 			},
 		}),
 		/inference ended with error/,
@@ -83,13 +84,13 @@ for (const maxRetries of [undefined, 1]) {
 	test(`Bedrock preserves ${maxRetries === undefined ? "omitted SDK retry configuration" : "explicit retry budget"}`, async () => {
 		bedrockFailure();
 		vi.stubEnv("AWS_MAX_ATTEMPTS", "3");
-		const model = { ...decisionModel, api: "bedrock-converse-stream" as const };
+		const model = { ...decisionModel, api: "bedrock-converse-stream" as const, compat: undefined };
 		const result = await bedrockStream(
 			model,
-			{
+			normalizeContext({
 				messages: [{ role: "user", content: "Decide", timestamp: 0 }],
 				tools: [{ name: "structured_output", description: "Decide", parameters: decisionRequest().schema }],
-			},
+			}),
 			{ apiKey: "mock-key", toolChoice: "auto", ...(maxRetries !== undefined ? { maxRetries } : {}) },
 		).result();
 		assert.equal(result.stopReason, "error");
@@ -115,8 +116,11 @@ for (const api of ["google-generative-ai", "google-vertex"] as const) {
 						getAll: () => [model],
 						streamSimple: (_model, context, options) =>
 							api === "google-generative-ai"
-								? googleStream({ ...model, api }, context, { ...options, apiKey: "mock-key" })
-								: vertexStream({ ...model, api }, context, { ...options, apiKey: "mock-key" }),
+								? googleStream({ ...model, api }, normalizeContext(context), { ...options, apiKey: "mock-key" })
+								: vertexStream({ ...model, api }, normalizeContext(context), {
+										...options,
+										apiKey: "mock-key",
+									}),
 					},
 				}),
 				/inference ended with error/,
@@ -137,7 +141,7 @@ for (const api of ["google-generative-ai", "google-vertex"] as const) {
 				),
 			);
 			vi.stubGlobal("fetch", transport);
-			const context = { messages: [{ role: "user" as const, content: "Decide", timestamp: 0 }] };
+			const context = normalizeContext({ messages: [{ role: "user", content: "Decide", timestamp: 0 }] });
 			const options = { apiKey: "mock-key", ...(maxRetries !== undefined ? { maxRetries } : {}) };
 			const pending = (
 				api === "google-generative-ai"

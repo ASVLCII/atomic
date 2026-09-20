@@ -1,4 +1,4 @@
-import { Box, Spacer, Text } from "@earendil-works/pi-tui";
+import { Box, Container, MouseRegion, Spacer, Text } from "@earendil-works/pi-tui";
 import type {
 	VerbatimCompactionDetails,
 	VerbatimCompactionResult,
@@ -47,29 +47,43 @@ export class CompactionBoundaryMessageComponent extends Box {
 
 	private updateDisplay(): void {
 		this.clear();
+		const content = new Container();
 		const tokenStr = (this.view.tokensBefore ?? this.view.stats.tokensBefore).toLocaleString();
 		// The fresh rung destroyed the compactable conversation; say so plainly.
 		const label = theme.fg(
 			"customMessageLabel",
 			theme.bold(this.view.rung === "fresh" ? "✻ Context cleared (compaction degraded)" : "✻ Context compacted"),
 		);
-		this.addChild(new Text(label, 0, 0));
-		this.addChild(new Spacer(1));
+		content.addChild(new Text(label, 0, 0));
+		content.addChild(new Spacer(1));
 		if (this.expanded) {
-			this.addChild(new Text(theme.bold(theme.fg("customMessageText", `Compacted from ${tokenStr} tokens`)), 0, 0));
-			this.addChild(new Spacer(1));
+			content.addChild(
+				new Text(theme.bold(theme.fg("customMessageText", `Compacted from ${tokenStr} tokens`)), 0, 0),
+			);
+			content.addChild(new Spacer(1));
 			const rendered = this.view.text
 				.split("\n")
 				.map((line) =>
 					/^\(filtered \d+ lines\)$/.test(line) ? theme.fg("dim", line) : theme.fg("customMessageText", line),
 				)
 				.join("\n");
-			this.addChild(new Text(rendered, 0, 0));
-			return;
+			content.addChild(new Text(rendered, 0, 0));
+		} else {
+			const hint = parenthesizedKeyHint("app.tools.expand", "to expand");
+			content.addChild(
+				new Text(
+					theme.fg("customMessageText", `Compacted from ${tokenStr} tokens`) + (hint ? ` ${hint}` : ""),
+					0,
+					0,
+				),
+			);
 		}
-		const hint = parenthesizedKeyHint("app.tools.expand", "to expand");
 		this.addChild(
-			new Text(theme.fg("customMessageText", `Compacted from ${tokenStr} tokens`) + (hint ? ` ${hint}` : ""), 0, 0),
+			new MouseRegion(content, (event) => {
+				if (event.type !== "click" || event.button !== "left") return undefined;
+				this.setExpanded(!this.expanded);
+				return { handled: true };
+			}),
 		);
 	}
 }

@@ -1,5 +1,6 @@
 // Regression for #3090: full model/effort catalogs must retain strict pair validation.
 import assert from "node:assert/strict";
+import type { JsonObject } from "@bastani/pi-ai";
 import { Type } from "typebox";
 import { test, vi } from "vitest";
 import { inferRouterDecision } from "../../packages/coding-agent/src/core/structured-output/index.js";
@@ -22,7 +23,7 @@ const schema = Type.Unsafe<{ model: string; effort: string }>({
 	),
 });
 
-function requestFor(value: Record<string, unknown>) {
+function requestFor(value: JsonObject) {
 	const request = decisionRequest();
 	const dispatch = vi.fn(() => messageStream(decisionMessage(value)));
 	return {

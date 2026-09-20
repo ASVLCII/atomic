@@ -1,3 +1,4 @@
+import { snapshotEventHandlers } from "./runner-events.ts";
 import type {
 	ExtensionError,
 	LoadExtensionsResult,
@@ -12,10 +13,7 @@ export async function emitProjectTrustEvent(
 	ctx: ProjectTrustContext,
 ): Promise<{ result?: ProjectTrustEventResult; errors: ExtensionError[] }> {
 	const errors: ExtensionError[] = [];
-	for (const ext of extensionsResult.extensions) {
-		const handlers = ext.handlers.get("project_trust");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensionsResult.extensions, "project_trust")) {
 		for (const handler of handlers) {
 			try {
 				const handlerResult = (await handler(event, ctx)) as ProjectTrustEventResult;

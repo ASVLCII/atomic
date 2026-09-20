@@ -79,6 +79,9 @@ user sends another prompt ◄─────────────────
 thinking level changes (settings, keybinding, pi.setThinkingLevel())
   └─► thinking_level_select
 
+prompt cache warming (when enabled)
+  └─► cache_warming_decision (can return `{ action: "warm" | "stop" }`)
+
 exit (CTRL+C, CTRL+D, SIGHUP, SIGTERM)
   └─► session_shutdown
 ```
@@ -268,9 +271,12 @@ pi.on("before_agent_start", async (event, ctx) => {
   // event.systemPrompt - current chained system prompt for this handler
   //   (includes changes from earlier before_agent_start handlers)
   // event.systemPromptOptions - structured options used to build the system prompt
-  //   .customPrompt - any custom system prompt (from --system-prompt, SYSTEM.md, or custom templates)
+  //   .customPrompt - prompt prefix from --system-prompt, SYSTEM.md, or custom templates
+  //   .forceSystemPrompt - optional exact replacement for the complete prompt
   //   .selectedTools - tools currently active in the prompt
   //   .toolSnippets - one-line descriptions for each tool
+  //   .toolGuidelines - guideline bullets keyed by tool name
+  //   .sections - custom XML-wrapped sections keyed by tag name
   //   .promptGuidelines - custom guideline bullets
   //   .appendSystemPrompt - text from --append-system-prompt flags
   //   .cwd - working directory
@@ -290,7 +296,9 @@ pi.on("before_agent_start", async (event, ctx) => {
 });
 ```
 
-The `systemPromptOptions` field exposes the structured data Atomic uses to build the system prompt. Inspect loaded custom prompts, guidelines, tool snippets, context files, and skills without rediscovering resources or parsing flags. Use this data to change the prompt while respecting user-provided configuration.
+The `systemPromptOptions` collections are mutable. Prefer editing `sections`, `selectedTools`, or `promptGuidelines`: Atomic records only changed prompt sections and tool declarations as chronological system messages. Editing `selectedTools`, or calling `pi.setActiveTools()` inside the handler, changes the same request's executable tools as well as their prompt contributions.
+
+Returning `systemPrompt`, or setting `forceSystemPrompt`, replaces the complete provider prompt for the run without recording the forced text. The transcript still records structured sections. Models supporting mid-conversation system messages receive patches in place; other models receive the replayed leading prompt. A forced replacement or unsupported tool transition can invalidate the cached prefix.
 
 Inside `before_agent_start`, `event.systemPrompt` and `ctx.getSystemPrompt()` both reflect the chained system prompt as of the current handler. Later `before_agent_start` handlers can still modify it again.
 

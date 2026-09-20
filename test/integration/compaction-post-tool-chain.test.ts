@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
 import type { Api, AssistantMessage, Model } from "@bastani/pi-ai/compat";
-import { getModel } from "@bastani/pi-ai/compat";
+import { getCurrentSystemPrompt, getModel } from "@bastani/pi-ai/compat";
 import { Agent, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { test } from "vitest";
@@ -80,9 +80,14 @@ function laneStream(traffic: Traffic): StreamFn {
 		},
 		"completed after compaction",
 	]);
-	return ((model: Model<Api>, context: { systemPrompt?: string }, options?: unknown) => {
+	return ((
+		model: Model<Api>,
+		context: { systemPrompt?: string; messages?: Array<{ role: string }> },
+		options?: unknown,
+	) => {
 		const label = `${model.provider}/${model.id}`;
-		if (context.systemPrompt === RANGE_PLANNER_SYSTEM_PROMPT) {
+		const systemPrompt = context.systemPrompt ?? (context.messages ? getCurrentSystemPrompt(context.messages) : "");
+		if (systemPrompt === RANGE_PLANNER_SYSTEM_PROMPT) {
 			traffic.planner.push(label);
 			return { result: async () => message(model, { stopReason: "error", errorMessage: "429 Too Many Requests" }) };
 		}
@@ -129,7 +134,7 @@ test("post-tool preflight: every model fails, the turn still completes on the fr
 		settingsManager,
 		cwd: process.cwd(),
 		modelRuntime,
-		resourceLoader: createTestResourceLoader(),
+		resourceLoader: createTestResourceLoader({ systemPrompt: "test" }),
 		fallbackModels: ["openai/gpt-5.1", "google/gemini-2.5-pro"],
 		baseToolsOverride: { large_result: largeResultTool },
 	});

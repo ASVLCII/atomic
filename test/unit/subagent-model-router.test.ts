@@ -5,7 +5,13 @@ import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@bastani/atomic";
-import { type Api, createAssistantMessageEventStream, type Model } from "@bastani/pi-ai";
+import {
+	type Api,
+	createAssistantMessageEventStream,
+	getCurrentTools,
+	type JsonObject,
+	type Model,
+} from "@bastani/pi-ai";
 import { Value } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { routeExecutionModel } from "../../packages/coding-agent/src/core/execution-model-router.js";
@@ -68,7 +74,7 @@ test("auto routing receives the shipped model-selection guide verbatim", async (
 	assert.ok(Object.isFrozen(selected.routerSelection));
 	assert.equal(f.infer.mock.calls.length, 1);
 	const [, context, options] = f.infer.mock.calls[0]!;
-	const state = JSON.parse(context.messages[0]!.content as string).state;
+	const state = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string).state;
 	assert.equal(state.task, "Fix the approved defect");
 	assert.deepEqual(state.agent, { name: agent.name, description: agent.description });
 	assert.equal(state.policy, undefined);
@@ -85,7 +91,9 @@ test("auto routing receives the shipped model-selection guide verbatim", async (
 test("self-contained agents retain their task fallback without duplicate instructions metadata", async () => {
 	const f = await fixture();
 	await routeSubagentModel({ ctx: f.ctx, agent });
-	const state = JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state;
+	const state = JSON.parse(
+		f.infer.mock.calls[0]![1].messages.find((message) => message.role === "user")!.content as string,
+	).state;
 	assert.equal(state.task, agent.systemPrompt);
 	assert.deepEqual(state.agent, { name: agent.name, description: agent.description });
 });
@@ -128,11 +136,12 @@ test("call allowlist cannot widen an agent restriction", async () => {
 	);
 	assert.equal(f.infer.mock.calls.length, 0);
 });
-for (const answer of [
+const invalidPairs: JsonObject[] = [
 	{ model: "auto", effort: null },
 	{ model: "decision-test/chat", effort: "off" },
 	{ model: "decision-test/chat", effort: null, extra: true },
-]) {
+];
+for (const answer of invalidPairs) {
 	test(`invalid pair rejected: ${JSON.stringify(answer)}`, async () => {
 		const f = await fixture();
 		f.infer.mockImplementation(() => messageStream(decisionMessage(answer)));
@@ -154,7 +163,7 @@ test("explicit legacy effort constrains automatic selection and intersects hard 
 	const f = await fixture();
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([decisionModel, reasoningModel]);
 	f.infer.mockImplementation((_model, context) => {
-		const payload = JSON.parse(context.messages[0]!.content as string);
+		const payload = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		assert.deepEqual(
 			Object.values(payload.questions.pair.criteria).map((entry) => JSON.parse(entry as string).effort),
 			["high"],
@@ -248,7 +257,9 @@ test("full provider catalog preserves supported off, independent task decisions 
 	const f = await fixture();
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([decisionModel, reasoningModel]);
 	f.infer.mockImplementation((_model, context) => {
-		const { state, questions } = JSON.parse(context.messages[0]!.content as string);
+		const { state, questions } = JSON.parse(
+			context.messages.find((message) => message.role === "user")!.content as string,
+		);
 		const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
 		if (candidates.length === 1) return messageStream(decisionMessage({ model: "decision-test/chat", effort: null }));
 		assert.deepEqual(
@@ -481,10 +492,17 @@ test("Jev covers 1997 pairs without filtering; ordinary router retains full cata
 	assert.equal((await f.route()).routerSelection.model, "decision-test/m255");
 	assert.equal(f.infer.mock.calls.length, 3);
 	const context = f.infer.mock.calls[0]![1];
-	assert.equal(Object.keys(JSON.parse(context.messages[0]!.content as string).questions.pair.criteria).length, 1997);
-	assert.ok(context.tools?.[0]);
+	assert.equal(
+		Object.keys(
+			JSON.parse(context.messages.find((message) => message.role === "user")!.content as string).questions.pair
+				.criteria,
+		).length,
+		1997,
+	);
+	const tools = getCurrentTools(context.messages);
+	assert.ok(tools[0]);
 	for (let index = 0; index < 1997; index++)
-		assert.equal(Value.Check(context.tools[0].parameters, { model: `decision-test/m${index}`, effort: null }), true);
+		assert.equal(Value.Check(tools[0].parameters, { model: `decision-test/m${index}`, effort: null }), true);
 });
 
 test("configured credential text is rejected before inference", async () => {
@@ -603,7 +621,11 @@ test("oversized protected tasks still fall back intact or fail when Jev is pinne
 	await f.route(task);
 	assert.equal(transport.mock.calls.length, 0);
 	assert.equal(f.infer.mock.calls.length, 1);
-	assert.equal(JSON.parse(f.infer.mock.calls[0]![1].messages[0]!.content as string).state.task, task);
+	assert.equal(
+		JSON.parse(f.infer.mock.calls[0]![1].messages.find((message) => message.role === "user")!.content as string).state
+			.task,
+		task,
+	);
 });
 
 test("auto ranks three distinct models, excludes their other efforts, and replays without inference", async () => {
@@ -617,7 +639,7 @@ test("auto ranks three distinct models, excludes their other efforts, and replay
 	];
 	let index = 0;
 	f.infer.mockImplementation((_model, context) => {
-		const { questions } = JSON.parse(context.messages[0]!.content as string);
+		const { questions } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		const candidates = Object.values(questions.pair.criteria).map((entry) => JSON.parse(entry as string));
 		for (const prior of ranked.slice(0, index)) assert.ok(candidates.every((pair) => pair.model !== prior.model));
 		return messageStream(decisionMessage(ranked[index++]));
@@ -654,7 +676,7 @@ test("auto routing retains model guidance without claiming provider-specific mea
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(models);
 	let rank = 0;
 	f.infer.mockImplementation((_model, context) => {
-		const { state } = JSON.parse(context.messages[0]!.content as string);
+		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		assert.match(state.model_selection_guide, /claude-fable-5/);
 		assert.match(
 			state.model_selection_guide,

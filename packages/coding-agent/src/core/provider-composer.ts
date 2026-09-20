@@ -1,7 +1,6 @@
 import {
 	type Api,
 	type AssistantMessageEventStream,
-	type Context,
 	type Credential,
 	lazyStream,
 	type Model,
@@ -10,6 +9,7 @@ import {
 	type ProviderHeaders,
 	type SimpleStreamOptions,
 	type StreamOptions,
+	type TranscriptContext,
 } from "@bastani/pi-ai";
 import { getApiProvider } from "@bastani/pi-ai/compat";
 import type { ModelConfig, ModelsJsonProvider } from "./model-config.ts";
@@ -83,7 +83,7 @@ export function composeModelProvider(
 	const supportsBaseApi = (model: Model<Api>) => base?.getModels().some((entry) => entry.api === model.api) ?? false;
 	const streamWith = (
 		model: Model<Api>,
-		context: Context,
+		context: TranscriptContext,
 		options: StreamOptions | undefined,
 		simple: boolean,
 	): AssistantMessageEventStream =>

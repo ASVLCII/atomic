@@ -136,7 +136,6 @@ export async function _preflightPostToolContext(
 		if (this._compactionReason === "threshold") this._compactionReason = undefined;
 	}
 }
-
 /** Gate the transformed message context immediately before provider conversion. */
 export function _finishPostToolCompactionPreflight(this: AgentSession, messages: AgentMessage[]): AgentMessage[] {
 	const pending = this._pendingPostToolCompactionGuard;
@@ -144,7 +143,25 @@ export function _finishPostToolCompactionPreflight(this: AgentSession, messages:
 	this._pendingPostToolCompactionGuard = undefined;
 
 	const providerBoundMessages = scrubPreCompactionAssistantUsage(messages, this.sessionManager.getBranch());
-	const projectedTokens = estimateContextTokens(providerBoundMessages).tokens;
+	// Mid-turn 0.86 system patches are appended after compaction and before this
+	// gate. Pre-compaction assistant usage would otherwise keep the old prompt
+	// size and reject a compacted follow-up that actually fits.
+	const projectedTokens = estimateContextTokens(
+		providerBoundMessages.map((message) => {
+			if (message.role !== "assistant" || !("usage" in message) || !message.usage) return message;
+			return {
+				...message,
+				usage: {
+					...message.usage,
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+				},
+			};
+		}),
+	).tokens;
 	if (projectedTokens > pending.hardInputLimit) {
 		const errorMessage = hardLimitMessage(projectedTokens, pending.hardInputLimit);
 		this._postToolCompactionPreflightError = errorMessage;

@@ -77,10 +77,7 @@ export function resolveProviderAuth(
 	return raceWithAbortSignal(operation, signal)
 		.catch((error: unknown) => {
 			if (timeout.signal.aborted && !caller.aborted) {
-				throw new ModelsError(
-					"auth",
-					requestAuthTimeoutMessage(provider.id),
-				);
+				throw new ModelsError("auth", requestAuthTimeoutMessage(provider.id));
 			}
 			throw error;
 		})

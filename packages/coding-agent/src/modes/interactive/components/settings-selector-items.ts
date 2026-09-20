@@ -132,6 +132,13 @@ function insertUiToggles(items: SettingItem[], config: SettingsConfig): void {
 		currentValue: config.showCacheMissNotices ? "true" : "false",
 		values: ["true", "false"],
 	});
+	insertAfter(items, "cache-miss-notices", {
+		id: "cache-warming",
+		label: "Cache warming",
+		description: "Refresh prompt caches before they expire. Each refresh costs money.",
+		currentValue: config.cacheWarming,
+		values: ["off", "streaming", "idle"],
+	});
 }
 
 export function buildSettingsItems(config: SettingsConfig, callbacks: SettingsCallbacks): SettingItem[] {

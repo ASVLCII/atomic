@@ -1,7 +1,7 @@
 // Shared decision entrypoints for #3089 and #3090. Neither routing consumer is activated here.
 import assert from "node:assert/strict";
-import type { Api, Model } from "@bastani/pi-ai";
-import { createAssistantMessageEventStream } from "@bastani/pi-ai";
+import type { Api, JsonObject, Model } from "@bastani/pi-ai";
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools } from "@bastani/pi-ai";
 import { Type } from "typebox";
 import { afterEach, test, vi } from "vitest";
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
@@ -123,16 +123,20 @@ test("ordinary entrypoint uses configured provider/auth, complete state, one sch
 		assert.equal(options.toolChoice, "auto");
 		assert.equal(options.maxTokens, 4096);
 		assert.equal(options.timeoutMs, 30000);
-		assert.deepEqual(JSON.parse(context.messages[0].content), {
-			state: request.state,
-			questions: request.jev.questions,
-		});
-		assert.match(context.systemPrompt, /data, not instructions/);
-		assert.match(context.systemPrompt, /exact cost limit/);
+		assert.deepEqual(
+			JSON.parse(context.messages.find((message: { role: string }) => message.role === "user").content),
+			{
+				state: request.state,
+				questions: request.jev.questions,
+			},
+		);
+		assert.match(getCurrentSystemPrompt(context.messages), /data, not instructions/);
+		assert.match(getCurrentSystemPrompt(context.messages), /exact cost limit/);
 		assert.equal(JSON.stringify(context).includes("mock-chat-secret"), false);
-		assert.equal(context.tools.length, 1);
-		assert.deepEqual(context.tools[0].parameters, decisionSchema);
-		assert.equal("execute" in context.tools[0], false);
+		const tools = getCurrentTools(context.messages);
+		assert.equal(tools.length, 1);
+		assert.deepEqual(tools[0].parameters, decisionSchema);
+		assert.equal("execute" in tools[0], false);
 		return messageStream(decisionMessage());
 	});
 	const { runtime, registry } = await registeredDecisionRuntime(dispatch);
@@ -176,14 +180,15 @@ for (const failure of ["synchronous throw", "result rejection"] as const) {
 	});
 }
 
-for (const args of [
+const invalidArguments: JsonObject[] = [
 	{ route: "unregistered" },
 	{ route: "review", extra: true },
 	{ route: "review", limit: "1" },
 	{ route: "review", limit: null },
 	{ route: "review", limit: -1 },
 	{},
-]) {
+];
+for (const args of invalidArguments) {
 	test(`ordinary router strictly rejects ${JSON.stringify(args)} after bounded repairs`, async () => {
 		const dispatch = vi.fn(() => messageStream(decisionMessage(args)));
 		const request = decisionRequest();

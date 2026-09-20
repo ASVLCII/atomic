@@ -64,9 +64,10 @@ try {
   const turn = session.prompt("preserve  raw\n"); await entered.promise; await completed.promise; await tick();
   const closing = session.dispose(); release.resolve(); await Promise.all([turn, closing]);
   const messages = session.sessionManager.buildSessionContext().messages;
-  assert.deepEqual(messages.map(message => message.role), ["user", "assistant"]);
-  assert.equal(messages[0].content[0].text, "preserve  raw\n");
-  assert.deepEqual(events, ["user", "assistant"]);
+  const conversational = messages.filter((message) => message.role !== "system");
+  assert.deepEqual(conversational.map((message) => message.role), ["user", "assistant"]);
+  assert.equal(conversational[0].content[0].text, "preserve  raw\n");
+  assert.deepEqual(events.filter((role) => role !== "system"), ["user", "assistant"]);
  } else {
   assert.ok(["summary", "summary-superseded", "summary-reload"].includes(mode));
   ({ session } = await createAgentSession({ ...options, extensionBindings: { mode: "rpc" } }));

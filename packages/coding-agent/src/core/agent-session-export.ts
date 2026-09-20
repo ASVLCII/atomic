@@ -21,7 +21,10 @@ export function getSessionStats(this: AgentSession): SessionStats {
 	const totals = createUsageTotals();
 	for (const entry of this.sessionManager.getEntries()) {
 		if (
-			(entry.type === "branch_summary" || entry.type === "session_summary" || entry.type === "compaction") &&
+			(entry.type === "usage" ||
+				entry.type === "branch_summary" ||
+				entry.type === "session_summary" ||
+				entry.type === "compaction") &&
 			entry.usage
 		) {
 			addUsageToTotals(totals, entry.usage);
@@ -216,27 +219,19 @@ export function exportToJsonl(
  */
 
 export function getLastAssistantText(this: AgentSession): string | undefined {
-	const lastAssistant = this.messages
-		.slice()
-		.reverse()
-		.find((m) => {
-			if (m.role !== "assistant") return false;
-			const msg = m as AssistantMessage;
-			// Skip aborted messages with no content
-			if (msg.stopReason === "aborted" && msg.content.length === 0) return false;
-			return true;
-		});
-
-	if (!lastAssistant) return undefined;
-
-	let text = "";
-	for (const content of (lastAssistant as AssistantMessage).content) {
-		if (content.type === "text") {
-			text += content.text;
+	for (const message of this.messages.slice().reverse()) {
+		if (message.role !== "assistant") continue;
+		const assistant = message as AssistantMessage;
+		// Skip aborted messages with no content
+		if (assistant.stopReason === "aborted" && assistant.content.length === 0) continue;
+		let text = "";
+		for (const content of assistant.content) {
+			if (content.type === "text") text += content.text;
 		}
+		const trimmed = text.trim();
+		if (trimmed) return trimmed;
 	}
-
-	return text.trim() || undefined;
+	return undefined;
 }
 
 // =========================================================================

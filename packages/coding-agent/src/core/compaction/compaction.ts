@@ -244,6 +244,22 @@ export function estimateTokens(message: AgentMessage): number {
 	if (!message || typeof message !== "object" || !messageIsLlmVisible(message)) return 0;
 
 	switch (message.role) {
+		case "system": {
+			const system = message as { content?: unknown; sections?: Record<string, string | null> };
+			let chars = 0;
+			if (typeof system.content === "string") chars += system.content.length;
+			else if (Array.isArray(system.content)) {
+				for (const block of system.content) {
+					if (block && typeof block === "object" && "text" in block && typeof block.text === "string") {
+						chars += block.text.length;
+					}
+				}
+			}
+			for (const value of Object.values(system.sections ?? {})) {
+				if (typeof value === "string") chars += value.length;
+			}
+			return chars > 0 ? Math.ceil(chars / 4) : 0;
+		}
 		case "user":
 		case "custom":
 			return estimateUserLikeContentTokens((message as { content?: unknown }).content);

@@ -1,14 +1,14 @@
 import { once } from "node:events";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import type { AssistantMessage, AssistantMessageEvent, Context, Model } from "@bastani/pi-ai";
+import { type AssistantMessage, type AssistantMessageEvent, type Model, normalizeContext } from "@bastani/pi-ai";
 import { stream as streamOpenAICompletions } from "@bastani/pi-ai/api/openai-completions";
 import { describe, it } from "vitest";
 import type { AgentSession, AgentSessionAdapter, InternalStageContext } from "./stage-runner-helpers.js";
 import { assert, createStageContext, makeMockSession, makeOpts } from "./stage-runner-helpers.js";
 
 const STAGE_STREAM_TERMINAL_TIMEOUT_MS = 5_000;
-const context: Context = { messages: [{ role: "user", content: "complete the task", timestamp: 1 }] };
+const context = normalizeContext({ messages: [{ role: "user", content: "complete the task", timestamp: 1 }] });
 
 function modelFor(baseUrl: string, candidate: string): Model<"openai-completions"> {
 	const slash = candidate.lastIndexOf("/");

@@ -17,6 +17,7 @@ import {
 	type ModelsRequestTransforms,
 	type ModelsSimpleStreamOptions,
 	type MutableModels,
+	normalizeContext,
 	type Provider,
 	type ProviderHeaders,
 	type SimpleStreamOptions,
@@ -130,6 +131,7 @@ export class ModelRuntimeStreaming {
 		context: Context,
 		options?: ModelsApiStreamOptions<TApi>,
 	): AssistantMessageEventStream {
+		const transcript = normalizeContext(context);
 		return lazyStream(model, async () => {
 			const prepared = await this.prepareRequest(
 				model,
@@ -137,7 +139,7 @@ export class ModelRuntimeStreaming {
 			);
 			return prepared.provider.stream(
 				prepared.model as Model<TApi>,
-				context,
+				transcript,
 				this.withCodexRouting(prepared.model, prepared.options) as ApiStreamOptions<TApi>,
 			);
 		});
@@ -156,11 +158,12 @@ export class ModelRuntimeStreaming {
 		context: Context,
 		options?: ModelRuntimeSimpleStreamOptions,
 	): AssistantMessageEventStream {
+		const transcript = normalizeContext(context);
 		return lazyStream(model, async () => {
 			const prepared = await this.prepareRequest(model, options);
 			return prepared.provider.streamSimple(
 				prepared.model,
-				context,
+				transcript,
 				this.withCodexRouting(prepared.model, prepared.options) as SimpleStreamOptions,
 			);
 		});

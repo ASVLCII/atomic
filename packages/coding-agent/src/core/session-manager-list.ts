@@ -1,8 +1,8 @@
 import type { Message, TextContent } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { existsSync } from "fs";
+import { existsSync, type Stats } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
-import { join } from "path";
+import { basename, join } from "path";
 import { getSessionsDir } from "../config.js";
 import { yieldToEventLoopIfSlow } from "../utils/event-loop.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
@@ -83,9 +83,37 @@ const PARSE_YIELD_EVERY_LINES = 2000;
 
 // Directory listings walk files in bounded batches, yielding between batches so
 // large session folders cannot starve the event loop during a scan.
-const LIST_FILE_BATCH_SIZE = 24;
+const LIST_FILE_BATCH_SIZE = 10;
 
-async function parseSessionEntriesCooperatively(content: string): Promise<FileEntry[]> {
+async function mapWithConcurrency<T, R>(
+	items: readonly T[],
+	limit: number,
+	map: (item: T, index: number) => Promise<R>,
+	signal?: AbortSignal,
+): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let next = 0;
+	await Promise.all(
+		Array.from({ length: Math.min(items.length, limit) }, async () => {
+			while (next < items.length) {
+				signal?.throwIfAborted();
+				const index = next++;
+				results[index] = await map(items[index]!, index);
+			}
+		}),
+	);
+	return results;
+}
+
+interface SessionFileCandidate {
+	path: string;
+	stats?: Stats;
+}
+function sortSessionInfos(sessions: SessionInfo[]): SessionInfo[] {
+	return sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+}
+
+async function parseSessionEntriesCooperatively(content: string, signal?: AbortSignal): Promise<FileEntry[]> {
 	const entries: FileEntry[] = [];
 	const lines = content.trim().split("\n");
 	let startedAt = Date.now();
@@ -99,6 +127,7 @@ async function parseSessionEntriesCooperatively(content: string): Promise<FileEn
 			}
 		}
 		if ((index + 1) % PARSE_YIELD_EVERY_LINES === 0) {
+			signal?.throwIfAborted();
 			await yieldToEventLoopIfSlow(startedAt);
 			startedAt = Date.now();
 		}
@@ -112,46 +141,45 @@ async function parseSessionEntriesCooperatively(content: string): Promise<FileEn
  * reported per file via onFileDone, matching the previous eager Promise.all.
  */
 async function mapSessionFilesCooperatively(
-	files: readonly string[],
+	files: readonly SessionFileCandidate[],
 	includeInternal: boolean,
-	onFileDone: () => void,
+	onFileDone: (info: SessionInfo | null, index: number) => void,
+	signal?: AbortSignal,
 ): Promise<(SessionInfo | null)[]> {
-	const results: (SessionInfo | null)[] = [];
-	for (let offset = 0; offset < files.length; offset += LIST_FILE_BATCH_SIZE) {
-		const batch = files.slice(offset, offset + LIST_FILE_BATCH_SIZE);
-		const startedAt = Date.now();
-		const batchResults = await Promise.all(
-			batch.map(async (file) => {
-				// Prefilter via the header so hidden/internal sessions are skipped
-				// before the expensive full-transcript parse in buildSessionInfo.
-				if (!includeInternal && isInternalHeader(readSessionHeader(file))) {
-					onFileDone();
-					return null;
-				}
-				const info = await buildSessionInfo(file);
-				onFileDone();
-				return info;
-			}),
-		);
-		for (const info of batchResults) results.push(info);
-		await yieldToEventLoopIfSlow(startedAt);
-	}
-	return results;
+	return mapWithConcurrency(
+		files,
+		LIST_FILE_BATCH_SIZE,
+		async (file, index) => {
+			// Hidden sessions never enter partial results or the expensive transcript parser.
+			const info =
+				!includeInternal && isInternalHeader(readSessionHeader(file.path))
+					? null
+					: await buildSessionInfo(file.path, signal, file.stats);
+			signal?.throwIfAborted();
+			onFileDone(info, index);
+			return info;
+		},
+		signal,
+	);
 }
 
-async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
+async function buildSessionInfo(
+	filePath: string,
+	signal?: AbortSignal,
+	fileStats?: Stats,
+): Promise<SessionInfo | null> {
 	try {
-		const content = await readFile(filePath, "utf8");
+		const content = await readFile(filePath, { encoding: "utf8", signal });
 		const entries =
 			content.length > COOPERATIVE_PARSE_CONTENT_BYTES
-				? await parseSessionEntriesCooperatively(content)
+				? await parseSessionEntriesCooperatively(content, signal)
 				: parseSessionEntries(content);
 
 		if (entries.length === 0) return null;
 		const header = entries[0];
 		if (header.type !== "session") return null;
 
-		const stats = await stat(filePath);
+		const stats = fileStats ?? (await stat(filePath));
 		let messageCount = 0;
 		let firstMessage = "";
 		const allMessages: string[] = [];
@@ -217,6 +245,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			allMessagesText: allMessages.join(" "),
 		};
 	} catch {
+		signal?.throwIfAborted();
 		return null;
 	}
 }
@@ -224,35 +253,39 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 export async function listSessionsFromDir(
 	dir: string,
 	onProgress?: SessionListProgress,
-	progressOffset = 0,
-	progressTotal?: number,
 	includeInternal = false,
+	signal?: AbortSignal,
 ): Promise<SessionInfo[]> {
-	const sessions: SessionInfo[] = [];
-	if (!existsSync(dir)) {
-		return sessions;
-	}
-
+	signal?.throwIfAborted();
+	if (!existsSync(dir)) return [];
 	try {
-		const dirEntries = await readdir(dir);
-		const files = dirEntries.filter((f) => f.endsWith(".jsonl")).map((f) => join(dir, f));
-		const total = progressTotal ?? files.length;
-
+		const files = (await readdir(dir))
+			.filter((file) => file.endsWith(".jsonl"))
+			.sort((a, b) => b.localeCompare(a))
+			.map((file) => ({ path: join(dir, file) }));
+		const partial: SessionInfo[] = [];
 		let loaded = 0;
-		const results = await mapSessionFilesCooperatively(files, includeInternal, () => {
-			loaded++;
-			onProgress?.(progressOffset + loaded, total);
-		});
-		for (const info of results) {
-			if (info && (includeInternal || !info.internal)) {
-				sessions.push(info);
-			}
-		}
+		const results = await mapSessionFilesCooperatively(
+			files,
+			includeInternal,
+			(info) => {
+				loaded++;
+				if (info && (includeInternal || !info.internal)) partial.push(info);
+				onProgress?.(
+					loaded,
+					files.length,
+					loaded === 1 || loaded % 10 === 0 || loaded === files.length
+						? sortSessionInfos([...partial])
+						: undefined,
+				);
+			},
+			signal,
+		);
+		return results.filter((info): info is SessionInfo => info !== null && (includeInternal || !info.internal));
 	} catch {
-		// Return empty list on error
+		signal?.throwIfAborted();
+		return [];
 	}
-
-	return sessions;
 }
 
 export async function listProjectSessions(
@@ -260,27 +293,30 @@ export async function listProjectSessions(
 	sessionDir?: string,
 	onProgress?: SessionListProgress,
 	includeInternal = false,
+	signal?: AbortSignal,
 ): Promise<SessionInfo[]> {
 	const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
 	const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
 	const resolvedCwd = resolvePath(cwd);
-	const sessions = (await listSessionsFromDir(dir, onProgress, 0, undefined, includeInternal)).filter(
-		(session) => !filterCwd || sessionCwdMatches(session.cwd, resolvedCwd),
-	);
-	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-	return sessions;
+	const include = (session: SessionInfo) => !filterCwd || sessionCwdMatches(session.cwd, resolvedCwd);
+	const progress: SessionListProgress | undefined = onProgress
+		? (loaded, total, partial) => onProgress(loaded, total, partial?.filter(include))
+		: undefined;
+	return sortSessionInfos((await listSessionsFromDir(dir, progress, includeInternal, signal)).filter(include));
 }
 
 export async function listAllSessions(
 	sessionDirOrOnProgress?: string | SessionListProgress,
 	onProgress?: SessionListProgress,
 	includeInternal = false,
+	signal?: AbortSignal,
 ): Promise<SessionInfo[]> {
+	signal?.throwIfAborted();
 	const customSessionDir =
 		typeof sessionDirOrOnProgress === "string" ? normalizePath(sessionDirOrOnProgress) : undefined;
 	const progress = typeof sessionDirOrOnProgress === "function" ? sessionDirOrOnProgress : onProgress;
 	if (customSessionDir) {
-		const sessions = await listSessionsFromDir(customSessionDir, progress, 0, undefined, includeInternal);
+		const sessions = await listSessionsFromDir(customSessionDir, progress, includeInternal, signal);
 		sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 		return sessions;
 	}
@@ -296,38 +332,60 @@ export async function listAllSessions(
 			.filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
 			.map((entry) => join(sessionsDir, entry.name));
 
-		// Count total files first for accurate progress
-		let totalFiles = 0;
-		const dirFiles: string[][] = [];
-		for (const dir of dirs) {
-			try {
-				const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
-				dirFiles.push(files.map((f) => join(dir, f)));
-				totalFiles += files.length;
-			} catch {
-				dirFiles.push([]);
-			}
-		}
-
-		// Process all files with progress tracking
+		const dirFiles = await mapWithConcurrency(
+			dirs,
+			64,
+			async (dir) => {
+				try {
+					return (await readdir(dir)).filter((file) => file.endsWith(".jsonl")).map((file) => join(dir, file));
+				} catch {
+					return [];
+				}
+			},
+			signal,
+		);
+		const candidates = await mapWithConcurrency(
+			dirFiles.flat(),
+			64,
+			async (path): Promise<SessionFileCandidate> => {
+				try {
+					return { path, stats: await stat(path) };
+				} catch {
+					return { path };
+				}
+			},
+			signal,
+		);
+		candidates.sort(
+			(a, b) =>
+				(b.stats?.mtimeMs ?? Number.NEGATIVE_INFINITY) - (a.stats?.mtimeMs ?? Number.NEGATIVE_INFINITY) ||
+				basename(b.path).localeCompare(basename(a.path)),
+		);
 		let loaded = 0;
-		const sessions: SessionInfo[] = [];
-		const allFiles = dirFiles.flat();
-
-		const results = await mapSessionFilesCooperatively(allFiles, includeInternal, () => {
-			loaded++;
-			progress?.(loaded, totalFiles);
-		});
-
-		for (const info of results) {
-			if (info && (includeInternal || !info.internal)) {
-				sessions.push(info);
-			}
-		}
-
-		sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-		return sessions;
+		let firstCandidateLoaded = false;
+		const partial: SessionInfo[] = [];
+		const results = await mapSessionFilesCooperatively(
+			candidates,
+			includeInternal,
+			(info, index) => {
+				loaded++;
+				if (index === 0) firstCandidateLoaded = true;
+				if (info && (includeInternal || !info.internal)) partial.push(info);
+				progress?.(
+					loaded,
+					candidates.length,
+					firstCandidateLoaded && (index === 0 || loaded % 100 === 0 || loaded === candidates.length)
+						? sortSessionInfos([...partial])
+						: undefined,
+				);
+			},
+			signal,
+		);
+		return sortSessionInfos(
+			results.filter((info): info is SessionInfo => info !== null && (includeInternal || !info.internal)),
+		);
 	} catch {
+		signal?.throwIfAborted();
 		return [];
 	}
 }

@@ -340,8 +340,8 @@ describe("AgentSession concurrent prompt guard", () => {
 		await session.agent.waitForIdle();
 
 		expect(snapshots).toEqual([
-			["user", "assistant"],
-			["user", "assistant"],
+			["system", "user", "assistant"],
+			["system", "user", "assistant"],
 		]);
 	});
 });

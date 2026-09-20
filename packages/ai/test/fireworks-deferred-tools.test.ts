@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.js";
 import { getModel } from "../src/compat.js";
 import type { AssistantMessage, Context, Model, Tool, ToolResultMessage } from "../src/types.js";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 const lookup: Tool = {
 	name: "lookup",
@@ -33,7 +34,7 @@ function discoveryContext(model: Model<"anthropic-messages">, name = "tool_searc
 		timestamp: 0,
 	};
 	return {
-		tools: [{ name, description: "Find tools", parameters: Type.Object({ query: Type.String() }) }, lookup],
+		tools: [{ name, description: "Find tools", parameters: Type.Object({ query: Type.String() }) }],
 		messages: [
 			{ role: "user", content: "Look up alpha.", timestamp: 0 },
 			assistant,
@@ -42,17 +43,17 @@ function discoveryContext(model: Model<"anthropic-messages">, name = "tool_searc
 				toolName: name,
 				toolCallId: "search1",
 				content: [{ type: "text", text: "Found lookup." }],
-				addedToolNames: ["lookup"],
 				isError: false,
 				timestamp: 0,
 			},
+			{ role: "system", content: "", toolsAdded: [lookup], timestamp: 0 },
 		],
 	};
 }
 
 async function capture(model: Model<"anthropic-messages">, context: Context): Promise<MessageCreateParamsStreaming> {
 	let payload: MessageCreateParamsStreaming | undefined;
-	await streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, context, {
+	await streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, normalizeContext(context), {
 		apiKey: "test-key",
 		cacheRetention: "none",
 		onPayload(value) {
@@ -85,7 +86,6 @@ describe("Fireworks deferred tools", () => {
 					name: "lookup",
 					description: lookup.description,
 					input_schema: { type: "object", properties: { key: { type: "string" } }, required: ["key"] },
-					defer_loading: true,
 				},
 			]);
 			expect(payload.messages[1].content).toContainEqual({
@@ -97,10 +97,9 @@ describe("Fireworks deferred tools", () => {
 				{
 					type: "tool_result",
 					tool_use_id: "search1",
-					content: [{ type: "tool_reference", tool_name: "lookup" }],
+					content: "Found lookup.",
 					is_error: false,
 				},
-				{ type: "text", text: "Found lookup." },
 			]);
 
 			// Fireworks unwraps tool_use_tool on the wire, even when the ID retains that prefix.
@@ -123,14 +122,18 @@ describe("Fireworks deferred tools", () => {
 				{ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 10 } },
 				{ type: "message_stop" },
 			];
-			const response = await streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, context, {
-				apiKey: "test-key",
-				fetch: async () =>
-					new Response(
-						events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
-						{ headers: { "content-type": "text/event-stream" } },
-					),
-			}).result();
+			const response = await streamAnthropic(
+				{ ...model, baseUrl: "http://127.0.0.1:9" },
+				normalizeContext(context),
+				{
+					apiKey: "test-key",
+					fetch: async () =>
+						new Response(
+							events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+							{ headers: { "content-type": "text/event-stream" } },
+						),
+				},
+			).result();
 			expect(response.stopReason).toBe("toolUse");
 			expect(response.content).toEqual([
 				{ type: "toolCall", id: "tool_use_tool_1", name: "lookup", arguments: { key: "alpha" } },
@@ -159,24 +162,27 @@ describe("Fireworks deferred tools", () => {
 		}
 	});
 
-	it("deduplicates references across multiple results and preserves ordinary text", async () => {
+	it("deduplicates declarations across system updates and preserves ordinary text", async () => {
 		const model = getModel("fireworks", "accounts/fireworks/models/kimi-k2p6");
 		const context = discoveryContext(model);
 		const assistant = context.messages[1] as AssistantMessage;
 		assistant.content.push({ type: "toolCall", id: "search2", name: "tool_search", arguments: { query: "lookup" } });
 		const result = context.messages[2] as ToolResultMessage;
-		result.addedToolNames = ["lookup", "lookup", "missing"];
-		context.messages.push({ ...result, toolCallId: "search2", content: [{ type: "text", text: "Already loaded." }] });
+		context.messages.push({ role: "system", content: "", toolsAdded: [lookup, lookup], timestamp: 0 });
+		context.messages.splice(3, 0, {
+			...result,
+			toolCallId: "search2",
+			content: [{ type: "text", text: "Already loaded." }],
+		});
 		const payload = await capture(model, context);
 		expect(payload.messages[2].content).toEqual([
 			{
 				type: "tool_result",
 				tool_use_id: "search1",
-				content: [{ type: "tool_reference", tool_name: "lookup" }],
+				content: "Found lookup.",
 				is_error: false,
 			},
 			{ type: "tool_result", tool_use_id: "search2", content: "Already loaded.", is_error: false },
-			{ type: "text", text: "Found lookup." },
 		]);
 	});
 
@@ -184,10 +190,16 @@ describe("Fireworks deferred tools", () => {
 		"keeps normal schemas for %s",
 		async (scenario) => {
 			const base = getModel("fireworks", "accounts/fireworks/models/kimi-k2p6");
-			const model = { ...base, compat: { ...base.compat, supportsToolReferences: scenario !== "disabled" } };
+			const model = { ...base, compat: { ...base.compat, supportsMidConvoToolChanges: false } };
 			const context = discoveryContext(model);
-			if (scenario === "no-discovery") context.messages = context.messages.slice(0, 1);
-			if (scenario === "no-markers") delete (context.messages[2] as ToolResultMessage).addedToolNames;
+			if (scenario === "no-discovery") {
+				context.messages = context.messages.slice(0, 1);
+				context.tools?.push(lookup);
+			}
+			if (scenario === "no-markers") {
+				context.messages = context.messages.filter((message) => message.role !== "system");
+				context.tools?.push(lookup);
+			}
 			if (scenario === "no-immediate") context.tools = [lookup];
 			if (scenario === "already-used") {
 				const assistant = structuredClone(context.messages[1]) as AssistantMessage;

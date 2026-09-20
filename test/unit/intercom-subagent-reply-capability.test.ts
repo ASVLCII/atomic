@@ -13,6 +13,9 @@ function fixture() {
 		{
 			on: (name: string, handler: Handler) => {
 				handlers.set(name, handler);
+				return () => {
+					handlers.delete(name);
+				};
 			},
 		} as Pick<ExtensionAPI, "on">,
 		() =>

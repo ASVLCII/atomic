@@ -278,6 +278,25 @@ export class CustomEditor extends Editor {
 		} finally {
 			this.submittedDraftSnapshot = undefined;
 		}
+		this.continueSlashSkillAutocomplete(data);
 		return false;
+	}
+
+	/**
+	 * 0.86 Editor retriggers slash suggestions only for `[A-Za-z0-9._-]`.
+	 * Atomic skill selectors are `/skill:name@scope`, so `:` and `@` must keep
+	 * discovery live after the picker closed on a non-matching prefix.
+	 */
+	private continueSlashSkillAutocomplete(data: string): void {
+		if (data !== ":" && data !== "@") return;
+		const cursor = this.getCursor();
+		if (cursor.line !== 0) return;
+		const beforeCursor = (this.getLines()[cursor.line] ?? "").slice(0, cursor.col);
+		if (!beforeCursor.trimStart().startsWith("/")) return;
+		(
+			this as unknown as {
+				tryTriggerAutocomplete: (explicitTab?: boolean) => void;
+			}
+		).tryTriggerAutocomplete();
 	}
 }

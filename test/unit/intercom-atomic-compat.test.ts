@@ -372,6 +372,7 @@ function captureIntercomRegistration(env: Record<string, string | undefined>): C
 		const api = {
 			on: ((event: string) => {
 				captured.handlers.push(event);
+				return () => {};
 			}) as ExtensionAPI["on"],
 			registerTool: ((tool: ToolDefinition) => {
 				captured.tools.push(tool);

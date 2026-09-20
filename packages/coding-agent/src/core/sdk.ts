@@ -11,6 +11,7 @@ import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { getBuiltinPackageLocations, getBuiltinPackagePaths } from "./builtin-packages.ts";
 import { withBuiltinResourceLoader } from "./builtin-resource-loader.ts";
 import { getDefaultCacheRetention } from "./cache-retention.ts";
+import { CacheWarmer } from "./cache-warmer.ts";
 import { inheritChildSessionOptions } from "./child-session-options.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner } from "./extensions/index.js";
@@ -36,6 +37,7 @@ import { scrubPreCompactionAssistantUsage } from "./provider-context-usage.ts";
 import { canCloneDefaultResourceDiscovery, DefaultResourceLoader } from "./resource-loader.ts";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk-types.ts";
 import { sessionLifecycleCreation, sessionLifecycleScopes } from "./session-lifecycle-scope.ts";
+import { sessionGenerationClosing, sessionLifetime, trackSessionWork } from "./session-lifecycle-work.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { registerStartupRollback, rollbackStartup } from "./session-startup-rollback.ts";
 import { SettingsManager } from "./settings-manager.ts";
@@ -357,6 +359,27 @@ async function constructAgentSession(
 	};
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
+	const cacheWarmer = new CacheWarmer(
+		{
+			streamSimple: (model, context, requestOptions) => {
+				const extension = modelRuntime.getRegisteredProviderConfig(model.provider);
+				return getModelFastRoute(model)?.serviceTier !== undefined &&
+					!(extension?.streamSimple && extension.api === model.api)
+					? streamWithFastRoute(model, context, requestOptions)
+					: modelRuntime.streamSimple(model, context, requestOptions);
+			},
+		},
+		sessionManager,
+		() => settingsManager.getCacheWarmingMode(),
+		async (event) => {
+			const runner = extensionRunnerRef.current;
+			if (!runner) {
+				return event.action;
+			}
+			return (await runner.emitCacheWarmingDecision(event)) ?? event.action;
+		},
+		(refresh) => trackSessionWork(session, refresh),
+	);
 
 	agent = new Agent({
 		initialState: {
@@ -446,6 +469,20 @@ async function constructAgentSession(
 				...fastRouteStreamOptions,
 				preparedRequestAuth: { resolution: authResult },
 			};
+			if (streamOptions?.sessionId === sessionManager.getSessionId()) {
+				const prefix = [...agent.state.messages];
+				cacheWarmer.start({ model: requestModel, context, options: preparedStreamOptions }, () => {
+					const current = agent.state.model;
+					return (
+						!sessionLifetime(session).aborted &&
+						!sessionGenerationClosing.has(session) &&
+						!(session as unknown as AgentSessionInternalSurface)._agentRunAbortRequested &&
+						current?.provider === model.provider &&
+						current.id === model.id &&
+						prefix.every((message, index) => agent.state.messages[index] === message)
+					);
+				});
+			}
 			if (usesExtensionStream) {
 				return modelRuntime.streamSimple(requestModel, context, preparedStreamOptions);
 			}
@@ -548,6 +585,7 @@ async function constructAgentSession(
 			resourceLoader,
 			customTools: options.customTools,
 			modelRuntime,
+			cacheWarmer,
 			initialActiveToolNames,
 			allowedToolNames,
 			excludedToolNames: options.excludedTools,

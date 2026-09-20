@@ -82,6 +82,58 @@ describe("ExtensionRunner", () => {
 		getSystemPrompt: () => "",
 	};
 
+	it("unsubscribes one registration idempotently with a stable dispatch snapshot", async () => {
+		fs.writeFileSync(
+			path.join(extensionsDir, "unsubscribe.ts"),
+			`export default function(pi) {
+			let off;
+			pi.on("input", event => { off(); return { action: "transform", text: event.text + "a" }; });
+			const handler = event => ({ action: "transform", text: event.text + "b" });
+			off = pi.on("input", handler);
+			pi.on("input", handler);
+		}`,
+		);
+		const loaded = await discoverAndLoadExtensions([], tempDir, tempDir);
+		const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, tempDir, sessionManager, modelRegistry);
+		runner.bindCore(extensionActions, extensionContextActions);
+		expect(await runner.emitInput("", undefined, "interactive")).toEqual({
+			action: "transform",
+			text: "abb",
+			images: undefined,
+		});
+		expect(await runner.emitInput("", undefined, "interactive")).toEqual({
+			action: "transform",
+			text: "ab",
+			images: undefined,
+		});
+	});
+
+	// Upstream #9068: a failed routing hook must never fall back to the local shell.
+	it("fails closed on user_bash errors and invalid results", async () => {
+		for (const body of [
+			"throw new Error('routing failed')",
+			"return null",
+			"return {}",
+			"return { operations: {} }",
+			"return { result: {} }",
+			"return { operations: { exec() {} }, result: {} }",
+		]) {
+			fs.writeFileSync(
+				path.join(extensionsDir, "bash.ts"),
+				`export default function(pi) { pi.on("user_bash", () => { ${body} }); }`,
+			);
+			const loaded = await discoverAndLoadExtensions([], tempDir, tempDir);
+			const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, tempDir, sessionManager, modelRegistry);
+			runner.bindCore(extensionActions, extensionContextActions);
+			const errors: string[] = [];
+			runner.onError((error) => errors.push(error.error));
+			await expect(
+				runner.emitUserBash({ type: "user_bash", command: "echo unsafe", excludeFromContext: false, cwd: tempDir }),
+			).rejects.toThrow();
+			expect(errors).toHaveLength(1);
+		}
+	});
+
 	describe("before_agent_start", () => {
 		it("keeps ctx.getSystemPrompt() in sync with chained system prompt updates", async () => {
 			const extCode1 = `
@@ -113,16 +165,15 @@ describe("ExtensionRunner", () => {
 			runner.onError((error) => errors.push(error.error));
 			runner.bindCore(extensionActions, extensionContextActions);
 
-			const chained = await runner.emitBeforeAgentStart("hello", undefined, "base", {
+			const chained = await runner.emitBeforeAgentStart("hello", undefined, {
 				cwd: tempDir,
+				forceSystemPrompt: "base",
 			});
 
 			expect(errors).toEqual([]);
 
-			expect(chained).toEqual({
-				messages: undefined,
-				systemPrompt: "base\nfirst\nsecond",
-			});
+			expect(chained.messages).toEqual([]);
+			expect(chained.systemPromptOptions.forceSystemPrompt).toBe("base\nfirst\nsecond");
 		});
 	});
 

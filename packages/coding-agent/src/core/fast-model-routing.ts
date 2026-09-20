@@ -6,6 +6,7 @@ import {
 	clampThinkingLevel,
 	type Model,
 	type ModelFastRoute,
+	normalizeContext,
 	type OpenAICodexResponsesOptions,
 	type OpenAIResponsesOptions,
 	type ProviderHeaders,
@@ -15,6 +16,7 @@ import {
 	streamOpenAIResponses,
 	streamSimple,
 	type ThinkingLevel,
+	type TranscriptContext,
 } from "@bastani/pi-ai/compat";
 import {
 	CODEX_FAST_ROUTE_HEADER,
@@ -35,12 +37,12 @@ export interface FastRouteStreamers {
 	streamSimple: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 	streamOpenAIResponses: (
 		model: Model<"openai-responses">,
-		context: Context,
+		context: TranscriptContext,
 		options?: OpenAIResponsesOptions,
 	) => AssistantMessageEventStream;
 	streamOpenAICodexResponses: (
 		model: Model<"openai-codex-responses">,
-		context: Context,
+		context: TranscriptContext,
 		options?: OpenAICodexResponsesOptions,
 	) => AssistantMessageEventStream;
 }
@@ -285,7 +287,7 @@ export function streamWithFastRoute(
 		if (model.api === "openai-responses") {
 			return streamers.streamOpenAIResponses(
 				model as Model<"openai-responses">,
-				context,
+				normalizeContext(context),
 				buildOpenAIResponsesFastRouteOptions(model, options),
 			);
 		}
@@ -299,7 +301,7 @@ export function streamWithFastRoute(
 
 		return streamers.streamOpenAICodexResponses(
 			model as Model<"openai-codex-responses">,
-			context,
+			normalizeContext(context),
 			buildOpenAICodexResponsesFastRouteOptions(model, options),
 		);
 	}

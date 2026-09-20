@@ -229,8 +229,7 @@ export async function bindExtensions(this: AgentSession, bindings: ExtensionBind
 	this._applyExtensionBindings(this._extensionRunner);
 	await startExtensions(this, this._extensionRunner, this._resourceLoader, this._sessionStartEvent, async () => {
 		if (this._disposed) throw hostInputError("SessionClosed");
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		this._rebuildSystemPrompt(this.getActiveToolNames());
 		if (recoverProtectedStreamingCustomMessages(this) > 0) {
 			await this._continueQueuedAgentMessages();
 		}
@@ -242,8 +241,7 @@ export async function extendResourcesFromExtensions(this: AgentSession, reason: 
 	return trackSessionWork(this, async () => {
 		await extendRunnerResources(this, this._extensionRunner, this._resourceLoader, reason);
 		assertSessionOpen(this);
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		this._rebuildSystemPrompt(this.getActiveToolNames());
 	});
 }
 
@@ -607,8 +605,7 @@ async function reloadOwnedGeneration(
 		sessionGenerationClosing.delete(this);
 		await startExtensions(this, this._extensionRunner, this._resourceLoader, { type: "session_start", reason });
 		if (this._disposed) throw hostInputError("SessionClosed");
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		this._rebuildSystemPrompt(this.getActiveToolNames());
 		return;
 	}
 

@@ -59,8 +59,17 @@ const OVERFLOW_PATTERNS = [
 	/context[_ ]length[_ ]exceeded/i, // Generic fallback
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
-	/^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i, // Cerebras: 400/413 with no body
 ];
+
+function isCerebrasBodylessOverflow(errorMessage: string): boolean {
+	const normalized = errorMessage.trim().toLowerCase();
+	return (
+		normalized === "400 status code (no body)" ||
+		normalized === "413 status code (no body)" ||
+		normalized === "400 (no body)" ||
+		normalized === "413 (no body)"
+	);
+}
 
 /**
  * Patterns that indicate non-overflow errors (e.g. rate limiting, server errors).
@@ -136,8 +145,13 @@ export function isContextOverflow(message: AssistantMessage, contextWindow?: num
 	if (message.stopReason === "error" && message.errorMessage) {
 		// Skip messages matching known non-overflow patterns (e.g. throttling / rate-limit)
 		const isNonOverflow = NON_OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!));
-		if (!isNonOverflow && OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!))) {
-			return true;
+		if (!isNonOverflow) {
+			if (OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!))) {
+				return true;
+			}
+			if (message.provider === "cerebras" && isCerebrasBodylessOverflow(message.errorMessage)) {
+				return true;
+			}
 		}
 	}
 

@@ -289,6 +289,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		const messageEntries = sessionManager.getEntries().filter((entry) => entry.type === "message");
 		expect(messageEntries.map((entry) => entry.message.role)).toEqual([
+			"system",
 			"user",
 			"assistant",
 			"toolResult",

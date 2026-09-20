@@ -1,3 +1,4 @@
+export type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../cache-warmer.ts";
 export type {
 	HostDiagnostic,
 	HostInput,
@@ -146,6 +147,7 @@ export type {
 	MessageUpdateEvent,
 	ModelSelectEvent,
 	ModelSelectSource,
+	NormalizedBuildSystemPromptOptions,
 	OrchestrationContext,
 	PowerShellToolCallEvent,
 	PowerShellToolResultEvent,

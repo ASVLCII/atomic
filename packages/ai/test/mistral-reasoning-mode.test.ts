@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getModel, streamSimple } from "../src/compat.ts";
 import type { Context, Model, SimpleStreamOptions } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 interface MistralPayload {
 	promptMode?: "reasoning";
@@ -24,7 +25,7 @@ async function capturePayload(
 		baseUrl: "http://127.0.0.1:9",
 	};
 
-	const stream = streamSimple(payloadCaptureModel, makeContext(), {
+	const stream = streamSimple(payloadCaptureModel, normalizeContext(makeContext()), {
 		...options,
 		apiKey: "fake-key",
 		onPayload: (payload) => {

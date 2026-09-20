@@ -49,7 +49,7 @@ test(
 				{ cwd: root, timeout: BUN_BUILD_TIMEOUT_MS },
 			);
 			assert.equal(appBuild.exitCode, 0, appBuild.stderr.toString());
-			for (const name of ["native-modifiers.js", "native-module-path.js"]) {
+			for (const name of ["native-modifiers.js", "native-module-path.js", "native-platform.js"]) {
 				copyFileSync(join(root, "node_modules/@earendil-works/pi-tui/dist", name), join(fixture, name));
 			}
 

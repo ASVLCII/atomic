@@ -109,7 +109,11 @@ function createCommittedAutomaticGate() {
 	return { factory, committed, release: () => release(), calls };
 }
 
-function createResponseGate(): { started: Promise<void>; wait: () => Promise<void>; release: () => void } {
+function createResponseGate(): {
+	started: Promise<void>;
+	wait: (signal?: AbortSignal) => Promise<void>;
+	release: () => void;
+} {
 	let signalStarted!: () => void;
 	let release!: () => void;
 	const started = new Promise<void>((resolve) => {
@@ -120,9 +124,22 @@ function createResponseGate(): { started: Promise<void>; wait: () => Promise<voi
 	});
 	return {
 		started,
-		wait: async () => {
+		wait: async (signal?: AbortSignal) => {
 			signalStarted();
-			await released;
+			if (!signal) {
+				await released;
+				return;
+			}
+			await Promise.race([
+				released,
+				new Promise<void>((resolve) => {
+					if (signal.aborted) {
+						resolve();
+						return;
+					}
+					signal.addEventListener("abort", () => resolve(), { once: true });
+				}),
+			]);
 		},
 		release: () => release(),
 	};
@@ -168,6 +185,24 @@ describe("manual compaction re-entrancy", () => {
 		seedTranscript(harness);
 		return harness;
 	}
+
+	// Upstream #9340/#9777: cancellation in compaction_start wins before hooks/auth.
+	it("stops an automatic compaction cancelled by its start listener", async () => {
+		let hookCalls = 0;
+		const harness = await createHarness((pi) => {
+			pi.on("session_before_compact", () => {
+				hookCalls++;
+				return { compactedText: "must not commit" };
+			});
+		});
+		harness.session.subscribe((event) => {
+			if (event.type === "compaction_start") harness.session.abortCompaction();
+		});
+		await (harness.session as AutoCompactionRunner)._runAutoCompaction("threshold", true);
+		expect(hookCalls).toBe(0);
+		expect(boundaryCount(harness)).toBe(0);
+		expect(harness.eventsOfType("compaction_end")).toMatchObject([{ aborted: true, willRetry: false }]);
+	});
 
 	it("joins a concurrent compact() call to the single in-flight run", async () => {
 		const gate = createGate();
@@ -283,7 +318,7 @@ describe("manual compaction re-entrancy", () => {
 	it("persists an active response abort before running the requested manual compaction", async () => {
 		const responseGate = createResponseGate();
 		const harness = await createHarnessWithExtensions({
-			model: { ...fauxModel, contextWindow: 1_000, maxTokens: 100 },
+			model: { ...fauxModel, contextWindow: 1_000_000, maxTokens: 100 },
 			settings: { compaction: { enabled: true, reserveTokens: 100, preserve_recent: 2 } },
 			tools: [noopTool],
 			responses: [

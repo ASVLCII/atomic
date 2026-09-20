@@ -30,6 +30,7 @@ export interface LlamaModelsResponse {
 
 export interface LlamaServerProps {
 	models_autoload?: boolean;
+	chat_template?: string;
 }
 
 export interface LlamaModelEvent {
@@ -199,10 +200,14 @@ export class LlamaClient {
 		return data;
 	}
 
-	async props(options: { signal?: AbortSignal } = {}): Promise<LlamaServerProps> {
-		const payload = await this.request("/props", { signal: options.signal });
+	async props(options: { model?: string; signal?: AbortSignal } = {}): Promise<LlamaServerProps> {
+		const query = options.model ? `?${new URLSearchParams({ model: options.model, autoload: "false" })}` : "";
+		const payload = await this.request(`/props${query}`, { signal: options.signal });
 		if (!isLlamaServerProps(payload)) return {};
-		return typeof payload.models_autoload === "boolean" ? { models_autoload: payload.models_autoload } : {};
+		return {
+			...(typeof payload.models_autoload === "boolean" ? { models_autoload: payload.models_autoload } : {}),
+			...(typeof payload.chat_template === "string" ? { chat_template: payload.chat_template } : {}),
+		};
 	}
 
 	async load(model: string, signal?: AbortSignal): Promise<void> {

@@ -1,7 +1,12 @@
 import type { ImageContent } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { runCallback } from "../callback-activity.ts";
-import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import {
+	type BuildSystemPromptOptions,
+	buildSystemPrompt,
+	type NormalizedBuildSystemPromptOptions,
+	normalizeBuildSystemPromptOptions,
+} from "../system-prompt.ts";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -34,8 +39,8 @@ import type {
 
 /** Combined result from all before_agent_start handlers. */
 export interface BeforeAgentStartCombinedResult {
-	messages?: NonNullable<BeforeAgentStartEventResult["message"]>[];
-	systemPrompt?: string;
+	messages: NonNullable<BeforeAgentStartEventResult["message"]>[];
+	systemPromptOptions: NormalizedBuildSystemPromptOptions;
 }
 
 export interface ResourcesDiscoverCombinedResult {
@@ -97,6 +102,10 @@ const emitCaughtError = (emitError: EmitExtensionError, extensionPath: string, e
 	});
 };
 
+export function snapshotEventHandlers(extensions: Extension[], event: ExtensionEvent["type"]) {
+	return extensions.map((ext) => ({ ext, handlers: ext.handlers.get(event)?.slice() ?? [] }));
+}
+
 export async function runGenericHandlers<TEvent extends RunnerEmitEvent>(
 	extensions: Extension[],
 	ctx: ExtensionContext,
@@ -107,10 +116,7 @@ export async function runGenericHandlers<TEvent extends RunnerEmitEvent>(
 	let result: SessionBeforeEventResult | undefined;
 	const promptNotifications: Promise<void>[] = [];
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get(event.type);
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, event.type)) {
 		for (const handler of handlers) {
 			// Workflow publishers can retire while a previous handler awaits.
 			if (isCurrent && !isCurrent()) return result as RunnerEmitResult<TEvent>;
@@ -155,10 +161,7 @@ export async function runMessageEndHandlers(
 	let currentMessage = event.message;
 	let modified = false;
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("message_end");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "message_end")) {
 		for (const handler of handlers) {
 			try {
 				const currentEvent: MessageEndEvent = { ...event, message: currentMessage };
@@ -197,10 +200,7 @@ export async function runToolResultHandlers(
 	const currentEvent: ToolResultEvent = { ...event };
 	let modified = false;
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("tool_result");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "tool_result")) {
 		for (const handler of handlers) {
 			try {
 				const handlerResult = (await runCallback(
@@ -238,10 +238,7 @@ export async function runToolCallHandlers(
 ): Promise<ToolCallEventResult | undefined> {
 	let result: ToolCallEventResult | undefined;
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("tool_call");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "tool_call")) {
 		for (const handler of handlers) {
 			const handlerResult = await runCallback(
 				{ kind: "extension.hook", name: event.type, sourcePath: ext.path },
@@ -257,25 +254,56 @@ export async function runToolCallHandlers(
 	return result;
 }
 
+function isUserBashEventResult(value: unknown): value is UserBashEventResult {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Record<string, unknown>;
+	const hasOperations = candidate.operations !== undefined;
+	const hasResult = candidate.result !== undefined;
+	if (hasOperations === hasResult) return false;
+	if (hasOperations) {
+		const operations = candidate.operations;
+		return (
+			typeof operations === "object" &&
+			operations !== null &&
+			typeof (operations as Record<string, unknown>).exec === "function"
+		);
+	}
+	const result = candidate.result;
+	if (typeof result !== "object" || result === null) return false;
+	const record = result as Record<string, unknown>;
+	return (
+		typeof record.output === "string" &&
+		"exitCode" in record &&
+		(record.exitCode === undefined || typeof record.exitCode === "number") &&
+		typeof record.cancelled === "boolean" &&
+		typeof record.truncated === "boolean" &&
+		(record.fullOutputPath === undefined || typeof record.fullOutputPath === "string")
+	);
+}
+
 export async function runUserBashHandlers(
 	extensions: Extension[],
 	ctx: ExtensionContext,
 	event: UserBashEvent,
 	emitError: EmitExtensionError,
 ): Promise<UserBashEventResult | undefined> {
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("user_bash");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "user_bash")) {
 		for (const handler of handlers) {
 			try {
 				const handlerResult = await runCallback(
 					{ kind: "extension.hook", name: event.type, sourcePath: ext.path },
 					() => handler(event, ctx),
 				);
-				if (handlerResult) return handlerResult as UserBashEventResult;
+				if (handlerResult === undefined) continue;
+				if (!isUserBashEventResult(handlerResult)) {
+					throw new Error(
+						"Invalid user_bash handler result: return undefined for local execution or exactly one valid { operations } or { result } object",
+					);
+				}
+				return handlerResult;
 			} catch (error) {
 				emitCaughtError(emitError, ext.path, "user_bash", error);
+				throw error;
 			}
 		}
 	}
@@ -291,10 +319,7 @@ export async function runContextHandlers(
 ): Promise<AgentMessage[]> {
 	let currentMessages = structuredClone(messages);
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("context");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "context")) {
 		for (const handler of handlers) {
 			try {
 				const event: ContextEvent = { type: "context", messages: currentMessages };
@@ -322,10 +347,7 @@ export async function runBeforeProviderRequestHandlers(
 ): Promise<unknown> {
 	let currentPayload = payload;
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("before_provider_request");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "before_provider_request")) {
 		for (const handler of handlers) {
 			try {
 				const event: BeforeProviderRequestEvent = { type: "before_provider_request", payload: currentPayload };
@@ -349,30 +371,27 @@ export async function runBeforeAgentStartHandlers(
 	assertActive: () => void,
 	prompt: string,
 	images: ImageContent[] | undefined,
-	systemPrompt: string,
-	systemPromptOptions: BuildSystemPromptOptions,
+	baseOptions: BuildSystemPromptOptions,
 	emitError: EmitExtensionError,
-): Promise<BeforeAgentStartCombinedResult | undefined> {
-	let currentSystemPrompt = systemPrompt;
+): Promise<BeforeAgentStartCombinedResult> {
+	const systemPromptOptions = normalizeBuildSystemPromptOptions(baseOptions);
 	const ctx = Object.defineProperties({}, Object.getOwnPropertyDescriptors(baseCtx)) as ExtensionContext;
 	ctx.getSystemPrompt = () => {
 		assertActive();
-		return currentSystemPrompt;
+		return buildSystemPrompt(systemPromptOptions);
 	};
 	const messages: NonNullable<BeforeAgentStartEventResult["message"]>[] = [];
-	let systemPromptModified = false;
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("before_agent_start");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "before_agent_start")) {
 		for (const handler of handlers) {
 			try {
 				const event: BeforeAgentStartEvent = {
 					type: "before_agent_start",
 					prompt,
 					images,
-					systemPrompt: currentSystemPrompt,
+					get systemPrompt() {
+						return buildSystemPrompt(systemPromptOptions);
+					},
 					systemPromptOptions,
 				};
 				const handlerResult = await runCallback(
@@ -384,8 +403,7 @@ export async function runBeforeAgentStartHandlers(
 				const result = handlerResult as BeforeAgentStartEventResult;
 				if (result.message) messages.push(result.message);
 				if (result.systemPrompt !== undefined) {
-					currentSystemPrompt = result.systemPrompt;
-					systemPromptModified = true;
+					systemPromptOptions.forceSystemPrompt = result.systemPrompt;
 				}
 			} catch (error) {
 				emitCaughtError(emitError, ext.path, "before_agent_start", error);
@@ -393,12 +411,7 @@ export async function runBeforeAgentStartHandlers(
 		}
 	}
 
-	return messages.length > 0 || systemPromptModified
-		? {
-				messages: messages.length > 0 ? messages : undefined,
-				systemPrompt: systemPromptModified ? currentSystemPrompt : undefined,
-			}
-		: undefined;
+	return { messages, systemPromptOptions };
 }
 
 export async function runResourcesDiscoverHandlers(
@@ -412,10 +425,7 @@ export async function runResourcesDiscoverHandlers(
 	const promptPaths: ResourcesDiscoverCombinedResult["promptPaths"] = [];
 	const themePaths: ResourcesDiscoverCombinedResult["themePaths"] = [];
 
-	for (const ext of extensions) {
-		const handlers = ext.handlers.get("resources_discover");
-		if (!handlers || handlers.length === 0) continue;
-
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "resources_discover")) {
 		for (const handler of handlers) {
 			try {
 				const event: ResourcesDiscoverEvent = { type: "resources_discover", cwd, reason };
@@ -452,8 +462,8 @@ export async function runInputHandlers(
 	let currentText = text;
 	let currentImages = images;
 
-	for (const ext of extensions) {
-		for (const handler of ext.handlers.get("input") ?? []) {
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "input")) {
+		for (const handler of handlers) {
 			try {
 				const event: InputEvent = {
 					type: "input",

@@ -5,6 +5,7 @@ import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dis
 import { SettingsManager } from "./settings-manager-core.ts";
 import { settingsInternals } from "./settings-manager-internals.ts";
 import type { CompactionModelOverride, CompactionSettings, TransportSetting } from "./settings-types.ts";
+import { CACHE_WARMING_MODES, type CacheWarmingMode } from "./settings-types.ts";
 
 type CompactionModel = Pick<Model<string>, "provider" | "id">;
 
@@ -36,6 +37,8 @@ function resolveCompactionSetting(
 }
 
 interface SettingsManagerBasicAccessors {
+	getCacheWarmingMode(): CacheWarmingMode;
+	setCacheWarmingMode(mode: CacheWarmingMode): void;
 	getLastChangelogVersion(): string | undefined;
 	setLastChangelogVersion(version: string): void;
 	getFirstRunOnboardingStartedVersion(): string | undefined;
@@ -112,6 +115,16 @@ declare module "./settings-manager-core.ts" {
 }
 
 const basicAccessors: SettingsManagerBasicAccessors = {
+	getCacheWarmingMode() {
+		const mode = settingsInternals(this).globalSettings.cacheWarming;
+		return mode !== undefined && CACHE_WARMING_MODES.includes(mode) ? mode : "streaming";
+	},
+	setCacheWarmingMode(mode) {
+		const state = settingsInternals(this);
+		state.globalSettings.cacheWarming = mode;
+		state.markModified("cacheWarming");
+		state.save();
+	},
 	getLastChangelogVersion() {
 		return settingsInternals(this).settings.lastChangelogVersion;
 	},

@@ -5,6 +5,7 @@ import { stream as streamOpenAICompletions } from "../src/api/openai-completions
 import { stream as streamOpenAIResponses } from "../src/api/openai-responses.ts";
 import { getModels } from "../src/compat.ts";
 import type { Context, Model } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 const context: Context = {
 	messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
@@ -103,19 +104,19 @@ async function captureRequestHeaders(
 	};
 
 	if (api === "anthropic-messages") {
-		await streamAnthropic(model as Model<"anthropic-messages">, context, {
+		await streamAnthropic(model as Model<"anthropic-messages">, normalizeContext(context), {
 			apiKey,
 			headers: optionsHeaders,
 			fetch: fetchStub,
 		}).result();
 	} else if (api === "openai-completions") {
-		await streamOpenAICompletions(model as Model<"openai-completions">, context, {
+		await streamOpenAICompletions(model as Model<"openai-completions">, normalizeContext(context), {
 			apiKey,
 			headers: optionsHeaders,
 			fetch: fetchStub,
 		}).result();
 	} else {
-		await streamOpenAIResponses(model as Model<"openai-responses">, context, {
+		await streamOpenAIResponses(model as Model<"openai-responses">, normalizeContext(context), {
 			apiKey,
 			headers: optionsHeaders,
 			fetch: fetchStub,

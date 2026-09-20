@@ -128,7 +128,7 @@ export function messageIsLlmVisible(
 	message: AgentMessage,
 	deletedBlockIndexes: ReadonlySet<number> = new Set<number>(),
 ): boolean {
-	if (message.role === "assistant" || message.role === "toolResult") return true;
+	if (message.role === "system" || message.role === "assistant" || message.role === "toolResult") return true;
 	return messageStartsLlmUserTurn(message, deletedBlockIndexes);
 }
 
@@ -324,6 +324,11 @@ export function repairOrphanToolResults<TMessage extends AgentMessage>(
 		pendingToolCalls = [];
 	};
 	for (const message of messages) {
+		// Instruction/tool updates never close a pending tool batch.
+		if (message.role === "system") {
+			repaired.push(message);
+			continue;
+		}
 		if (message.role === "assistant") {
 			flushUnanswered();
 			const announcedToolCalls = collectAssistantToolCalls(message);
@@ -393,6 +398,8 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 					if (!Array.isArray(m.content)) return m;
 					return { ...m, content: filterUserLikeContentBlocks(m.content) } as Message;
 				}
+				case "system":
+					return m;
 				case "assistant":
 				case "toolResult":
 					return m;

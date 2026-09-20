@@ -13,7 +13,6 @@ import type { ExtensionAPI } from "@bastani/atomic";
 import {
 	type Api,
 	type AssistantMessageEventStream,
-	type Context,
 	createAssistantMessageEventStream,
 	type Model,
 	type OAuthCredentials,
@@ -22,6 +21,7 @@ import {
 	streamSimpleAnthropic,
 	streamSimpleOpenAIResponses,
 	type ThinkingLevelMap,
+	type TranscriptContext,
 } from "@bastani/pi-ai/compat";
 
 // =============================================================================
@@ -312,7 +312,7 @@ async function refreshGitLabToken(
 
 export function streamGitLabDuo(
 	model: Model<Api>,
-	context: Context,
+	context: TranscriptContext,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();

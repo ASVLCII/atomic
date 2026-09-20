@@ -52,17 +52,19 @@ function findSectionEnd(prompt: string, startIndex: number, nextHeaders: string[
 }
 
 export function stripProjectContext(prompt: string): string {
-	const startIndex = prompt.indexOf(PROJECT_CONTEXT_HEADER);
-	if (startIndex === -1) return prompt;
-	const endIndex = findSectionEnd(prompt, startIndex + PROJECT_CONTEXT_HEADER.length, [SKILLS_HEADER, DATE_HEADER]);
-	return `${prompt.slice(0, startIndex)}${prompt.slice(endIndex)}`;
+	const tagged = prompt.replace(/\n*<project_context>[\s\S]*?<\/project_context>\n*/g, "\n");
+	const startIndex = tagged.indexOf(PROJECT_CONTEXT_HEADER);
+	if (startIndex === -1) return tagged;
+	const endIndex = findSectionEnd(tagged, startIndex + PROJECT_CONTEXT_HEADER.length, [SKILLS_HEADER, DATE_HEADER]);
+	return `${tagged.slice(0, startIndex)}${tagged.slice(endIndex)}`;
 }
 
 export function stripInheritedSkills(prompt: string): string {
-	const startIndex = prompt.indexOf(SKILLS_HEADER);
-	if (startIndex === -1) return prompt;
-	const endIndex = findSectionEnd(prompt, startIndex + SKILLS_HEADER.length, [DATE_HEADER]);
-	return `${prompt.slice(0, startIndex)}${prompt.slice(endIndex)}`;
+	const tagged = prompt.replace(/\n*<skills>[\s\S]*?<\/skills>\n*/g, "\n");
+	const startIndex = tagged.indexOf(SKILLS_HEADER);
+	if (startIndex === -1) return tagged;
+	const endIndex = findSectionEnd(tagged, startIndex + SKILLS_HEADER.length, [DATE_HEADER]);
+	return `${tagged.slice(0, startIndex)}${tagged.slice(endIndex)}`;
 }
 
 export function stripSubagentOrchestrationSkill(prompt: string): string {

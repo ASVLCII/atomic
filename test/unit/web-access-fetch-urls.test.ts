@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@bastani/atomic";
-import { validateToolArguments } from "@bastani/pi-ai";
+import { type JsonObject, validateToolArguments } from "@bastani/pi-ai";
 import { Value } from "typebox/value";
 import { test, vi } from "vitest";
 
@@ -56,7 +56,7 @@ function capture(register: (pi: ExtensionAPI) => void): ToolDefinition {
 		registerTool: (tool) => {
 			tools.push(tool);
 		},
-		on: () => {},
+		on: () => () => {},
 		registerShortcut: () => {},
 		registerCommand: () => {},
 		appendEntry: () => {},
@@ -94,7 +94,7 @@ for (const [name, register] of Object.entries(registrations)) {
 			"properties" in parameters && typeof parameters.properties === "object" && parameters.properties !== null,
 		);
 		assert.equal("url" in parameters.properties, false);
-		for (const input of [
+		const invalidInputs: JsonObject[] = [
 			{},
 			{ url: "https://example.com" },
 			{ URLs: ["https://example.com"] },
@@ -103,7 +103,8 @@ for (const [name, register] of Object.entries(registrations)) {
 			{ urls: [{ url: "https://example.com" }] },
 			{ urls: [""] },
 			{ urls: ["https://example.com"], url: "https://other.example" },
-		]) {
+		];
+		for (const input of invalidInputs) {
 			assert.equal(Value.Check(parameters, input), false, JSON.stringify(input));
 			if (typeof input.urls !== "string") {
 				const tool = register();
@@ -186,7 +187,7 @@ test("fetch_content exposes retained excerpts when every extraction reports an e
 	for (const firstContent of ["", "First retained excerpt"]) {
 		fetchAllContent.mockResolvedValueOnce([
 			{ url: urls[0], title: "", content: firstContent, error: "Incomplete extraction" },
-			{ url: urls[1], title: "", content: "Retained evidence " + "x".repeat(1100), error: "Incomplete extraction" },
+			{ url: urls[1], title: "", content: `Retained evidence ${"x".repeat(1100)}`, error: "Incomplete extraction" },
 		]);
 		const result = await registrations
 			.heavy()

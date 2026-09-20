@@ -1,6 +1,11 @@
 /** Offline terminal fixture for the actual registered subagent launch/kill/wait tools. */
 import type { ExtensionAPI } from "@bastani/atomic";
-import { type AssistantMessage, createAssistantMessageEventStream } from "@bastani/pi-ai/compat";
+import {
+	type AssistantMessage,
+	createAssistantMessageEventStream,
+	getCurrentSystemPrompt,
+	type JsonObject,
+} from "@bastani/pi-ai/compat";
 
 export default function (pi: ExtensionAPI): void {
 	let taskId: string | undefined;
@@ -48,7 +53,10 @@ export default function (pi: ExtensionAPI): void {
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
 			};
-			if (text.includes("HOLD_KILL_FIXTURE_CHILD") && context.systemPrompt?.includes("You are a child subagent")) {
+			if (
+				text.includes("HOLD_KILL_FIXTURE_CHILD") &&
+				getCurrentSystemPrompt(context.messages).includes("You are a child subagent")
+			) {
 				const abort = () => {
 					output.stopReason = "aborted";
 					stream.push({ type: "error", reason: "aborted", error: output });
@@ -67,7 +75,8 @@ export default function (pi: ExtensionAPI): void {
 				if (match) taskId = match[1];
 				output.content = [{ type: "text", text: `Fixture receipt: ${resultText}` }];
 			} else {
-				const args =
+				const target: JsonObject = taskId === undefined ? {} : { id: taskId };
+				const args: JsonObject | undefined =
 					text === "launch-child"
 						? {
 								agent: "worker",
@@ -79,13 +88,13 @@ export default function (pi: ExtensionAPI): void {
 								progress: false,
 							}
 						: text === "kill-child"
-							? { action: "kill", id: taskId }
+							? { action: "kill", ...target }
 							: text === "wait-child"
-								? { action: "wait", id: taskId }
+								? { action: "wait", ...target }
 								: text === "status-child"
-									? { action: "status", id: taskId }
+									? { action: "status", ...target }
 									: text === "old-command"
-										? { action: "interrupt", id: taskId }
+										? { action: "interrupt", ...target }
 										: undefined;
 				output.content = args
 					? [{ type: "toolCall", id: `fixture-${Date.now()}`, name: "subagent", arguments: args }]

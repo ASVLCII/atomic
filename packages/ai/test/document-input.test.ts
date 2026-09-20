@@ -4,6 +4,7 @@ import { stream as streamBedrock } from "../src/api/bedrock-converse-stream.ts";
 import { getModel, streamSimple } from "../src/compat.ts";
 import type { Context, DocumentContent, Message, Model } from "../src/types.ts";
 import { estimateMessageTokens } from "../src/utils/estimate.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * PDF document input.
@@ -67,7 +68,7 @@ interface AnthropicBlock {
 
 async function captureAnthropicPayload(model: Model<"anthropic-messages">, context: Context) {
 	let captured: { messages?: Array<{ content: string | AnthropicBlock[] }> } | undefined;
-	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, context, {
+	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, normalizeContext(context), {
 		apiKey: "fake-key",
 		onPayload: (payload) => {
 			captured = payload as typeof captured;
@@ -86,7 +87,7 @@ interface BedrockBlock {
 
 async function captureBedrockPayload(model: Model<"bedrock-converse-stream">, context: Context) {
 	let captured: { messages?: Array<{ content: BedrockBlock[] }> } | undefined;
-	const s = streamBedrock(model, context, {
+	const s = streamBedrock(model, normalizeContext(context), {
 		onPayload: (payload) => {
 			captured = payload as typeof captured;
 			throw new PayloadCaptured();
@@ -221,7 +222,7 @@ describe("a document media type neither serializer implements is rejected", () =
 	it("rejects it on the Anthropic Messages path, naming the value", async () => {
 		const s = streamAnthropic(
 			{ ...getModel("anthropic", "claude-fable-5-1"), baseUrl: "http://127.0.0.1:9" },
-			mislabelledDocumentContext("text/plain"),
+			normalizeContext(mislabelledDocumentContext("text/plain")),
 			{ apiKey: "fake-key" },
 		);
 
@@ -235,7 +236,7 @@ describe("a document media type neither serializer implements is rejected", () =
 	it("rejects it on the Bedrock Converse path, naming the value", async () => {
 		const s = streamBedrock(
 			getModel("amazon-bedrock", "global.anthropic.claude-fable-5-1"),
-			mislabelledDocumentContext("text/plain"),
+			normalizeContext(mislabelledDocumentContext("text/plain")),
 			{},
 		);
 		for await (const event of s) {

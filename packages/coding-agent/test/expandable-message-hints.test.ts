@@ -1,4 +1,4 @@
-import { getKeybindings, setKeybindings, type TUI } from "@earendil-works/pi-tui";
+import { getKeybindings, setKeybindings, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { renderTodoResult } from "../src/core/tools/todos-render.ts";
@@ -23,6 +23,33 @@ function bashTui(): TUI {
 		removeInterval: () => {},
 		requestRender: () => {},
 	} as unknown as TUI;
+}
+
+type CollapsibleSummary =
+	| SkillInvocationMessageComponent
+	| BranchSummaryMessageComponent
+	| CompactionBoundaryMessageComponent;
+
+function clickCollapsible(
+	target: CollapsibleSummary,
+	button: TuiMouseEvent["button"] = "left",
+): ReturnType<CollapsibleSummary["handleMouse"]> {
+	const width = 120;
+	const lines = target.render(width);
+	return target.handleMouse({
+		type: "click",
+		button,
+		x: 1,
+		y: 1,
+		screenX: 1,
+		screenY: 1,
+		width,
+		height: lines.length,
+		shift: false,
+		alt: false,
+		ctrl: false,
+		clickCount: 1,
+	});
 }
 
 beforeAll(() => initTheme("dark"));
@@ -97,5 +124,47 @@ describe("unbound expandable message hints", () => {
 		const collapsedTodo = stripAnsi(todo.render(120).join("\n"));
 		expect(collapsedTodo).toContain("Investigate");
 		noExpandAffordance(collapsedTodo);
+	});
+});
+
+describe("collapsible summary click toggles", () => {
+	test("skill, branch, and compaction summaries expand and collapse on left click", () => {
+		const skill = new SkillInvocationMessageComponent({
+			name: "tmux",
+			location: "/tmp/tmux/SKILL.md",
+			content: "skill body",
+		});
+		const branch = new BranchSummaryMessageComponent({
+			role: "branchSummary",
+			summary: "branch body",
+			fromId: "entry-1",
+		});
+		const compaction = new CompactionBoundaryMessageComponent({
+			text: "compacted body",
+			stats: {
+				linesBefore: 10,
+				linesDeleted: 5,
+				linesKept: 5,
+				rangeCount: 1,
+				tokensBefore: 100,
+				tokensAfter: 50,
+				percentReduction: 50,
+			},
+			rung: "planned",
+		});
+
+		for (const { target, body } of [
+			{ target: skill, body: "skill body" },
+			{ target: branch, body: "branch body" },
+			{ target: compaction, body: "compacted body" },
+		]) {
+			expect(stripAnsi(target.render(120).join("\n"))).not.toContain(body);
+			expect(clickCollapsible(target, "right")).toBeUndefined();
+			expect(stripAnsi(target.render(120).join("\n"))).not.toContain(body);
+			expect(clickCollapsible(target)?.handled).toBe(true);
+			expect(stripAnsi(target.render(120).join("\n"))).toContain(body);
+			expect(clickCollapsible(target)?.handled).toBe(true);
+			expect(stripAnsi(target.render(120).join("\n"))).not.toContain(body);
+		}
 	});
 });

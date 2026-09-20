@@ -62,7 +62,7 @@ describe("HTTP settings parity", () => {
 	});
 });
 
-test("models.json preserves deferredToolsMode and constructs configured Radius providers", async () => {
+test("models.json preserves mid-conversation tool compat and constructs configured Radius providers", async () => {
 	const dir = await tempDir();
 	const path = join(dir, "models.json");
 	await writeFile(
@@ -73,7 +73,7 @@ test("models.json preserves deferredToolsMode and constructs configured Radius p
 					baseUrl: "https://kimi.example/v1",
 					apiKey: "key",
 					api: "openai-completions",
-					compat: { deferredToolsMode: "kimi" },
+					compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolAdditions: true },
 					models: [{ id: "moonshot" }],
 				},
 				corporate: { name: "Corporate Radius", baseUrl: "https://radius.example/v1", oauth: "radius" },
@@ -82,7 +82,8 @@ test("models.json preserves deferredToolsMode and constructs configured Radius p
 	);
 	const runtime = await ModelRuntime.create({ modelsPath: path });
 	const compat = runtime.getModels("kimi")[0]?.compat as OpenAICompletionsCompat | undefined;
-	assert.equal(compat?.deferredToolsMode, "kimi");
+	assert.equal(compat?.supportsMidConvoSystemMessages, true);
+	assert.equal(compat?.supportsMidConvoToolAdditions, true);
 	const radius = runtime.getProvider("corporate");
 	assert.equal(radius?.id, "corporate");
 	assert.equal(radius?.name, "Corporate Radius");

@@ -4,6 +4,7 @@ import { type BedrockOptions, stream as streamBedrock } from "../src/api/bedrock
 import { type OpenAICompletionsOptions, stream as streamCompletions } from "../src/api/openai-completions.ts";
 import { getModel, getModels, getProviders } from "../src/compat.ts";
 import type { Api, Context, Model, Tool } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * Forced tool choice on Claude Fable 5.1.
@@ -55,7 +56,7 @@ async function captureAnthropicPayload(
 ): Promise<ToolChoicePayload> {
 	let capturedPayload: ToolChoicePayload | undefined;
 
-	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, makeContext(), {
+	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, normalizeContext(makeContext()), {
 		apiKey: "fake-key",
 		toolChoice,
 		onPayload: (payload) => {
@@ -77,7 +78,7 @@ async function anthropicErrorMessage(
 	model: Model<"anthropic-messages">,
 	toolChoice: AnthropicOptions["toolChoice"],
 ): Promise<string> {
-	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, makeContext(), {
+	const s = streamAnthropic({ ...model, baseUrl: "http://127.0.0.1:9" }, normalizeContext(makeContext()), {
 		apiKey: "fake-key",
 		toolChoice,
 	});
@@ -94,7 +95,7 @@ async function captureBedrockPayload(
 	toolChoice: BedrockOptions["toolChoice"],
 ): Promise<BedrockToolConfigPayload> {
 	let capturedPayload: BedrockToolConfigPayload | undefined;
-	const s = streamBedrock(model, makeContext(), {
+	const s = streamBedrock(model, normalizeContext(makeContext()), {
 		toolChoice,
 		onPayload: (payload) => {
 			capturedPayload = payload as BedrockToolConfigPayload;
@@ -117,7 +118,7 @@ async function bedrockErrorMessage(
 	toolChoice: BedrockOptions["toolChoice"],
 	tools: Tool[] | undefined = [testTool],
 ): Promise<string> {
-	const s = streamBedrock(model, makeContext(tools), { toolChoice });
+	const s = streamBedrock(model, normalizeContext(makeContext(tools)), { toolChoice });
 	for await (const event of s) {
 		if (event.type === "error") break;
 	}
@@ -135,7 +136,7 @@ async function captureCompletionsPayload(
 ): Promise<CompletionsToolChoicePayload> {
 	let capturedPayload: CompletionsToolChoicePayload | undefined;
 
-	const s = streamCompletions({ ...model, baseUrl: "http://127.0.0.1:9/v1" }, makeContext(), {
+	const s = streamCompletions({ ...model, baseUrl: "http://127.0.0.1:9/v1" }, normalizeContext(makeContext()), {
 		apiKey: "fake-key",
 		toolChoice,
 		onPayload: (payload) => {
@@ -156,7 +157,7 @@ async function completionsErrorMessage(
 	model: Model<"openai-completions">,
 	toolChoice: OpenAICompletionsOptions["toolChoice"],
 ): Promise<string> {
-	const s = streamCompletions({ ...model, baseUrl: "http://127.0.0.1:9/v1" }, makeContext(), {
+	const s = streamCompletions({ ...model, baseUrl: "http://127.0.0.1:9/v1" }, normalizeContext(makeContext()), {
 		apiKey: "fake-key",
 		toolChoice,
 	});

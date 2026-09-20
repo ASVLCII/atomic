@@ -2,7 +2,7 @@
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CreateAgentSessionOptions, ExtensionAPI } from "@bastani/atomic";
-import { type AssistantMessage, createAssistantMessageEventStream } from "@bastani/pi-ai/compat";
+import { type AssistantMessage, createAssistantMessageEventStream, type JsonObject } from "@bastani/pi-ai/compat";
 import { Type } from "typebox";
 
 export default function (pi: ExtensionAPI): void {
@@ -78,9 +78,7 @@ export default function (pi: ExtensionAPI): void {
 			}
 			const command = /^fixture-call (.+)$/.exec(text)?.[1];
 			const request =
-				command === undefined
-					? undefined
-					: (JSON.parse(command) as { name: string; arguments: Record<string, unknown> });
+				command === undefined ? undefined : (JSON.parse(command) as { name: string; arguments: JsonObject });
 			const isHold = text === "fixture-hold";
 			const content: AssistantMessage["content"] = request
 				? [{ type: "toolCall", id: `fixture-${Date.now()}`, name: request.name, arguments: request.arguments }]

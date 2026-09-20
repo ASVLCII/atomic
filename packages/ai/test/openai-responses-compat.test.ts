@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stream as streamOpenAIResponses } from "../src/api/openai-responses.ts";
-import { getModel } from "../src/compat.ts";
+import { getModel, normalizeContext } from "../src/compat.ts";
 import type { Model } from "../src/types.ts";
 
 type CapturedHeaders = Headers | string[][] | Record<string, string | readonly string[] | undefined> | undefined;
@@ -56,10 +56,10 @@ async function captureOpenAIResponseHeaders(
 
 	const stream = streamOpenAIResponses(
 		model,
-		{
+		normalizeContext({
 			systemPrompt: "sys",
 			messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-		},
+		}),
 		{ apiKey: "test-key", ...options },
 	);
 
@@ -88,10 +88,10 @@ describe("openai-responses provider defaults", () => {
 
 		const stream = streamOpenAIResponses(
 			model,
-			{
+			normalizeContext({
 				systemPrompt: "sys",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				onPayload: (payload) => {
@@ -122,7 +122,7 @@ describe("openai-responses provider defaults", () => {
 
 		const stream = streamOpenAIResponses(
 			getModel("openai", "gpt-5.4"),
-			{
+			normalizeContext({
 				messages: [
 					{
 						role: "user",
@@ -137,7 +137,7 @@ describe("openai-responses provider defaults", () => {
 						parameters: Type.Object({ value: Type.String() }),
 					},
 				],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				toolChoice: "required",
@@ -170,7 +170,7 @@ describe("openai-responses provider defaults", () => {
 
 		const stream = streamOpenAIResponses(
 			model,
-			{
+			normalizeContext({
 				messages: [{ role: "user", content: "Use a tool.", timestamp: Date.now() }],
 				tools: [
 					{
@@ -188,7 +188,7 @@ describe("openai-responses provider defaults", () => {
 						constrainedSampling: { type: "json_schema", strict: "prefer" },
 					},
 				],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				onPayload: (payload) => {
@@ -232,10 +232,10 @@ describe("openai-responses provider defaults", () => {
 
 		const stream = streamOpenAIResponses(
 			model,
-			{
+			normalizeContext({
 				systemPrompt: "sys",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				onPayload: (payload) => {
@@ -268,10 +268,10 @@ describe("openai-responses provider defaults", () => {
 
 			const stream = streamOpenAIResponses(
 				model,
-				{
+				normalizeContext({
 					systemPrompt: "sys",
 					messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-				},
+				}),
 				{
 					apiKey: "test-key",
 					onPayload: (payload) => {
@@ -309,10 +309,10 @@ describe("openai-responses provider defaults", () => {
 
 		const stream = streamOpenAIResponses(
 			getModel("openai", "gpt-5.4"),
-			{
+			normalizeContext({
 				systemPrompt: "sys",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				sessionId,
@@ -511,10 +511,10 @@ describe("openai-responses provider defaults", () => {
 
 		const stream = streamOpenAIResponses(
 			model,
-			{
+			normalizeContext({
 				systemPrompt: "sys",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-			},
+			}),
 			{ apiKey: "test-key", serviceTier },
 		);
 
@@ -558,7 +558,7 @@ describe("openai-responses provider defaults", () => {
 		// `Models`/`ModelRuntime` caller relies on (the `*Simple` whitelist drops the option).
 		const stream = streamOpenAIResponses(
 			fast,
-			{ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
+			normalizeContext({ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] }),
 			{ apiKey: "test-key" },
 		);
 		const result = await stream.result();
@@ -622,7 +622,10 @@ describe("openai-responses provider defaults", () => {
 
 			const result = await streamOpenAIResponses(
 				copilotFast,
-				{ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
+				normalizeContext({
+					systemPrompt: "sys",
+					messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
+				}),
 				{ apiKey: "test-key", serviceTier: requested },
 			).result();
 
@@ -648,7 +651,7 @@ describe("openai-responses provider defaults", () => {
 
 		const result = await streamOpenAIResponses(
 			fast,
-			{ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
+			normalizeContext({ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] }),
 			{ apiKey: "test-key", onPayload: () => replacement as never },
 		).result();
 
@@ -694,7 +697,7 @@ describe("openai-responses provider defaults", () => {
 
 		const result = await streamOpenAIResponses(
 			model,
-			{ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
+			normalizeContext({ systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: Date.now() }] }),
 			{ apiKey: "test-key", serviceTier: requested },
 		).result();
 
@@ -721,10 +724,10 @@ describe("openai-responses max_output_tokens compat", () => {
 
 		const stream = streamOpenAIResponses(
 			getModel("openai", "gpt-5.4"),
-			{
+			normalizeContext({
 				systemPrompt: "sys",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				maxTokens: 1024,
@@ -758,10 +761,10 @@ describe("openai-responses max_output_tokens compat", () => {
 
 		const stream = streamOpenAIResponses(
 			model,
-			{
+			normalizeContext({
 				systemPrompt: "sys",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-			},
+			}),
 			{
 				apiKey: "test-key",
 				maxTokens: 1024,

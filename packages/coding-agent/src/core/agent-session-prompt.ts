@@ -22,6 +22,15 @@ import { getSkillCatalog } from "./skill-catalog.ts";
 
 type UserMessageDeliveryAction = "prompt" | "steer" | "followUp" | "handled";
 
+function assistantHasRecoverableOutput(message: AgentMessage): boolean {
+	if (message.role !== "assistant") return false;
+	return message.content.some((block) => {
+		if (block.type === "text") return block.text.length > 0;
+		if (block.type === "thinking") return block.thinking.length > 0;
+		return true;
+	});
+}
+
 type PromptOptionsWithWorkflowDelivery = PromptOptions & {
 	readonly __workflowDelivery?: {
 		readonly beforeDelivery?: () => void;
@@ -49,6 +58,7 @@ export async function prompt(this: AgentSession, text: string, options?: PromptO
 }
 
 async function admittedPrompt(this: AgentSession, text: string, options?: PromptOptions): Promise<void> {
+	if (this._activePromptCount === 0 && !this.isStreaming) this._agentRunAbortRequested = false;
 	this._activePromptCount += 1;
 	try {
 		await promptInternal.call(this, text, options);
@@ -229,13 +239,21 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 		this._pendingNextTurnMessages = [];
 
 		// Emit before_agent_start extension event
-		const result = await this._extensionRunner.emitBeforeAgentStart(
+		const selectedToolsBefore = this._baseSystemPromptOptions.selectedTools ?? [];
+		const emitted = await this._extensionRunner.emitBeforeAgentStart(
 			expandedText,
 			currentImages,
-			this._baseSystemPrompt,
 			this._baseSystemPromptOptions,
 		);
+		const result = emitted ?? { systemPromptOptions: this._baseSystemPromptOptions };
 		assertCurrent();
+		const nextTools = result.systemPromptOptions.selectedTools ?? selectedToolsBefore;
+		const handlerEditedTools =
+			nextTools.length !== selectedToolsBefore.length ||
+			nextTools.some((name, index) => name !== selectedToolsBefore[index]);
+		if (!handlerEditedTools && typeof this.getActiveToolNames === "function") {
+			result.systemPromptOptions.selectedTools = this.getActiveToolNames();
+		}
 		// Add all custom messages from extensions
 		if (result?.messages) {
 			for (const msg of result.messages) {
@@ -249,15 +267,9 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 				});
 			}
 		}
-		// Apply extension-modified system prompt, or reset to base
-		if (result?.systemPrompt !== undefined) {
-			this._systemPromptOverride = result.systemPrompt;
-			this.agent.state.systemPrompt = result.systemPrompt;
-		} else {
-			// Ensure we're using the base prompt (in case previous turn had modifications)
-			this._systemPromptOverride = undefined;
-			this.agent.state.systemPrompt = this._baseSystemPrompt;
-		}
+		const updateMessage = this._preparePromptAndToolLoadout(result.systemPromptOptions);
+		this._runSystemPromptOptions = result.systemPromptOptions;
+		if (updateMessage) messages.unshift(updateMessage);
 	} catch (error) {
 		preflightResult?.(false);
 		throw error;
@@ -285,6 +297,7 @@ export async function _runAgentPrompt(
 		}
 		return owner._runAgentPrompt(messages, promptStarted);
 	}
+	if (this._activePromptCount === 0 && !this.isStreaming) this._agentRunAbortRequested = false;
 	this._activePromptCount += 1;
 	try {
 		if (this._subagentMessageAdmission) {
@@ -293,6 +306,10 @@ export async function _runAgentPrompt(
 		}
 		const pendingPriority = preparePriorityContinuation(this);
 		if (pendingPriority) await pendingPriority;
+		if (this._agentRunAbortRequested) {
+			if (this.isStreaming || this._queuedMessagesPaused) return;
+			this._agentRunAbortRequested = false;
+		}
 		// An explicit stop may win during input preflight or priority preparation.
 		// Preserve the prepared input without opening a native turn past that gate.
 		if (this._queuedMessagesPaused) {
@@ -306,10 +323,22 @@ export async function _runAgentPrompt(
 		if (this.isStreaming) promptStarted?.();
 		await turn;
 		await this.waitForRetry();
+		if (
+			this._agentRunAbortRequested &&
+			!this._queuedMessagesPaused &&
+			this._protectedStreamingCustomMessages?.some((entry) => entry.phase === "queued")
+		) {
+			this._agentRunAbortRequested = false;
+		}
+		// Abort still has to answer a queued message already in the transcript.
+		// `_continueQueuedAgentMessages` skips remaining queue drains while abort
+		// is requested; skipping it entirely reintroduces issue #2362.
 		await this._continueQueuedAgentMessages();
+		if (this._agentRunAbortRequested) return;
 		await this._awaitPendingPostCompactionContinuation();
 	} finally {
-		this._systemPromptOverride = undefined;
+		this._runSystemPromptOptions = undefined;
+		this._cacheWarmer?.onAgentSettled();
 		await this._agentEventQueue;
 		this._flushPendingCustomMessages();
 		if (typeof this._extensionRunner?.emit === "function") {
@@ -337,6 +366,7 @@ async function settleSubagentMessages(session: AgentSession): Promise<void> {
 }
 
 export async function _runAgentContinue(this: AgentSession): Promise<void> {
+	if (this._agentRunAbortRequested) return;
 	await this.agent.continue();
 	await this.waitForRetry();
 	await this._continueQueuedAgentMessages();
@@ -370,11 +400,23 @@ export async function _continueQueuedAgentMessages(this: AgentSession): Promise<
 	await this._agentEventQueue;
 	await preparePriorityContinuation(this);
 
-	while (!this._stopAfterTurnBlockedContinuation && !this._queuedMessagesPaused && this.agent.hasQueuedMessages()) {
-		await this.agent.continue();
-		await this.waitForRetry();
-		await this._agentEventQueue;
-		await preparePriorityContinuation(this);
+	if (
+		!this._agentRunAbortRequested &&
+		!this._stopAfterTurnBlockedContinuation &&
+		!this._queuedMessagesPaused &&
+		this.agent.hasQueuedMessages()
+	) {
+		while (
+			!this._agentRunAbortRequested &&
+			!this._stopAfterTurnBlockedContinuation &&
+			!this._queuedMessagesPaused &&
+			this.agent.hasQueuedMessages()
+		) {
+			await this.agent.continue();
+			await this.waitForRetry();
+			await this._agentEventQueue;
+			await preparePriorityContinuation(this);
+		}
 	}
 	if (this._stopAfterTurnBlockedContinuation) return;
 
@@ -413,16 +455,18 @@ async function answerAdmittedQueuedMessage(session: AgentSession): Promise<void>
 	}
 
 	const messages = session.agent.state.messages;
-	const reply = messages[messages.length - 1];
+	let replyIndex = messages.length - 1;
+	while (replyIndex >= 0 && messages[replyIndex]?.role === "system") replyIndex--;
+	const reply = messages[replyIndex];
 	// Only an interrupt that produced nothing is recoverable. A partially streamed
 	// reply already answered the message; restarting it would duplicate output.
-	if (reply?.role !== "assistant" || reply.stopReason !== "aborted" || reply.content.length > 0) return;
-	const message = messages[messages.length - 2];
+	if (reply?.role !== "assistant" || reply.stopReason !== "aborted" || assistantHasRecoverableOutput(reply)) return;
+	const message = messages[replyIndex - 1];
 	if (message?.role !== "user" || session._getUserMessageText(message) !== admitted) return;
 
 	// Drop the empty aborted reply from agent state so `continue()` resumes from the
 	// admitted user message. The session history keeps it, as the retry paths do.
-	session.agent.state.messages = messages.slice(0, -1);
+	session.agent.state.messages = [...messages.slice(0, replyIndex), ...messages.slice(replyIndex + 1)];
 	// Publish this turn before it starts. It begins after the pause abort boundary
 	// resolves, so a submission that only waited for that boundary would race it
 	// and be rejected by the streaming guard while the queue is still paused.

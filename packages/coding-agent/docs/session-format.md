@@ -63,7 +63,7 @@ interface ToolCall {
   type: "toolCall";
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  arguments: JsonObject;
 }
 ```
 
@@ -72,6 +72,15 @@ interface ToolCall {
 ### Base Message Types (from `@bastani/pi-ai`)
 
 ```typescript
+interface SystemMessage {
+  role: "system";
+  content: string | TextContent[];
+  sections?: Record<string, string | null>;
+  toolsAdded?: Tool[];
+  toolsRemoved?: ToolReference[];
+  timestamp: number;
+}
+
 interface UserMessage {
   role: "user";
   content: string | (TextContent | ImageContent)[];
@@ -95,7 +104,7 @@ interface ToolResultMessage {
   toolCallId: string;
   toolName: string;
   content: (TextContent | ImageContent)[];
-  details?: any;      // Tool-specific metadata
+  details?: JsonValue; // Tool-specific durable metadata
   isError: boolean;
   timestamp: number;
 }
@@ -117,6 +126,8 @@ interface Usage {
 ```
 
 The pi-ai `StopReason` type also includes `"pending"`, the reason a message carries while it is still streaming. The terminal event replaces it before the assistant message is written, so `"pending"` does not appear in session JSONL.
+
+System messages record prompt and tool changes in chronological order. Later `content` adds instructions, `sections` patches names (`null` deletes), and tool declarations add or remove availability. Resume and branch selection replay that branch's state. Compaction entries can contain a `systemMessage` checkpoint, replayed before the compacted transcript; system instructions are not offered to the deletion planner. Older sessions acquire a declaration on their next request, not merely when opened. Forced per-run prompts affect provider requests but are not written to the transcript.
 
 A process can stop after a `toolUse` assistant message reaches JSONL but before every corresponding `toolResult` is appended. Atomic does not rewrite that append-only history. When the inactive session is reopened, its derived context supplies an error result for each unanswered call before rendering, compaction, or another provider request. The error states that execution was interrupted and its result is unavailable; it does not claim the tool had no side effects. Orphaned and duplicate results are also removed from provider-bound derived context. The original JSONL remains the authoritative record of what was actually persisted.
 

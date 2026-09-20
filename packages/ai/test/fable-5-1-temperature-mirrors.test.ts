@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type BedrockOptions, stream as streamBedrock } from "../src/api/bedrock-converse-stream.ts";
 import { getModel, getModels, streamSimple } from "../src/compat.ts";
 import type { BedrockCompat, Context, Model, OpenAICompletionsCompat } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * Temperature suppression for Claude Fable 5.1 on the non-Anthropic-Messages mirrors.
@@ -41,7 +42,7 @@ async function captureBedrockPayload(
 	options?: BedrockOptions,
 ): Promise<BedrockTemperaturePayload> {
 	let capturedPayload: BedrockTemperaturePayload | undefined;
-	const s = streamBedrock(model, makeContext(), {
+	const s = streamBedrock(model, normalizeContext(makeContext()), {
 		...options,
 		onPayload: (payload) => {
 			capturedPayload = payload as BedrockTemperaturePayload;

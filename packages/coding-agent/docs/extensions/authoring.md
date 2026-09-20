@@ -390,11 +390,11 @@ pi.registerTool({
 
 ### Fireworks deferred tool loading
 
-Extensions making requests directly through `@bastani/pi-ai` can use native deferred tool loading with Fireworks `anthropic-messages` models. Supply the tool definitions in `context.tools` and record newly loaded tool names in the loader result's `addedToolNames` field. The provider serializes deferred definitions with `defer_loading` and inserts `tool_reference` content at the load point.
+Extensions making requests directly through `@bastani/pi-ai` can use native deferred tool loading with Fireworks `anthropic-messages` models. Keep the discovery tool in `context.tools`. After the discovery tool result, append a chronological system message with `toolsAdded` (and `toolsRemoved` if needed) containing the newly loaded tool definitions. The provider serializes deferred definitions with `defer_loading` and inserts `tool_reference` content at the load point.
 
 Name the loader `ToolSearch` or `tool_search` to keep deferred schemas out of the initial prompt prefix. Other names work, but Fireworks includes the schemas in the prefix and loses that cache benefit. Fireworks GLM models and Kimi K3 still use Chat Completions; this feature does not change their routing.
 
-This is an AI SDK capability. Atomic's `pi.setActiveTools()` updates the active tool list but does not automatically populate `addedToolNames`. See the [AI SDK deferred tool-loading guide](https://github.com/bastani-inc/atomic/blob/main/packages/ai/README.md#fireworks-deferred-tools) for details.
+This is an AI SDK capability. Atomic's `pi.setActiveTools()` updates the active tool list and records chronological system-message tool deltas for the next request; it does not attach tool names to a tool result. See the [AI SDK deferred tool-loading guide](https://github.com/bastani-inc/atomic/blob/main/packages/ai/README.md#fireworks-deferred-tools) for details.
 
 ### Overriding Built-in Tools
 

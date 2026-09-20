@@ -4,6 +4,7 @@ import type { OpenAICompletionsOptions } from "../src/api/openai-completions.ts"
 import { stream } from "../src/api/openai-completions.ts";
 import { getModel } from "../src/compat.ts";
 import type { Model } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 let headers: IncomingHttpHeaders;
 let path: string | undefined;
@@ -30,11 +31,11 @@ afterAll(async () => {
 
 async function request(options: OpenAICompletionsOptions = {}, overrides: Partial<Model<"openai-completions">> = {}) {
 	const model = { ...getModel("baseten", "zai-org/GLM-5.2"), ...overrides, baseUrl };
-	const result = await stream(
-		model,
-		{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
-		{ apiKey: "test", sessionId: "baseten-session", ...options },
-	).result();
+	const result = await stream(model, normalizeContext({ messages: [{ role: "user", content: "hi", timestamp: 0 }] }), {
+		apiKey: "test",
+		sessionId: "baseten-session",
+		...options,
+	}).result();
 	expect(result.stopReason).toBe("stop");
 	expect(path).toBe("/v1/chat/completions");
 	return headers;

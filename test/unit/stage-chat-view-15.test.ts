@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent, ChatMessageEntry, ToolDefinition } from "@bastani/atomic";
+import type { JsonObject } from "@bastani/pi-ai";
 import { getKeybindings, setKeybindings } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 import { afterEach, beforeEach, describe, test } from "vitest";
@@ -173,7 +174,7 @@ function subagentRenderSettings(toolOutputExpanded = false) {
 }
 
 function subagentToolCallMessages(mode: "single" | "parallel"): AgentSession["messages"] {
-	const args =
+	const args: JsonObject =
 		mode === "single"
 			? { agent: "worker", task: "fix spinner" }
 			: {

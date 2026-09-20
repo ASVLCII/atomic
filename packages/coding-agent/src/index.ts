@@ -1,4 +1,10 @@
 export type { ExtensionBindings } from "./core/agent-session-types.js";
+export {
+	CacheWarmer,
+	type CacheWarmingDecisionEvent,
+	type CacheWarmingDecisionEventResult,
+	type CacheWarmingStatus,
+} from "./core/cache-warmer.ts";
 export type {
 	HostDiagnostic,
 	HostInput,
@@ -8,6 +14,8 @@ export type {
 	QuestionnaireResult,
 	QuestionParams,
 } from "./core/extensions/host-input.js";
+export type { UsageEntry } from "./core/session-manager.ts";
+export { CACHE_WARMING_MODES, type CacheWarmingMode } from "./core/settings-manager.ts";
 // Internal trusted-host task integration (not model authority).
 export { AgentTaskHost, type AgentTaskHostBinding, type AgentTaskRunnerFactory } from "./core/tasks/agent-adapter.js";
 export type { AgentIntent, OperationId, TaskId, TaskResult, WaitPolicy } from "./core/tasks/contracts.js";
@@ -338,6 +346,7 @@ export {
 	type StructuredOutputRequest,
 	type StructuredOutputResult,
 } from "./core/structured-output/index.js";
+export type { NormalizedBuildSystemPromptOptions } from "./core/system-prompt.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Builtin tool definitions reusable by first-party extensions (e.g. workflows
 // invoking the structured ask_user_question UI deterministically).

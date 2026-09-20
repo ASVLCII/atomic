@@ -45,7 +45,7 @@ export type ChatMessageEntry =
 			toolName: string;
 			toolCallId: string;
 			args: unknown;
-			result?: ToolResultMessage;
+			result?: RenderableToolResult;
 			isPartial?: boolean;
 	  }
 	| { role: "tool"; kind: "bashExecution"; message: BashExecutionMessage; isPartial?: boolean }
@@ -433,12 +433,14 @@ function minimalAssistantMessage(): AssistantMessage {
 		stopReason: "stop",
 	} as unknown as AssistantMessage;
 }
+/** UI progress may contain in-memory details; only durable transcript results are JSON. */
+type RenderableToolResult = Omit<ToolResultMessage, "details"> & { details?: unknown };
 function toolResultFromUnknown(
 	result: unknown,
 	toolName: string,
 	toolCallId: string,
 	isError: boolean,
-): ToolResultMessage {
+): RenderableToolResult {
 	if (result !== null && typeof result === "object" && "content" in result) {
 		const candidate = result as { content?: unknown; details?: unknown };
 		const content = Array.isArray(candidate.content) ? candidate.content : [];

@@ -289,6 +289,7 @@ rm -rf "$runtime_deps_dir"
 bun run scripts/copy-runtime-dependencies.ts "$runtime_deps_dir"
 cp "$runtime_deps_dir/@earendil-works/pi-tui/dist/native-modifiers.js" "$shared_app_dir/native-modifiers.js"
 cp "$runtime_deps_dir/@earendil-works/pi-tui/dist/native-module-path.js" "$shared_app_dir/native-module-path.js"
+cp "$runtime_deps_dir/@earendil-works/pi-tui/dist/native-platform.js" "$shared_app_dir/native-platform.js"
 bun run scripts/assert-pi-runtime-assets.ts --node-modules "$runtime_deps_dir" --app "$shared_app_dir/app.js"
 clipboard_copy_args=()
 if [[ "$SKIP_DEPS" == "true" ]]; then
@@ -462,6 +463,7 @@ for platform in "${PLATFORMS[@]}"; do
     cp "$shared_app_dir/app.js" "binaries/$platform/"
     cp "$shared_app_dir/native-modifiers.js" "binaries/$platform/"
     cp "$shared_app_dir/native-module-path.js" "binaries/$platform/"
+    cp "$shared_app_dir/native-platform.js" "binaries/$platform/"
     cp "$shared_app_dir/image-resize-worker.js" "binaries/$platform/"
     cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "binaries/$platform/"
     mkdir -p "binaries/$platform/theme"
@@ -472,7 +474,7 @@ for platform in "${PLATFORMS[@]}"; do
     cp -r dist/builtin "binaries/$platform/"
     bun run ../../scripts/assert-builtin-set.ts "binaries/$platform/builtin"
     if console_arch="$(win32_console_mode_arch "$platform")"; then
-        console_src="../../node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-$console_arch/win32-console-mode.node"
+        console_src="../../node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-$console_arch/win32-platform.node"
         console_dst="binaries/$platform/native/win32/prebuilds/win32-$console_arch"
         if [ -f "$console_src" ]; then
             mkdir -p "$console_dst"

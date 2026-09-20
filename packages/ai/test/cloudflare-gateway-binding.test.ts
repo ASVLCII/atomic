@@ -7,6 +7,7 @@ import {
 } from "../src/api/cloudflare-gateway-binding.ts";
 import { streamSimple as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import type { Model } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 const BINDING_PREFIX = "https://workers-binding.ai/ai-gateway/gateways/my-gateway";
 const PASSTHROUGH_OPTIONS = { baseUrl: BINDING_PREFIX, gateway: "my-gateway" };
@@ -98,7 +99,7 @@ describe("createGatewayBindingFetch binding.fetch() passthrough", () => {
 
 		const result = await streamOpenAICompletions(
 			model,
-			{ messages: [{ role: "user", content: "hello", timestamp: 1 }] },
+			normalizeContext({ messages: [{ role: "user", content: "hello", timestamp: 1 }] }),
 			{
 				headers: {
 					"cf-aig-authorization": `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}`,

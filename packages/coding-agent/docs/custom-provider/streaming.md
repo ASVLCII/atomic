@@ -28,21 +28,26 @@ All providers follow the same pattern:
 import {
   type AssistantMessage,
   type AssistantMessageEventStream,
-  type Context,
   type Model,
   type SimpleStreamOptions,
+  type TranscriptContext,
   calculateCost,
   createAssistantMessageEventStream,
+  getCurrentSystemPrompt,
+  getCurrentTools,
 } from "@bastani/pi-ai";
 
 function streamMyProvider(
   model: Model<any>,
-  context: Context,
+  context: TranscriptContext,
   options?: SimpleStreamOptions
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream();
 
   (async () => {
+    const systemPrompt = getCurrentSystemPrompt(context.messages);
+    const tools = getCurrentTools(context.messages);
+    // Initialize output message
     // Initialize output message
     const output: AssistantMessage = {
       role: "assistant",

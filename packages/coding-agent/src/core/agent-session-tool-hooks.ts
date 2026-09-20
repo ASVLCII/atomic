@@ -1,8 +1,9 @@
+import { getCurrentSystemMessage, type SystemMessage } from "@bastani/pi-ai";
 import type { AgentLoopTurnUpdate, PrepareNextTurnContext } from "@earendil-works/pi-agent-core";
-
 import { normalizeToolResultImages } from "../utils/tool-result-images.js";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { assertToolPairingInvariant } from "./context-tool-pairing.js";
+import { normalizeBuildSystemPromptOptions } from "./system-prompt.ts";
 import { redirectOversizedToolResult } from "./tools/oversized-tool-result.js";
 
 export function _installAgentToolHooks(this: AgentSession): void {
@@ -121,7 +122,16 @@ export function _installAgentNextTurnRefresh(this: AgentSession): void {
 		// Last checkpoint before provider conversion: a structurally invalid context
 		// here becomes an unrecoverable provider 400, so surface it as an Atomic error.
 		assertToolPairingInvariant(guarded);
-		return guarded;
+		const forced = this._runSystemPromptOptions?.forceSystemPrompt ?? this._baseSystemPromptOptions.forceSystemPrompt;
+		if (forced === undefined) return guarded;
+		const current = getCurrentSystemMessage(guarded);
+		const head: SystemMessage = {
+			role: "system",
+			content: forced,
+			...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+			timestamp: current?.timestamp ?? Date.now(),
+		};
+		return [head, ...guarded.filter((message) => message.role !== "system")];
 	};
 
 	const prepareTurn = async (turn: PrepareNextTurnContext, signal?: AbortSignal): Promise<AgentLoopTurnUpdate> => {
@@ -134,15 +144,26 @@ export function _installAgentNextTurnRefresh(this: AgentSession): void {
 		const preparedTurn = compactedContext === turn.context ? turn : { ...turn, context: compactedContext };
 		const previousSnapshot = await previousPrepareNextTurnWithContext?.(preparedTurn, signal);
 		const previousContext = previousSnapshot?.context ?? compactedContext;
+		const runOptions = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
+		const options = normalizeBuildSystemPromptOptions({
+			...runOptions,
+			selectedModel: this.model,
+			selectedThinkingLevel: this.thinkingLevel,
+			selectedTools: this.getActiveToolNames(),
+			toolSnippets: { ...this._baseSystemPromptOptions.toolSnippets, ...runOptions.toolSnippets },
+			toolGuidelines: { ...this._baseSystemPromptOptions.toolGuidelines, ...runOptions.toolGuidelines },
+		});
+		const updateMessage = this._preparePromptAndToolLoadout(options, previousContext.messages);
+		this._runSystemPromptOptions = options;
 
 		return {
 			...previousSnapshot,
 			context: {
 				...previousContext,
 				messages: previousContext.messages,
-				systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
 				tools: this.agent.state.tools.slice(),
 			},
+			messages: updateMessage ? [...(previousSnapshot?.messages ?? []), updateMessage] : previousSnapshot?.messages,
 			model: this.agent.state.model,
 			thinkingLevel: this.agent.state.thinkingLevel,
 		};

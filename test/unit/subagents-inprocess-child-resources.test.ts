@@ -9,6 +9,7 @@ import {
 	type AssistantMessage,
 	createAssistantMessageEventStream,
 	type Model,
+	normalizeContext,
 	type ProviderHeaders,
 } from "@bastani/pi-ai";
 import { getModel } from "@bastani/pi-ai/compat";
@@ -263,7 +264,7 @@ describe("in-process child session resources", () => {
 			try {
 				const { session } = await createChildSession({ cwd, agentDir, model, modelRuntime });
 				try {
-					const stream = await session.agent.streamFunction(model, { messages: [] });
+					const stream = await session.agent.streamFunction(model, normalizeContext({ messages: [] }));
 					await stream.result();
 					assertCredentialRequest(requests[0]);
 				} finally {

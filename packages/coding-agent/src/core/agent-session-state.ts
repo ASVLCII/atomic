@@ -1,9 +1,16 @@
+import { getCurrentSystemMessage, type SystemMessage } from "@bastani/pi-ai";
 import type { Api, Model } from "@bastani/pi-ai/compat";
-import type { AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import type { ToolDefinition, ToolInfo } from "./extensions/index.js";
 import { getSkillCatalog } from "./skill-catalog.ts";
-import { buildSystemPrompt } from "./system-prompt.ts";
+import {
+	buildSystemPrompt,
+	buildSystemPromptSections,
+	diffSystemPromptSections,
+	type NormalizedBuildSystemPromptOptions,
+	normalizeBuildSystemPromptOptions,
+} from "./system-prompt.ts";
 
 export function getActiveToolNames(this: AgentSession): string[] {
 	return this.agent.state.tools.map((t) => t.name);
@@ -46,9 +53,7 @@ export function setActiveToolsByName(this: AgentSession, toolNames: string[]): v
 	const validToolNames = tools.map((tool) => tool.name);
 	this.agent.state.tools = tools;
 
-	// Rebuild base system prompt with new tool set
-	this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-	this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	this._rebuildSystemPrompt(validToolNames);
 }
 
 /** Whether compaction or branch summarization is currently running */
@@ -86,19 +91,13 @@ export function _normalizePromptGuidelines(this: AgentSession, guidelines: strin
 	return Array.from(unique);
 }
 
-export function _rebuildSystemPrompt(this: AgentSession, toolNames: string[]): string {
+export function _rebuildSystemPrompt(this: AgentSession, toolNames: string[]): void {
 	const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 	const toolSnippets: Record<string, string> = {};
-	const promptGuidelines: string[] = [];
-	for (const name of validToolNames) {
+	for (const name of this._toolRegistry.keys()) {
 		const snippet = this._toolPromptSnippets.get(name);
 		if (snippet) {
 			toolSnippets[name] = snippet;
-		}
-
-		const toolGuidelines = this._toolPromptGuidelines.get(name);
-		if (toolGuidelines) {
-			promptGuidelines.push(...toolGuidelines);
 		}
 	}
 
@@ -108,7 +107,7 @@ export function _rebuildSystemPrompt(this: AgentSession, toolNames: string[]): s
 	const loadedSkills = getSkillCatalog(this._resourceLoader).modelSkills();
 	const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 
-	this._baseSystemPromptOptions = {
+	this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
 		cwd: this._cwd,
 		selectedModel: this.model,
 		selectedThinkingLevel: this.thinkingLevel,
@@ -119,15 +118,43 @@ export function _rebuildSystemPrompt(this: AgentSession, toolNames: string[]): s
 		selectedTools: validToolNames,
 		excludedTools: this._excludedToolNames ? Array.from(this._excludedToolNames) : undefined,
 		toolSnippets,
-		promptGuidelines,
-	};
-	const baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
-	return this._systemPromptTransform ? this._systemPromptTransform(baseSystemPrompt) : baseSystemPrompt;
+		toolGuidelines: Object.fromEntries(this._toolPromptGuidelines),
+	});
+	if (this._systemPromptTransform) {
+		this._baseSystemPromptOptions.forceSystemPrompt = this._systemPromptTransform(
+			buildSystemPrompt(this._baseSystemPromptOptions),
+		);
+	}
 }
 
 export function _refreshBaseSystemPromptFromActiveTools(this: AgentSession): void {
-	this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-	this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	this._rebuildSystemPrompt(this.getActiveToolNames());
+}
+
+/** Diff structured prompt state; executable tool changes are declared by the agent loop. */
+export function _preparePromptAndToolLoadout(
+	this: AgentSession,
+	options: NormalizedBuildSystemPromptOptions,
+	messages: AgentMessage[] = this.agent.state.messages,
+): SystemMessage | undefined {
+	options.selectedTools = [...new Set(options.selectedTools)].filter((name) => this._toolRegistry.has(name));
+	this.agent.state.tools = options.selectedTools.flatMap((name) => {
+		const tool = this._toolRegistry.get(name);
+		return tool ? [tool] : [];
+	});
+	const sections = diffSystemPromptSections(
+		getCurrentSystemMessage(messages)?.sections ?? {},
+		buildSystemPromptSections(options),
+	);
+	return sections ? { role: "system", content: "", sections, timestamp: Date.now() } : undefined;
+}
+
+/** Restore registered tools from the selected transcript, not another branch's live state. */
+export function _restoreToolsFromTranscript(this: AgentSession): void {
+	const current = getCurrentSystemMessage(this.sessionManager.buildSessionContext().messages);
+	if (!current) return;
+	const names = (current.toolsAdded ?? []).map((tool) => tool.name).filter((name) => this._toolRegistry.has(name));
+	this.setActiveToolsByName(names);
 }
 
 // =========================================================================
@@ -153,5 +180,7 @@ export const agentSessionStateMethods = {
 	_normalizePromptSnippet,
 	_normalizePromptGuidelines,
 	_rebuildSystemPrompt,
+	_preparePromptAndToolLoadout,
+	_restoreToolsFromTranscript,
 	_refreshBaseSystemPromptFromActiveTools,
 };

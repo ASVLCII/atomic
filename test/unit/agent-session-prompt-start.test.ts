@@ -29,13 +29,13 @@ describe("AgentSession prompt-start handshake", () => {
 			async _awaitPendingPostCompactionContinuation() {
 				events.push("compaction-complete");
 			},
-			_systemPromptOverride: "override" as string | undefined,
+			_runSystemPromptOptions: "override" as string | undefined,
 		};
 
 		const running = _runAgentPrompt.call(session as never, [], () => events.push("prompt-started"));
 
 		assert.deepEqual(events, ["agent.prompt", "prompt-started"]);
-		assert.equal(session._systemPromptOverride, "override");
+		assert.equal(session._runSystemPromptOptions, "override");
 
 		turn.resolve();
 		await running;
@@ -46,7 +46,7 @@ describe("AgentSession prompt-start handshake", () => {
 			"queues-complete",
 			"compaction-complete",
 		]);
-		assert.equal(session._systemPromptOverride, undefined);
+		assert.equal(session._runSystemPromptOptions, undefined);
 	});
 
 	test("does not report prompt ownership when agent.prompt throws synchronously", async () => {
@@ -64,7 +64,7 @@ describe("AgentSession prompt-start handshake", () => {
 			async waitForRetry() {},
 			async _continueQueuedAgentMessages() {},
 			async _awaitPendingPostCompactionContinuation() {},
-			_systemPromptOverride: "override" as string | undefined,
+			_runSystemPromptOptions: "override" as string | undefined,
 		};
 
 		await assert.rejects(
@@ -74,7 +74,7 @@ describe("AgentSession prompt-start handshake", () => {
 			/startup failed/,
 		);
 		assert.equal(promptStarted, false);
-		assert.equal(session._systemPromptOverride, undefined);
+		assert.equal(session._runSystemPromptOptions, undefined);
 	});
 
 	test("does not report prompt ownership when startup rejects before streaming", async () => {
@@ -88,7 +88,7 @@ describe("AgentSession prompt-start handshake", () => {
 			async waitForRetry() {},
 			async _continueQueuedAgentMessages() {},
 			async _awaitPendingPostCompactionContinuation() {},
-			_systemPromptOverride: "override" as string | undefined,
+			_runSystemPromptOptions: "override" as string | undefined,
 		};
 
 		await assert.rejects(
@@ -98,7 +98,7 @@ describe("AgentSession prompt-start handshake", () => {
 			/startup rejected/,
 		);
 		assert.equal(promptStarted, false);
-		assert.equal(session._systemPromptOverride, undefined);
+		assert.equal(session._runSystemPromptOptions, undefined);
 	});
 });
 

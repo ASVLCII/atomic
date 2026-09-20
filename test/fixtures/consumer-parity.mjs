@@ -95,6 +95,11 @@ async function until(check) {
 		}
 	}
 }
+function emitAssistant(stream, message) {
+	stream.push({ type: "start", partial: { ...message, content: [], stopReason: "pending" } });
+	stream.push({ type: "done", reason: message.stopReason, message });
+	stream.end(message);
+}
 const host = (confirm) => ({
 	input: async () => "  durable text  ",
 	confirm,
@@ -260,7 +265,7 @@ try {
 		// Production routing is essential: test hosts intentionally replace stage/subagent sessions.
 		process.env.NODE_ENV = "production";
 		delete process.env.NODE_TEST_CONTEXT;
-		const { createAssistantMessageEventStream, getModel } = await import("@bastani/pi-ai/compat");
+		const { createAssistantMessageEventStream, getCurrentTools, getModel } = await import("@bastani/pi-ai/compat");
 		const model = { ...getModel("anthropic", "claude-sonnet-4-5"), provider: "packed-child", id: "fixture" };
 		let childCalls = 0;
 		const observed = [];
@@ -283,10 +288,11 @@ try {
 			models: [model],
 			streamSimple: (_model, context) => {
 				childCalls++;
-				observed.push({ tools: context.tools?.map((tool) => tool.name), messages: context.messages });
+				const tools = context.tools ?? getCurrentTools(context.messages ?? []);
+				observed.push({ tools: tools.map((tool) => tool.name), messages: context.messages });
 				const ask =
-					context.tools?.length === 1 &&
-					context.tools[0].name === "ask_user_question" &&
+					tools.length === 1 &&
+					tools[0].name === "ask_user_question" &&
 					!context.messages.some((message) => message.role === "toolResult");
 				const stream = createAssistantMessageEventStream();
 				const message = {
@@ -308,8 +314,7 @@ try {
 					stopReason: ask ? "toolUse" : "stop",
 					timestamp: Date.now(),
 				};
-				stream.push({ type: "done", reason: message.stopReason, message });
-				stream.end(message);
+				emitAssistant(stream, message);
 				return stream;
 			},
 		});
@@ -474,8 +479,7 @@ export default workflow({ name: "children", description: "children", inputs: {},
 					stopReason: next ? "toolUse" : "stop",
 					timestamp: Date.now(),
 				};
-				stream.push({ type: "done", reason: message.stopReason, message });
-				stream.end(message);
+				emitAssistant(stream, message);
 				return stream;
 			},
 		});

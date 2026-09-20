@@ -7,6 +7,7 @@ import { stream as streamCodex } from "../src/api/openai-codex-responses.ts";
 import { stream as streamPiMessages } from "../src/api/pi-messages.ts";
 import { getModel } from "../src/compat.ts";
 import type { Context, Model } from "../src/types.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 const STREAM_DEADLINE_MS = 50;
 const STREAM_SETTLEMENT_TIMEOUT_MS = 10_000;
@@ -94,7 +95,7 @@ describe("provider stream deadlines for native SSE routes (#2553)", () => {
 			maxTokens: 1024,
 		};
 
-		const message = await streamPiMessages(model, context, {
+		const message = await streamPiMessages(model, normalizeContext(context), {
 			apiKey: "test-key",
 			streamDeadlineMs: STREAM_DEADLINE_MS,
 		}).result();
@@ -110,7 +111,7 @@ describe("provider stream deadlines for native SSE routes (#2553)", () => {
 		);
 		const model = { ...getModel("mistral", "mistral-large-latest"), baseUrl };
 
-		const message = await streamMistral(model, context, {
+		const message = await streamMistral(model, normalizeContext(context), {
 			apiKey: "test-key",
 			streamDeadlineMs: STREAM_DEADLINE_MS,
 		}).result();
@@ -124,7 +125,7 @@ describe("provider stream deadlines for native SSE routes (#2553)", () => {
 		const { baseUrl, connections } = await startStalledServer(
 			'data: {"type":"response.output_text.delta","delta":"partial"}\n\n',
 		);
-		const message = await streamCodex(createCodexModel(baseUrl), context, {
+		const message = await streamCodex(createCodexModel(baseUrl), normalizeContext(context), {
 			apiKey: createCodexToken("test-account"),
 			transport: "sse",
 			streamDeadlineMs: STREAM_DEADLINE_MS,

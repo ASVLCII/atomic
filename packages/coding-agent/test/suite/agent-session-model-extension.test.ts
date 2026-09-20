@@ -1,3 +1,4 @@
+import { getCurrentSystemPrompt } from "@bastani/pi-ai";
 import { fauxAssistantMessage, fauxToolCall, type Model } from "@bastani/pi-ai/compat";
 import type { AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
@@ -385,7 +386,7 @@ describe("AgentSession model and extension characterization", () => {
 		let sawInjectedUserMessage = false;
 		harness.setResponses([
 			(context) => {
-				providerSystemPrompt = context.systemPrompt ?? "";
+				providerSystemPrompt = getCurrentSystemPrompt(context.messages);
 				sawInjectedUserMessage = context.messages.some(
 					(message) =>
 						message.role === "user" &&

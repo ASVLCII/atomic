@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import type { AssistantMessageEvent, Context, Model, OpenAICompletionsCompat } from "../src/types.ts";
 import { isRetryableAssistantError } from "../src/utils/retry.ts";
+import { normalizeContext } from "../src/utils/transcript.ts";
 
 /**
  * End-to-end reproduction of #2553 against a real HTTP server, real `fetch`, and
@@ -23,6 +24,8 @@ import { isRetryableAssistantError } from "../src/utils/retry.ts";
 const compat = {
 	supportsStore: true,
 	supportsDeveloperRole: true,
+	supportsMidConvoSystemMessages: false,
+	supportsMidConvoToolAdditions: false,
 	supportsReasoningEffort: false,
 	supportsTemperature: true,
 	supportsForcedToolChoice: true,
@@ -49,10 +52,9 @@ const compat = {
 	supportsLongCacheRetention: false,
 } satisfies Omit<
 	Required<OpenAICompletionsCompat>,
-	"cacheControlFormat" | "deferredToolsMode" | "thinkingTokenBudgetField" | "vllmPriority"
+	"cacheControlFormat" | "thinkingTokenBudgetField" | "vllmPriority"
 > & {
 	cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
-	deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
 	thinkingTokenBudgetField?: OpenAICompletionsCompat["thinkingTokenBudgetField"];
 };
 
@@ -138,7 +140,7 @@ describe("provider stream decompression and stall recovery (#2553)", () => {
 		});
 
 		const terminal = await settle(
-			streamOpenAICompletions(buildModel(url), context, { apiKey: "test-key", maxRetries: 0 }),
+			streamOpenAICompletions(buildModel(url), normalizeContext(context), { apiKey: "test-key", maxRetries: 0 }),
 		);
 
 		expect(terminal?.type).toBe("error");
@@ -165,7 +167,7 @@ describe("provider stream decompression and stall recovery (#2553)", () => {
 
 		const started = Date.now();
 		const terminal = await settle(
-			streamOpenAICompletions(buildModel(url), context, {
+			streamOpenAICompletions(buildModel(url), normalizeContext(context), {
 				apiKey: "test-key",
 				maxRetries: 0,
 				streamDeadlineMs: 1_500,

@@ -35,7 +35,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", async (importOriginal) => {
 });
 
 import { stream as streamBedrock } from "../src/api/bedrock-converse-stream.ts";
-import { getModel } from "../src/compat.ts";
+import { getModel, normalizeContext } from "../src/compat.ts";
 
 const model = getModel("amazon-bedrock", "us.anthropic.claude-opus-4-8");
 
@@ -62,7 +62,7 @@ describe("Bedrock 1h cache write cost", () => {
 		state.details = details;
 		const result = await streamBedrock(
 			model,
-			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			normalizeContext({ messages: [{ role: "user", content: "hi", timestamp: 0 }] }),
 			{ cacheRetention: "none" },
 		).result();
 		expect(result.stopReason).toBe("stop");

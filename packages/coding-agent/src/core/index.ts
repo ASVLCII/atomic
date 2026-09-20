@@ -1,3 +1,11 @@
+export {
+	CacheWarmer,
+	type CacheWarmingDecisionEvent,
+	type CacheWarmingDecisionEventResult,
+	type CacheWarmingStatus,
+} from "./cache-warmer.ts";
+export type { UsageEntry } from "./session-manager.ts";
+export { CACHE_WARMING_MODES, type CacheWarmingMode } from "./settings-manager.ts";
 /**
  * Core modules shared between all run modes.
  */
@@ -58,6 +66,7 @@ export {
 	type ExtensionUIContext,
 	type LoadExtensionsResult,
 	type MessageRenderer,
+	type NormalizedBuildSystemPromptOptions,
 	type RegisteredCommand,
 	type SessionBeforeCompactEvent,
 	type SessionBeforeForkEvent,

@@ -1,3 +1,4 @@
+import { getCurrentSystemMessage } from "@bastani/pi-ai";
 import type { ImageContent, Message, TextContent, Usage } from "@bastani/pi-ai/compat";
 import { existsSync, readdirSync, statSync } from "fs";
 import { join, resolve } from "path";
@@ -50,8 +51,9 @@ import type {
 	SessionNameState,
 	SessionTreeNode,
 	SessionWorkflowMetadata,
+	UsageEntry,
 } from "./session-manager-types.ts";
-import { assertValidSessionId, createSessionId } from "./session-manager-validation.ts";
+import { assertValidSessionId, createSessionId, generateId } from "./session-manager-validation.ts";
 
 /** Manages conversation sessions as append-only trees stored in JSONL files.  Each session entry has an id and parentId forming a tree structure. The "leaf" pointer tracks the current position. Appending creates a child of the current leaf. Branching moves the leaf to an earlier entry, allowing new branches without modifying history.  Use buildSessionContext() to get the resolved message list for the LLM, which applies context-deletion filtering and follows the path from root to current leaf. */
 export class SessionManager {
@@ -245,6 +247,23 @@ export class SessionManager {
 		return entry.id;
 	}
 
+	/** Record auxiliary model usage without adding it to the LLM context. */
+	appendUsage(kind: string, provider: string, model: string, usage: Usage, note?: string): UsageEntry {
+		const entry: UsageEntry = {
+			type: "usage",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			kind,
+			provider,
+			model,
+			usage,
+			...(note === undefined ? {} : { note }),
+		};
+		this._appendEntry(entry);
+		return entry;
+	}
+
 	/** Append a model change as child of current leaf, then advance leaf. Returns entry id. */
 	appendModelChange(provider: string, modelId: string): string {
 		const entry = createModelChangeEntry(provider, modelId, this.byId, this.leafId);
@@ -269,6 +288,8 @@ export class SessionManager {
 			this.byId,
 			this.leafId,
 		);
+		const systemMessage = getCurrentSystemMessage(this.buildSessionContext().messages);
+		if (systemMessage) entry.systemMessage = { ...systemMessage, timestamp: new Date(entry.timestamp).getTime() };
 		this._appendEntry(entry);
 		return entry.id;
 	}
@@ -541,23 +562,39 @@ export class SessionManager {
 		cwd: string,
 		sessionDir?: string,
 		onProgress?: SessionListProgress,
-		options?: { includeInternal?: boolean },
+		options?: { includeInternal?: boolean; signal?: AbortSignal } | AbortSignal,
 	): Promise<SessionInfo[]> {
-		return listProjectSessions(cwd, sessionDir, onProgress, options?.includeInternal === true);
+		const signal = options && "aborted" in options ? options : options?.signal;
+		return listProjectSessions(
+			cwd,
+			sessionDir,
+			onProgress,
+			options !== undefined && "includeInternal" in options && options.includeInternal === true,
+			signal,
+		);
 	}
 
 	/** List sessions across all directories. Internal (workflow) sessions are excluded unless `includeInternal: true`. */
-	static async listAll(onProgress?: SessionListProgress): Promise<SessionInfo[]>;
+	static async listAll(onProgress?: SessionListProgress, signal?: AbortSignal): Promise<SessionInfo[]>;
 	static async listAll(
 		sessionDir?: string,
 		onProgress?: SessionListProgress,
-		options?: { includeInternal?: boolean },
+		options?: { includeInternal?: boolean; signal?: AbortSignal } | AbortSignal,
 	): Promise<SessionInfo[]>;
 	static async listAll(
 		sessionDirOrOnProgress?: string | SessionListProgress,
-		onProgress?: SessionListProgress,
-		options?: { includeInternal?: boolean },
+		onProgress?: SessionListProgress | AbortSignal,
+		options?: { includeInternal?: boolean; signal?: AbortSignal } | AbortSignal,
 	): Promise<SessionInfo[]> {
-		return listAllSessions(sessionDirOrOnProgress, onProgress, options?.includeInternal === true);
+		const signal =
+			options && "aborted" in options
+				? options
+				: (options?.signal ?? (typeof onProgress === "object" ? onProgress : undefined));
+		return listAllSessions(
+			sessionDirOrOnProgress,
+			typeof onProgress === "function" ? onProgress : undefined,
+			options !== undefined && "includeInternal" in options && options.includeInternal === true,
+			signal,
+		);
 	}
 }

@@ -17,6 +17,7 @@ import {
 	captureRegistrationInvocation as captureInvocation,
 	invocationExtension,
 	invocationRuntime,
+	originalRegistrationCallback,
 	resolveInvocationRuntime,
 } from "./loader-bindings.ts";
 import {
@@ -187,11 +188,23 @@ export function createExtensionAPI(
 			const publisher = runtime.workflowActivityHub.registerWorkflowActivityPublisher();
 			return { ...publisher, dispose: trackRelease(() => publisher.dispose()) };
 		},
-		on(event: string, handler: HandlerFn): void {
+		on(event: string, handler: HandlerFn): () => void {
 			assertActive();
+			const registeredHandler = captureRegistrationInvocation((...args: Parameters<HandlerFn>) => handler(...args));
 			const list = extension.handlers.get(event) ?? [];
-			list.push(captureRegistrationInvocation(handler));
+			list.push(registeredHandler);
 			extension.handlers.set(event, list);
+			return () => {
+				const handlers = extension.handlers.get(event);
+				if (!handlers) return;
+				const index = handlers.findIndex(
+					(candidate) =>
+						originalRegistrationCallback(candidate) === originalRegistrationCallback(registeredHandler),
+				);
+				if (index === -1) return;
+				handlers.splice(index, 1);
+				if (handlers.length === 0) extension.handlers.delete(event);
+			};
 		},
 
 		registerTool(tool: ToolDefinition): void {

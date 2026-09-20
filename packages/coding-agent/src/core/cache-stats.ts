@@ -75,6 +75,17 @@ function scan(entries: SessionEntry[], models: ModelPriceSource) {
 			prev = undefined;
 			continue;
 		}
+		if (entry.type === "usage" && entry.kind === "cache_warm") {
+			const promptTokens = entry.usage.input + entry.usage.cacheRead + entry.usage.cacheWrite;
+			if (promptTokens > 0)
+				prev = {
+					promptTokens,
+					modelKey: `${entry.provider}/${entry.model}`,
+					timestamp: Date.parse(entry.timestamp),
+					reportedCache: true,
+				};
+			continue;
+		}
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 		const miss = detect(prev, entry.message, models);
 		if (miss) {

@@ -59,6 +59,7 @@ InteractiveModeBase.prototype.showSettingsSelector = function (this: Interactive
 				followUpMode: this.session.followUpMode,
 				transport: this.settingsManager.getTransport(),
 				httpIdleTimeoutMs: this.settingsManager.getHttpIdleTimeoutMs(),
+				cacheWarming: this.settingsManager.getCacheWarmingMode(),
 				bashInterceptorEnabled: this.settingsManager.getBashInterceptorEnabled(),
 				thinkingLevel: this.session.thinkingLevel,
 				availableThinkingLevels: this.session.getAvailableThinkingLevels(),
@@ -134,6 +135,9 @@ InteractiveModeBase.prototype.showSettingsSelector = function (this: Interactive
 				onHttpIdleTimeoutChange: (timeoutMs) => {
 					this.settingsManager.setHttpIdleTimeoutMs(timeoutMs);
 					configureHttpDispatcher(timeoutMs);
+				},
+				onCacheWarmingChange: (mode) => {
+					this.session.setCacheWarmingMode(mode);
 				},
 				onBashInterceptorEnabledChange: (enabled) => {
 					this.settingsManager.setBashInterceptorEnabled(enabled);
