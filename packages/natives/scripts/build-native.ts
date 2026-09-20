@@ -1,7 +1,8 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { formatNativeSpawnFailure } from "./spawn-error.ts";
+import { fixGeneratedBinding } from "./generated-binding-fixes.js";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 const packageRoot = resolve(import.meta.dir, "..");
@@ -69,3 +70,9 @@ if (glibcTarget) {
 		throw new Error(`Failed to build Atomic native bindings (${formatNativeSpawnFailure("napi", result)})`);
 	}
 }
+
+const loaderPath = join(nativeDir, "index.js");
+const declarationsPath = join(nativeDir, "index.d.ts");
+const corrected = fixGeneratedBinding(readFileSync(loaderPath, "utf8"), readFileSync(declarationsPath, "utf8"));
+writeFileSync(loaderPath, corrected.loader);
+writeFileSync(declarationsPath, corrected.declarations);
