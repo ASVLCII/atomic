@@ -50,6 +50,10 @@
 - Automatic subagent and workflow-stage model selection now uses bounded excerpts of long tasks, preserving their beginning, end and protected `<keepContext>` spans. Execution prompts and hard model constraints remain unchanged; oversized protected content retains the existing router fallback behavior.
 - Automatic subagent and workflow-stage model selection now sends the factual `evals.md` benchmark records as the router's evals state field instead of sending the general model-selection guide. The guide stays human-readable and links to the dated eval records, which use markdown tables.
 
+### Removed
+
+- Removed the Benchmark Sources and Pareto Efficiency documentation pages. Dated measurements and one-paragraph benchmark explainers live in Evals; general selection guidance stays in Model Selection.
+
 ### Fixed
 
 - Automatic compaction cancelled from a `compaction_start` listener now aborts the auto controller before `session_before_compact` or planner auth.

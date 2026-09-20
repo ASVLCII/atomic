@@ -401,12 +401,11 @@ const generatedNavigationInsertions: Record<string, readonly string[]> = {
 	"/intercom": ["/intercom/operations"],
 	"/extensions": ["/extensions/authoring", "/extensions/events", "/extensions/ui", "/extensions/examples"],
 	"/packages": ["/packages/authoring"],
-	"/models": ["/models/model-selection", "/models/pareto-efficiency", "/models/evals"],
+	"/models": ["/models/model-selection", "/models/evals"],
 	"/workflows/reliable-design": ["/workflows/verification"],
 	"/tmux": ["/herdr"],
 	// The edit reference now lives in tools; integrations follow it.
 	"/tools": ["/mcp-servers", "/web-access"],
-	"/changelog": ["/models/artificial-analysis-index"],
 	"/custom-provider": [
 		"/custom-provider/override",
 		"/custom-provider/registration",
@@ -640,8 +639,8 @@ describe("docs information architecture (#2847)", () => {
 		const expectedGenerated = Object.values(generatedNavigationInsertions).flat().sort();
 		assert.equal(
 			expectedGenerated.length,
-			36,
-			"24 migration routes, all six upstream additions, the four reader-path orientation pages, /mcp-servers (#3065), and /sdk/structured-decisions have insertion points",
+			34,
+			"migration routes, upstream additions, reader-path orientation pages, /mcp-servers, and /sdk/structured-decisions have insertion points",
 		);
 		assert.deepEqual(generated, expectedGenerated, "no generated page may fall outside the insertion contract");
 
