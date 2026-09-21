@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.20-alpha.5] - 2026-09-20
+
 ### Added
 
 - The SDK exports `spawnProcess` next to `createChildProcessEnvironment`: the child-process spawner that stamps Atomic's agent attribution into the environment and, on Windows, runs `.cmd`/`.bat` launchers through `cross-spawn` with correct argument quoting. The bundled `impeccable` skill's engine launcher and the `open-claude-design` live loop use it.
