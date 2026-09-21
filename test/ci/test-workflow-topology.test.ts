@@ -130,9 +130,10 @@ test("each split job retains its measured timeout hang detector", async () => {
 			Math.ceil(((135 + 2 * 116 + 7) * 1.5) / 60),
 			Math.ceil(((147 + 2 * 186.92 + 7) * 1.5) / 60),
 		],
-		// Run 34270757695: jobs 102211457418 / 102211457032 reached 382s / 552s. Test steps
-		// passed without retry, but both jobs still exceeded their 6/9-minute caps.
-		"agent-suite": [Math.ceil((382 * 1.5) / 60), Math.ceil((552 * 1.5) / 60)],
+		// Successful completions: Linux run 35543699213 reached 570s and Windows job 106398647825
+		// (run 35619483893) 766s, with the vitest step alone at 434s / 615s. The previous
+		// 382s / 552s calibration timed out 3 of 9 consecutive main runs on Linux.
+		"agent-suite": [Math.ceil((570 * 1.5) / 60), Math.ceil((766 * 1.5) / 60)],
 		// Linux run 34653564242 / job 103440964907: 49s setup + 84s censored build.
 		// Reserve another full 15s packaging (successful max rounded up), 5s smoke and 5s tail.
 		// The partial build is not a measured completion; docs/ci.md records this projection's limits.

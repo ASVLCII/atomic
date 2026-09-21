@@ -208,13 +208,13 @@ jobs:
         include:
           - os: blacksmith-4vcpu-ubuntu-2404
             binary_platform: linux-x64
-            timeout_minutes: 10
+            timeout_minutes: 15
           - os: blacksmith-4vcpu-windows-2025
             binary_platform: windows-x64
-            timeout_minutes: 14
+            timeout_minutes: 20
       fail-fast: false
     runs-on: ${{ matrix.os }}
-    # Run 34270757695: 382s Linux / 552s Windows, timeout-censored, plus 50%; see docs/ci.md.
+    # Successful completions of 570s Linux (run 35543699213) / 766s Windows (run 35619483893), plus 50%; see docs/ci.md.
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
       - uses: useblacksmith/checkout@6fd481652155169ed4d2f25ebaf97464f685175f # v1.1
