@@ -13,6 +13,7 @@ import {
 	flushMicrotasks,
 	makeMockSession,
 	makeOpts,
+	skippedStructuredOutputTurn,
 	Type,
 } from "./stage-runner-helpers.js";
 
@@ -45,11 +46,13 @@ describe("createStageContext — durable model-fallback metadata notification", 
 					typeof options.model === "string"
 						? options.model
 						: `${String(options.model?.provider)}/${options.model?.id}`;
+				const messages: AgentSession["messages"] = [];
 				const { session } = makeMockSession({
+					messages,
 					async prompt() {
-						// The primary returns clean turns that never call the tool, the
-						// exact shape reported in issue #2812; the fallback answers.
-						if (model === "anthropic/primary") return;
+						// The primary returns clean prose turns that never call the tool,
+						// the shape issue #2812 corrects; the fallback answers.
+						if (model === "anthropic/primary") return skippedStructuredOutputTurn(messages);
 						const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
 						assert.ok(structuredTool);
 						await structuredTool.execute(
@@ -136,10 +139,12 @@ describe("createStageContext — durable model-fallback metadata notification", 
 						? options.model
 						: `${String(options.model?.provider)}/${options.model?.id}`;
 				calls.push(model);
+				const messages: AgentSession["messages"] = [];
 				const { session } = makeMockSession({
+					messages,
 					async prompt() {
 						promptCount += 1;
-						if (promptCount === 1) return;
+						if (promptCount === 1) return skippedStructuredOutputTurn(messages);
 						const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
 						assert.ok(structuredTool);
 						await structuredTool.execute(
@@ -282,7 +287,13 @@ describe("createStageContext — durable model-fallback metadata notification", 
 		const notified: StageModelFallbackMeta[] = [];
 		const agentSession: AgentSessionAdapter = {
 			async create() {
-				return makeMockSession({ async prompt() {} }).session;
+				const messages: AgentSession["messages"] = [];
+				return makeMockSession({
+					messages,
+					async prompt() {
+						skippedStructuredOutputTurn(messages);
+					},
+				}).session;
 			},
 		};
 		const ctx = createStageContext(

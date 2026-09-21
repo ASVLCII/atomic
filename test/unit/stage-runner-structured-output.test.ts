@@ -25,6 +25,7 @@ import {
 	mkdtemp,
 	readFile,
 	rm,
+	skippedStructuredOutputTurn,
 	Type,
 	tmpdir,
 } from "./stage-runner-helpers.js";
@@ -47,12 +48,6 @@ function assistantMessageWithContent(content: AssistantMessage["content"]): Assi
 		stopReason: "toolUse",
 		timestamp: Date.now(),
 	};
-}
-
-/** A clean turn that answered in prose and never called `structured_output`. */
-function skippedStructuredOutputTurn(messages: AgentSession["messages"]): undefined {
-	messages.push(assistantMessageWithContent([{ type: "text", text: "prose answer without the tool" }]));
-	return undefined;
 }
 
 describe("createStageContext — structured_output corrective retry", () => {

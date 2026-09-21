@@ -1,6 +1,7 @@
 import { describe } from "vitest";
 import {
 	type AgentSession,
+	appendProseTurn,
 	assert,
 	type CreateAgentSessionOptions,
 	createStore,
@@ -455,12 +456,16 @@ describe("executor.run", () => {
 							const structuredTool = options.customTools?.find(
 								(tool): tool is ToolDefinition => tool.name === "structured_output",
 							);
+							const session = mockSession();
 							return {
-								...mockSession(),
+								...session,
 								async prompt() {
-									// The primary burns its whole correction budget on clean
+									// The primary burns its whole correction budget on prose
 									// turns that never call the tool; the fallback answers.
-									if (model === "anthropic/primary" || structuredTool === undefined) return;
+									if (model === "anthropic/primary" || structuredTool === undefined) {
+										appendProseTurn(session.messages);
+										return;
+									}
 									await structuredTool.execute(
 										"structured-call-fallback",
 										{ ok: true } as Parameters<ToolDefinition["execute"]>[1],
@@ -495,5 +500,75 @@ describe("executor.run", () => {
 		// Before the fix this snapshot held only the four failed primary attempts.
 		assert.deepEqual(lastRunning?.attempts, expected);
 		assert.deepEqual(observed[firstTerminalIndex]?.attempts, expected);
+	});
+
+	test("an exhausted empty-completion chain blocks the run as a recoverable provider failure (#3164)", async () => {
+		const st = createStore();
+		const schema = Type.Object({ ok: Type.Boolean() }, { additionalProperties: false });
+		const promptsByModel = new Map<string, number>();
+		const def = workflow({
+			name: "empty-completion-blocks",
+			description: "",
+			inputs: {},
+			outputs: { ok: Type.Boolean() },
+			run: async (ctx) => {
+				await ctx
+					.stage("scout", { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema })
+					.prompt("partition the work");
+				return { ok: true };
+			},
+		});
+
+		const result = await run(
+			def,
+			{},
+			{
+				adapters: {
+					agentSession: {
+						async create(options: CreateAgentSessionOptions) {
+							const modelValue = (options as { readonly model?: string }).model;
+							const model = typeof modelValue === "string" ? modelValue : "object-model";
+							return {
+								...mockSession(),
+								async prompt() {
+									// Every candidate's request is dropped: no assistant
+									// message is ever appended.
+									promptsByModel.set(model, (promptsByModel.get(model) ?? 0) + 1);
+								},
+							};
+						},
+					},
+				},
+				store: st,
+			},
+		);
+
+		// No corrective prompts are spent: each candidate gets the stage prompt
+		// once (no retry settings are configured) and the chain advances.
+		assert.deepEqual(
+			[...promptsByModel.entries()],
+			[
+				["anthropic/primary", 1],
+				["openai/fallback", 1],
+			],
+		);
+		const storedRun = st.runs()[0]!;
+		assert.equal(result.status, "running");
+		assert.equal(storedRun.failureKind, "provider");
+		assert.equal(storedRun.failureCode, "provider_unavailable");
+		assert.equal(storedRun.failureDisposition, "active_blocked");
+		const stage = storedRun.stages.find((entry) => entry.name === "scout");
+		assert.equal(stage?.status, "failed");
+		assert.deepEqual(
+			stage?.modelAttempts?.map((attempt) => ({ model: attempt.model, success: attempt.success })),
+			[
+				{ model: "anthropic/primary", success: false },
+				{ model: "openai/fallback", success: false },
+			],
+		);
+		for (const attempt of stage?.modelAttempts ?? []) {
+			assert.match(attempt.error ?? "", /ended without an assistant message/);
+			assert.doesNotMatch(attempt.error ?? "", /must finish by calling structured_output/);
+		}
 	});
 });
