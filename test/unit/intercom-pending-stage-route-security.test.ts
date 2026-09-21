@@ -2334,6 +2334,28 @@ test("a same-name stage of a later round registers its id alias while the earlie
 		1,
 		"the ambiguous name alias never redirects the earlier round's traffic to the later round",
 	);
+
+	// The reused name no longer resolves to round one's retained session at the broker: the
+	// name form goes back through the owner, which decides the ambiguous target's fate.
+	sender.send({
+		type: "send",
+		to: `workflow:${runId}/reviewer-a`,
+		message: { id: "ambiguous-name", timestamp: 5, content: { text: "which reviewer-a?" } },
+	});
+	const ambiguous = await owner.next("pending_stage_message", (frame) => frame.message.id === "ambiguous-name");
+	assert.notEqual(ambiguous.live, true, "an ambiguous name is not a live forward to either occurrence");
+	owner.send({
+		type: "pending_stage_message_result",
+		requestId: ambiguous.requestId,
+		outcome: "refused",
+		reason: "ambiguous stage name",
+	});
+	assert.equal(
+		(await sender.next("delivery_failed", (frame) => frame.messageId === "ambiguous-name")).reason,
+		"ambiguous stage name",
+	);
+	assert.equal(roundOne.received.filter((frame) => frame.type === "message").length, 1);
+	assert.equal(roundTwo.received.filter((frame) => frame.type === "message").length, 1);
 });
 
 // Regression for #3163: the owner reconnecting before a stage registers is transient.

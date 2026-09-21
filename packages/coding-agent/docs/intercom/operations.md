@@ -51,7 +51,7 @@ When a workflow stage starts, its session registers a live Intercom route with t
 | `Live workflow-stage route is owned by another active session` | Another connected session already owns this exact stage. | Transient when the previous attempt's session is still being torn down; a genuinely live duplicate owner is refused on every attempt and the stage fails after the bounded retries. |
 | `… capability does not match the workflow owner` / `… registrant is outside the workflow invocation group` / `… name a non-agent workflow node` | Authority or configuration mismatch. | Terminal for that stage startup; it repeats identically on retry. |
 
-A stage name reused by a later occurrence in the same run (for example `reviewer-a` in a second review round while the first round's completed session is still connected) is not a duplicate owner. The later stage registers under its stage id; the reused name is ambiguous and gets no live alias. Address such stages by the id-form target that `intercom list` shows.
+A stage name reused by a later occurrence in the same run (for example `reviewer-a` in a second review round while the first round's completed session is still connected) is not a duplicate owner. The later stage registers under its stage id, and the reused name is ambiguous: neither occurrence keeps a live name alias, so a send to that name is routed through the workflow owner rather than delivered to whichever occurrence registered first. Address such stages by the id-form target that `intercom list` shows.
 
 ## How It Works
 

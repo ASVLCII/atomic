@@ -567,6 +567,37 @@ class IntercomBroker {
     }
   }
 
+  /** Stage names shared by more than one agent stage of a roster; hosts resolve them to no stage. */
+  private ambiguousStageNames(roster: WorkflowRosterRegistration | undefined): ReadonlySet<string> {
+    const counts = new Map<string, number>();
+    for (const stage of roster?.stages ?? []) {
+      if (!isAgentRecipient(stage)) continue;
+      counts.set(stage.stageName, (counts.get(stage.stageName) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
+  }
+
+  /**
+   * #3163: once a run's roster makes a stage name ambiguous, no occurrence may keep the
+   * name-form alias — otherwise a send to `workflow:<root>/reviewer-a` would still reach
+   * the retained earlier round while the later round is the one running. The id-form
+   * aliases stay; the name resolves through the owner, which treats it as ambiguous.
+   */
+  private retireAmbiguousNameAliases(runId: string): void {
+    const roster = this.workflowRosters.get(runId);
+    const ambiguousNames = this.ambiguousStageNames(roster);
+    if (ambiguousNames.size === 0) return;
+    const stages = roster?.stages ?? [];
+    for (const stage of stages) {
+      if (!ambiguousNames.has(stage.stageName)) continue;
+      // A name that is also some stage's id addresses that stage; leave its id alias alone.
+      if (stages.some((candidate) => candidate.stageId === stage.stageName)) continue;
+      const nameTarget = withWorkflowStageTargetFinalSegment(stage.target, stage.stageName);
+      if (nameTarget === undefined || nameTarget === stage.target) continue;
+      if (this.liveWorkflowStageRoutes.get(nameTarget)?.runId === runId) this.liveWorkflowStageRoutes.delete(nameTarget);
+    }
+  }
+
   /** Register the stage's live aliases; returns the refusal code when a precondition fails. */
   private registerLiveWorkflowStageRoute(
     currentId: string,
@@ -595,10 +626,11 @@ class IntercomBroker {
 		// is ambiguous — hosts resolve such a name to no stage — so it gets no name alias
 		// rather than colliding with the retained earlier occurrence's live session. The
 		// stage stays addressable by its id-form target, which the roster advertises.
+		const ambiguousNames = this.ambiguousStageNames(roster);
+		this.retireAmbiguousNameAliases(runId);
 		const aliasStageKeys = uniqueStageKeys.filter((key) => {
-			const matches = rosterMatches(key);
-			const isIdKey = matches.some((stage) => stage.stageId === key);
-			return isIdKey || matches.filter(isAgentRecipient).length <= 1;
+			const isIdKey = rosterMatches(key).some((stage) => stage.stageId === key);
+			return isIdKey || !ambiguousNames.has(key);
 		});
 		const targets = aliasStageKeys.map((stageKey) => {
 			const matches = rosterMatches(stageKey);
@@ -1474,6 +1506,7 @@ class IntercomBroker {
               ...(possibleStages === undefined ? {} : { possibleStages }),
               ...(parent === undefined ? {} : { parent }),
             });
+            this.retireAmbiguousNameAliases(clientMessage.runId);
           }
           break;
         }
@@ -1490,6 +1523,7 @@ class IntercomBroker {
             ...(possibleStages === undefined ? {} : { possibleStages }),
             ...(parent === undefined ? {} : { parent }),
           });
+          this.retireAmbiguousNameAliases(clientMessage.runId);
         }
         break;
       }
