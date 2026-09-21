@@ -93,7 +93,7 @@ job deadline.
 | --- | ---: | ---: | --- |
 | Unit tests | 22 min | 22 min | [Observed timeout boundaries](https://github.com/bastani-inc/atomic/actions/runs/34270757695) |
 | Integration tests | 10 min | 14 min | [Linux setup](https://github.com/bastani-inc/atomic/actions/runs/34652319107/job/103437056550), [Windows retry](https://github.com/bastani-inc/atomic/actions/runs/34275410217/job/102227085985) |
-| Agent suite | 10 min | 14 min | [Observed timeout boundaries](https://github.com/bastani-inc/atomic/actions/runs/34270757695) |
+| Agent suite | 15 min | 20 min | [Linux completion](https://github.com/bastani-inc/atomic/actions/runs/35543699213), [Windows completion](https://github.com/bastani-inc/atomic/actions/runs/35619483893/job/106398647825) |
 | Release archive | 4 min | 7 min | [Linux build](https://github.com/bastani-inc/atomic/actions/runs/34653564242/job/103440964907), [Windows finalization](https://github.com/bastani-inc/atomic/actions/runs/34035777039/job/101493452122) |
 | Static checks | 5 min | not run | [182-second finalization timeout](https://github.com/bastani-inc/atomic/actions/runs/34873678170/job/104075487913) |
 | Result gate | 1 min | 1 min | Both labeled legs execute on Linux |
