@@ -21,6 +21,7 @@ import { readSubagentMessageSource } from "../source-ownership.js";
 import { isMessage, isSessionInfo } from "./client-message-validation.js";
 import { normalizeGroups } from "../group.js";
 import { IntercomClientDisconnectedError } from "../recoverable-disconnect.js";
+import { IntercomLiveRouteRefusedError, isLiveWorkflowStageRouteRefusalCode } from "../live-route-refusal.js";
 
 const BROKER_SOCKET = getBrokerSocketPath();
 const GROUP_REQUEST_TIMEOUT_MS = 5000;
@@ -417,7 +418,13 @@ export class IntercomClient extends EventEmitter {
       }
       case "registration_failed": {
         if (typeof brokerMessage.reason !== "string") throw new Error("Invalid registration_failed message");
-        const refusal = new Error(brokerMessage.reason);
+        // A coded refusal is classified by construction downstream; the code, not
+        // the wording, decides whether the stage's bounded warm-up retry may clear it.
+        // A code this client does not know (broker/client version skew) keeps the
+        // reason as an ordinary, non-recoverable error.
+        const refusal = isLiveWorkflowStageRouteRefusalCode(brokerMessage.code)
+          ? new IntercomLiveRouteRefusedError(brokerMessage.code, brokerMessage.reason)
+          : new Error(brokerMessage.reason);
         if (this._sessionId === null) {
           // Still registering: `connect()` owns the failure and its own cleanup.
           this.emit("_registration_failed", refusal);

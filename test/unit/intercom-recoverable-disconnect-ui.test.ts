@@ -38,6 +38,7 @@ import type {
 	ExtensionError,
 } from "../../packages/coding-agent/src/core/extensions/types.js";
 import intercom from "../../packages/intercom/index.js";
+import { IntercomLiveRouteRefusedError } from "../../packages/intercom/live-route-refusal.js";
 import { IntercomClientDisconnectedError } from "../../packages/intercom/recoverable-disconnect.js";
 import { IntercomWarmUpExhaustedError } from "../../packages/intercom/warm-up-exhaustion.js";
 import { requestSupervisorAuthorization } from "../../packages/subagents/src/intercom/supervisor-authorization.js";
@@ -604,5 +605,60 @@ describe("Intercom bounded warm-up retry for a parked workflow stage", () => {
 
 		assert.equal(reported.length, 1, "a non-recoverable failure stays immediately actionable");
 		assert.equal(current.imports, 1, "and is not retried");
+	});
+
+	// Regression for #3163: the broker ends the socket on every live-route refusal, but
+	// only a refusal whose condition can clear on its own may share the warm-up retry.
+	test("retries a transient live-route refusal (owner reconnecting) and unparks the stage (#3163)", async () => {
+		const delivery = pendingStageDeliveryWithQueuedMessages();
+		const current = fixture(
+			[{ error: new IntercomLiveRouteRefusedError("owner_missing") }, { module: successfulHeavyModule() }],
+			[1],
+		);
+
+		const reported = await current.emitSessionStart(workflowStageContext(delivery));
+		assert.deepEqual(reported, [], "an owner still re-registering is not a stage startup failure");
+
+		await delivery.ready();
+
+		assert.equal(current.imports, 2);
+		assert.equal(delivery.deliverPendingCalls, 1);
+		assert.deepEqual(consoleErrorCalls, []);
+	});
+
+	test("keeps refusing a genuine duplicate live owner and settles the stage once retries run out (#3163)", async () => {
+		const delivery = pendingStageDeliveryWithQueuedMessages();
+		const current = fixture(
+			[
+				{ error: new IntercomLiveRouteRefusedError("duplicate_live_owner") },
+				{ error: new IntercomLiveRouteRefusedError("duplicate_live_owner") },
+			],
+			[1],
+		);
+
+		const reported = await current.emitSessionStart(workflowStageContext(delivery));
+		await waitFor(() => delivery.failReasons.length > 0);
+
+		assert.deepEqual(reported, []);
+		assert.equal(current.imports, 2, "the retry never grants ownership; it only re-asks the broker");
+		const reason = delivery.failReasons[0];
+		assert.ok(reason instanceof IntercomWarmUpExhaustedError);
+		assert.equal(
+			(reason?.cause as Error | undefined)?.message,
+			"Live workflow-stage route is owned by another active session",
+			"the terminal reason still names the genuine duplicate owner",
+		);
+	});
+
+	test("does not retry a live-route refusal that repeats identically, and reports its actual condition (#3163)", async () => {
+		const delivery = pendingStageDeliveryWithQueuedMessages();
+		const current = fixture([{ error: new IntercomLiveRouteRefusedError("capability_mismatch") }], [1]);
+
+		const reported = await current.emitSessionStart(workflowStageContext(delivery));
+		await sleep(30);
+
+		assert.equal(reported.length, 1);
+		assert.equal(reported[0]?.error, "Live workflow-stage route capability does not match the workflow owner");
+		assert.equal(current.imports, 1, "a configuration mismatch is not retried");
 	});
 });

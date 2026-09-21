@@ -1,3 +1,5 @@
+import type { LiveWorkflowStageRouteRefusalCode } from "./live-route-refusal.js";
+
 export interface SessionInfo {
   id: string;
   /** Host-declared connection purpose; omitted by legacy agent clients. Immutable after registration. */
@@ -167,7 +169,7 @@ export type ClientMessage =
 
 export type BrokerMessage =
   | { type: "registered"; sessionId: string; supervisorSessionId?: string }
-  | { type: "registration_failed"; reason: string }
+  | { type: "registration_failed"; reason: string; code?: LiveWorkflowStageRouteRefusalCode }
   | { type: "question_target"; messageId: string; attemptId: string; sessionId: string }
  | { type: "sessions"; requestId: string; sessions: SessionInfo[]; workflowStages?: WorkflowStageRosterEntry[]; workflowFutureStages?: WorkflowFutureStageRosterEntry[] }
 	| { type: "groups"; requestId: string; groups: GroupSummary[] }

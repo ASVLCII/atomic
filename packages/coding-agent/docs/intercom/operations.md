@@ -41,6 +41,18 @@ Name sessions with `/name` so they can target each other (for example `/name pla
 
 If initialization keeps failing, check the reported cause and `~/.atomic/agent/intercom/broker.log` (or the Intercom directory under `ATOMIC_CODING_AGENT_DIR`). Do not automatically resend an operation reported with an unknown delivery outcome; check with the recipient first.
 
+### Workflow-stage route refusals
+
+When a workflow stage starts, its session registers a live Intercom route with the broker. A refusal names the condition that failed:
+
+| Reason | Meaning | Behavior |
+| --- | --- | --- |
+| `Live workflow-stage route has no registered workflow owner` | The workflow owner's own broker connection is re-registering (for example after a reconnect). | Transient. The stage's bounded warm-up retry re-registers once the owner is back; the stage fails only if every attempt is refused. |
+| `Live workflow-stage route is owned by another active session` | Another connected session already owns this exact stage. | Transient when the previous attempt's session is still being torn down; a genuinely live duplicate owner is refused on every attempt and the stage fails after the bounded retries. |
+| `… capability does not match the workflow owner` / `… registrant is outside the workflow invocation group` / `… name a non-agent workflow node` | Authority or configuration mismatch. | Terminal for that stage startup; it repeats identically on retry. |
+
+A stage name reused by a later occurrence in the same run (for example `reviewer-a` in a second review round while the first round's completed session is still connected) is not a duplicate owner. The later stage registers under its stage id, and the reused name is ambiguous: neither occurrence keeps a live name alias, so a send to that name is routed through the workflow owner rather than delivered to whichever occurrence registered first. Address such stages by the id-form target that `intercom list` shows.
+
 ## How It Works
 
 The local broker starts on first use and exits after five seconds without registered sessions. Clients reconnect automatically using delays of 1, 2, 5, 10, then 30 seconds. Explicit connection failures remain visible while background recovery continues.
