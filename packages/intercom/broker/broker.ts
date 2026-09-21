@@ -628,22 +628,27 @@ class IntercomBroker {
 		// stage stays addressable by its id-form target, which the roster advertises.
 		const ambiguousNames = this.ambiguousStageNames(roster);
 		this.retireAmbiguousNameAliases(runId);
-		const aliasStageKeys = uniqueStageKeys.filter((key) => {
-			const isIdKey = rosterMatches(key).some((stage) => stage.stageId === key);
-			return isIdKey || !ambiguousNames.has(key);
-		});
-		const targets = aliasStageKeys.map((stageKey) => {
-			const matches = rosterMatches(stageKey);
-			const entry = matches.find((stage) => stage.stageId === stageKey) ?? matches[0];
-			const entryTarget = entry === undefined ? undefined : parseWorkflowStageTarget(entry.target);
-			if (entry !== undefined && entryTarget?.kind === "path") {
-				if (stageKey !== entry.stageName) return entry.target;
-				return (
-					withWorkflowStageTargetFinalSegment(entry.target, entry.stageName) ?? entry.target
-				);
+		const stages = roster?.stages ?? [];
+		// The registrant is the roster stage its own `[id, name]` keys describe. A key is an
+		// id alias only when it is *that* stage's id: a name that happens to equal another
+		// stage's id must not take over that stage's route.
+		const registrant =
+			stages.find((stage) => uniqueStageKeys.includes(stage.stageId) &&
+				(uniqueStageKeys.length === 1 || uniqueStageKeys.includes(stage.stageName))) ??
+			(uniqueStageKeys.length === 1 ? rosterMatches(uniqueStageKeys[0]!).find(isAgentRecipient) : undefined);
+		const idOfAnotherStage = (key: string): boolean =>
+			stages.some((stage) => stage.stageId === key && stage !== registrant);
+		const targets = uniqueStageKeys.flatMap((stageKey) => {
+			if (idOfAnotherStage(stageKey)) return [];
+			const registrantTarget = registrant === undefined ? undefined : parseWorkflowStageTarget(registrant.target);
+			if (registrant !== undefined && registrantTarget?.kind === "path") {
+				if (stageKey === registrant.stageId) return [registrant.target];
+				if (ambiguousNames.has(stageKey)) return [];
+				return [withWorkflowStageTargetFinalSegment(registrant.target, stageKey) ?? registrant.target];
 			}
+			if (ambiguousNames.has(stageKey)) return [];
 			const prefix = runId === rootRunId ? [] : [runId];
-			return formatWorkflowStageTarget(rootRunId, ...prefix, stageKey);
+			return [formatWorkflowStageTarget(rootRunId, ...prefix, stageKey)];
 		});
 		for (const target of targets) {
 			const existing = this.liveWorkflowStageRoutes.get(target);

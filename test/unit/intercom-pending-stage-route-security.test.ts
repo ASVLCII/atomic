@@ -2425,3 +2425,62 @@ test("a production stage treats a capability_mismatch refusal as terminal (#3163
 	assert.equal(refusal.message, "Live workflow-stage route capability does not match the workflow owner");
 	assert.equal(isRecoverableIntercomDisconnect(refusal), false);
 });
+
+// Regression for #3165 review: an ambiguous name that equals another stage's id must not take that id's route.
+test("an ambiguous stage name never aliases another stage's id route (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000009";
+	const group = `workflow:${runId}`;
+	const capability = "name-equals-id-capability";
+	const owner = new WireClient();
+	const namesake = new WireClient();
+	const idOwner = new WireClient();
+	const sender = new WireClient();
+	await register(owner, "name-equals-id-owner", group);
+	await register(namesake, "reviewer-round-1", group);
+	await register(idOwner, "id-owner-stage", group);
+	await register(sender, "name-equals-id-sender", group);
+	owner.send({
+		type: "register_pending_stage_route",
+		runId,
+		group,
+		capability,
+		stages: [
+			rosterStage(runId, "reviewer", "gate-x", group),
+			rosterStage(runId, "a1", "reviewer", group),
+			rosterStage(runId, "a2", "reviewer", group),
+		],
+	});
+	assert.equal(await registrationOutcome(owner, "name-equals-id-owner-processed"), "acknowledged");
+
+	namesake.send({
+		type: "register_live_workflow_stage_route",
+		requestId: "namesake-route",
+		runId,
+		stageKeys: ["a1", "reviewer"],
+		capability,
+	});
+	await namesake.next("live_workflow_stage_route_registered", (frame) => frame.requestId === "namesake-route");
+	idOwner.send({
+		type: "register_live_workflow_stage_route",
+		requestId: "id-owner-route",
+		runId,
+		stageKeys: ["reviewer", "gate-x"],
+		capability,
+	});
+	await idOwner.next("live_workflow_stage_route_registered", (frame) => frame.requestId === "id-owner-route");
+
+	const validation = forwardNextLiveMessage(owner);
+	sender.send({
+		type: "send",
+		to: `workflow:${runId}/reviewer`,
+		message: { id: "to-id-owner", timestamp: 6, content: { text: "for the stage whose id is reviewer" } },
+	});
+	assert.equal((await validation).message.id, "to-id-owner");
+	await sender.next("delivered", (frame) => frame.messageId === "to-id-owner");
+	assert.equal((await idOwner.next("message")).message.content.text, "for the stage whose id is reviewer");
+	assert.equal(
+		namesake.received.some((frame) => frame.type === "message"),
+		false,
+		"the namesake stage never receives traffic addressed to the other stage's id",
+	);
+});
