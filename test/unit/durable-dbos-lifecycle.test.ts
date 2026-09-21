@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, test } from "vitest";
+import { afterEach, describe, test, vi } from "vitest";
 import {
 	type ConfiguredDbosDurability,
 	DbosDurableBackend,
@@ -49,7 +49,10 @@ function configured(
 	};
 }
 
-afterEach(() => resetDbosLifecycleForTests());
+afterEach(() => {
+	resetDbosLifecycleForTests();
+	vi.unstubAllEnvs();
+});
 
 describe("mandatory DBOS lifecycle", () => {
 	// #3105: independently owned hosts share DBOS without sharing disposal.
@@ -148,6 +151,45 @@ describe("mandatory DBOS lifecycle", () => {
 			else process.env.DBOS_SYSTEM_DATABASE_URL = originalUrl;
 		}
 	});
+	test.sequential("starts local DBOS Postgres once after a startup connection reset", async () => {
+		const originalUrl = process.env.DBOS_SYSTEM_DATABASE_URL;
+		delete process.env.DBOS_SYSTEM_DATABASE_URL;
+		let launchCalls = 0;
+		let provisionCalls = 0;
+		resetDbosLifecycleForTests(
+			async () =>
+				configured([], async () => {
+					launchCalls += 1;
+					if (launchCalls === 1) throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+				}),
+			async () => {
+				provisionCalls += 1;
+			},
+		);
+		try {
+			await getReadyDbosBackend();
+			assert.equal(launchCalls, 2);
+			assert.equal(provisionCalls, 1);
+			assert.equal(dbosLifecycleState(), "ready");
+		} finally {
+			if (originalUrl === undefined) delete process.env.DBOS_SYSTEM_DATABASE_URL;
+			else process.env.DBOS_SYSTEM_DATABASE_URL = originalUrl;
+		}
+	});
+
+	test.sequential("a non-provisionable launch failure shuts the partial executor down", async () => {
+		const events: string[] = [];
+		resetDbosLifecycleForTests(async () =>
+			configured(events, async () => {
+				events.push("launch");
+				throw new Error("postgres unavailable");
+			}),
+		);
+
+		await assert.rejects(getReadyDbosBackend(), DbosDurabilityError);
+		assert.equal(events.filter((event) => event === "shutdown").length, 1);
+		assert.equal(dbosLifecycleState(), "failed");
+	});
 
 	test.sequential("memoizes launch failure without selecting another backend", async () => {
 		let launchCalls = 0;
@@ -239,7 +281,7 @@ describe("mandatory DBOS lifecycle", () => {
 
 		await assert.rejects(getReadyDbosBackend(), DbosDurabilityError);
 		await shutdownDbos();
-		assert.equal(events.filter((event) => event === "shutdown").length, 1);
+		assert.equal(events.filter((event) => event === "shutdown").length, 2);
 		assert.equal(localShutdowns, 1);
 		assert.equal(dbosLifecycleState(), "failed");
 	});
@@ -320,3 +362,32 @@ describe("mandatory DBOS lifecycle", () => {
 		assert.equal(dbosLifecycleState(), "failed");
 	});
 });
+
+for (const failedAttempt of [1, 2]) {
+	test(`failed executor cleanup on launch ${failedAttempt} prevents any further launch`, async () => {
+		vi.stubEnv("DBOS_SYSTEM_DATABASE_URL", "");
+		const events: string[] = [];
+		let launches = 0;
+		resetDbosLifecycleForTests(
+			async () =>
+				configured(
+					events,
+					async () => {
+						launches++;
+						throw new Error(`launch ${launches}: ECONNRESET`);
+					},
+					async () => {
+						if (launches === failedAttempt) throw new Error("executor teardown failed");
+					},
+				),
+			async () => {
+				events.push("provision");
+			},
+			async () => {},
+		);
+		await assert.rejects(getReadyDbosBackend(), /ECONNRESET.*executor teardown failed/s);
+		assert.equal(launches, failedAttempt);
+		assert.equal(dbosLifecycleState(), "failed");
+		assert.equal(events.length, failedAttempt - 1);
+	});
+}

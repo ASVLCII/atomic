@@ -7,11 +7,13 @@ import {
 	resetDurableBackendProcessOwner,
 } from "./backend-process-owner.js";
 import {
+	DbosDurabilityError,
 	DbosNotReadyError,
 	DbosShutdownError,
 	dbosLifecycleState,
 	getReadyDbosBackend,
 	getReadyDbosBackendSync,
+	shutdownDbos,
 } from "./dbos-lifecycle.js";
 import { classifyDbosDurabilityFailure, readDbosFailureDetail } from "./dbos-registration-diagnostics.js";
 
@@ -99,6 +101,16 @@ async function degradeToNonDurableBackend(error: unknown): Promise<DurableWorkfl
 		"atomic-workflows: durable backend unavailable — continuing NON-DURABLY with an in-memory backend. " +
 		"Workflow runs will execute, but their state will not survive this process and `/workflow resume` " +
 		`after exit will not work. ${restore}`;
+	try {
+		await shutdownDbos();
+	} catch (cleanupError) {
+		throw new DbosDurabilityError(
+			`Workflow backend cleanup failed; refusing to start another backend while executor shutdown is unconfirmed. ` +
+				`Restart Atomic after correcting the shutdown failure. Initialization: ${detail}. ` +
+				`Cleanup: ${readDbosFailureDetail(cleanupError)}`,
+			{ cause: cleanupError },
+		);
+	}
 	const owner = getDurableBackendProcessOwner();
 	const backend = new InMemoryDurableBackend();
 	owner.initializedBackend = backend;

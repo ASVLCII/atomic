@@ -11,6 +11,8 @@
  *      provisioning fails without leaving retained-process cleanup pending.
  */
 
+import { Client } from "pg";
+import { defaultPostgresUrl } from "./dbos-default-postgres-url.js";
 import {
 	EmbeddedPostgresCleanupPendingError,
 	embeddedDbosSystemDatabaseUrl,
@@ -22,12 +24,22 @@ import {
 } from "./dbos-embedded-postgres.js";
 import type { EmbeddedPostgresRunContext } from "./dbos-embedded-postgres-root.js";
 import type { ManagedPostgresMetadata } from "./dbos-postgres-ownership.js";
-import { commandFailureDetail, delay, runLocalCommand, tcpReachable } from "./local-command.js";
+import { commandFailureDetail, delay, runLocalCommand } from "./local-command.js";
 
 const DOCKER_CONTAINER = "dbos-db";
 const DOCKER_IMAGE = "pgvector/pgvector:pg16";
 const DOCKER_READY_ATTEMPTS = 60;
 const DOCKER_READY_DELAY_MS = 500;
+const DOCKER_READY_QUERY_TIMEOUT_MS = 1_000;
+const TRANSIENT_STARTUP_CODES = new Set([
+	"ECONNREFUSED",
+	"ECONNRESET",
+	"ETIMEDOUT",
+	"EPIPE",
+	"57P01",
+	"57P02",
+	"57P03",
+]);
 
 type LocalDbosProvider = () => Promise<void>;
 type LocalDbosShutdowner = () => Promise<void>;
@@ -153,10 +165,132 @@ export function shutdownResolvedLocalDbos(): Promise<void> {
 
 export function shouldProvisionLocalDbos(error: unknown): boolean {
 	if (process.env.DBOS_SYSTEM_DATABASE_URL?.trim()) return false;
+	if (isTransientStartupError(readStartupFailure(error))) return true;
 	const message = error instanceof Error ? `${error.message}\n${error.cause ?? ""}` : String(error);
-	return /ECONNREFUSED|server not reachable|connect failed|connection refused|unable to connect to system database/i.test(
-		message,
+	return /server not reachable|connect failed|connection refused|unable to connect to system database/i.test(message);
+}
+
+function postgresReadinessPort(value: string | number): number {
+	const port = Number(value);
+	const validFormat = typeof value !== "string" || /^\d+$/.test(value);
+	const validPort = Number.isInteger(port) && port >= 1 && port <= 65535;
+	if (!validFormat || !validPort)
+		throw new Error("PostgreSQL readiness port (PGPORT) must be an integer between 1 and 65535.");
+	return port;
+}
+
+/** Host/port/user/password DBOS uses when the Docker fallback supplies no URL. */
+export function dockerFallbackEndpoint(): {
+	readonly host: string;
+	readonly port: number;
+	readonly user: string;
+	readonly password: string;
+} {
+	return {
+		host: process.env.PGHOST || "localhost",
+		port: postgresReadinessPort(process.env.PGPORT || "5432"),
+		user: process.env.PGUSER || "postgres",
+		password: process.env.PGPASSWORD || "dbos",
+	};
+}
+
+export type PostgresReadinessProbe = (host: string, port: number) => Promise<boolean>;
+
+export interface PostgresProtocolReadinessOptions {
+	readonly host: string;
+	readonly port: number;
+	readonly isReady?: PostgresReadinessProbe;
+	readonly attempts?: number;
+	readonly delayMs?: number;
+	readonly wait?: (ms: number) => Promise<void>;
+}
+
+/** Wait until PostgreSQL on host:port answers a query, or the bounded deadline expires. */
+export async function waitForPostgresProtocolReadiness(options: PostgresProtocolReadinessOptions): Promise<void> {
+	postgresReadinessPort(options.port);
+	const attempts = options.attempts ?? DOCKER_READY_ATTEMPTS;
+	const delayMs = options.delayMs ?? DOCKER_READY_DELAY_MS;
+	const wait = options.wait ?? delay;
+	const isReady = options.isReady ?? dockerPostgresQueryReady;
+	const deadline = performance.now() + attempts * delayMs;
+	for (let attempt = 0; attempt < attempts && performance.now() < deadline; attempt += 1) {
+		try {
+			if (await isReady(options.host, options.port)) return;
+		} catch (error) {
+			if (!isTransientStartupError(readStartupFailure(error))) throw error;
+		}
+		if (attempt + 1 < attempts && performance.now() < deadline) await wait(delayMs);
+	}
+	throw new Error(
+		`The DBOS Postgres container started but did not become ready within ${(attempts * delayMs) / 1000} seconds.`,
 	);
+}
+
+interface PostgresStartupFailure {
+	readonly message: string;
+	readonly code?: string;
+	readonly cause?: Error | string;
+	readonly source?: Error;
+}
+
+function readStartupFailure(value: unknown): PostgresStartupFailure {
+	if (!(value instanceof Error)) return { message: String(value) };
+	const cause = value.cause;
+	return {
+		message: value.message,
+		code: "code" in value && typeof value.code === "string" ? value.code : undefined,
+		cause: cause === undefined ? undefined : cause instanceof Error ? cause : String(cause),
+		source: value,
+	};
+}
+
+function isTransientStartupError(error: PostgresStartupFailure): boolean {
+	const seen = new Set<Error>();
+	let current: PostgresStartupFailure | undefined = error;
+	while (current !== undefined) {
+		const { code, message, source, cause }: PostgresStartupFailure = current;
+		if (typeof code === "string" && TRANSIENT_STARTUP_CODES.has(code)) return true;
+		if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return false;
+		if (
+			/\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE)\b|^connection (?:refused|terminated(?: unexpectedly| due to connection timeout)?)(?:\s|$)|^connect(?:ion)? (?:timeout|timed out)(?:\s|$)|^timeout (?:expired|exceeded when trying to connect)$/i.test(
+				message,
+			)
+		)
+			return true;
+		if (source === undefined || seen.has(source)) return false;
+		seen.add(source);
+		current = cause === undefined ? undefined : readStartupFailure(cause);
+	}
+	return false;
+}
+
+async function dockerPostgresQueryReady(host: string, port: number): Promise<boolean> {
+	const client = new Client({
+		connectionString: defaultPostgresUrl("postgres", host, String(port)),
+		connectionTimeoutMillis: DOCKER_READY_QUERY_TIMEOUT_MS,
+		query_timeout: DOCKER_READY_QUERY_TIMEOUT_MS,
+		statement_timeout: DOCKER_READY_QUERY_TIMEOUT_MS,
+	});
+	client.on("error", () => {});
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			(async () => {
+				await client.connect();
+				await client.query("SELECT 1");
+			})(),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error("timeout expired")), DOCKER_READY_QUERY_TIMEOUT_MS);
+			}),
+		]);
+		return true;
+	} catch (error) {
+		if (isTransientStartupError(readStartupFailure(error))) return false;
+		throw error;
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+		client.end().catch(() => undefined);
+	}
 }
 
 async function resolve(): Promise<string | undefined> {
@@ -192,6 +326,7 @@ async function resolve(): Promise<string | undefined> {
 
 /** Start DBOS's canonical reusable local Postgres container. */
 async function ensureDockerDbosPostgres(): Promise<void> {
+	const endpoint = dockerFallbackEndpoint();
 	const docker = await runLocalCommand("docker", ["version", "--format", "{{.Server.Version}}"]).catch(
 		() => undefined,
 	);
@@ -215,18 +350,14 @@ async function ensureDockerDbosPostgres(): Promise<void> {
 			"-e",
 			"PGDATA=/var/lib/postgresql/data",
 			"-p",
-			"127.0.0.1:5432:5432",
+			`127.0.0.1:${endpoint.port}:5432`,
 			"-v",
 			"dbos-db-data:/var/lib/postgresql/data",
 			DOCKER_IMAGE,
 		]);
 	}
 
-	for (let attempt = 0; attempt < DOCKER_READY_ATTEMPTS; attempt += 1) {
-		if (await tcpReachable("127.0.0.1", 5432)) return;
-		await delay(DOCKER_READY_DELAY_MS);
-	}
-	throw new Error("The DBOS Postgres container started but did not become ready within 30 seconds.");
+	await waitForPostgresProtocolReadiness({ host: endpoint.host, port: endpoint.port });
 }
 
 async function requireDockerSuccess(action: string, args: string[]): Promise<void> {

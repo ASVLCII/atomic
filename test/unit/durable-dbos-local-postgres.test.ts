@@ -4,8 +4,9 @@
  */
 
 import assert from "node:assert/strict";
+import { createServer } from "node:net";
 import type { RetainedPostgres } from "@bastani/atomic-natives";
-import { afterEach, describe, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, test, vi } from "vitest";
 import { effectiveSystemDatabaseUrl } from "../../packages/workflows/src/durable/dbos-backend.js";
 import * as embeddedPostgres from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
 import {
@@ -14,6 +15,7 @@ import {
 	shutdownEmbeddedDbosPostgres,
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
 import {
+	dockerFallbackEndpoint,
 	provisionResolvedLocalDbos,
 	recoverManagedPostgres,
 	resetLocalDbosProvisioningForTests,
@@ -21,6 +23,7 @@ import {
 	resolvedPostgresProvider,
 	shouldProvisionLocalDbos,
 	shutdownResolvedLocalDbos,
+	waitForPostgresProtocolReadiness,
 } from "../../packages/workflows/src/durable/dbos-local-postgres.js";
 
 const originalUrl = process.env.DBOS_SYSTEM_DATABASE_URL;
@@ -332,12 +335,251 @@ describe("shouldProvisionLocalDbos", () => {
 			shouldProvisionLocalDbos(new Error("Unable to connect to system database at postgresql://...")),
 			true,
 		);
+		assert.equal(shouldProvisionLocalDbos(new Error("read ECONNRESET")), true);
+		assert.equal(shouldProvisionLocalDbos(Object.assign(new Error("socket reset"), { code: "ECONNRESET" })), true);
+		assert.equal(shouldProvisionLocalDbos(new Error("Connection terminated unexpectedly")), true);
 		assert.equal(shouldProvisionLocalDbos(new Error("password authentication failed")), false);
 
 		process.env.DBOS_SYSTEM_DATABASE_URL = "postgresql://user:pw@db.example:5432/dbos";
 		assert.equal(shouldProvisionLocalDbos(new Error("connect ECONNREFUSED db.example:5432")), false);
+		assert.equal(shouldProvisionLocalDbos(new Error("read ECONNRESET")), false);
+		assert.equal(shouldProvisionLocalDbos(new Error("Connection terminated unexpectedly")), false);
 	});
 });
+
+describe("dockerFallbackEndpoint", () => {
+	test.sequential("uses PGHOST/PGPORT/PGUSER/PGPASSWORD the same way DBOS default URL does", () => {
+		const previous = {
+			PGHOST: process.env.PGHOST,
+			PGPORT: process.env.PGPORT,
+			PGUSER: process.env.PGUSER,
+			PGPASSWORD: process.env.PGPASSWORD,
+		};
+		process.env.PGHOST = "fixture.invalid";
+		process.env.PGPORT = "15432";
+		process.env.PGUSER = "fixture";
+		process.env.PGPASSWORD = "p@ss/word";
+		try {
+			assert.deepEqual(dockerFallbackEndpoint(), {
+				host: "fixture.invalid",
+				port: 15432,
+				user: "fixture",
+				password: "p@ss/word",
+			});
+		} finally {
+			for (const [key, value] of Object.entries(previous)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
+	test.sequential("defaults to localhost:5432 postgres/dbos when PG* is unset", () => {
+		const previous = {
+			PGHOST: process.env.PGHOST,
+			PGPORT: process.env.PGPORT,
+			PGUSER: process.env.PGUSER,
+			PGPASSWORD: process.env.PGPASSWORD,
+		};
+		delete process.env.PGHOST;
+		delete process.env.PGPORT;
+		delete process.env.PGUSER;
+		delete process.env.PGPASSWORD;
+		try {
+			assert.deepEqual(dockerFallbackEndpoint(), {
+				host: "localhost",
+				port: 5432,
+				user: "postgres",
+				password: "dbos",
+			});
+		} finally {
+			for (const [key, value] of Object.entries(previous)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+});
+describe("waitForPostgresProtocolReadiness", () => {
+	beforeEach(() => {
+		vi.spyOn(performance, "now").mockReturnValue(0);
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	test.sequential("a TCP-published port that resets is not PostgreSQL-ready", async () => {
+		const listener = await listenResettingPort();
+		try {
+			await assert.rejects(
+				waitForPostgresProtocolReadiness({
+					host: "127.0.0.1",
+					port: listener.port,
+					attempts: 2,
+					delayMs: 1,
+					wait: async () => {},
+				}),
+				/did not become ready/,
+			);
+		} finally {
+			await listener.close();
+		}
+	});
+
+	test.sequential("a TCP-published port that FINs is retried until the deadline", async () => {
+		const listener = await listenClosingPort("fin");
+		try {
+			await assert.rejects(
+				waitForPostgresProtocolReadiness({
+					host: "127.0.0.1",
+					port: listener.port,
+					attempts: 2,
+					delayMs: 1,
+					wait: async () => {},
+				}),
+				/did not become ready/,
+			);
+		} finally {
+			await listener.close();
+		}
+	});
+	test.sequential("recovers after a transient startup reset then becomes ready", async () => {
+		let probes = 0;
+		await waitForPostgresProtocolReadiness({
+			host: "127.0.0.1",
+			port: 1,
+			attempts: 3,
+			delayMs: 1,
+			wait: async () => {},
+			isReady: async () => {
+				probes += 1;
+				if (probes === 1) {
+					throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+				}
+				return true;
+			},
+		});
+		assert.equal(probes, 2);
+	});
+
+	test.sequential("recovers after FATAL 57P03 then becomes ready", async () => {
+		let probes = 0;
+		await waitForPostgresProtocolReadiness({
+			host: "127.0.0.1",
+			port: 1,
+			attempts: 3,
+			delayMs: 1,
+			wait: async () => {},
+			isReady: async () => {
+				probes += 1;
+				if (probes === 1) {
+					throw Object.assign(new Error("the database system is starting up"), { code: "57P03" });
+				}
+				return true;
+			},
+		});
+		assert.equal(probes, 2);
+	});
+
+	test.sequential("recovers after a connect timeout then becomes ready", async () => {
+		let probes = 0;
+		await waitForPostgresProtocolReadiness({
+			host: "127.0.0.1",
+			port: 1,
+			attempts: 3,
+			delayMs: 1,
+			wait: async () => {},
+			isReady: async () => {
+				probes += 1;
+				if (probes === 1) throw new Error("timeout expired");
+				return true;
+			},
+		});
+		assert.equal(probes, 2);
+	});
+
+	test.sequential("exhausts the bounded attempts when PostgreSQL never becomes ready", async () => {
+		let probes = 0;
+		await assert.rejects(
+			waitForPostgresProtocolReadiness({
+				host: "127.0.0.1",
+				port: 1,
+				attempts: 2,
+				delayMs: 1,
+				wait: async () => {},
+				isReady: async () => {
+					probes += 1;
+					return false;
+				},
+			}),
+			/did not become ready within 0.002 seconds/,
+		);
+		assert.equal(probes, 2);
+	});
+
+	test("deadline exhaustion stops probes before the attempt limit", async () => {
+		let now = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => now);
+		let probes = 0;
+		await assert.rejects(
+			waitForPostgresProtocolReadiness({
+				host: "127.0.0.1",
+				port: 1,
+				attempts: 10,
+				delayMs: 500,
+				isReady: async () => {
+					probes++;
+					now = 5_001;
+					return false;
+				},
+			}),
+			/did not become ready within 5 seconds/,
+		);
+		assert.equal(probes, 1);
+	});
+
+	test.sequential("does not retry an authentication failure", async () => {
+		let probes = 0;
+		await assert.rejects(
+			waitForPostgresProtocolReadiness({
+				host: "127.0.0.1",
+				port: 1,
+				attempts: 5,
+				delayMs: 1,
+				wait: async () => {},
+				isReady: async () => {
+					probes += 1;
+					throw new Error("password authentication failed");
+				},
+			}),
+			/password authentication failed/,
+		);
+		assert.equal(probes, 1);
+	});
+});
+
+async function listenClosingPort(mode: "rst" | "fin"): Promise<{ port: number; close: () => Promise<void> }> {
+	const server = createServer((socket) => {
+		if (mode === "rst") socket.resetAndDestroy();
+		else socket.destroy();
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen({ host: "127.0.0.1", port: 0 }, () => resolve());
+	});
+	const address = server.address();
+	if (address === null || typeof address === "string") {
+		server.close();
+		throw new Error("closing listener did not bind a TCP port");
+	}
+	return {
+		port: address.port,
+		close: () =>
+			new Promise<void>((resolve, reject) => {
+				server.close((error) => (error ? reject(error) : resolve()));
+			}),
+	};
+}
+
+const listenResettingPort = (): Promise<{ port: number; close: () => Promise<void> }> => listenClosingPort("rst");
 
 describe("effectiveSystemDatabaseUrl", () => {
 	test("explicit config wins over the environment variable", () => {
