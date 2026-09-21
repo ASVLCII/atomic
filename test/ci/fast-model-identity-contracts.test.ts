@@ -226,6 +226,8 @@ const proseNames = new Set([
 	"ATOMIC_POSTGRES_PORT",
 	// PR #3114: the replacement TypeSafe environment variable is configuration, not an export.
 	"TYPESAFE_API_KEY",
+	// PR #3167: the Meta Model API key environment variable is configuration, not an export.
+	"META_API_KEY",
 	"openrouter",
 	"flex",
 	"undefined",
