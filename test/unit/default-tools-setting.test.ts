@@ -234,33 +234,36 @@ describe("defaultTools setting", () => {
 		}
 	});
 
-	test("preserves explicit tool option precedence over the setting", async () => {
-		const allowlistedSession = await createSession(["read", "find"], { tools: ["read"] });
+	// One session per test: each session loads every builtin extension package,
+	// and the CI duration gate scores tests individually.
+	test("an explicit tools allowlist takes precedence over the setting", async () => {
+		const session = await createSession(["read", "find"], { tools: ["read"] });
 		try {
-			assert.deepEqual(allowlistedSession.getActiveToolNames(), ["read"]);
+			assert.deepEqual(session.getActiveToolNames(), ["read"]);
 		} finally {
-			allowlistedSession.dispose();
+			session.dispose();
 		}
+	});
 
-		const excludedSession = await createSession(["read", "find"], { excludedTools: ["read"] });
+	test("excludedTools takes precedence over the setting", async () => {
+		const session = await createSession(["read", "find"], { excludedTools: ["read"] });
+		try {
+			assert.deepEqual([...session.getActiveToolNames()].sort(), ["find", ...BUILTIN_EXTENSION_TOOLS].sort());
+		} finally {
+			session.dispose();
+		}
+	});
+
+	test('noTools: "all" takes precedence over the setting', async () => {
+		const session = await createSession(["read"], { noTools: "all" });
 		try {
 			assert.deepEqual(
-				[...excludedSession.getActiveToolNames()].sort(),
-				["find", ...BUILTIN_EXTENSION_TOOLS].sort(),
-			);
-		} finally {
-			excludedSession.dispose();
-		}
-
-		const toolLessSession = await createSession(["read"], { noTools: "all" });
-		try {
-			assert.deepEqual(
-				toolLessSession.getAllTools().map((tool) => tool.name),
+				session.getAllTools().map((tool) => tool.name),
 				[],
 			);
-			assert.deepEqual(toolLessSession.getActiveToolNames(), []);
+			assert.deepEqual(session.getActiveToolNames(), []);
 		} finally {
-			toolLessSession.dispose();
+			session.dispose();
 		}
 	});
 
@@ -280,26 +283,25 @@ describe("defaultTools setting", () => {
 		}
 	});
 
-	test("an unset setting keeps the standard built-in defaults; an empty list keeps none", async () => {
-		const unsetSession = await createSession(undefined);
+	test("an unset setting keeps the standard built-in defaults", async () => {
+		const session = await createSession(undefined);
 		try {
 			assert.deepEqual(
-				[...unsetSession.getActiveToolNames()].sort(),
+				[...session.getActiveToolNames()].sort(),
 				[...getDefaultToolNames(), ...BUILTIN_EXTENSION_TOOLS].sort(),
 			);
 		} finally {
-			unsetSession.dispose();
+			session.dispose();
 		}
+	});
 
-		const emptySession = await createSession([], {}, [staticExtensionTool("static_tool")]);
+	test("an empty list keeps no built-ins active but leaves them registered", async () => {
+		const session = await createSession([], {}, [staticExtensionTool("static_tool")]);
 		try {
-			assert.deepEqual(
-				[...emptySession.getActiveToolNames()].sort(),
-				["static_tool", ...BUILTIN_EXTENSION_TOOLS].sort(),
-			);
+			assert.deepEqual([...session.getActiveToolNames()].sort(), ["static_tool", ...BUILTIN_EXTENSION_TOOLS].sort());
 			for (const builtin of registrableToolNames) {
 				assert.ok(
-					emptySession
+					session
 						.getAllTools()
 						.map((tool) => tool.name)
 						.includes(builtin),
@@ -307,31 +309,33 @@ describe("defaultTools setting", () => {
 				);
 			}
 		} finally {
-			emptySession.dispose();
+			session.dispose();
 		}
 	});
 
-	test("an unreadable setting value falls back to the standard built-in defaults", async () => {
-		// Settings load unvalidated from disk. Before the accessor guarded the
-		// stored shape, a string value spread into single characters and silently
-		// produced a zero-tool session, while a number threw out of
-		// createAgentSession itself (the hazard upstream 541045ae exists to
-		// prevent, reached through a malformed input shape).
-		for (const raw of ['"read"', "42", '{"read":true}']) {
-			const { cwd, agentDir } = sessionRoots("atomic-default-tools-invalid-");
-			writeTextSync(join(agentDir, "settings.json"), `{"defaultTools": ${raw}}`);
-			const settingsManager = SettingsManager.create(cwd, agentDir);
+	// Settings load unvalidated from disk. Before the accessor guarded the
+	// stored shape, a string value spread into single characters and silently
+	// produced a zero-tool session, while a number threw out of
+	// createAgentSession itself (the hazard upstream 541045ae exists to
+	// prevent, reached through a malformed input shape).
+	test.each([
+		["a string", '"read"'],
+		["a number", "42"],
+		["an object", '{"read":true}'],
+	])("an unreadable setting value (%s) falls back to the standard built-in defaults", async (_label, raw) => {
+		const { cwd, agentDir } = sessionRoots("atomic-default-tools-invalid-");
+		writeTextSync(join(agentDir, "settings.json"), `{"defaultTools": ${raw}}`);
+		const settingsManager = SettingsManager.create(cwd, agentDir);
 
-			const session = await createSessionFromManager(settingsManager, cwd, agentDir);
-			try {
-				assert.deepEqual(
-					[...session.getActiveToolNames()].sort(),
-					[...getDefaultToolNames(), ...BUILTIN_EXTENSION_TOOLS].sort(),
-					`expected malformed defaultTools ${raw} to fall back to the standard defaults`,
-				);
-			} finally {
-				session.dispose();
-			}
+		const session = await createSessionFromManager(settingsManager, cwd, agentDir);
+		try {
+			assert.deepEqual(
+				[...session.getActiveToolNames()].sort(),
+				[...getDefaultToolNames(), ...BUILTIN_EXTENSION_TOOLS].sort(),
+				`expected malformed defaultTools ${raw} to fall back to the standard defaults`,
+			);
+		} finally {
+			session.dispose();
 		}
 	});
 });
