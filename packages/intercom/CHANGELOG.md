@@ -4,6 +4,8 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 
 ## [Unreleased]
 
+## [0.9.20-alpha.5] - 2026-09-20
+
 ### Changed
 
 - The `intercom` skill adds a peer-coordination pattern for subagents and workflow stages that share a group, covering connect, coordinate, learn, and debate exchanges alongside the existing supervisor-escalation patterns.
