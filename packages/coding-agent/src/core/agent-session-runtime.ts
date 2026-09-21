@@ -487,7 +487,7 @@ export class AgentSessionRuntime {
 					await setup(result.session.sessionManager);
 					this.assertOpen();
 					if (this.session !== result.session) return;
-					result.session.agent.state.messages = result.session.sessionManager.buildSessionContext().messages;
+					result.session.refreshContext();
 				}
 				if (this.rebindSession) {
 					await this.rebindSession(result.session);

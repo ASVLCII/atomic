@@ -35,6 +35,7 @@ Review the staged changes (`git diff --cached`). Focus on:
 - The filename becomes the command name. `review.md` becomes `/review`.
 - `description` is optional. If missing, the first non-empty line is used.
 - `argument-hint` is optional. When set, the hint is displayed before the description in the autocomplete dropdown.
+- Invalid YAML frontmatter (for example an unquoted `description: Broken: value`) skips only that template and reports a warning naming the file and the parse position; valid sibling templates still load.
 
 ### Argument Hints
 

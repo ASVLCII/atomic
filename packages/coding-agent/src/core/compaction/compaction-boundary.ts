@@ -7,9 +7,9 @@ import {
 	messageStartsLlmUserTurn,
 } from "../messages.ts";
 import { normalizeDerivedSessionEntries } from "../session-entry-normalization.ts";
-import { buildSessionContext } from "../session-manager-history.ts";
-import type { CompactionEntry, SessionEntry } from "../session-manager-types.ts";
-import { type CompactionSettings, estimateContextTokens, estimateTokens } from "./compaction.ts";
+import { applyContextEdit, buildSessionProjection, collectContextEdits } from "../session-manager-history.ts";
+import type { CompactionEntry, ContextEditEntry, SessionEntry } from "../session-manager-types.ts";
+import { type CompactionSettings, estimateProjectedContextTokens, estimateTokens } from "./compaction.ts";
 import {
 	COMPACTION_AUTO_QUERY,
 	normalizeCompactionParameters,
@@ -97,11 +97,15 @@ function activeBoundary(entry: SessionEntry): entry is CompactionEntry<VerbatimC
 	return details?.strategy === VERBATIM_COMPACTION_STRATEGY;
 }
 
-function visibleEntries(entries: SessionEntry[], start = 0): VisibleEntry[] {
+/** Context-visible entries from `start`, with append-only context edits applied to their content. */
+function visibleEntries(entries: SessionEntry[], start = 0, edits?: Map<string, ContextEditEntry>): VisibleEntry[] {
 	const visible: VisibleEntry[] = [];
 	for (let index = start; index < entries.length; index++) {
 		const entry = entries[index];
-		const message = messageFromEntry(entry);
+		const raw = messageFromEntry(entry);
+		if (!raw) continue;
+		const edit = edits?.get(entry.id);
+		const message = edit ? applyContextEdit([raw], edit)[0] : raw;
 		if (message && messageIsLlmVisible(message)) visible.push({ entry, index, message });
 	}
 	return visible;
@@ -176,7 +180,7 @@ export function prepareCompactionBoundary(
 		regionStart = keptIndex >= 0 ? keptIndex : previous.index + 1;
 	}
 
-	const visible = visibleEntries(entries, regionStart);
+	const visible = visibleEntries(entries, regionStart, collectContextEdits(entries));
 	const parameters = normalizeCompactionParameters({ ...settings, ...options }, autoDetectCompactionQuery(entries));
 	const tailStart = Math.max(0, visible.length - parameters.preserve_recent);
 	const regionMessages = visible.slice(0, tailStart);
@@ -194,7 +198,7 @@ export function prepareCompactionBoundary(
 		region,
 		regionEntryIds: regionMessages.map((item) => item.entry.id),
 		keptTailMessageCount: tailMessages.length,
-		tokensBefore: estimateContextTokens(buildSessionContext(entries).messages).tokens,
+		tokensBefore: estimateProjectedContextTokens(buildSessionProjection(entries), entries).tokens,
 		parameters,
 		settings,
 	};

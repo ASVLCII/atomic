@@ -267,6 +267,18 @@ Older Atomic versions stored logical entry/content-block deletions in `type:"con
 
 These records are archival and never produced or applied by current Atomic. When an old session resumes, previously hidden content may re-enter context until verbatim-line compaction creates an active boundary.
 
+### ContextEditEntry
+
+Append-only edit of one earlier context-producing entry. It changes only future model context; the target entry and its metadata remain unchanged in raw history, UI, exports, and session accounting.
+
+```json
+{"type":"context_edit","id":"g6h7i8j9","parentId":"f6g7h8i9","timestamp":"2024-12-03T14:11:00.000Z","targetId":"c3d4e5f6","replacement":null}
+```
+
+Targets may be user, assistant, tool-result, or custom-message entries. `replacement: null` omits the target from model context. A non-null `replacement` replaces only the target message content. String replacements for assistant and tool-result entries are normalized to one text block because those roles require content arrays. If several edits target the same entry, the latest edit on the active branch wins. Edits are branch-relative: navigating to a point before the edit reveals the target's original contribution again.
+
+Atomic writes these entries itself when it durably omits a failed attempt from model context (an automatic retry after a provider error, a model fallback, an overflow or length recovery, or an interrupted empty reply that resumes an admitted queued message). Extensions append them through the `turn_end` and `agent_before_settle` boundaries.
+
 ### BranchSummaryEntry
 
 Created when switching branches via `/tree` with an LLM generated summary of the left branch up to the common ancestor. Captures context from the abandoned path.
@@ -354,10 +366,10 @@ Entries form a tree:
 
 ## Context Building
 
-`buildSessionContext()` walks the active branch from root to leaf and replays model, thinking-level, and context-window changes. It selects the latest `compaction` entry whose `details.strategy` is `"verbatim-lines"`.
+`buildSessionProjection()` walks the active branch from root to leaf and replays model, thinking-level, and context-window changes. It selects the latest `compaction` entry whose `details.strategy` is `"verbatim-lines"`, then applies the latest `context_edit` for each selected target. It returns the model-visible messages together with their source entries (`entries[].sourceEntry` and `entries[].messages`); omitted targets produce no message, replacements retain the source entry's role and metadata while changing only content, and the raw selected entries are not modified. `buildSessionContext()` returns just the messages, thinking level, and model from that projection. Provider requests are built from this projection.
 
 - With no active boundary, normal message, custom-message, and branch-summary entries are emitted verbatim.
-- With a boundary whose `firstKeptEntryId` is a string, Atomic emits a single custom-role `customType:"compaction"` message whose text is the durable string plus the losslessly serialized kept tail (the entries from that ID up to the boundary, with retained images kept as image blocks on that message), then the messages appended after the boundary.
+- With a boundary whose `firstKeptEntryId` is a string, Atomic emits a single custom-role `customType:"compaction"` message whose text is the durable string plus the losslessly serialized kept tail (the entries from that ID up to the boundary, with context edits applied and retained images kept as image blocks on that message), then the messages appended after the boundary. Kept-tail entries project no standalone messages of their own.
 - With `firstKeptEntryId: null`, Atomic emits the boundary and post-boundary messages but no pre-boundary ordinary message.
 - If a corrupt/foreign boundary's non-null `firstKeptEntryId` is absent, Atomic emits the boundary followed by post-boundary messages rather than resurrecting all older content.
 - Legacy `context_compaction` entries and non-verbatim `compaction` entries are skipped as inert archival records.
@@ -468,7 +480,10 @@ for (const stage of stages.filter((session) => session.internal)) {
 - `branchWithSummary(entryId, summary, details?, fromHook?)` - Branch with context summary
 
 ### Instance Methods - Context & Info
+- `buildSessionProjection()` - Get the context-edited projection: source entries with their model-visible messages, plus thinkingLevel and model
 - `buildSessionContext()` - Get messages, thinkingLevel, and model for LLM
+- `buildContextEntries()` - Active branch entries after the latest compaction boundary
+- `appendContextEdit(targetId, replacement)` - Append a branch-local context edit (`null` omits the target; `{ content }` replaces only its content)
 - `getEntries()` - All entries (excluding header)
 - `getHeader()` - Session header metadata
 - `getSessionName()` - Get display name from latest session_info entry (`undefined` when cleared or never named)

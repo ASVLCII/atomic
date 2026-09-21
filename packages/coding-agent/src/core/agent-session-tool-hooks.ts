@@ -55,8 +55,10 @@ export function _installAgentToolHooks(this: AgentSession): void {
 
 		const hookContent = hookResult?.content ?? result.content;
 		// Run after extension hooks so extension-injected images enter history at provider-safe sizes.
+		const resizeOptions = this.model?.inputLimits?.images?.resize;
 		const normalizedContent = await normalizeToolResultImages(hookContent, {
 			autoResizeImages: this.settingsManager.getImageAutoResize(),
+			...(resizeOptions ? { resizeOptions } : {}),
 		});
 		const resultReplacement =
 			hookResult || normalizedContent !== hookContent
@@ -101,18 +103,22 @@ export function _installAgentNextTurnRefresh(this: AgentSession): void {
 			? async (_turn: PrepareNextTurnContext, signal?: AbortSignal) => await this.agent.prepareNextTurn?.(signal)
 			: undefined);
 
-	const previousShouldStopAfterTurn = this.agent.shouldStopAfterTurn;
-	this.agent.shouldStopAfterTurn = async (turn, signal) => {
+	const previousFinishTurn = this.agent.finishTurn;
+	this.agent.finishTurn = async (turn, signal) => {
+		// shouldStopAfterTurn previously ran only for normal responses. finishTurn
+		// also fires for error/aborted turns, but those stay hard exits whose
+		// decisions agent-core ignores, so skip the side effects there too.
+		if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
 		const toolCallIds = turn.message.content.filter((part) => part.type === "toolCall").map((part) => part.id);
 		const terminatingBatch =
 			toolCallIds.length > 0 && toolCallIds.every((id) => this._terminatingToolCallIds.has(id));
 		for (const id of toolCallIds) this._terminatingToolCallIds.delete(id);
 
-		const shouldStop = (await previousShouldStopAfterTurn?.(turn, signal)) ?? false;
-		this._stopAfterTurnBlockedContinuation = shouldStop;
+		const previousDecision = (await previousFinishTurn?.(turn, signal)) ?? undefined;
+		this._stopAfterTurnBlockedContinuation = previousDecision?.action === "end";
 		await settleFallbackAfterTurn(this, turn, terminatingBatch);
 		if (this._subagentMessageAdmission) await this._subagentMessageAdmission.waitForPendingDeliveries();
-		return shouldStop;
+		return previousDecision;
 	};
 
 	const previousTransformContext = this.agent.transformContext;
@@ -143,6 +149,9 @@ export function _installAgentNextTurnRefresh(this: AgentSession): void {
 			compactedMessages === turn.context.messages ? turn.context : { ...turn.context, messages: compactedMessages };
 		const preparedTurn = compactedContext === turn.context ? turn : { ...turn, context: compactedContext };
 		const previousSnapshot = await previousPrepareNextTurnWithContext?.(preparedTurn, signal);
+		// A caller-supplied replacement is the complete context for the next request; the
+		// canonical projection must not overwrite it at the request boundary.
+		this._callerReplacedNextRequestContext = previousSnapshot?.context !== undefined;
 		const previousContext = previousSnapshot?.context ?? compactedContext;
 		const runOptions = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
 		const options = normalizeBuildSystemPromptOptions({

@@ -57,7 +57,8 @@ try {
  } else if (mode === "persist") {
   const events = [];
   const loader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true, extensionFactories: [pi => {
-   pi.on("agent_start", async () => { entered.resolve(); await release.promise; });
+   // Provider requests wait for queued session events, so the gate holds the run open after the conversation events completed.
+   pi.on("agent_end", async () => { entered.resolve(); await release.promise; });
    pi.on("message_end", event => { events.push(event.message.role); });
   }] });
   ({ session } = await createAgentSession({ ...options, resourceLoader: loader }));

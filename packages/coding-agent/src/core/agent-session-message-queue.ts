@@ -228,8 +228,7 @@ export function _appendCustomMessage<T>(this: AgentSession, message: CustomMessa
 		return;
 	}
 	const stageAdmissionMessage = message as StageAdmittedCustomMessage;
-	this.agent.state.messages.push(message);
-	this.sessionManager.appendCustomMessageEntry(
+	const entryId = this.sessionManager.appendCustomMessageEntry(
 		message.customType,
 		message.content,
 		message.display,
@@ -238,6 +237,8 @@ export function _appendCustomMessage<T>(this: AgentSession, message: CustomMessa
 		undefined,
 		stageAdmissionMessage.stageAdmissionKey,
 	);
+	this._entryIdsByMessage.set(message, entryId);
+	this._refreshFinalizedContext();
 	this._emit({ type: "message_start", message });
 	this._emit({ type: "message_end", message });
 }

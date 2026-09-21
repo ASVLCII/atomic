@@ -288,11 +288,14 @@ describe("AgentSession concurrent prompt guard", () => {
 		await new Promise((resolve) => setTimeout(resolve, 100));
 
 		const messageEntries = sessionManager.getEntries().filter((entry) => entry.type === "message");
+		// The tool declaration checkpoint for the continued turn is persisted as a system
+		// message between the tool result and the next assistant response.
 		expect(messageEntries.map((entry) => entry.message.role)).toEqual([
 			"system",
 			"user",
 			"assistant",
 			"toolResult",
+			"system",
 			"assistant",
 		]);
 	});

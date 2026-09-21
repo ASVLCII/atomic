@@ -167,6 +167,12 @@ export interface AgentSessionConfig {
 	sessionStartEvent?: SessionStartEvent;
 	subagentPolicy?: SubagentChildPolicy;
 	systemPromptTransform?: (prompt: string) => string;
+	/**
+	 * Transform the canonical session projection whenever it becomes the finalized
+	 * context (session construction, provider requests, boundaries, recovery). The
+	 * durable transcript stays unchanged; only derived context is filtered.
+	 */
+	contextProjectionTransform?: (messages: AgentMessage[]) => AgentMessage[];
 	orchestrationContext?: OrchestrationContext;
 }
 

@@ -87,16 +87,16 @@ export async function updatePromptsFromPathsAsync(
 	metadataByPath?: Map<string, PathMetadata>,
 ): Promise<void> {
 	const state = resourceInternals(loader);
-	const loadedPrompts =
+	const loaded =
 		state.noPromptTemplates && promptPaths.length === 0
-			? []
+			? { templates: [], diagnostics: [] }
 			: await loadPromptTemplatesAsync({
 					cwd: state.cwd,
 					agentDir: state.agentDir,
 					promptPaths,
 					includeDefaults: false,
 				});
-	const sourcedPrompts = loadedPrompts.map((prompt) => ({
+	const sourcedPrompts = loaded.templates.map((prompt) => ({
 		...prompt,
 		sourceInfo:
 			findSourceInfoForPath(loader, prompt.filePath, state.extensionPromptSourceInfos, metadataByPath) ??
@@ -106,12 +106,16 @@ export async function updatePromptsFromPathsAsync(
 	for (const prompt of sourcedPrompts) {
 		if (prompt.sourceInfo) state.extensionPromptSourceInfos.set(prompt.filePath, prompt.sourceInfo);
 	}
-	const promptsResult = dedupePrompts(sourcedPrompts);
+	const deduped = dedupePrompts(sourcedPrompts);
 	state.extensionsResult.overlaps ??= [];
 	const overlaps = state.extensionsResult.overlaps;
 	const extensionOverlaps = overlaps.filter((overlap) => overlap.resourceType !== "prompt");
-	overlaps.splice(0, overlaps.length, ...extensionOverlaps, ...promptsResult.overlaps);
-	applyPromptsResult(loader, promptsResult, metadataByPath);
+	overlaps.splice(0, overlaps.length, ...extensionOverlaps, ...deduped.overlaps);
+	applyPromptsResult(
+		loader,
+		{ prompts: deduped.prompts, diagnostics: [...loaded.diagnostics, ...deduped.diagnostics] },
+		metadataByPath,
+	);
 }
 
 function applyThemesResult(

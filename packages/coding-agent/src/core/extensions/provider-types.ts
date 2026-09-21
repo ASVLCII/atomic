@@ -72,6 +72,8 @@ export interface ProviderModelConfig {
 	thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
 	/** Supported input types. `"pdf"` only on runtimes that can serialize a document block. */
 	input: Model<Api>["input"];
+	/** Provider input limits and cache-safe image preprocessing metadata. */
+	inputLimits?: Model<Api>["inputLimits"];
 	/** Request pricing, including optional request-wide long-context tiers. */
 	cost: Model<Api>["cost"];
 	/** Default/effective context window size in tokens. */

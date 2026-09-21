@@ -216,6 +216,7 @@ export function applyTreeFilter(state: TreeListState): void {
 		// Entry types hidden in default view (settings/bookkeeping)
 		const isSettingsEntry =
 			entry.type === "label" ||
+			entry.type === "context_edit" ||
 			entry.type === "custom" ||
 			entry.type === "model_change" ||
 			entry.type === "thinking_level_change" ||

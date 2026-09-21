@@ -6,6 +6,7 @@ import { validSessionWorkflowMetadata } from "./session-manager-classification.t
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
+	type ContextEditEntry,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
@@ -120,6 +121,20 @@ export function createCompactionEntry(
 		details,
 		usage,
 		fromHook: details.rung === "extension" || undefined,
+	};
+}
+
+export function createContextEditEntry(
+	targetId: string,
+	replacement: ContextEditEntry["replacement"],
+	byId: { has(id: string): boolean },
+	parentId: string | null,
+): ContextEditEntry {
+	return {
+		type: "context_edit",
+		...entryBase(byId, parentId),
+		targetId,
+		replacement,
 	};
 }
 

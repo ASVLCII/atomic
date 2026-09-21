@@ -11,9 +11,12 @@ import {
 import { normalizeDerivedSessionEntries } from "./session-entry-normalization.ts";
 import type {
 	CompactionEntry,
+	ContextEditEntry,
 	FileEntry,
+	ProjectedSessionEntry,
 	SessionContext,
 	SessionEntry,
+	SessionProjection,
 	SessionTreeNode,
 } from "./session-manager-types.ts";
 
@@ -47,14 +50,73 @@ function contextMessageFromEntry(entry: SessionEntry): AgentMessage | undefined 
  * tool results keep their full text and images stay as image blocks, because the tail
  * is exactly the span `preserve_recent` promised to keep.
  */
-function serializeKeptTail(entries: SessionEntry[]): TranscriptChunk[] {
+function serializeKeptTail(entries: SessionEntry[], edits?: Map<string, ContextEditEntry>): TranscriptChunk[] {
 	const messages: AgentMessage[] = [];
 	for (const entry of entries) {
 		const message = contextMessageFromEntry(entry);
-		if (message) messages.push(message);
+		if (!message) continue;
+		const edit = edits?.get(entry.id);
+		if (edit) messages.push(...applyContextEdit([message], edit));
+		else messages.push(message);
 	}
 	if (messages.length === 0) return [];
 	return serializeRetainedTranscript(convertToLlm(messages));
+}
+
+/** Index the latest context edit per target among the given entries. */
+export function collectContextEdits(entries: readonly SessionEntry[]): Map<string, ContextEditEntry> {
+	const edits = new Map<string, ContextEditEntry>();
+	for (const entry of entries) {
+		if (entry.type === "context_edit") edits.set(entry.targetId, entry);
+	}
+	return edits;
+}
+
+/** Apply one append-only context edit to the messages an entry contributes. */
+export function applyContextEdit(messages: AgentMessage[], edit: ContextEditEntry): AgentMessage[] {
+	const replacement = edit.replacement;
+	if (replacement === null) return [];
+
+	return messages.map((message) => {
+		if (
+			message.role !== "user" &&
+			message.role !== "assistant" &&
+			message.role !== "toolResult" &&
+			message.role !== "custom"
+		) {
+			return message;
+		}
+		const content =
+			(message.role === "assistant" || message.role === "toolResult") && typeof replacement.content === "string"
+				? [{ type: "text" as const, text: replacement.content }]
+				: replacement.content;
+		return { ...message, content } as AgentMessage;
+	});
+}
+
+function projectContextEntry(entry: SessionEntry, edit: ContextEditEntry | undefined): AgentMessage[] {
+	const messages = sessionEntryToContextMessages(entry);
+	if (!edit) return messages;
+	return applyContextEdit(messages, edit);
+}
+
+/** Extract the settings (thinking level and model) recorded along a branch path. */
+function getSessionContextSettings(path: SessionEntry[]): {
+	thinkingLevel: string;
+	model: { provider: string; modelId: string } | null;
+} {
+	let thinkingLevel = "off";
+	let model: { provider: string; modelId: string } | null = null;
+	for (const entry of path) {
+		if (entry.type === "thinking_level_change") {
+			thinkingLevel = entry.thinkingLevel;
+		} else if (entry.type === "model_change") {
+			model = { provider: entry.provider, modelId: entry.modelId };
+		} else if (entry.type === "message" && entry.message.role === "assistant") {
+			model = { provider: entry.message.provider, modelId: entry.message.model };
+		}
+	}
+	return { thinkingLevel, model };
 }
 
 export function getLatestCompactionBoundaryEntry(
@@ -129,17 +191,20 @@ export function buildContextEntries(
 }
 
 /**
- * Build the session context from entries using tree traversal.
- * If leafId is provided, walks from that entry to root.
- * Emits the latest verbatim compaction boundary as one custom-role text message: the
- * compacted string with the kept tail serialized and appended to its end, rather than
- * the tail being replayed as separate structured messages.
+ * Build provenance-preserving, compaction-aware model context.
+ *
+ * Every entry on the active branch after the latest compaction boundary is projected
+ * to the messages it contributes after context edits. The latest verbatim compaction
+ * boundary is emitted as one custom-role text message: the compacted string with the
+ * kept tail (edits applied) serialized and appended to its end, rather than the tail
+ * being replayed as separate structured messages. Kept-tail entries therefore project
+ * to no standalone messages of their own.
  */
-export function buildSessionContext(
+export function buildSessionProjection(
 	entries: SessionEntry[],
 	leafId?: string | null,
 	byId?: Map<string, SessionEntry>,
-): SessionContext {
+): SessionProjection {
 	// Build uuid index if not available
 	if (!byId) {
 		byId = new Map<string, SessionEntry>();
@@ -152,7 +217,7 @@ export function buildSessionContext(
 	let leaf: SessionEntry | undefined;
 	if (leafId === null) {
 		// Explicitly null - return no messages (navigated to before first entry)
-		return { messages: [], thinkingLevel: "off", model: null };
+		return { entries: [], messages: [], thinkingLevel: "off", model: null };
 	}
 	if (leafId) {
 		leaf = byId.get(leafId);
@@ -163,54 +228,69 @@ export function buildSessionContext(
 	}
 
 	if (!leaf) {
-		return { messages: [], thinkingLevel: "off", model: null };
+		return { entries: [], messages: [], thinkingLevel: "off", model: null };
 	}
 
 	// Walk from leaf to root, collecting path
 	const path = normalizeDerivedSessionEntries(getBranchPath(leaf.id, byId));
-
-	// Extract settings
-	let thinkingLevel = "off";
-	let model: { provider: string; modelId: string } | null = null;
-
-	for (const entry of path) {
-		if (entry.type === "thinking_level_change") {
-			thinkingLevel = entry.thinkingLevel;
-		} else if (entry.type === "model_change") {
-			model = { provider: entry.provider, modelId: entry.modelId };
-		} else if (entry.type === "message" && entry.message.role === "assistant") {
-			model = { provider: entry.message.provider, modelId: entry.message.model };
-		}
-	}
-
-	const messages: AgentMessage[] = [];
-	const appendMessage = (entry: SessionEntry): void => {
-		const message = contextMessageFromEntry(entry);
-		if (message) messages.push(message);
-	};
+	const { thinkingLevel, model } = getSessionContextSettings(path);
+	const contextEntries = buildContextEntries(entries, leaf.id, byId);
+	const edits = collectContextEdits(contextEntries);
 
 	const boundary = getLatestCompactionBoundaryEntry(path);
 	if (!boundary) {
-		for (const entry of path) appendMessage(entry);
-		return { messages, thinkingLevel, model };
+		const projected = contextEntries.map(
+			(sourceEntry): ProjectedSessionEntry => ({
+				sourceEntry,
+				messages: projectContextEntry(sourceEntry, edits.get(sourceEntry.id)),
+			}),
+		);
+		return { entries: projected, messages: projected.flatMap((entry) => entry.messages), thinkingLevel, model };
 	}
 
 	const boundaryIndex = path.findIndex((entry) => entry.id === boundary.id);
 	const firstKeptIndex = path.findIndex(
 		(entry, index) => index < boundaryIndex && entry.id === boundary.firstKeptEntryId,
 	);
-	const keptTail = firstKeptIndex >= 0 ? serializeKeptTail(path.slice(firstKeptIndex, boundaryIndex)) : [];
+	const keptTailEntries = firstKeptIndex >= 0 ? path.slice(firstKeptIndex, boundaryIndex) : [];
+	const keptTailIds = new Set(keptTailEntries.map((entry) => entry.id));
+	const keptTail = serializeKeptTail(keptTailEntries, edits);
 	const separator: TranscriptChunk[] =
 		keptTail.length > 0 && boundary.summary.length > 0 ? [{ type: "text", text: "\n\n" }] : [];
-	if (boundary.systemMessage) messages.push(boundary.systemMessage);
-	messages.push(
+	const boundaryMessages: AgentMessage[] = [
+		...(boundary.systemMessage ? [boundary.systemMessage] : []),
 		createVerbatimCompactionMessage(boundary.summary, boundary.tokensBefore, boundary.timestamp, boundary.details, [
 			...separator,
 			...keptTail,
 		]),
+	];
+	const projected = contextEntries.map(
+		(sourceEntry): ProjectedSessionEntry => ({
+			sourceEntry,
+			messages:
+				sourceEntry.id === boundary.id
+					? boundaryMessages
+					: keptTailIds.has(sourceEntry.id)
+						? []
+						: projectContextEntry(sourceEntry, edits.get(sourceEntry.id)),
+		}),
 	);
-	for (let i = boundaryIndex + 1; i < path.length; i++) appendMessage(path[i]);
+	return { entries: projected, messages: projected.flatMap((entry) => entry.messages), thinkingLevel, model };
+}
 
+/**
+ * Build the session context from entries using tree traversal.
+ * If leafId is provided, walks from that entry to root.
+ * Emits the latest verbatim compaction boundary as one custom-role text message: the
+ * compacted string with the kept tail serialized and appended to its end, rather than
+ * the tail being replayed as separate structured messages.
+ */
+export function buildSessionContext(
+	entries: SessionEntry[],
+	leafId?: string | null,
+	byId?: Map<string, SessionEntry>,
+): SessionContext {
+	const { messages, thinkingLevel, model } = buildSessionProjection(entries, leafId, byId);
 	return { messages, thinkingLevel, model };
 }
 

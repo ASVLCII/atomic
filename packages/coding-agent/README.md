@@ -278,6 +278,15 @@ Long sessions can exhaust context windows. Compaction now uses deletion-only con
 
 The full history still remains in the JSONL file; use `/tree` to revisit. See [docs/compaction.md](docs/compaction.md) for internals.
 
+Session model context is projected from append-only history. Extensions can append a `context_edit` to omit or replace an earlier message only for future model requests; raw history and usage remain unchanged:
+
+```typescript
+const assistantId = sessionManager.appendMessage(partialAssistant);
+sessionManager.appendContextEdit(assistantId, null); // Hidden from model context, retained in JSONL.
+```
+
+Atomic uses the same mechanism itself when it retries a failed attempt: the attempt stays in the JSONL file but is omitted from what the model sees.
+
 ---
 
 ## Settings
@@ -368,6 +377,33 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => { ... });
 }
 ```
+
+`turn_end` and `agent_before_settle` are actionable persistence boundaries. Handlers can append structural entries and request one continuation. Later handlers see earlier proposals:
+
+```typescript
+let replacedResponse = false;
+pi.on("turn_end", (event) => {
+  if (replacedResponse || event.outcome !== "completed" || event.toolResults.length > 0) return;
+  replacedResponse = true;
+  return {
+    entries: [
+      ...event.entries,
+      { type: "context_edit", targetId: event.messageEntryId, replacement: null },
+      {
+        type: "custom_message",
+        customType: "replacement-instruction",
+        content: "Answer again using the persisted user request.",
+        display: false,
+      },
+    ],
+    continue: true,
+  };
+});
+```
+
+Continuation is one-shot per boundary result, not per registered handler. It ensures one next provider request: tool-result, steering, or follow-up scheduling can satisfy that request without adding another one; otherwise Atomic makes one context-only request. Guard handlers like the example above because an unconditional `continue: true` is evaluated again after the next response and can loop indefinitely. Error and aborted responses remain hard exits.
+
+Use `agent_before_settle` for final actions after retries, compaction, and queued input are exhausted. See [docs/extensions/events.md](docs/extensions/events.md#agent_start-/-agent_end-/-agent_before_settle-/-agent_settled).
 
 The default export can also be `async`. Atomic waits for async extension factories before startup continues, which is useful for one-time initialization such as fetching remote model lists before calling `pi.registerProvider()`.
 

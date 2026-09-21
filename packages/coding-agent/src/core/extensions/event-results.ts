@@ -3,10 +3,14 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { BashResult } from "../bash-executor.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { BashOperations } from "../tools/bash.js";
+import type { BoundaryResult } from "./agent-events.ts";
 
 export interface ContextEventResult {
 	messages?: AgentMessage[];
 }
+
+export type TurnEndEventResult = BoundaryResult;
+export type AgentBeforeSettleEventResult = BoundaryResult;
 
 export type BeforeProviderRequestEventResult = unknown;
 

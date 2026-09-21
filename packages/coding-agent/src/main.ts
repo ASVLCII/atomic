@@ -816,11 +816,7 @@ export async function main(argv: string[], options?: MainOptions) {
 	}
 	time("readPipedStdin");
 
-	const { initialMessage, initialImages } = await prepareInitialMessage(
-		parsed,
-		settingsManager.getImageAutoResize(),
-		stdinContent,
-	);
+	const { initialMessage, initialImages } = await prepareInitialMessage(parsed, stdinContent);
 	time("prepareInitialMessage");
 	startupEarlyInputCapture = await runFirstTimeSetup(appMode, settingsManager, startupEarlyInputCapture);
 	initTheme(settingsManager.getTheme(), appMode === "interactive");

@@ -4,7 +4,8 @@ import { CONFIG_DIR_NAME } from "../config.js";
 import { yieldToEventLoopIfSlow } from "../utils/event-loop.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
-import type { LoadPromptTemplatesOptions, PromptTemplate } from "./prompt-templates.ts";
+import type { ResourceDiagnostic } from "./diagnostics.ts";
+import type { LoadPromptTemplatesOptions, LoadPromptTemplatesResult, PromptTemplate } from "./prompt-templates.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 
 const YIELD_AFTER_MS = 8;
@@ -18,35 +19,57 @@ async function exists(path: string): Promise<boolean> {
 	}
 }
 
-async function loadTemplateFromFile(filePath: string, sourceInfo: SourceInfo): Promise<PromptTemplate | null> {
+async function loadTemplateFromFile(
+	filePath: string,
+	sourceInfo: SourceInfo,
+): Promise<{ template: PromptTemplate | null; diagnostics: ResourceDiagnostic[] }> {
+	const diagnostics: ResourceDiagnostic[] = [];
+	let rawContent: string;
 	try {
-		const rawContent = await readFile(filePath, "utf-8");
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(rawContent);
-		const name = basename(filePath).replace(/\.md$/, "");
-		let description = frontmatter.description || "";
-		if (!description) {
-			const firstLine = body.split("\n").find((line) => line.trim());
-			if (firstLine) description = firstLine.length > 60 ? `${firstLine.slice(0, 60)}...` : firstLine;
-		}
-		return {
+		rawContent = await readFile(filePath, "utf-8");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "failed to read prompt template file";
+		diagnostics.push({ type: "warning", message, path: filePath });
+		return { template: null, diagnostics };
+	}
+
+	let frontmatter: Record<string, string | undefined>;
+	let body: string;
+	try {
+		({ frontmatter, body } = parseFrontmatter<Record<string, string | undefined>>(rawContent));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "failed to parse prompt template file";
+		diagnostics.push({ type: "warning", message, path: filePath });
+		return { template: null, diagnostics };
+	}
+
+	const name = basename(filePath).replace(/\.md$/, "");
+	let description = typeof frontmatter.description === "string" ? frontmatter.description : "";
+	if (!description) {
+		const firstLine = body.split("\n").find((line) => line.trim());
+		if (firstLine) description = firstLine.length > 60 ? `${firstLine.slice(0, 60)}...` : firstLine;
+	}
+	const argumentHint = typeof frontmatter["argument-hint"] === "string" ? frontmatter["argument-hint"] : undefined;
+	return {
+		template: {
 			name,
 			description,
-			...(frontmatter["argument-hint"] && { argumentHint: frontmatter["argument-hint"] }),
+			...(argumentHint && { argumentHint }),
 			content: body,
 			sourceInfo,
 			filePath,
-		};
-	} catch {
-		return null;
-	}
+		},
+		diagnostics,
+	};
 }
 
 async function loadTemplatesFromDir(
 	dir: string,
 	getSourceInfo: (filePath: string) => Promise<SourceInfo>,
-): Promise<PromptTemplate[]> {
+): Promise<LoadPromptTemplatesResult> {
 	const templates: PromptTemplate[] = [];
-	if (!(await exists(dir))) return templates;
+	const diagnostics: ResourceDiagnostic[] = [];
+	if (!(await exists(dir))) return { templates, diagnostics };
 	const startedAt = Date.now();
 	try {
 		const entries = await readdir(dir, { withFileTypes: true });
@@ -62,19 +85,27 @@ async function loadTemplatesFromDir(
 				}
 			}
 			if (!isFile || !entry.name.endsWith(".md")) continue;
-			const template = await loadTemplateFromFile(fullPath, await getSourceInfo(fullPath));
-			if (template) templates.push(template);
+			const result = await loadTemplateFromFile(fullPath, await getSourceInfo(fullPath));
+			if (result.template) templates.push(result.template);
+			diagnostics.push(...result.diagnostics);
 		}
 	} catch {}
-	return templates;
+	return { templates, diagnostics };
 }
 
-export async function loadPromptTemplatesAsync(options: LoadPromptTemplatesOptions): Promise<PromptTemplate[]> {
+export async function loadPromptTemplatesAsync(
+	options: LoadPromptTemplatesOptions,
+): Promise<LoadPromptTemplatesResult> {
 	const resolvedCwd = resolvePath(options.cwd);
 	const resolvedAgentDir = resolvePath(options.agentDir);
 	const promptPaths = options.promptPaths ?? [];
 	const includeDefaults = options.includeDefaults ?? true;
 	const templates: PromptTemplate[] = [];
+	const diagnostics: ResourceDiagnostic[] = [];
+	const addResult = (result: LoadPromptTemplatesResult): void => {
+		templates.push(...result.templates);
+		diagnostics.push(...result.diagnostics);
+	};
 	const globalPromptsDir = join(resolvedAgentDir, "prompts");
 	const projectPromptsDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "prompts");
 	const isUnderPath = (target: string, root: string): boolean => {
@@ -102,8 +133,8 @@ export async function loadPromptTemplatesAsync(options: LoadPromptTemplatesOptio
 		});
 	};
 	if (includeDefaults) {
-		templates.push(...(await loadTemplatesFromDir(globalPromptsDir, getSourceInfo)));
-		templates.push(...(await loadTemplatesFromDir(projectPromptsDir, getSourceInfo)));
+		addResult(await loadTemplatesFromDir(globalPromptsDir, getSourceInfo));
+		addResult(await loadTemplatesFromDir(projectPromptsDir, getSourceInfo));
 	}
 	const startedAt = Date.now();
 	for (const rawPath of promptPaths) {
@@ -113,12 +144,16 @@ export async function loadPromptTemplatesAsync(options: LoadPromptTemplatesOptio
 		try {
 			const stats = await stat(resolvedPath);
 			if (stats.isDirectory()) {
-				templates.push(...(await loadTemplatesFromDir(resolvedPath, getSourceInfo)));
+				addResult(await loadTemplatesFromDir(resolvedPath, getSourceInfo));
 			} else if (stats.isFile() && resolvedPath.endsWith(".md")) {
-				const template = await loadTemplateFromFile(resolvedPath, await getSourceInfo(resolvedPath));
-				if (template) templates.push(template);
+				const result = await loadTemplateFromFile(resolvedPath, await getSourceInfo(resolvedPath));
+				if (result.template) templates.push(result.template);
+				diagnostics.push(...result.diagnostics);
 			}
-		} catch {}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "failed to read prompt template path";
+			diagnostics.push({ type: "warning", message, path: resolvedPath });
+		}
 	}
-	return templates;
+	return { templates, diagnostics };
 }

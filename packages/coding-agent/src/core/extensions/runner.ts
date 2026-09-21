@@ -47,11 +47,14 @@ import {
 } from "./runner-context.ts";
 import {
 	type BeforeAgentStartCombinedResult,
+	type BoundaryBaseEvent,
+	type BoundaryDispatchResult,
 	type ResourcesDiscoverCombinedResult,
 	type RunnerEmitEvent,
 	type RunnerEmitResult,
 	runBeforeAgentStartHandlers,
 	runBeforeProviderRequestHandlers,
+	runBoundaryHandlers,
 	runContextHandlers,
 	runGenericHandlers,
 	runInputHandlers,
@@ -84,6 +87,7 @@ import { resolveExtensionShortcuts } from "./runner-shortcuts.ts";
 import { noOpUIContext } from "./runner-ui.ts";
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from "./stale-context.ts";
 import type {
+	BoundaryContextPreview,
 	CompactOptions,
 	ContextUsage,
 	EntryRenderer,
@@ -109,6 +113,7 @@ import type {
 	RegisteredTool,
 	ResolvedCommand,
 	ResourcesDiscoverEvent,
+	SessionBoundaryDraft,
 	SessionShutdownEvent,
 	SubagentChildPolicy,
 	ToolCallEvent,
@@ -846,6 +851,20 @@ export class ExtensionRunner {
 	async emitUserBash(event: UserBashEvent): Promise<UserBashEventResult | undefined> {
 		return runResourceRegistrationBatch(this.runtime, () =>
 			runUserBashHandlers(this.extensions, this.createContext(), event, (error) => this.emitError(error)),
+		);
+	}
+
+	async emitBoundary(
+		baseEvent: BoundaryBaseEvent,
+		buildContext: (entries: SessionBoundaryDraft[]) => BoundaryContextPreview | Promise<BoundaryContextPreview>,
+	): Promise<BoundaryDispatchResult> {
+		return runResourceRegistrationBatch(
+			this.runtime,
+			() =>
+				runBoundaryHandlers(this.extensions, this.createContext(), baseEvent, buildContext, (error) =>
+					this.emitError(error),
+				),
+			true,
 		);
 	}
 

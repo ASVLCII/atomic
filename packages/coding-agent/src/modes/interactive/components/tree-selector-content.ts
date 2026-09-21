@@ -54,6 +54,9 @@ export function getSearchableText(node: SessionTreeNode): string {
 		case "custom":
 			parts.push("custom", entry.customType);
 			break;
+		case "context_edit":
+			parts.push("context edit", entry.replacement === null ? "omit" : "replace", entry.targetId);
+			break;
 		case "label":
 			parts.push("label", entry.label ?? "");
 			break;
@@ -134,6 +137,9 @@ export function getEntryDisplayText(
 			break;
 		case "custom":
 			result = theme.fg("dim", `[custom: ${entry.customType}]`);
+			break;
+		case "context_edit":
+			result = theme.fg("dim", `[context ${entry.replacement === null ? "omit" : "replace"}: ${entry.targetId}]`);
 			break;
 		case "label":
 			result = theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);

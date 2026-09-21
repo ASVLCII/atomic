@@ -387,6 +387,7 @@ async function constructAgentSession(
 			model,
 			thinkingLevel,
 			tools: [],
+			messages: existingMessages,
 		},
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, streamOptions) => {
@@ -537,9 +538,8 @@ async function constructAgentSession(
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
 	});
 
-	// Restore messages if session has existing data
+	// Restore missing settings metadata for older sessions.
 	if (hasExistingSession) {
-		agent.state.messages = existingMessages;
 		if (!hasThinkingEntry) {
 			sessionManager.appendThinkingLevelChange(thinkingLevel);
 		}
@@ -594,6 +594,7 @@ async function constructAgentSession(
 			orchestrationContext: options.orchestrationContext,
 			subagentPolicy: options.subagentPolicy,
 			systemPromptTransform: options.systemPromptTransform,
+			contextProjectionTransform: options.initialContextTransform,
 		});
 	} catch (error) {
 		// The constructor releases its own leases/subscriptions; restore borrowed provider state here.

@@ -107,7 +107,11 @@ Automatic continuations belong to the original prompt, including repeated output
 
 Concurrent manual SDK requests share one run and result; `abortCompaction()` cancels it for all waiters. A manual request during automatic compaction cancels unfinished automatic work and its pending continuation, then runs after the active work settles. If the automatic boundary already committed, the manual run follows it. In the TUI, `/compact` can take over automatic compaction but refuses a second manual compaction or branch summary. Ordinary text remains queued until non-mid-turn compaction finishes, fails, or is cancelled.
 
-SDK `prepareNextTurn` and `prepareNextTurnWithContext` callbacks receive rebuilt context after post-tool compaction. A `shouldStopAfterTurn` result of `true` leaves queued input pending until an explicit prompt or continuation. Mid-turn compaction resumes streaming without another user action.
+SDK `prepareNextTurn` and `prepareNextTurnWithContext` callbacks receive rebuilt context after post-tool compaction. A `finishTurn` decision of `{ action: "end" }` leaves queued input pending until an explicit prompt or continuation. Mid-turn compaction resumes streaming without another user action.
+
+### Recovery omissions
+
+Threshold decisions and recovery use the canonical session projection. When Atomic recovers from a provider error retry, a model fallback, a context overflow, or a truncated response, the failed attempt stays in raw session history and a `context_edit` entry durably omits it from model context (see [Session Format](/session-format)). Omitted entries do not affect the compactable region, the kept tail, or token estimates, and usage captured by an omitted or later-edited assistant is not trusted for threshold checks. Extensions can inspect the omitted attempt through the raw transcript, exports, and history search.
 
 ## Planning rungs and failure behavior
 

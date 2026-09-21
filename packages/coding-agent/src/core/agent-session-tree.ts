@@ -231,9 +231,8 @@ export async function navigateTree(
 			this.sessionManager.appendLabelChange(targetId, label);
 		}
 
-		// Update agent state
-		const sessionContext = this.sessionManager.buildSessionContext();
-		this.agent.state.messages = sessionContext.messages;
+		// Update finalized context from the canonical session projection.
+		this._refreshFinalizedContext();
 		this._restoreToolsFromTranscript();
 
 		// Emit session_tree event

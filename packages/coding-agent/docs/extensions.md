@@ -318,9 +318,9 @@ Moved to [Extension events](/extensions/events#agent-events).
 
 Moved to [Extension events](/extensions/events#before_agent_start).
 
-#### agent_start / agent_end / agent_settled
+#### agent_start / agent_end / agent_before_settle / agent_settled
 
-Moved to [Extension events](/extensions/events#agent_start-/-agent_end-/-agent_settled).
+Moved to [Extension events](/extensions/events#agent_start-/-agent_end-/-agent_before_settle-/-agent_settled).
 
 #### ui_prompt_start / ui_prompt_end
 
@@ -341,6 +341,10 @@ Moved to [Extension events](/extensions/events#tool_execution_start-/-tool_execu
 #### context
 
 Moved to [Extension events](/extensions/events#context).
+
+#### context_with_system
+
+Moved to [Extension events](/extensions/events#context_with_system).
 
 #### before_provider_headers
 

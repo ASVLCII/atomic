@@ -27,7 +27,6 @@ import type {
 	ToolExecutionEndEvent,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
-	TurnEndEvent,
 	TurnStartEvent,
 } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
@@ -192,15 +191,19 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			retryConsumedProtectedStreamingCustomMessages(this);
 		}
 	}
-	if (event.type === "turn_end") this._flushPendingCustomMessages();
+	if (event.type === "turn_end") {
+		this._lastAssistantToolResults = event.toolResults;
+		this._flushPendingCustomMessages();
+	}
 
 	// Handle session persistence
 	if (event.type === "message_end") {
+		let entryId: string | undefined;
 		// Check if this is a custom message from extensions
 		if (event.message.role === "custom") {
 			const admitted = event.message as StageAdmittedCustomMessage;
 			if (protectedMessage === undefined) {
-				this.sessionManager.appendCustomMessageEntry(
+				entryId = this.sessionManager.appendCustomMessageEntry(
 					event.message.customType,
 					event.message.content,
 					event.message.display,
@@ -217,8 +220,9 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			event.message.role === "toolResult"
 		) {
 			// Regular LLM message - persist as SessionMessageEntry
-			this.sessionManager.appendMessage(event.message);
+			entryId = this.sessionManager.appendMessage(event.message);
 		}
+		if (entryId) this._entryIdsByMessage.set(event.message, entryId);
 		// Other message types (bashExecution, branchSummary) are persisted elsewhere
 
 		// Track assistant message for auto-compaction (checked on agent_end)
@@ -444,13 +448,12 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 		};
 		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "turn_end") {
-		const extensionEvent: TurnEndEvent = {
-			type: "turn_end",
-			turnIndex: this._turnIndex,
-			message: event.message,
-			toolResults: event.toolResults,
-		};
-		await this._extensionRunner.emit(extensionEvent, undefined, true);
+		// finishTurn already dispatched the actionable boundary for loop-driven turns.
+		// Synthetic turns (for example a run that fails before the loop's finishTurn)
+		// still reach extensions here.
+		if (event.message.role === "assistant" && !this._boundaryDispatchedMessages.delete(event.message)) {
+			await this._dispatchTurnEndBoundary(event.message, event.toolResults);
+		}
 		this._turnIndex++;
 	} else if (event.type === "message_start") {
 		const extensionEvent: MessageStartEvent = {

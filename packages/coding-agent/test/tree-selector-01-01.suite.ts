@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
@@ -154,6 +155,43 @@ describe("TreeSelectorComponent", () => {
 			// Should focus on user-2 (parent of model-1), not user-3 (last item)
 			expect(list.getSelectedNode()?.entry.id).toBe("user-2");
 		});
+		test("hides context edits by default and labels them in all mode", () => {
+			const entries: SessionEntry[] = [
+				userMessage("user-1", null, "hello"),
+				assistantMessage("asst-1", "user-1", "hi"),
+				{
+					type: "context_edit",
+					id: "edit-1",
+					parentId: "asst-1",
+					timestamp: new Date().toISOString(),
+					targetId: "asst-1",
+					replacement: null,
+				},
+			];
+			const tree = buildTree(entries);
+			const defaultSelector = new TreeSelectorComponent(
+				tree,
+				"edit-1",
+				24,
+				() => {},
+				() => {},
+			);
+			expect(defaultSelector.getTreeList().getSelectedNode()?.entry.id).toBe("asst-1");
+
+			const allSelector = new TreeSelectorComponent(
+				tree,
+				"edit-1",
+				24,
+				() => {},
+				() => {},
+				undefined,
+				undefined,
+				"all",
+			);
+			const rendered = allSelector.getTreeList().render(200).map(stripVTControlCharacters).join("\n");
+			expect(rendered).toContain("[context omit: asst-1]");
+		});
+
 		test("focuses nearest visible ancestor when currentLeafId is a thinking_level_change entry", () => {
 			// Similar structure with thinking_level_change instead of model_change
 			const entries = [

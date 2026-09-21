@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { ImageContent, TextContent } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
+import { processImage } from "../utils/image-process.ts";
 import { resolveWorkflowStageDeliveryTarget } from "./agent-session-delivery-forwarding.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import type { PromptOptions } from "./agent-session-types.js";
@@ -49,11 +50,39 @@ export async function tryExecuteSessionSlashCommand(
 	return session._tryExecuteExtensionCommand(text);
 }
 
+async function _normalizePromptImages(
+	this: AgentSession,
+	images: ImageContent[] | undefined,
+): Promise<{ images: ImageContent[]; hints: string[] }> {
+	if (!images) return { images: [], hints: [] };
+
+	const normalizedImages: ImageContent[] = [];
+	const hints: string[] = [];
+	for (const image of images) {
+		const processed = await processImage(Buffer.from(image.data, "base64"), image.mimeType, {
+			autoResizeImages: this.settingsManager.getImageAutoResize(),
+			resizeOptions: this.model?.inputLimits?.images?.resize,
+		});
+		if (!processed.ok) {
+			hints.push(processed.message);
+			continue;
+		}
+		normalizedImages.push({ type: "image", data: processed.data, mimeType: processed.mimeType });
+		hints.push(...processed.hints);
+	}
+	return { images: normalizedImages, hints };
+}
+
 export async function prompt(this: AgentSession, text: string, options?: PromptOptions): Promise<void> {
 	if (this._disposed || sessionGenerationClosing.has(this))
 		throw Object.assign(new Error("Session is closed"), { code: "SessionClosed" });
 	const owner = resolveWorkflowStageDeliveryTarget(this);
 	if (owner !== this) return owner.prompt(text, options);
+	if (this._isEmittingAgentSettled) {
+		// A run started by an agent_settled handler waits until every settled handler completes.
+		this._deferredSettledActions.push(async () => await this.prompt(text, options));
+		return;
+	}
 	return trackSessionWork(this, () => admittedPrompt.call(this, text, options));
 }
 
@@ -153,8 +182,10 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 		}
 
-		// If streaming, queue via steer() or followUp() based on option
-		if (this.isStreaming) {
+		// If streaming, queue via steer() or followUp() based on option. The run is still
+		// open while agent_before_settle handlers decide on its continuation, so input sent
+		// from that boundary queues for the continuation instead of starting a second run.
+		if (this.isStreaming || this._isBeforeSettle) {
 			if (!options?.streamingBehavior) {
 				throw new Error(
 					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
@@ -218,27 +249,8 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 			assertCurrent();
 		}
 
-		// Build messages array (custom message if any, then user message)
-		messages = [];
-
-		// Add user message
-		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
-		if (currentImages) {
-			userContent.push(...currentImages);
-		}
-		messages.push({
-			role: "user",
-			content: userContent,
-			timestamp: Date.now(),
-		});
-
-		// Inject any pending "nextTurn" messages as context alongside the user message
-		for (const msg of this._pendingNextTurnMessages) {
-			messages.push(msg);
-		}
-		this._pendingNextTurnMessages = [];
-
-		// Emit before_agent_start extension event
+		// Emit before_agent_start before normalizing images so extension-driven model
+		// selection determines the resize profile used for the request and history.
 		const selectedToolsBefore = this._baseSystemPromptOptions.selectedTools ?? [];
 		const emitted = await this._extensionRunner.emitBeforeAgentStart(
 			expandedText,
@@ -254,6 +266,27 @@ async function promptInternal(this: AgentSession, text: string, options?: Prompt
 		if (!handlerEditedTools && typeof this.getActiveToolNames === "function") {
 			result.systemPromptOptions.selectedTools = this.getActiveToolNames();
 		}
+
+		const normalized = await _normalizePromptImages.call(this, currentImages);
+		assertCurrent();
+		const userText = normalized.hints.length > 0 ? `${expandedText}\n\n${normalized.hints.join("\n")}` : expandedText;
+
+		// Build messages only after hooks and image normalization have completed.
+		messages = [];
+		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: userText }];
+		userContent.push(...normalized.images);
+		messages.push({
+			role: "user",
+			content: userContent,
+			timestamp: Date.now(),
+		});
+
+		// Inject any pending "nextTurn" messages as context alongside the user message
+		for (const msg of this._pendingNextTurnMessages) {
+			messages.push(msg);
+		}
+		this._pendingNextTurnMessages = [];
+
 		// Add all custom messages from extensions
 		if (result?.messages) {
 			for (const msg of result.messages) {
@@ -297,6 +330,10 @@ export async function _runAgentPrompt(
 		}
 		return owner._runAgentPrompt(messages, promptStarted);
 	}
+	if (this._isEmittingAgentSettled) {
+		this._deferredSettledActions.push(async () => await this._runAgentPrompt(messages, promptStarted));
+		return;
+	}
 	if (this._activePromptCount === 0 && !this.isStreaming) this._agentRunAbortRequested = false;
 	this._activePromptCount += 1;
 	try {
@@ -336,17 +373,48 @@ export async function _runAgentPrompt(
 		await this._continueQueuedAgentMessages();
 		if (this._agentRunAbortRequested) return;
 		await this._awaitPendingPostCompactionContinuation();
+		await runBeforeSettleContinuations(this);
 	} finally {
 		this._runSystemPromptOptions = undefined;
 		this._cacheWarmer?.onAgentSettled();
 		await this._agentEventQueue;
 		this._flushPendingCustomMessages();
-		if (typeof this._extensionRunner?.emit === "function") {
-			await this._extensionRunner.emit({ type: "agent_settled" });
+		this._isEmittingAgentSettled = true;
+		try {
+			if (typeof this._extensionRunner?.emit === "function") {
+				await this._extensionRunner.emit({ type: "agent_settled" });
+			}
+			this._emit?.({ type: "agent_settled" });
+		} finally {
+			this._isEmittingAgentSettled = false;
 		}
-		this._emit?.({ type: "agent_settled" });
 		if (this._subagentMessageAdmission) await settleSubagentMessages(this);
 		this._activePromptCount -= 1;
+		// Runs deferred by agent_settled handlers start only after every settled handler completed.
+		// Guarded because prompt-handshake suites drive this function on a synthetic session.
+		const deferred = this._deferredSettledActions?.splice(0) ?? [];
+		for (const action of deferred) await action();
+	}
+}
+
+/**
+ * Give `agent_before_settle` handlers a chance to append entries and request one explicit
+ * continuation before the run settles. Each continuation is followed by the same queued
+ * and post-compaction drains as the initial run, then the boundary is offered again.
+ */
+async function runBeforeSettleContinuations(session: AgentSession): Promise<void> {
+	// Guarded because prompt-handshake suites drive this function on a synthetic session.
+	if (typeof session._extensionRunner?.hasHandlers !== "function") return;
+	if (typeof session._runBeforeSettleBoundary !== "function") return;
+	while (!session._agentRunAbortRequested) {
+		await session._agentEventQueue?.catch(() => {});
+		if (!(await session._runBeforeSettleBoundary())) return;
+		// An explicit stop or a paused queue keeps the requested continuation pending.
+		if (session._agentRunAbortRequested || session._queuedMessagesPaused || session._stopAfterTurnBlockedContinuation)
+			return;
+		await session._runAgentContinue();
+		if (session._agentRunAbortRequested) return;
+		await session._awaitPendingPostCompactionContinuation();
 	}
 }
 
@@ -464,9 +532,9 @@ async function answerAdmittedQueuedMessage(session: AgentSession): Promise<void>
 	const message = messages[replyIndex - 1];
 	if (message?.role !== "user" || session._getUserMessageText(message) !== admitted) return;
 
-	// Drop the empty aborted reply from agent state so `continue()` resumes from the
-	// admitted user message. The session history keeps it, as the retry paths do.
-	session.agent.state.messages = [...messages.slice(0, replyIndex), ...messages.slice(replyIndex + 1)];
+	// Omit the empty aborted reply from the model projection so `continue()` resumes
+	// from the admitted user message. Raw session history keeps it, as the retry paths do.
+	session._omitRecoveryAttempt(reply);
 	// Publish this turn before it starts. It begins after the pause abort boundary
 	// resolves, so a submission that only waited for that boundary would race it
 	// and be rejected by the streaming guard while the queue is still paused.
