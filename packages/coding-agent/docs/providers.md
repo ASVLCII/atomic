@@ -28,6 +28,7 @@ Use `/login` in interactive mode, then select a provider:
 - OpenRouter
 - Kimi Code
 - xAI (Grok/X subscription)
+- Meta (Muse subscription)
 - Radius
 
 Use `/login <provider>`, such as `/login openrouter` or `/login kimi-coding`, to go directly to a provider. Select subscription or API-key authentication when both are available.
@@ -134,6 +135,10 @@ Atomic defaults xAI sessions to `grok-4.6`. GitHub Copilot also exposes Grok 4.6
 
 Builtin workflows and subagents default to `model: "auto"`, selecting an available model and supported effort for each task rather than using fixed role models or shipped fallback chains. This does not change your main-chat model. To choose the decision provider, use `/settings` → **Router model**. For explicit child models, fallback lists or provider restrictions, see [Subagent reference](/subagents/reference#automatic-model-selection) and [builtin workflow model options](/workflows/builtins#built-in-workflows).
 
+### Meta (Muse subscription)
+
+Run `/login meta`, then select **Sign in with Meta** to open the device authorization flow. The login mints a Model API key that is re-minted automatically about once a day. `META_API_KEY` remains available through **Use an API key**.
+
 ### Radius
 
 Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens in `auth.json`; its model catalog refreshes independently and is cached in `models-store.json`. API-key authentication is also available through `/login radius` or `RADIUS_API_KEY`. Custom Radius gateways can be declared in `models.json` with `"oauth": "radius"` and the gateway `baseUrl`.
@@ -186,6 +191,7 @@ Catalog failures preserve the last usable models for each provider. See [catalog
 | Together AI                        | `TOGETHER_API_KEY`                                                        | `together`                   |
 | Baseten                            | `BASETEN_API_KEY`                                                         | `baseten`                    |
 | Kimi For Coding                    | `KIMI_API_KEY`                                                            | `kimi-coding`                |
+| Meta                               | `META_API_KEY`                                                            | `meta`                       |
 | MiniMax                            | `MINIMAX_API_KEY`                                                         | `minimax`                    |
 | MiniMax (China)                    | `MINIMAX_CN_API_KEY`                                                      | `minimax-cn`                 |
 | Moonshot AI                        | `MOONSHOT_API_KEY`                                                        | `moonshotai`                 |

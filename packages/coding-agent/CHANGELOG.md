@@ -6,6 +6,10 @@
 
 - Removed the `timeoutMs` option from `StructuredOutputRequest` and `RouterDecisionRequest`, and the `DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS` export. SDK integrations can pass an `AbortSignal` for cancellation or a caller-owned deadline.
 
+### Added
+
+- Added Meta (Muse subscription) login via `/login meta` with automatic Model API key refresh, plus `META_API_KEY` support.
+
 ### Fixed
 
 - Structured decisions and automatic model selection no longer fail at a fixed 30-second deadline, including during model ranking, output repairs and Jev-to-chat fallback. Explicit cancellation and independent provider and tool-request limits still apply.
