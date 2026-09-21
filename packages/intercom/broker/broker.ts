@@ -52,6 +52,10 @@ import { PendingQuestionIndex } from "./pending-question-index.js";
 import { matchStagePathSegments } from "../workflow-stage-path-matching.js";
 import { DELIVERED_MESSAGE_TTL_MS } from "../retry-policy.js";
 import { isAgentRecipient } from "../recipient-purpose.js";
+import {
+	LIVE_WORKFLOW_STAGE_ROUTE_REFUSAL_REASONS,
+	type LiveWorkflowStageRouteRefusalCode,
+} from "../live-route-refusal.js";
 
 const INTERCOM_DIR = getIntercomDirPath();
 const SOCKET_PATH = getBrokerSocketPath();
@@ -563,28 +567,42 @@ class IntercomBroker {
     }
   }
 
+  /** Register the stage's live aliases; returns the refusal code when a precondition fails. */
   private registerLiveWorkflowStageRoute(
     currentId: string,
     requestId: string,
     runId: string,
     stageKeys: readonly string[],
     capability: string,
-  ): boolean {
+  ): LiveWorkflowStageRouteRefusalCode | undefined {
 		const uniqueStageKeys = [...new Set(stageKeys)];
 		const owner = this.pendingStageRoutes.get(runId);
-		if (owner === undefined || !owner.group.startsWith("workflow:")) return false;
+		if (owner === undefined) return "owner_missing";
+		if (!owner.group.startsWith("workflow:")) return "owner_not_workflow";
 		const rootRunId = owner.group.slice("workflow:".length);
 		// D8 clarification: advertised targets are depth-faithful, so the live aliases must be
 		// depth-faithful too. The roster publishes the id-form target per stage; the name form
 		// swaps its final segment. Without a roster entry, fall back to the flat run-id prefix
 		// (still an accepted resolver input).
 		const roster = this.workflowRosters.get(runId);
+		const rosterMatches = (key: string): WorkflowStageRosterAnnouncement[] =>
+			roster?.stages.filter((stage) => stage.stageId === key || stage.stageName === key) ?? [];
 		if (uniqueStageKeys.some((key) => {
-			const matches = roster?.stages.filter((stage) => stage.stageId === key || stage.stageName === key) ?? [];
+			const matches = rosterMatches(key);
 			return matches.length > 0 && matches.every((stage) => !isAgentRecipient(stage));
-		})) return false;
-		const targets = uniqueStageKeys.map((stageKey) => {
-			const entry = roster?.stages.find((stage) => stage.stageId === stageKey || stage.stageName === stageKey);
+		})) return "non_agent_stage_key";
+		// #3163: a stage name reused by a later occurrence (`reviewer-a` in review round two)
+		// is ambiguous — hosts resolve such a name to no stage — so it gets no name alias
+		// rather than colliding with the retained earlier occurrence's live session. The
+		// stage stays addressable by its id-form target, which the roster advertises.
+		const aliasStageKeys = uniqueStageKeys.filter((key) => {
+			const matches = rosterMatches(key);
+			const isIdKey = matches.some((stage) => stage.stageId === key);
+			return isIdKey || matches.filter(isAgentRecipient).length <= 1;
+		});
+		const targets = aliasStageKeys.map((stageKey) => {
+			const matches = rosterMatches(stageKey);
+			const entry = matches.find((stage) => stage.stageId === stageKey) ?? matches[0];
 			const entryTarget = entry === undefined ? undefined : parseWorkflowStageTarget(entry.target);
 			if (entry !== undefined && entryTarget?.kind === "path") {
 				if (stageKey !== entry.stageName) return entry.target;
@@ -602,7 +620,7 @@ class IntercomBroker {
         existing.sessionId !== currentId &&
         this.sessions.has(existing.sessionId)
       ) {
-        return false;
+        return "duplicate_live_owner";
       }
     }
     for (const target of targets) {
@@ -636,7 +654,7 @@ class IntercomBroker {
     );
     this.liveWorkflowStageRouteActivations.set(requestId, { sessionId: currentId, pendingRequestIds });
     this.acknowledgeLiveWorkflowStageRoute(requestId);
-    return true;
+    return undefined;
   }
 
 	private routePendingStage = (route: PendingStageRoute): boolean => {
@@ -1489,42 +1507,56 @@ class IntercomBroker {
         ) {
           throw new Error("Invalid live workflow-stage route registration");
         }
+        const refuse = (code: LiveWorkflowStageRouteRefusalCode): void => {
+          // #3163: every precondition names its own condition, so a stage that started
+          // while its owner was reconnecting is not reported as a duplicate live owner.
+          writeMessageIfOpen(socket, {
+            type: "registration_failed",
+            reason: LIVE_WORKFLOW_STAGE_ROUTE_REFUSAL_REASONS[code],
+            code,
+          });
+          this.endRefusedConnection(socket, currentId, setId);
+        };
         if (!clientMessage.stageKeys.every((stageKey) => !stageKey.includes("/") && !stageKey.includes("*"))) {
           // A stage name containing "/" or "*" cannot be a canonical path segment, but throwing
           // here reaches the framing reader's onError and destroys the stage session's whole
           // broker connection. Refuse orderly like every neighbouring rejection; host clients
           // filter such name keys and register the stage-id key instead.
-          writeMessageIfOpen(socket, {
-            type: "registration_failed",
-            reason: "Live workflow-stage route keys must be single path segments",
-          });
-          this.endRefusedConnection(socket, currentId, setId);
+          refuse("invalid_stage_key");
           return;
         }
         const ownerRegistration = this.pendingStageRoutes.get(clientMessage.runId);
         const registeringSession = this.sessions.get(currentId);
+        if (ownerRegistration === undefined) {
+          refuse("owner_missing");
+          return;
+        }
+        if (registeringSession === undefined || !isAgentRecipient(registeringSession.info)) {
+          refuse("registrant_not_agent");
+          return;
+        }
+        if (ownerRegistration.capability !== clientMessage.capability) {
+          refuse("capability_mismatch");
+          return;
+        }
         if (
-          ownerRegistration === undefined ||
-          registeringSession === undefined ||
-		  !isAgentRecipient(registeringSession.info) ||
-          ownerRegistration.capability !== clientMessage.capability ||
-		  !invocationOwnsGroup(
-			ownerRegistration.group,
-			registeringSession.registrationGroup ?? registeringSession.info.group ?? "default",
-		  ) ||
-          !this.registerLiveWorkflowStageRoute(
-            currentId,
-            clientMessage.requestId,
-            clientMessage.runId,
-            clientMessage.stageKeys,
-            clientMessage.capability,
+          !invocationOwnsGroup(
+            ownerRegistration.group,
+            registeringSession.registrationGroup ?? registeringSession.info.group ?? "default",
           )
         ) {
-          writeMessageIfOpen(socket, {
-            type: "registration_failed",
-            reason: "Live workflow-stage route is owned by another active session",
-          });
-          this.endRefusedConnection(socket, currentId, setId);
+          refuse("group_mismatch");
+          return;
+        }
+        const refusal = this.registerLiveWorkflowStageRoute(
+          currentId,
+          clientMessage.requestId,
+          clientMessage.runId,
+          clientMessage.stageKeys,
+          clientMessage.capability,
+        );
+        if (refusal !== undefined) {
+          refuse(refusal);
           return;
         }
         break;

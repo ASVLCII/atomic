@@ -331,6 +331,7 @@ test("a live-route registration with a non-segment stage key is refused orderly 
 	assert.deepEqual(await stage.next("registration_failed"), {
 		type: "registration_failed",
 		reason: "Live workflow-stage route keys must be single path segments",
+		code: "invalid_stage_key",
 	});
 	await stage.closed;
 	assert.deepEqual(stage.rejectionLifecycle, ["registration_failed", "end", "close"]);
@@ -2105,4 +2106,300 @@ test("concurrent attachment and steer wait for failed primary ownership shutdown
 		await results;
 		await ctx.__dispose();
 	}
+});
+
+// Regression for #3163: a live-route refusal must name the condition that failed.
+function rosterStage(runId: string, stageId: string, stageName: string, group: string) {
+	return {
+		stageId,
+		stageName,
+		target: `workflow:${runId}/${stageId}`,
+		lifecycle: "pending" as const,
+		routeEligible: true,
+		group,
+	};
+}
+
+async function liveRouteRefusal(
+	stage: WireClient,
+	request: Extract<ClientMessage, { type: "register_live_workflow_stage_route" }>,
+): Promise<Extract<BrokerMessage, { type: "registration_failed" }>> {
+	stage.send(request);
+	const refusal = await stage.next("registration_failed");
+	await stage.closed;
+	return refusal;
+}
+
+test("a live-route registration without a workflow owner is refused as owner_missing, not as a duplicate owner (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000001";
+	const group = `workflow:${runId}`;
+	const stage = new WireClient();
+	await register(stage, "ownerless-stage", group);
+	const refusal = await liveRouteRefusal(stage, {
+		type: "register_live_workflow_stage_route",
+		requestId: "ownerless-route",
+		runId,
+		stageKeys: ["reviewer-id", "reviewer"],
+		capability: "some-capability",
+	});
+	assert.equal(refusal.code, "owner_missing");
+	assert.equal(refusal.reason, "Live workflow-stage route has no registered workflow owner");
+	assert.deepEqual(stage.rejectionLifecycle, ["registration_failed", "end", "close"]);
+});
+
+test("a live-route registration with the wrong capability is refused as capability_mismatch (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000002";
+	const group = `workflow:${runId}`;
+	const owner = new WireClient();
+	const stage = new WireClient();
+	await register(owner, "capability-owner", group);
+	await register(stage, "capability-stage", group);
+	owner.send({ type: "register_pending_stage_route", runId, group, capability: "owner-capability" });
+	assert.equal(await registrationOutcome(owner, "capability-owner-processed-3163"), "acknowledged");
+	const refusal = await liveRouteRefusal(stage, {
+		type: "register_live_workflow_stage_route",
+		requestId: "wrong-capability-route",
+		runId,
+		stageKeys: ["reviewer-id", "reviewer"],
+		capability: "not-the-owner-capability",
+	});
+	assert.equal(refusal.code, "capability_mismatch");
+	assert.equal(refusal.reason, "Live workflow-stage route capability does not match the workflow owner");
+});
+
+test("a live-route registration from outside the invocation group is refused as group_mismatch (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000003";
+	const group = `workflow:${runId}`;
+	const owner = new WireClient();
+	const outsider = new WireClient();
+	await register(owner, "group-owner", group);
+	await register(outsider, "group-outsider", "default");
+	owner.send({ type: "register_pending_stage_route", runId, group, capability: "group-capability" });
+	assert.equal(await registrationOutcome(owner, "group-owner-processed-3163"), "acknowledged");
+	const refusal = await liveRouteRefusal(outsider, {
+		type: "register_live_workflow_stage_route",
+		requestId: "outsider-route",
+		runId,
+		stageKeys: ["reviewer-id", "reviewer"],
+		capability: "group-capability",
+	});
+	assert.equal(refusal.code, "group_mismatch");
+	assert.equal(refusal.reason, "Live workflow-stage route registrant is outside the workflow invocation group");
+});
+
+test("a live-route registration naming a non-agent node is refused as non_agent_stage_key (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000004";
+	const group = `workflow:${runId}`;
+	const owner = new WireClient();
+	const stage = new WireClient();
+	await register(owner, "non-agent-owner", group);
+	await register(stage, "non-agent-stage", group);
+	owner.send({
+		type: "register_pending_stage_route",
+		runId,
+		group,
+		capability: "non-agent-capability",
+		stages: [
+			{
+				...rosterStage(runId, "gate-id", "gate", group),
+				routeEligible: false,
+				recipientPurpose: "control" as const,
+			},
+		],
+	});
+	assert.equal(await registrationOutcome(owner, "non-agent-owner-processed-3163"), "acknowledged");
+	const refusal = await liveRouteRefusal(stage, {
+		type: "register_live_workflow_stage_route",
+		requestId: "non-agent-route",
+		runId,
+		stageKeys: ["gate-id", "gate"],
+		capability: "non-agent-capability",
+	});
+	assert.equal(refusal.code, "non_agent_stage_key");
+	assert.equal(refusal.reason, "Live workflow-stage route keys name a non-agent workflow node");
+});
+
+test("a genuine duplicate live owner is still refused, now as duplicate_live_owner (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000005";
+	const group = `workflow:${runId}`;
+	const owner = new WireClient();
+	const first = new WireClient();
+	const duplicate = new WireClient();
+	await register(owner, "duplicate-owner", group);
+	await register(first, "duplicate-first", group);
+	await register(duplicate, "duplicate-second", group);
+	owner.send({
+		type: "register_pending_stage_route",
+		runId,
+		group,
+		capability: "duplicate-capability",
+		stages: [rosterStage(runId, "reviewer-id", "reviewer", group)],
+	});
+	assert.equal(await registrationOutcome(owner, "duplicate-owner-processed-3163"), "acknowledged");
+	first.send({
+		type: "register_live_workflow_stage_route",
+		requestId: "duplicate-first-route",
+		runId,
+		stageKeys: ["reviewer-id", "reviewer"],
+		capability: "duplicate-capability",
+	});
+	await first.next("live_workflow_stage_route_registered", (frame) => frame.requestId === "duplicate-first-route");
+	const refusal = await liveRouteRefusal(duplicate, {
+		type: "register_live_workflow_stage_route",
+		requestId: "duplicate-second-route",
+		runId,
+		stageKeys: ["reviewer-id", "reviewer"],
+		capability: "duplicate-capability",
+	});
+	assert.equal(refusal.code, "duplicate_live_owner");
+	assert.equal(refusal.reason, "Live workflow-stage route is owned by another active session");
+	assert.equal(first.closeHadError, undefined, "the legitimate owner keeps its connection");
+});
+
+// Regression for #3163: a later review round reusing a stage name is not a duplicate owner.
+test("a same-name stage of a later round registers its id alias while the earlier round's session is still connected (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000006";
+	const group = `workflow:${runId}`;
+	const owner = new WireClient();
+	const roundOne = new WireClient();
+	const roundTwo = new WireClient();
+	const sender = new WireClient();
+	await register(owner, "same-name-owner", group);
+	await register(roundOne, "reviewer-a-round-1", group);
+	await register(roundTwo, "reviewer-a-round-2", group);
+	await register(sender, "same-name-sender", group);
+	const capability = "same-name-capability";
+	owner.send({
+		type: "register_pending_stage_route",
+		runId,
+		group,
+		capability,
+		stages: [rosterStage(runId, "reviewer-a-1", "reviewer-a", group)],
+	});
+	assert.equal(await registrationOutcome(owner, "same-name-owner-round-1"), "acknowledged");
+	roundOne.send({
+		type: "register_live_workflow_stage_route",
+		requestId: "round-1-route",
+		runId,
+		stageKeys: ["reviewer-a-1", "reviewer-a"],
+		capability,
+	});
+	await roundOne.next("live_workflow_stage_route_registered", (frame) => frame.requestId === "round-1-route");
+
+	// The repair pass completes and the next review round materializes a second `reviewer-a`
+	// while round one's completed session is retained on the broker.
+	owner.send({
+		type: "register_pending_stage_route",
+		runId,
+		group,
+		capability,
+		stages: [
+			{ ...rosterStage(runId, "reviewer-a-1", "reviewer-a", group), lifecycle: "running" as const },
+			rosterStage(runId, "reviewer-a-2", "reviewer-a", group),
+		],
+	});
+	assert.equal(await registrationOutcome(owner, "same-name-owner-round-2"), "acknowledged");
+	roundTwo.send({
+		type: "register_live_workflow_stage_route",
+		requestId: "round-2-route",
+		runId,
+		stageKeys: ["reviewer-a-2", "reviewer-a"],
+		capability,
+	});
+	await roundTwo.next("live_workflow_stage_route_registered", (frame) => frame.requestId === "round-2-route");
+	assert.equal(roundTwo.closeHadError, undefined);
+	assert.equal(roundOne.closeHadError, undefined);
+
+	const roundTwoValidation = forwardNextLiveMessage(owner);
+	sender.send({
+		type: "send",
+		to: `workflow:${runId}/reviewer-a-2`,
+		message: { id: "round-2-by-id", timestamp: 3, content: { text: "second round by id" } },
+	});
+	assert.equal((await roundTwoValidation).message.id, "round-2-by-id");
+	await sender.next("delivered", (frame) => frame.messageId === "round-2-by-id");
+	assert.equal((await roundTwo.next("message")).message.content.text, "second round by id");
+
+	const roundOneValidation = forwardNextLiveMessage(owner);
+	sender.send({
+		type: "send",
+		to: `workflow:${runId}/reviewer-a-1`,
+		message: { id: "round-1-by-id", timestamp: 4, content: { text: "first round by id" } },
+	});
+	assert.equal((await roundOneValidation).message.id, "round-1-by-id");
+	await sender.next("delivered", (frame) => frame.messageId === "round-1-by-id");
+	assert.equal((await roundOne.next("message")).message.content.text, "first round by id");
+	assert.equal(
+		roundTwo.received.filter((frame) => frame.type === "message").length,
+		1,
+		"the ambiguous name alias never redirects the earlier round's traffic to the later round",
+	);
+});
+
+// Regression for #3163: the owner reconnecting before a stage registers is transient.
+test("a production stage treats an owner_missing refusal as recoverable and registers once the owner is back (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000007";
+	const group = `workflow:${runId}`;
+	const capability = "owner-reconnect-capability";
+	const stages = [rosterStage(runId, "reviewer-id", "reviewer", group)];
+	const stage = new IntercomClient();
+	realClients.add(stage);
+	stage.on("error", () => {});
+	await stage.connect(productionRegistration("owner-reconnect-stage", group));
+	const disconnected = Promise.withResolvers<unknown>();
+	stage.once("disconnected", (error: unknown) => disconnected.resolve(error));
+	const refusal = await stage.registerLiveWorkflowStageRoute(runId, ["reviewer-id", "reviewer"], capability).then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	assert.ok(refusal instanceof Error);
+	assert.equal(refusal.message, "Live workflow-stage route has no registered workflow owner");
+	assert.equal(isRecoverableIntercomDisconnect(refusal), true);
+	assert.equal(isRecoverableIntercomDisconnect(await disconnected.promise), true);
+	assert.equal(stage.isConnected(), false);
+
+	const owner = new IntercomClient();
+	realClients.add(owner);
+	owner.on("error", () => {});
+	await owner.connect(productionRegistration("owner-reconnect-owner", group));
+	owner.registerPendingStageRoute(runId, group, capability, stages);
+	await owner.listSessions();
+
+	const retry = new IntercomClient();
+	realClients.add(retry);
+	retry.on("error", () => {});
+	const retryDisconnected: unknown[] = [];
+	retry.on("disconnected", (error: unknown) => retryDisconnected.push(error));
+	await retry.connect(productionRegistration("owner-reconnect-stage", group));
+	await retry.registerLiveWorkflowStageRoute(runId, ["reviewer-id", "reviewer"], capability);
+	assert.deepEqual(retryDisconnected, []);
+	assert.equal(retry.isConnected(), true);
+	const live = (await owner.listDirectory()).workflowStages.find((entry) => entry.stageId === "reviewer-id");
+	assert.equal(live?.sessionId, retry.sessionId);
+});
+
+test("a production stage treats a capability_mismatch refusal as terminal (#3163)", async () => {
+	const runId = "31630000-0000-4000-8000-000000000008";
+	const group = `workflow:${runId}`;
+	const owner = new IntercomClient();
+	const stage = new IntercomClient();
+	for (const client of [owner, stage]) {
+		realClients.add(client);
+		client.on("error", () => {});
+	}
+	await owner.connect(productionRegistration("terminal-refusal-owner", group));
+	owner.registerPendingStageRoute(runId, group, "terminal-owner-capability", [
+		rosterStage(runId, "reviewer-id", "reviewer", group),
+	]);
+	await owner.listSessions();
+	await stage.connect(productionRegistration("terminal-refusal-stage", group));
+	const refusal = await stage
+		.registerLiveWorkflowStageRoute(runId, ["reviewer-id", "reviewer"], "stale-capability")
+		.then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+	assert.ok(refusal instanceof Error);
+	assert.equal(refusal.message, "Live workflow-stage route capability does not match the workflow owner");
+	assert.equal(isRecoverableIntercomDisconnect(refusal), false);
 });
