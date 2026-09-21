@@ -339,6 +339,8 @@ pi.on("agent_settled", async (_event, ctx) => {
 
 If the run is aborted while `agent_before_settle` handlers are running, valid returned entries are still committed, but requested continuation is suppressed. Work requested from `agent_settled` is deferred until every settled handler completes, so notification dispatch is non-reentrant. Input sent from an `agent_before_settle` handler with `deliverAs: "steer"` or `"followUp"` queues for the requested continuation instead of starting a second run.
 
+Each provider request is built from the persisted session after every queued handler for the events before it (`agent_start`, `turn_start`, `message_start`, `message_end`, `tool_execution_*`) has finished, because a `message_end` handler may replace the message that gets persisted. Handlers run without blocking the event that triggered them, but a handler that waits for something later in the same run, such as the provider's response, stalls that run; wait in `agent_end` or `agent_settled` instead.
+
 #### ui_prompt_start / ui_prompt_end
 
 These notification-only events wrap blocking user-facing prompts. Each event has `reason: "ui_prompt" | "project_trust"`, the prompt `kind`, and the prompt `title` when available. Host and status integrations can use the pair to distinguish waiting for the user from active work.

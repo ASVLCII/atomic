@@ -174,6 +174,48 @@ describe("AgentSession actionable boundaries", () => {
 		expect(snapshots.every((snapshot) => snapshot.includes("committed context"))).toBe(true);
 	});
 
+	it("waits for queued session events before each provider request so message_end replacements reach the canonical context", async () => {
+		const gate = deferred();
+		let gated = true;
+		let requestedWhileGated = false;
+		const requests: string[] = [];
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("agent_start", async () => {
+						await gate.promise;
+					});
+					pi.on("message_end", (event) => {
+						if (event.message.role !== "user") return;
+						return { message: { ...event.message, content: [{ type: "text", text: "rewritten prompt" }] } };
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			(context) => {
+				requestedWhileGated = gated;
+				requests.push(JSON.stringify(context.messages));
+				return fauxAssistantMessage("done");
+			},
+		]);
+
+		const run = harness.session.prompt("original prompt");
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		// The user message_end handler is queued behind the blocked agent_start handler, so its
+		// replacement is not persisted yet; the canonical request must wait rather than race ahead.
+		expect(requests).toHaveLength(0);
+		gated = false;
+		gate.resolve();
+		await run;
+
+		expect(requestedWhileGated).toBe(false);
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toContain("rewritten prompt");
+		expect(requests[0]).not.toContain("original prompt");
+	});
+
 	it("omits boundary-edited entries from the next request", async () => {
 		let handled = false;
 		const requests: string[] = [];

@@ -91,9 +91,13 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	);
 	this._agentEventQueue = processing;
 
-	// Keep queue alive if an event handler fails. Agent-core must additionally
-	// await protected persistence and fallback reconciliation before the next
-	// provider request; other listener work stays nonblocking.
+	// Keep queue alive if an event handler fails. Per event, agent-core awaits only
+	// protected persistence and fallback reconciliation; other listener work is
+	// nonblocking for that event. The queue as a whole is still drained before each
+	// provider request (`prepareRequest` in agent-session-boundaries.ts): message_end
+	// handlers may replace the message that gets persisted, and the request is built
+	// from the persisted canonical projection, so every queued handler gates the next
+	// request rather than only the persistence step.
 	processing.catch((error) => {
 		// #3105: callbacks interrupted by terminal disposal remain observable at shutdown.
 		if (this._disposed) {

@@ -64,8 +64,11 @@ export function _installAgentRequestProjection(this: AgentSession): void {
 	const previousPrepareRequest = this.agent.prepareRequest;
 	this.agent.prepareRequest = async (request, signal) => {
 		// Session listeners persist messages asynchronously; the projection is canonical
-		// only once every queued event has been applied to the session manager. A failed
-		// listener is reported through the queue's own recovery, never through the request.
+		// only once every queued event has been applied to the session manager. The whole
+		// queue is the barrier, not just persistence: message_end handlers may replace the
+		// message that gets persisted, and extension dispatch is serialized in event order,
+		// so the last message_end cannot settle before earlier handlers. A failed listener
+		// is reported through the queue's own recovery, never through the request.
 		await this._agentEventQueue.catch(() => {});
 		// Atomic honors a caller's complete replacement context from prepareNextTurnWithContext
 		// for exactly the request it prepared.
