@@ -8,6 +8,7 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 - Added Meta provider (Model API key and Muse subscription OAuth) with Muse Spark models.
 - Added model image-input limit and cache-safe resize metadata (`inputLimits`) to the `Model` type and the generated catalog ([#9631](https://github.com/earendil-works/pi/issues/9631)).
+- Added Grok 4.7 to the built-in xAI model catalog with long-context pricing metadata.
 
 ### Fixed
 

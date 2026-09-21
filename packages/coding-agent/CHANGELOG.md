@@ -24,6 +24,7 @@
 ### Changed
 
 - A custom message sent with `triggerTurn: false` during an active run is still appended after the current turn's tool results rather than steered into it, and, because provider requests now use the canonical session projection, it is visible to that run's next request instead of only a later turn.
+- Changed the default xAI model to Grok 4.7.
 
 ### Fixed
 
