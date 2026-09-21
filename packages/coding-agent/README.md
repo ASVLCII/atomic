@@ -124,6 +124,7 @@ For each built-in provider, Atomic maintains a list of tool-capable models, upda
 - Together AI
 - Baseten
 - Kimi For Coding
+- Meta
 - MiniMax
 - MiniMax (China)
 - Moonshot AI
