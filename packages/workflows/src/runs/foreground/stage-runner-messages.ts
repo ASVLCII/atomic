@@ -161,6 +161,36 @@ export function latestTerminalAssistantFailureSince(
 	return undefined;
 }
 
+export function hasAssistantMessageSince(messages: AgentSession["messages"], startIndex: number): boolean {
+	for (let index = messages.length - 1; index >= Math.max(startIndex, 0); index -= 1) {
+		if (messages[index]?.role === "assistant") return true;
+	}
+	return false;
+}
+
+export const EMPTY_COMPLETION_FAILURE_MESSAGE =
+	"Model turn ended without an assistant message after the prompt (empty completion)";
+
+/**
+ * A prompt that resolved without appending any assistant message (issue #3164).
+ *
+ * That shape is never a model answer: the provider request was dropped, the
+ * turn ended before its first message, or the session lifecycle swallowed the
+ * completion. Classifying it as a transient provider failure sends it through
+ * the same-model retry budget and then the configured fallback chain, instead
+ * of recording a success and spending structured-output correction prompts on
+ * a transport-layer condition. Explicit cancellation is handled before this
+ * failure is raised, so it never masks an abort.
+ */
+export class WorkflowPromptEmptyCompletionFailure extends Error {
+	readonly code = "provider_error";
+
+	constructor() {
+		super(EMPTY_COMPLETION_FAILURE_MESSAGE);
+		this.name = "WorkflowPromptEmptyCompletionFailure";
+	}
+}
+
 export class WorkflowPromptModelFailure extends Error {
 	override readonly cause: unknown;
 

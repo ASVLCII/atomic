@@ -193,6 +193,42 @@ function mockSession(): StageSessionRuntime {
 	};
 }
 
+/**
+ * A session whose every prompt answers in prose without calling
+ * `structured_output`: the shape that legitimately enters output correction.
+ * Appending nothing at all is an empty completion (#3164), which the runner
+ * classifies as a provider failure rather than a correctable turn.
+ */
+function proseOnlySession(): StageSessionRuntime {
+	const session = mockSession();
+	return {
+		...session,
+		async prompt() {
+			appendProseTurn(session.messages);
+		},
+	};
+}
+
+function appendProseTurn(messages: AgentSession["messages"]): void {
+	messages.push({
+		role: "assistant",
+		content: [{ type: "text", text: "prose answer without the tool" }],
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "test-model",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: 0,
+	} as AgentSession["messages"][number]);
+}
+
 function makeSmartSession(events: string[]): () => StageSessionRuntime {
 	return (): StageSessionRuntime => {
 		const listeners = new Set<(e: { type: string; [k: string]: unknown }) => void>();
@@ -302,6 +338,7 @@ export type {
 };
 export {
 	afterEach,
+	appendProseTurn,
 	assert,
 	beforeEach,
 	callThroughStack,
@@ -316,6 +353,7 @@ export {
 	mkdtempSync,
 	mockSession,
 	pauseRun,
+	proseOnlySession,
 	RESUME_CONTINUATION_PROMPT,
 	readFileSync,
 	resolveExecutorCustomPrompt,

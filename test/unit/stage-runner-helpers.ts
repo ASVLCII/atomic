@@ -80,6 +80,25 @@ export function assistantMessageWithUsage(
 	return message;
 }
 
+/**
+ * Append a clean assistant turn that answered in prose and never called
+ * `structured_output`: the shape that legitimately enters output correction.
+ * A prompt that appends nothing at all is an empty completion (#3164) and is
+ * classified as a provider failure instead.
+ */
+export function skippedStructuredOutputTurn(messages: AgentSession["messages"]): undefined {
+	messages.push(
+		assistantMessageWithUsage("prose answer without the tool", {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			cost: 0,
+		}),
+	);
+	return undefined;
+}
+
 export function makeSignal(): AbortSignal {
 	return new AbortController().signal;
 }

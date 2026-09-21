@@ -8,6 +8,7 @@ import {
 	killRun,
 	mockSession,
 	pauseRun,
+	proseOnlySession,
 	resumeRun,
 	run,
 	type StageSessionRuntime,
@@ -354,7 +355,7 @@ describe("executor — stage-control registry integration", () => {
 				adapters: {
 					agentSession: {
 						async create() {
-							return mockSession();
+							return proseOnlySession();
 						},
 					},
 				},
@@ -393,7 +394,7 @@ describe("executor — stage-control registry integration", () => {
 				adapters: {
 					agentSession: {
 						async create() {
-							return mockSession();
+							return proseOnlySession();
 						},
 					},
 				},
