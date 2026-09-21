@@ -36,9 +36,11 @@ import { StageArtifactCapture } from "./stage-runner-artifact-capture.js";
 import { candidateLabel, effectiveCandidateReasoning, modelAttemptReasoning } from "./stage-runner-candidate.js";
 import { StageMessageAdmission } from "./stage-runner-message-admission.js";
 import {
+	hasAssistantMessageSince,
 	lastAssistantTextFromSession,
 	latestTerminalAssistantFailureSince,
 	structuredOutputTurnDetail,
+	WorkflowPromptEmptyCompletionFailure,
 	WorkflowPromptModelFailure,
 } from "./stage-runner-messages.js";
 import { missingAdapter, stripWorkflowOnlyOptions, unavailableSync } from "./stage-runner-options.js";
@@ -1065,10 +1067,10 @@ export class StageSessionController {
 					if (continuationSession !== undefined) {
 						const outcome = await this.continueWithPauseResume(continuationSession);
 						if (outcome.kind === "continued") {
-							return {
-								terminalScanStartIndex:
-									terminalScanStartIndex ?? this.lastPromptStartIndex ?? messagesBeforeAttempt.length,
-							};
+							const continuedScanStartIndex =
+								terminalScanStartIndex ?? this.lastPromptStartIndex ?? messagesBeforeAttempt.length;
+							this.throwIfEmptyCompletion(activeSession, continuedScanStartIndex);
+							return { terminalScanStartIndex: continuedScanStartIndex };
 						}
 						// A controlled pause interrupted the continuation. The resumed
 						// objective owns the turn from here, so re-prompt with it rather
@@ -1734,6 +1736,7 @@ export class StageSessionController {
 					continue;
 				}
 				this.throwUnresolvedContextOverflowIfPresent();
+				this.throwIfEmptyCompletion(activeSession, promptStartIndex);
 				return { terminalScanStartIndex: promptStartIndex };
 			} catch (err) {
 				const pendingPauseAfterThrow = this.pauseControl.currentResume();
@@ -1938,5 +1941,19 @@ export class StageSessionController {
 		const message = this.unresolvedContextOverflowMessage;
 		this.unresolvedContextOverflowMessage = undefined;
 		if (message !== undefined) throw unresolvedContextOverflowFailure(message);
+	}
+
+	/**
+	 * A schema-backed prompt that resolved without any assistant message is an
+	 * execution-layer failure, not a clean turn awaiting output correction
+	 * (issue #3164). Cancellation wins: an aborted stage reports its abort reason
+	 * rather than a provider failure the retry loop would try to repair.
+	 */
+	private throwIfEmptyCompletion(activeSession: StageSessionRuntime, promptStartIndex: number): void {
+		if (this.structuredOutputCapture === undefined || this.structuredOutputCapture.called) return;
+		if (this.disposed || hasAssistantMessageSince(activeSession.messages, promptStartIndex)) return;
+		if (this.opts.signal?.aborted) throw this.workflowAbortReason();
+		if (this.startupWait.signal.aborted) throw this.abortReason ?? new DOMException("stage aborted", "AbortError");
+		throw new WorkflowPromptEmptyCompletionFailure();
 	}
 }

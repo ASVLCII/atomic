@@ -1,5 +1,15 @@
 import type { AssistantMessage } from "@bastani/pi-ai/compat";
 import { describe, test } from "vitest";
+import {
+	EMPTY_COMPLETION_FAILURE_MESSAGE,
+	WorkflowPromptEmptyCompletionFailure,
+} from "../../packages/workflows/src/runs/foreground/stage-runner-messages.js";
+import {
+	errorMessage,
+	isRetryableModelFailure,
+	isRetryableSameModelFailure,
+	normalizeModelFailureSignal,
+} from "../../packages/workflows/src/runs/shared/model-fallback.js";
 import type {
 	AgentSession,
 	AgentSessionAdapter,
@@ -39,6 +49,12 @@ function assistantMessageWithContent(content: AssistantMessage["content"]): Assi
 	};
 }
 
+/** A clean turn that answered in prose and never called `structured_output`. */
+function skippedStructuredOutputTurn(messages: AgentSession["messages"]): undefined {
+	messages.push(assistantMessageWithContent([{ type: "text", text: "prose answer without the tool" }]));
+	return undefined;
+}
+
 describe("createStageContext — structured_output corrective retry", () => {
 	test("schema-backed noTools=all stages still expose structured_output", async () => {
 		let createOptions: StageSessionCreateOptions | undefined;
@@ -70,10 +86,12 @@ describe("createStageContext — structured_output corrective retry", () => {
 	test("re-prompts when a schema-backed stage skips structured_output and then succeeds", async () => {
 		let createOptions: StageSessionCreateOptions | undefined;
 		const prompts: string[] = [];
+		const messages = [] as AgentSession["messages"];
 		const mock = makeMockSession({
+			messages,
 			async prompt(promptText) {
 				prompts.push(promptText);
-				if (prompts.length === 1) return;
+				if (prompts.length === 1) return skippedStructuredOutputTurn(messages);
 				const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
 				assert.ok(structuredTool);
 				await structuredTool.execute("structured-call-1", { ok: true }, undefined, undefined, undefined as never);
@@ -609,11 +627,14 @@ describe("createStageContext — structured_output corrective retry", () => {
 
 	test("stops after three corrective prompts when structured_output is still missing", async () => {
 		const prompts: string[] = [];
+		const messages = [] as AgentSession["messages"];
 		const agentSession: AgentSessionAdapter = {
 			async create() {
 				return makeMockSession({
+					messages,
 					async prompt(promptText) {
 						prompts.push(promptText);
+						skippedStructuredOutputTurn(messages);
 					},
 				}).session;
 			},
@@ -668,14 +689,15 @@ describe("createStageContext — structured_output correction exhaustion and mod
 						? options.model
 						: `${String(options.model?.provider)}/${options.model?.id}`;
 				calls.push(model);
+				const messages = [] as AgentSession["messages"];
 				const { session } = makeMockSession({
+					messages,
 					async prompt(promptText) {
 						const seen = promptsByModel.get(model) ?? [];
 						seen.push(promptText);
 						promptsByModel.set(model, seen);
-						// The primary returns a clean turn that produced no assistant
-						// message at all — the exact shape reported in issue #2812.
-						if (model === "anthropic/primary") return;
+						// The primary returns clean prose turns that never call the tool.
+						if (model === "anthropic/primary") return skippedStructuredOutputTurn(messages);
 						const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
 						assert.ok(structuredTool);
 						await structuredTool.execute(
@@ -735,14 +757,14 @@ describe("createStageContext — structured_output correction exhaustion and mod
 		for (const attempt of meta.modelAttempts?.slice(0, 4) ?? []) {
 			assert.equal(
 				attempt.error,
-				"atomic-workflows: stage configured with schema must finish by calling structured_output. The model produced no assistant message after the prompt",
+				"atomic-workflows: stage configured with schema must finish by calling structured_output. The model produced assistant text but never called structured_output",
 			);
 		}
 		assert.equal(meta.modelAttempts?.[4]?.error, undefined);
 		// The standard warning supplies its own sentence break, so the composed
 		// text reads as one sentence rather than doubling the period.
 		assert.deepEqual(meta.warnings, [
-			"[fallback] anthropic/primary failed: atomic-workflows: stage configured with schema must finish by calling structured_output. The model produced no assistant message after the prompt. Retrying with openai/fallback.",
+			"[fallback] anthropic/primary failed: atomic-workflows: stage configured with schema must finish by calling structured_output. The model produced assistant text but never called structured_output. Retrying with openai/fallback.",
 		]);
 	});
 
@@ -758,9 +780,21 @@ describe("createStageContext — structured_output correction exhaustion and mod
 						: `${String(options.model?.provider)}/${options.model?.id}`;
 				calls.push(model);
 				let emit: ((event: { type: string; [k: string]: unknown }) => void) | undefined;
+				const messages = [] as AgentSession["messages"];
 				const mock = makeMockSession({
+					messages,
 					async prompt() {
 						if (model === "anthropic/primary") {
+							messages.push(
+								assistantMessageWithContent([
+									{
+										type: "toolCall",
+										id: "structured-call-invalid",
+										name: "structured_output",
+										arguments: { ok: "not-a-boolean" },
+									},
+								]),
+							);
 							emit?.({
 								type: "tool_execution_end",
 								toolName: "structured_output",
@@ -831,9 +865,12 @@ describe("createStageContext — structured_output correction exhaustion and mod
 						? options.model
 						: `${String(options.model?.provider)}/${options.model?.id}`;
 				calls.push(model);
+				const messages = [] as AgentSession["messages"];
 				return makeMockSession({
+					messages,
 					async prompt(promptText) {
 						prompts.push(promptText);
+						skippedStructuredOutputTurn(messages);
 					},
 				}).session;
 			},
@@ -885,10 +922,12 @@ describe("createStageContext — structured_output correction exhaustion and mod
 						? options.model
 						: `${String(options.model?.provider)}/${options.model?.id}`;
 				calls.push(model);
+				const messages = [] as AgentSession["messages"];
 				const { session } = makeMockSession({
+					messages,
 					async prompt() {
 						promptCount += 1;
-						if (promptCount === 1) return;
+						if (promptCount === 1) return skippedStructuredOutputTurn(messages);
 						const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
 						assert.ok(structuredTool);
 						await structuredTool.execute(
@@ -978,9 +1017,11 @@ describe("createStageContext — structured_output correction exhaustion and mod
 					typeof options.model === "string"
 						? options.model
 						: `${String(options.model?.provider)}/${options.model?.id}`;
+				const messages = [] as AgentSession["messages"];
 				const { session } = makeMockSession({
+					messages,
 					async prompt() {
-						if (model === "anthropic/primary") return;
+						if (model === "anthropic/primary") return skippedStructuredOutputTurn(messages);
 						const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
 						assert.ok(structuredTool);
 						captured.push({ model, value: { ok: true } });
@@ -1019,6 +1060,341 @@ describe("createStageContext — structured_output correction exhaustion and mod
 			abandoned.every((attempt) => attempt.success === false),
 			true,
 		);
+	});
+});
+
+// Issue #3164: a schema-backed prompt that resolves without any assistant
+// message is an execution-layer failure. It must spend the same-model retry
+// budget and then the fallback chain like any transient provider failure,
+// never be recorded as a success, and never enter structured-output correction.
+describe("createStageContext — empty completions on schema-backed stages (#3164)", () => {
+	const SCHEMA = Type.Object({ ok: Type.Boolean() }, { additionalProperties: false });
+	const retrySettings = { enabled: true, maxRetries: 3, baseDelayMs: 0 };
+
+	function modelOf(options: StageSessionCreateOptions): string {
+		return typeof options.model === "string"
+			? options.model
+			: `${String(options.model?.provider)}/${options.model?.id}`;
+	}
+
+	async function callStructuredOutput(createOptions: StageSessionCreateOptions | undefined, id: string) {
+		const structuredTool = createOptions?.customTools?.find((tool) => tool.name === "structured_output");
+		assert.ok(structuredTool);
+		await structuredTool.execute(id, { ok: true }, undefined, undefined, undefined as never);
+	}
+
+	test("classifies the empty-completion failure as a same-model retryable provider failure", () => {
+		const failure = new WorkflowPromptEmptyCompletionFailure();
+		assert.equal(isRetryableModelFailure(failure), true);
+		assert.equal(isRetryableSameModelFailure(failure), true);
+		assert.equal(normalizeModelFailureSignal(failure).kind, "provider_unavailable");
+		assert.equal(errorMessage(failure), EMPTY_COMPLETION_FAILURE_MESSAGE);
+	});
+
+	test("retries an empty completion on the same model, then falls back, without corrective prompts", async () => {
+		const calls: string[] = [];
+		const disposed: string[] = [];
+		const promptsByModel = new Map<string, string[]>();
+		let createOptions: StageSessionCreateOptions | undefined;
+		const agentSession: AgentSessionAdapter = {
+			async create(options) {
+				createOptions = options;
+				const model = modelOf(options);
+				calls.push(model);
+				const { session } = makeMockSession({
+					settingsManager: { getRetrySettings: () => retrySettings },
+					async prompt(promptText) {
+						const seen = promptsByModel.get(model) ?? [];
+						seen.push(promptText);
+						promptsByModel.set(model, seen);
+						// The primary resolves without appending any assistant message:
+						// the exact shape reported in issue #3164.
+						if (model === "anthropic/primary") return;
+						await callStructuredOutput(createOptions, "structured-call-fallback");
+					},
+					dispose() {
+						disposed.push(model);
+					},
+				});
+				return session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({
+				adapters: { agentSession },
+				stageOptions: { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema: SCHEMA },
+			}),
+		) as InternalStageContext;
+
+		assert.deepEqual(await ctx.prompt("review this"), { ok: true });
+		assert.deepEqual(calls, ["anthropic/primary", "openai/fallback"]);
+		assert.deepEqual(disposed, ["anthropic/primary"]);
+		// The stage prompt plus the full same-model retry budget, every one of
+		// them the original prompt: no output-correction prompt is spent on a
+		// transport-layer condition.
+		assert.deepEqual(promptsByModel.get("anthropic/primary"), [
+			"review this",
+			"review this",
+			"review this",
+			"review this",
+		]);
+		assert.deepEqual(promptsByModel.get("openai/fallback"), ["review this"]);
+
+		const meta = ctx.__modelFallbackMeta();
+		assert.deepEqual(
+			meta.modelAttempts?.map((attempt) => ({
+				model: attempt.model,
+				success: attempt.success,
+				error: attempt.error,
+			})),
+			[
+				{ model: "anthropic/primary", success: false, error: EMPTY_COMPLETION_FAILURE_MESSAGE },
+				{ model: "openai/fallback", success: true, error: undefined },
+			],
+		);
+		// The failed attempt record is the diagnosis; like every other transient
+		// fallback, a successful successor clears the pending chain warning.
+		assert.equal(meta.warnings, undefined);
+	});
+
+	test("advances immediately when same-model retries are disabled", async () => {
+		const calls: string[] = [];
+		let primaryPrompts = 0;
+		let createOptions: StageSessionCreateOptions | undefined;
+		const agentSession: AgentSessionAdapter = {
+			async create(options) {
+				createOptions = options;
+				const model = modelOf(options);
+				calls.push(model);
+				return makeMockSession({
+					settingsManager: { getRetrySettings: () => ({ ...retrySettings, enabled: false }) },
+					async prompt() {
+						if (model === "anthropic/primary") {
+							primaryPrompts += 1;
+							return;
+						}
+						await callStructuredOutput(createOptions, "structured-call-fallback");
+					},
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({
+				adapters: { agentSession },
+				stageOptions: { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema: SCHEMA },
+			}),
+		) as InternalStageContext;
+
+		assert.deepEqual(await ctx.prompt("review this"), { ok: true });
+		assert.equal(primaryPrompts, 1);
+		assert.deepEqual(calls, ["anthropic/primary", "openai/fallback"]);
+	});
+
+	test("fails with the empty-completion error, not the structured-output contract, when no fallback remains", async () => {
+		let prompts = 0;
+		const agentSession: AgentSessionAdapter = {
+			async create() {
+				return makeMockSession({
+					settingsManager: { getRetrySettings: () => retrySettings },
+					async prompt() {
+						prompts += 1;
+					},
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({ adapters: { agentSession }, stageOptions: { model: "anthropic/primary", schema: SCHEMA } }),
+		) as InternalStageContext;
+
+		await assert.rejects(ctx.prompt("review this"), { message: EMPTY_COMPLETION_FAILURE_MESSAGE });
+		assert.equal(prompts, 4);
+		const meta = ctx.__modelFallbackMeta();
+		assert.deepEqual(
+			meta.modelAttempts?.map((attempt) => ({ success: attempt.success, error: attempt.error })),
+			[{ success: false, error: EMPTY_COMPLETION_FAILURE_MESSAGE }],
+		);
+	});
+
+	test("an empty completion on a stage without a schema is still a completed turn", async () => {
+		let prompts = 0;
+		const agentSession: AgentSessionAdapter = {
+			async create() {
+				return makeMockSession({
+					settingsManager: { getRetrySettings: () => retrySettings },
+					async prompt() {
+						prompts += 1;
+					},
+					getLastAssistantText: () => "plain answer",
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({ adapters: { agentSession }, stageOptions: { model: "anthropic/primary" } }),
+		) as InternalStageContext;
+
+		assert.equal(await ctx.prompt("review this"), "plain answer");
+		assert.equal(prompts, 1);
+		assert.deepEqual(
+			ctx.__modelFallbackMeta().modelAttempts?.map((attempt) => attempt.success),
+			[true],
+		);
+	});
+
+	test("retries a transient thrown API failure on the same model before succeeding", async () => {
+		const calls: string[] = [];
+		let prompts = 0;
+		let createOptions: StageSessionCreateOptions | undefined;
+		const agentSession: AgentSessionAdapter = {
+			async create(options) {
+				createOptions = options;
+				calls.push(modelOf(options));
+				return makeMockSession({
+					settingsManager: { getRetrySettings: () => retrySettings },
+					async prompt() {
+						prompts += 1;
+						if (prompts === 1) throw new Error("503 service unavailable");
+						await callStructuredOutput(createOptions, "structured-call-retried");
+					},
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({
+				adapters: { agentSession },
+				stageOptions: { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema: SCHEMA },
+			}),
+		) as InternalStageContext;
+
+		assert.deepEqual(await ctx.prompt("review this"), { ok: true });
+		assert.equal(prompts, 2);
+		assert.deepEqual(calls, ["anthropic/primary"]);
+		assert.deepEqual(
+			ctx
+				.__modelFallbackMeta()
+				.modelAttempts?.map((attempt) => ({ model: attempt.model, success: attempt.success })),
+			[{ model: "anthropic/primary", success: true }],
+		);
+	});
+
+	test("a non-retryable API failure advances to the fallback without spending same-model retries", async () => {
+		const calls: string[] = [];
+		let primaryPrompts = 0;
+		let createOptions: StageSessionCreateOptions | undefined;
+		const agentSession: AgentSessionAdapter = {
+			async create(options) {
+				createOptions = options;
+				const model = modelOf(options);
+				calls.push(model);
+				return makeMockSession({
+					settingsManager: { getRetrySettings: () => retrySettings },
+					async prompt() {
+						if (model === "anthropic/primary") {
+							primaryPrompts += 1;
+							throw new Error("401 unauthorized: invalid api key");
+						}
+						await callStructuredOutput(createOptions, "structured-call-fallback");
+					},
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({
+				adapters: { agentSession },
+				stageOptions: { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema: SCHEMA },
+			}),
+		) as InternalStageContext;
+
+		assert.deepEqual(await ctx.prompt("review this"), { ok: true });
+		assert.equal(primaryPrompts, 1);
+		assert.deepEqual(calls, ["anthropic/primary", "openai/fallback"]);
+		const meta = ctx.__modelFallbackMeta();
+		assert.deepEqual(
+			meta.modelAttempts?.map((attempt) => ({ model: attempt.model, success: attempt.success })),
+			[
+				{ model: "anthropic/primary", success: false },
+				{ model: "openai/fallback", success: true },
+			],
+		);
+		assert.match(meta.modelAttempts?.[0]?.error ?? "", /401 unauthorized/);
+	});
+
+	test("cancellation during an empty completion stops retries and fallback", async () => {
+		const calls: string[] = [];
+		let prompts = 0;
+		const controller = new AbortController();
+		const agentSession: AgentSessionAdapter = {
+			async create(options) {
+				calls.push(modelOf(options));
+				return makeMockSession({
+					settingsManager: { getRetrySettings: () => retrySettings },
+					async prompt() {
+						prompts += 1;
+						// The workflow is killed while the request is in flight, and the
+						// turn resolves with nothing appended.
+						controller.abort(new Error("workflow cancelled by operator"));
+					},
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({
+				adapters: { agentSession },
+				signal: controller.signal,
+				stageOptions: { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema: SCHEMA },
+			}),
+		) as InternalStageContext;
+
+		await assert.rejects(ctx.prompt("review this"), { message: "workflow cancelled by operator" });
+		assert.equal(prompts, 1);
+		assert.deepEqual(calls, ["anthropic/primary"]);
+		const meta = ctx.__modelFallbackMeta();
+		assert.deepEqual(
+			meta.modelAttempts?.map((attempt) => ({ success: attempt.success, error: attempt.error })),
+			[{ success: false, error: "workflow cancelled by operator" }],
+		);
+		assert.equal(meta.warnings, undefined);
+	});
+
+	test("an empty completion on a corrective prompt is retried, not counted as a corrected turn", async () => {
+		const promptsByModel = new Map<string, string[]>();
+		let createOptions: StageSessionCreateOptions | undefined;
+		const agentSession: AgentSessionAdapter = {
+			async create(options) {
+				createOptions = options;
+				const model = modelOf(options);
+				const messages = [] as AgentSession["messages"];
+				return makeMockSession({
+					messages,
+					settingsManager: { getRetrySettings: () => ({ ...retrySettings, maxRetries: 1 }) },
+					async prompt(promptText) {
+						const seen = promptsByModel.get(model) ?? [];
+						seen.push(promptText);
+						promptsByModel.set(model, seen);
+						// First a genuine prose turn that skipped the tool, then the
+						// corrective prompt's request is dropped, then the retry answers.
+						if (seen.length === 1) return skippedStructuredOutputTurn(messages);
+						if (seen.length === 2) return;
+						await callStructuredOutput(createOptions, "structured-call-corrected");
+					},
+				}).session;
+			},
+		};
+		const ctx = createStageContext(
+			makeOpts({
+				adapters: { agentSession },
+				stageOptions: { model: "anthropic/primary", fallbackModels: ["openai/fallback"], schema: SCHEMA },
+			}),
+		) as InternalStageContext;
+
+		assert.deepEqual(await ctx.prompt("review this"), { ok: true });
+		const primaryPrompts = promptsByModel.get("anthropic/primary") ?? [];
+		assert.equal(primaryPrompts.length, 3);
+		assert.equal(primaryPrompts[0], "review this");
+		assert.match(primaryPrompts[1] ?? "", /Corrective attempt 1\/3/);
+		// The retry re-sends the same corrective prompt rather than escalating
+		// the correction count for a request the model never answered.
+		assert.equal(primaryPrompts[2], primaryPrompts[1]);
+		assert.equal(promptsByModel.has("openai/fallback"), false);
 	});
 });
 
