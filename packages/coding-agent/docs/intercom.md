@@ -9,7 +9,7 @@ description: "Direct messaging between Atomic sessions on the same machine"
 
 Atomic bundles `@bastani/intercom` for direct 1:1 messaging between sessions on the same machine. Send context, findings, or requests yourself, or let agents coordinate. No separate install is needed.
 
-The extension registers commands and tools at startup. Connections are lazy: a session connects when you or the model invoke Intercom.
+The extension registers commands and tools at startup. Connections are lazy: a session connects when you or the model invoke Intercom. Workflow stages and admitted subagent children connect at session start so they are listable and steerable immediately.
 
 **Key capabilities:**
 - **Session messaging** - `send`, `ask` (blocking, 10-minute timeout), `reply`, `pending`, `list`, `groups`, and `status` via the `intercom` tool

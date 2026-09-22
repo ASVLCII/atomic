@@ -1111,7 +1111,12 @@ export default function piIntercomExtension(pi: ExtensionAPI, testOverrides: Int
   });
   pi.on("session_start", async (_event, ctx) => {
     const pendingStageDelivery = ctx.orchestrationContext?.kind === "workflow-stage" ? ctx.orchestrationContext.pendingStageDelivery : undefined;
-    if (pendingStageDelivery === undefined) return;
+    if (pendingStageDelivery === undefined) {
+      // An admitted child registers at startup so its supervisor and peers can
+      // list and steer it before it uses Intercom itself.
+      if (ctx.subagentPolicy?.intercom !== undefined) await ensureConnected("startup");
+      return;
+    }
     await ensureConnected("startup");
     await pendingStageDelivery.deliverPending((from, message) =>
       handleIncomingMessage(ctx, from as SessionInfo, message as Message, undefined, true),
