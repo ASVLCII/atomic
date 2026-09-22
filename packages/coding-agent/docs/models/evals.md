@@ -5,11 +5,50 @@ description: "Primary-source benchmark facts used by Atomic automatic model rout
 
 # Evals
 
-Facts only. Accessed 2026-09-21. `∅`=source null/absent, not zero. Values are rounded to 1 decimal from the [model leaderboard](https://artificialanalysis.ai/leaderboards/models) payload, Coding Index and Agentic Index fields on free `GET /api/v2/language/models/free`, and default-chart constituent fields on the [Intelligence Index](https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index) page. A chart label may show the nearest integer of `idx`.
+Last Accessed: 2026-09-21.
+
+Key:
+
+- `∅`=source null/absent, not zero.
+- Values are rounded to 1 decimal from the [model leaderboard](https://artificialanalysis.ai/leaderboards/models) payload, Coding Index and Agentic Index fields on free `GET /api/v2/language/models/free`, and default-chart constituent fields on the [Intelligence Index](https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index) page.
+- A chart label may show the nearest integer of `idx`.
+- `idx`: Intelligence Index points.
+- `Cod`: Coding Index points.
+- `Agt`: Agentic Index points.
+- `Brief`: AA-Briefcase normalized Elo `clamp((Elo-500)/2000)*100`.
+- `Gn`: GDPval-AA normalized Elo `clamp((Elo-500)/2000)*100`.
+- `Omni`: Omniscience Index, -100 to 100.
+- `Open`: Openness Index points.
+- Other score columns are percent.
+- `OA`: Omniscience accuracy.
+- `ONH`: the 6,000-question ONH rate `(partial+notattempted)/(incorrect+partial+notattempted)`, not 1 minus the hallucination rate.
+- `PDF`: GDP.pdf All-pass.
+- `Auto`: AutomationBench-AA.
+- `TB4`: Terminal-Bench 4.0.
+- `TB21`: Terminal-Bench 2.1.
+- `TBh`: Terminal-Bench Hard.
+- `Sci`: SciCode.
+- `HLE`: Humanity's Last Exam.
+- `Crit`: CritPt.
+- `LCR`: AA-LCR.
+- `GPQA`: GPQA Diamond.
+- `IF`: IFBench.
+- `MMMU`: MMMU-Pro.
+- `tau2`: τ².
+- `tauB`: τ²-Banking.
+- `Analyst`: Analyst Agent.
+- `ITB`: ITBench SRE.
+- `Apex`: Apex Agents.
+- `AIME`: AIME 2025.
+- `LCB`: LiveCodeBench.
+- `Harvey`: Harvey Lab.
+- `MLCR`: MLCR overall.
+- `Ent`: EnterpriseOps Gym.
+- `Brief`, `Auto`, `PDF`, `AIME`, `LCB`, `Harvey`, `MLCR`, `Open`, and `Ent` are published for default-chart models; other rows are `∅` for those columns.
 
 ## Artificial Analysis Intelligence Index v4.3.2
 
-Table: 656 catalog models, one row each, sorted by Intelligence Index. `idx` is Intelligence Index points. `Cod` and `Agt` are Coding Index and Agentic Index points. `Brief` and `Gn` are normalized Elo `clamp((Elo-500)/2000)*100` for AA-Briefcase and GDPval-AA. `Omni` is the Omniscience Index (-100 to 100). `Open` is Openness Index points. Other columns are percent. `OA` is Omniscience accuracy. `ONH` is the 6,000-question ONH rate `(partial+notattempted)/(incorrect+partial+notattempted)`, not 1 minus the hallucination rate. `PDF` is GDP.pdf All-pass. `Auto` is AutomationBench-AA. `TB4`, `TB21`, and `TBh` are Terminal-Bench 4.0, 2.1, and Hard. `Brief`, `Auto`, `PDF`, `AIME`, `LCB`, `Harvey`, `MLCR`, `Open`, and `Ent` are published for default-chart models; other rows are `∅` for those columns.
+Table: 656 catalog models, one row each, sorted by Intelligence Index.
 
 | slug | Model | idx | Brief | Gn | Auto | TB4 | Sci | HLE | PDF | Crit | OA | ONH | LCR | Cod | Agt | Omni | GPQA | TB21 | TBh | IF | MMMU | tau2 | tauB | Analyst | ITB | Apex | AIME | LCB | Harvey | MLCR | Open | Ent |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
