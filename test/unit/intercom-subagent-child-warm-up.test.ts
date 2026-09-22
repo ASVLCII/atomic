@@ -281,3 +281,101 @@ describe("Intercom heavy runtime admitted child registration", () => {
 		}
 	});
 });
+
+describe("Intercom admitted child broker-connect recovery through the real composition", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	test("keeps a recoverable startup connect failure out of the launch and reconnects on the next call", async () => {
+		vi.mocked(spawnBrokerIfNeeded).mockResolvedValue(undefined as never);
+		const connectAttempts: Array<Parameters<IntercomClient["connect"]>[0]> = [];
+		vi.spyOn(IntercomClient.prototype, "connect").mockImplementation(async (registration) => {
+			connectAttempts.push(structuredClone(registration));
+			if (connectAttempts.length === 1) throw new IntercomClientDisconnectedError();
+		});
+		vi.spyOn(IntercomClient.prototype, "isConnected").mockImplementation(function (this: IntercomClient) {
+			return connectAttempts.length >= 2;
+		});
+		vi.spyOn(IntercomClient.prototype, "listSessions").mockResolvedValue([]);
+		vi.spyOn(IntercomClient.prototype, "disconnect").mockResolvedValue();
+		const handlers = new Map<string, ExtensionEventHandler[]>();
+		const tools = new Map<string, ToolDefinition>();
+		let sessionName: string | undefined;
+		const pi = {
+			on(event: string, handler: ExtensionEventHandler) {
+				handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+			},
+			registerTool(tool: ToolDefinition) {
+				tools.set(tool.name, tool);
+			},
+			registerCommand() {},
+			registerShortcut() {},
+			registerMessageRenderer() {},
+			appendEntry() {},
+			getSessionName: () => sessionName,
+			setSessionName(value: string) {
+				sessionName = value;
+			},
+			getActiveTools: () => [],
+			setActiveTools() {},
+			events: createEventBus(),
+		};
+		intercom(pi as never);
+		const ctx = {
+			...admittedChildContext(),
+			isIdle: () => true,
+			ui: { notify() {} },
+			sessionManager: { getSessionId: () => "child-session", getBranch: () => [] },
+		} as unknown as ExtensionContext;
+		const hostHandlers = new Map<string, Array<(...args: unknown[]) => Promise<unknown>>>();
+		for (const [event, registered] of handlers) {
+			hostHandlers.set(
+				event,
+				registered.map(
+					(handler) =>
+						async (...args: unknown[]) =>
+							await handler(args[0], args[1]),
+				),
+			);
+		}
+		const extension = {
+			path: EXTENSION_PATH,
+			resolvedPath: EXTENSION_PATH,
+			sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level" },
+			handlers: hostHandlers,
+			tools: new Map(),
+			messageRenderers: new Map(),
+			entryRenderers: new Map(),
+			commands: new Map(),
+			flags: new Map(),
+			shortcuts: new Map(),
+		} as never as Extension;
+		const reported: ExtensionError[] = [];
+		try {
+			await runGenericHandlers([extension], ctx, { type: "session_start", reason: "startup" } as never, (error) =>
+				reported.push(error),
+			);
+			assert.deepEqual(reported, []);
+			assert.deepEqual(consoleErrorCalls, []);
+			assert.equal(connectAttempts.length, 1, "startup must attempt the broker connection once");
+
+			const tool = tools.get("intercom");
+			assert.ok(tool, "intercom tool should be registered");
+			const result = await tool.execute(
+				"tool-call",
+				{ action: "status" },
+				new AbortController().signal,
+				undefined,
+				ctx as never,
+			);
+
+			assert.equal(connectAttempts.length, 2, "the next Intercom call must reconnect");
+			assert.equal(connectAttempts[1]?.group, "workflow:run-1");
+			const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+			assert.match(text, /Connected: Yes/);
+		} finally {
+			await runGenericHandlers([extension], ctx, { type: "session_shutdown", reason: "quit" } as never, (error) =>
+				reported.push(error),
+			);
+		}
+	});
+});
