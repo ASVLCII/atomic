@@ -211,7 +211,7 @@ test("authoring guidance states the Cua Driver face rule for custom workflows (#
 	const prompt = DEFAULT_PROMPT_GUIDANCE.join("\n");
 	assert.match(
 		prompt,
-		/when a model chooses the next action \(authored model stages\), use the cua-driver skill and one-shot `cua-driver call <tool>` commands/,
+		/when a model chooses the next action \(any workflow stage acting outside `ctx\.tool`\), use the cua-driver skill and one-shot `cua-driver call <tool>` commands/,
 	);
 	assert.match(
 		prompt,

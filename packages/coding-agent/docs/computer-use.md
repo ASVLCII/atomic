@@ -185,10 +185,8 @@ Atomic uses Cua Driver through two faces of one typed surface. Choose by who dec
 
 | Situation | Face | Why |
 | --- | --- | --- |
-| Interactive session: you ask Atomic to drive, inspect, or automate a desktop app, simulator, or emulator window | `cua-driver` CLI through the bundled `cua-driver` skill | A model picks each action; the skill's loop is written for one-shot `cua-driver call <tool>` commands. |
-| Builtin Goal or Ralph stage doing end-to-end desktop verification | `cua-driver` CLI through the bundled `cua-driver` skill | The stage is a model deciding turn by turn; its evidence is the JSON results and `screenshot_out_file` images it saves. |
-| Authored model stage in a custom or dynamic workflow doing ad hoc desktop work | `cua-driver` CLI through the bundled `cua-driver` skill | Same as above. |
-| Deterministic scenario that workflow TypeScript owns, run inside `ctx.tool(name, args, fn, { timeoutMs })` | `@trycua/cua-driver` TypeScript SDK | Code owns the sequence and the postcondition; the result is durably checkpointed and replayed on resume. |
+| A language model chooses each action: an interactive session driving, inspecting, or automating a desktop app, simulator, or emulator window, or any workflow stage acting outside `ctx.tool` | `cua-driver` CLI through the bundled `cua-driver` skill | The model decides turn by turn; the skill's loop is written for one-shot `cua-driver call <tool>` commands, and the evidence is the JSON results and `screenshot_out_file` images it saves. |
+| A custom workflow's TypeScript owns the scenario and its postcondition, run inside `ctx.tool(name, args, fn, { timeoutMs })` | `@trycua/cua-driver` TypeScript SDK | Code owns the sequence; the result is durably checkpointed and replayed on resume. |
 
 The rule of thumb: **when a model chooses the next action, use the CLI; when TypeScript code owns the sequence and the postcondition, use the SDK.** Browsers stay with [agent-browser](#browser-automation-with-agent-browser). Terminals stay with [Herdr](#terminal-automation-with-herdr), falling back to tmux or psmux. Both faces share tool names (`list_apps`, `list_windows`, `get_window_state`, `click`, `type_text`, and the rest), so a scenario worked out interactively translates directly into code.
 
