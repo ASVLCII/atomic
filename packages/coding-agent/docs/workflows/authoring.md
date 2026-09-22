@@ -625,13 +625,15 @@ const sdkDir = join(homedir(), ".cache", "atomic-cua");
 const cuaEnv = { ...process.env, CUA_DRIVER_RS_TELEMETRY_ENABLED: "false" };
 
 function run(command: string, args: string[], signal: AbortSignal, cwd?: string) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const child = spawn(command, args, { cwd, env: cuaEnv, signal, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on("error", reject);
+    // A missing executable (ENOENT) or an abort arrives here rather than on "close"; treat it as a
+    // failed command so the preflight can return its remediation instead of throwing.
+    child.on("error", (error) => resolve({ code: null, stdout, stderr: `${stderr}${error.message}` }));
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
