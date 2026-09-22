@@ -272,7 +272,14 @@ describe("buildSystemPrompt", () => {
 		assert.doesNotMatch(prompt, /PyAutoGUI|pyautogui/i);
 		assert.doesNotMatch(prompt, /uv run --with pyautogui/);
 		assert.doesNotMatch(prompt, /CUA_DRIVER_RS_UPDATE_CHECK=false/);
-		assert.match(prompt, /browser automation use the agent-browser skill/);
+		assert.match(
+			prompt,
+			/Prefer the agent-browser skill for what it covers: websites and web apps in Chrome\/Chromium, Electron desktop apps/,
+		);
+		assert.match(
+			prompt,
+			/Use cua-driver for everything else \(native desktop apps, iOS simulators, Android emulators[\s\S]*whenever agent-browser hits a limitation/,
+		);
 		assert.match(prompt, /terminal automation\/testing, prefer herdr on macOS, Linux and Windows/);
 		assert.match(prompt, /install it if missing/);
 		assert.match(prompt, /fall back to tmux or native Windows psmux/);

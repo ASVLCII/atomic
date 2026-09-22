@@ -95,6 +95,18 @@ test("computer-use guides route desktop CUA to Cua Driver and never to PyAutoGUI
 		assert.doesNotMatch(text, /uv run --with pyautogui/, `${name} still runs pyautogui through uv`);
 		assert.match(text, /cua-driver/, `${name} does not route desktop CUA to cua-driver`);
 	}
+	for (const [name, text] of [
+		["computer-use.md", computer],
+		["workflows/verification.md", verification],
+	] as const) {
+		assert.match(text, /Electron desktop app/, `${name} does not scope agent-browser by its skill`);
+		assert.match(
+			text,
+			/agent-browser hits a limitation/,
+			`${name} does not route agent-browser limitations to Cua Driver`,
+		);
+		assert.match(text, /iOS simulator/, `${name} does not route iOS simulators to Cua Driver`);
+	}
 	for (const heading of ["### Install if missing", "### Turn telemetry off", "### Check readiness"]) {
 		assert.ok(computer.includes(heading), `computer-use.md lacks ${heading}`);
 	}
@@ -115,7 +127,7 @@ test("computer-use guides route desktop CUA to Cua Driver and never to PyAutoGUI
 	assert.match(computer, /`cua-driver update --apply` once/);
 	assert.match(computer, /`CuaDriver\.connect\(\)`[\s\S]*`CuaDriver\.create\(\)`/);
 	assert.match(computer, /\/workflows\/authoring#desktop-verification-with-cua-driver-in-ctx-tool/);
-	assert.match(verification, /\| Desktop app, simulator, or emulator \| \*\*Cua Driver\*\*/);
+	assert.match(verification, /\| Native desktop app, iOS simulator, or Android emulator \| \*\*Cua Driver\*\*/);
 	assert.match(verification, /`blocked`\/`needs_human`/);
 	assert.match(verification, /ctx\.exit\(\{ status: "blocked", reason \}\)/);
 	assert.match(verification, /structured window state plus screenshots, not a screenshot alone/);

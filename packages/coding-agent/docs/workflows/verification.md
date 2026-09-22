@@ -13,8 +13,8 @@ Start with the project's existing tests, build, typecheck, and lint commands. Ad
 | Changed behavior | Preferred mechanism | What to check |
 | --- | --- | --- |
 | Interactive terminal or TUI | **Herdr**, under its explicit-request and managed-pane requirements; tmux or native Windows psmux as fallbacks | Actual input, rendered output, navigation, resizing, and exit behavior relevant to the change. |
-| Browser/frontend | **agent-browser** | The user flow and its visible result, with DOM or network assertions where useful. |
-| Desktop app, simulator, or emulator | **Cua Driver**: the `cua-driver` CLI through the bundled skill when a model chooses actions, or the `@trycua/cua-driver` SDK inside `ctx.tool` when workflow code owns the scenario; supplemented by native/app APIs | The exact window's before/after accessibility state and screenshots, a checked postcondition, and the saved or exported result. |
+| Browser/frontend, Electron desktop app, Slack, or cloud browser | **agent-browser**, for the scope its skill covers; Cua Driver when agent-browser hits a limitation | The user flow and its visible result, with DOM or network assertions where useful. |
+| Native desktop app, iOS simulator, or Android emulator | **Cua Driver**: the `cua-driver` CLI through the bundled skill when a model chooses actions, or the `@trycua/cua-driver` SDK inside `ctx.tool` when workflow code owns the scenario; supplemented by native/app APIs | The exact window's before/after accessibility state and screenshots, a checked postcondition, and the saved or exported result. |
 | API, library, script, or other non-UI behavior | Existing test runner and shell commands | Inputs, outputs, error handling, and relevant build/type contracts. |
 | Documentation | Documentation checks and example review | Links, navigation, command accuracy, and whether a reader can follow the instructions. |
 
