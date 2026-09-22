@@ -45,12 +45,45 @@ function executionModeContract(prompt: string): void {
 
 function verificationContract(prompt: string): void {
 	assert.match(prompt, /For web or frontend flows[\s\S]*agent-browser/);
+	assert.match(
+		prompt,
+		/Prefer agent-browser for what its skill covers \(websites and web apps in Chrome\/Chromium, Electron desktop apps, Slack, cloud browsers\); use Cua Driver for anything else, including iOS simulators, Android emulators[\s\S]*whenever agent-browser hits a limitation/,
+	);
 	assert.match(prompt, /For TUI\/terminal automation\/testing, prefer the herdr skill on macOS, Linux and Windows/);
 	assert.match(prompt, /Install Herdr if missing[\s\S]*fall back to the tmux skill or native Windows psmux/);
 	assert.match(prompt, /explicit-request and HERDR_ENV=1 requirements/);
-	assert.match(prompt, /For desktop and accessible simulator\/emulator windows[\s\S]*PyAutoGUI or native/);
-	assert.match(prompt, /release held keys\/buttons/);
+	assert.match(prompt, /For desktop and accessible simulator\/emulator windows, use Cua Driver/);
+	assert.match(prompt, /when a model chooses the next action, as in this stage, use the `cua-driver` CLI/);
+	assert.match(
+		prompt,
+		/when workflow TypeScript code owns the sequence and the postcondition, the @trycua\/cua-driver TypeScript SDK inside `ctx\.tool` is the face instead/,
+	);
+	assert.match(prompt, /load the cua-driver skill and drive the exact window/);
+	assert.match(prompt, /one-shot `cua-driver call <tool>` commands/);
+	assert.match(prompt, /snapshot -> act -> fresh snapshot -> verify loop/);
+	assert.match(prompt, /one bounded attempt with upstream's one-line installer/);
+	assert.match(prompt, /never `cua-driver skills install`/);
+	assert.match(prompt, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/);
+	assert.match(prompt, /`cua-driver telemetry disable` once after an executable install/);
+	assert.match(prompt, /`cua-driver status`, `cua-driver doctor`, `cua-driver call list_apps`/);
+	assert.match(prompt, /`cua-driver permissions status`/);
+	assert.match(prompt, /open -n -g -a CuaDriver --args serve/);
+	assert.match(
+		prompt,
+		/Save each `get_window_state` JSON result and `screenshot_out_file` image to the artifacts directory/,
+	);
+	assert.match(
+		prompt,
+		/missing macOS Accessibility or Screen Recording grant, a non-interactive Windows session, no graphical Linux session, or a refused\/failed install as the stage's blocked\/needs_human finding/,
+	);
+	assert.match(prompt, /`cua-driver permissions grant`, then toggle CuaDriver on/);
+	assert.match(prompt, /re-run the readiness check on resume/);
 	assert.match(prompt, /not.*label browser recordings as terminal\/iOS proof/);
+	assert.doesNotMatch(prompt, /PyAutoGUI|pyautogui/i);
+	assert.doesNotMatch(prompt, /uv run --with pyautogui/);
+	assert.doesNotMatch(prompt, /openai-cua-sample-app/);
+	assert.doesNotMatch(prompt, /CUA_DRIVER_RS_UPDATE_CHECK=false/);
+	assert.doesNotMatch(prompt, /`workflow resume` re-runs the preflight/);
 	assert.match(
 		prompt,
 		/Known offline\/restricted installation is sufficient evidence not to attempt prohibited downloads/,
@@ -100,6 +133,14 @@ for (const name of ["goal", "ralph"] as const) {
 					executionModeContract(prompt);
 					if (stage === "pull-request") {
 						assert.match(prompt, /Local evidence collection does not authorize uploads/);
+						assert.match(
+							prompt,
+							/attach it to the PR body when the provider supports uploads: cua-driver `screenshot_out_file` before\/after PNGs[\s\S]*agent-browser `screenshot` PNGs and `record` recordings/,
+						);
+						assert.match(
+							prompt,
+							/gh pr create --body-file <body\.md> --attach 'before\.png#State before the action'/,
+						);
 						assert.match(
 							prompt,
 							/gh pr comment <number> --repo <owner\/repo> --body-file <body.md> --attach <proof.mp4>/,
@@ -184,6 +225,52 @@ for (const order of [["workflow", "subagent"], ["subagent", "workflow"], ["subag
 		}
 	});
 }
+
+test("authoring guidance states the Cua Driver face rule for custom workflows (#3181)", () => {
+	const prompt = DEFAULT_PROMPT_GUIDANCE.join("\n");
+	assert.match(
+		prompt,
+		/when a model chooses the next action \(any workflow stage acting outside `ctx\.tool`\), use the cua-driver skill and one-shot `cua-driver call <tool>` commands/,
+	);
+	assert.match(
+		prompt,
+		/when workflow TypeScript code owns the sequence and the postcondition, use the @trycua\/cua-driver TypeScript SDK inside `ctx\.tool\(name, args, fn, \{ timeoutMs \}\)`, forward `signal`/,
+	);
+	assert.match(
+		prompt,
+		/readiness preflight as its own `ctx\.tool` that calls `ctx\.exit\(\{ status: "blocked", reason \}\)` on a missing permission/,
+	);
+	assert.match(
+		prompt,
+		/a blocked author exit is terminal and not resumable, so after the user grants the permission start a new run/,
+	);
+	assert.doesNotMatch(prompt, /`workflow resume` re-runs the preflight/);
+	assert.match(
+		prompt,
+		/`CuaDriver\.connect\(\)` when `cua-driver status` reports a running daemon and fall back to `CuaDriver\.create\(\)` only when no daemon is reachable/,
+	);
+	assert.match(
+		prompt,
+		/in-process fallback attributes Accessibility\/Screen Recording grants to the node host rather than CuaDriver\.app/,
+	);
+	assert.match(prompt, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/);
+	assert.match(
+		prompt,
+		/attach the image and video evidence the run produced \(cua-driver `screenshot_out_file` before\/after PNGs, agent-browser screenshots and `record` recordings\) to the PR body/,
+	);
+	assert.match(
+		prompt,
+		/requires node \(preferred\) or bun on the host, so install one in a single bounded attempt when both are missing/,
+	);
+	assert.match(
+		prompt,
+		/agent-browser for what its skill covers \(websites and web apps in Chrome\/Chromium, Electron desktop apps, Slack, cloud browsers\) and Cua Driver for anything else or whenever agent-browser hits a limitation/,
+	);
+	assert.match(prompt, /prefer herdr for terminal automation\/testing[\s\S]*fall back to tmux\/native Windows psmux/);
+	assert.doesNotMatch(prompt, /PyAutoGUI|pyautogui/i);
+	assert.doesNotMatch(prompt, /uv run --with pyautogui/);
+	assert.doesNotMatch(prompt, /CUA_DRIVER_RS_UPDATE_CHECK=false/);
+});
 
 test("default constructed guidance delegates scoped intent interpretation to the router", () => {
 	const prompt = DEFAULT_PROMPT_GUIDANCE.join("\n");

@@ -511,6 +511,197 @@ After exit is selected, new tracked work and retained stage operations are refus
 
 On resume of an unfinished tool, a successful exit cannot skip that tool. Restore its matching call before new tracked work; otherwise Atomic reports `insufficient_state: replay topology mismatch`. Intentional failed, blocked, cancelled, or skipped exits remain available.
 
+<a id="desktop-verification-with-cua-driver-in-ctx-tool" />
+
+### Desktop verification with Cua Driver in `ctx.tool`
+
+When a model chooses each desktop action, an authored model stage loads the bundled `cua-driver` skill and runs one-shot `cua-driver call <tool>` commands; see [Computer use](/computer-use#desktop-automation-with-cua-driver) for the face rule, installation, telemetry, and readiness. When your workflow's TypeScript owns the sequence and the postcondition, run the scenario with the [`@trycua/cua-driver`](https://www.npmjs.com/package/@trycua/cua-driver) TypeScript SDK inside `ctx.tool(name, args, fn, { timeoutMs })` so the observe → act → re-observe → assert loop is a durable, replayable node rather than a transcript.
+
+Prerequisites and setup, each as one bounded attempt:
+
+- `node` (preferred) or `bun` on the host. If neither is present, install one in a bounded attempt (Node via [fnm](https://github.com/Schniz/fnm) with `fnm install --lts` or the host's package manager, Bun via `curl -fsSL https://bun.sh/install | bash`) and report what the installer did; if the install is refused or fails, report that as the limitation rather than retrying.
+- The `cua-driver` executable (`cua-driver --version`), installed with upstream's one-line installer if missing, followed by `cua-driver telemetry disable` once.
+- The SDK installed at the exact driver version into a scratch directory outside the user's repository, for example `npm install @trycua/cua-driver@0.28.2 --prefix ~/.cache/atomic-cua`. The package ships per-platform native optional dependencies. Daemon-backed clients verify contract, tool-schema, capability, and protocol versions before each action and refuse on mismatch, so the pin must match `cua-driver --version`.
+
+The scenario itself is a small script in that scratch directory. It acquires the driver with `CuaDriver.connect()` when a daemon is running, so it reuses the daemon's permission identity (on macOS, `CuaDriver.app`'s Accessibility and Screen Recording grants) and the persisted telemetry-off preference; upstream describes `connect()` as a compatibility and app-hosting path, which is exactly the role it plays here. Only when no daemon is reachable does it fall back to `CuaDriver.create()`, which loads the runtime into the node process. On macOS that in-process fallback attributes permissions to the node host, normally the terminal app, as a **separate grant** from the app's; `checkPermissions` is then read-only, and the host must fully quit and relaunch after granting. Save it as `~/.cache/atomic-cua/verify-counter.mjs`:
+
+```js
+// Reads {"daemon":true|false,"artifactsDir":"..."} from argv[2]; prints one JSON result line.
+// Replace the app name, window title, element labels, and postcondition with ones you control.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  ActionTarget, ClickButton, ClickInput, ClickPosition, CuaDriver,
+  GetWindowStateInput, InputDeliveryMode, ListAppsInput, ListWindowsInput,
+} from "@trycua/cua-driver";
+
+const { daemon, artifactsDir } = JSON.parse(process.argv[2]);
+mkdirSync(artifactsDir, { recursive: true });
+const unique = (items, what) => {
+  if (items.length !== 1) throw new Error(`Expected one ${what}, found ${items.length}`);
+  return items[0];
+};
+const finish = (result, detail) => {
+  process.stdout.write(`${JSON.stringify({ result, detail })}\n`);
+  process.exitCode = result === "verified" ? 0 : 1;
+};
+
+// The wrapper already set CUA_DRIVER_RS_TELEMETRY_ENABLED=false in this process's environment
+// before the driver was constructed; the SDK is one of the faces that reports telemetry by default.
+const driver = daemon ? await CuaDriver.connect() : CuaDriver.create(undefined);
+try {
+  const apps = await driver.listApps(ListAppsInput.new({}));
+  const app = unique(apps.apps.filter((a) => a.name === "Window Demo" && a.running), "app");
+  const windows = await driver.listWindows(ListWindowsInput.new({ pid: app.pid, onScreenOnly: true }));
+  const window = unique(windows.windows.filter((w) => w.title === "Counter"), "window");
+  const target = new ActionTarget.Window({ pid: app.pid, windowId: window.windowId });
+  const snapshot = async (label) => {
+    const state = await driver.getWindowState(
+      GetWindowStateInput.new({
+        pid: app.pid, windowId: window.windowId,
+        includeAccessibilityTree: true, includeScreenshot: true,
+        screenshotOutFile: join(artifactsDir, `${label}.png`),
+      }),
+    );
+    if (state.degraded || state.truncated) throw new Error(`${label} snapshot is degraded or truncated`);
+    // Keep the whole result (snapshot id, screenshot reference, degraded/truncated flags), not just
+    // the elements, so the retained tree is provably from a complete snapshot. Ids are bigint.
+    const json = JSON.stringify(state, (_key, value) => (typeof value === "bigint" ? value.toString() : value), 2);
+    writeFileSync(join(artifactsDir, `${label}.json`), json);
+    return state;
+  };
+
+  const before = await snapshot("before");
+  const button = unique((before.elements ?? []).filter((e) => e.label === "Increment"), "button");
+  const counter = unique((before.elements ?? []).filter((e) => e.label === "Count"), "counter");
+  if (!button.elementToken || counter.value === undefined) throw new Error("Snapshot lacks the button token or counter value");
+
+  let clicked = false;
+  try {
+    await driver.click(ClickInput.new({
+      target,
+      position: new ClickPosition.Element({ elementToken: button.elementToken }),
+      deliveryMode: InputDeliveryMode.Background,
+      button: ClickButton.Left, count: 1,
+    }));
+    clicked = true;
+  } catch (error) {
+    // A timeout or interrupted action before its response is "unknown": the postcondition below
+    // decides, and the click is never replayed.
+    if (!/timed out|ActionInterrupted/u.test(String(error))) throw error;
+  }
+
+  // Bounded poll on fresh snapshots; never a fixed sleep, never a second click.
+  const deadline = Date.now() + 10_000;
+  let after = await snapshot("after");
+  let updated = unique((after.elements ?? []).filter((e) => e.label === "Count"), "counter");
+  while (updated.value === counter.value && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    after = await snapshot("after");
+    updated = unique((after.elements ?? []).filter((e) => e.label === "Count"), "counter");
+  }
+  if (updated.value !== undefined && updated.value !== counter.value) {
+    finish("verified", `Count ${counter.value} -> ${updated.value}`);
+  } else {
+    finish(clicked ? "refuted" : "unknown", `Count stayed ${counter.value}`);
+  }
+} catch (error) {
+  finish("unknown", String(error));
+} finally {
+  try {
+    await driver.shutdown();
+  } finally {
+    if ("uniffiDestroy" in driver && typeof driver.uniffiDestroy === "function") driver.uniffiDestroy();
+  }
+}
+```
+
+The workflow runs a readiness preflight as its own `ctx.tool` first, so a missing permission or session ends the run with `ctx.exit({ status: "blocked", reason })`. A blocked author exit is terminal and not resumable (see [Early exit with `ctx.exit()`](#early-exit-with-ctx-exit)), and the preflight's `{ ready: false }` result is a completed, cached checkpoint, so after the user grants the permission start a new run: its fresh preflight checks again instead of replaying the cached result. The scenario tool spawns `node` with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false` in the child environment, forwards `signal` so a quit or targeted abort kills the child, and maps anything but `verified` to a nonzero outcome:
+
+```ts
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { Type, workflow } from "@bastani/workflows";
+
+const sdkDir = join(homedir(), ".cache", "atomic-cua");
+const cuaEnv = { ...process.env, CUA_DRIVER_RS_TELEMETRY_ENABLED: "false" };
+
+function run(command: string, args: string[], signal: AbortSignal, cwd?: string) {
+  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(command, args, { cwd, env: cuaEnv, signal, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    // A missing executable (ENOENT) or an abort arrives here rather than on "close"; treat it as a
+    // failed command so the preflight can return its remediation instead of throwing.
+    child.on("error", (error) => resolve({ code: null, stdout, stderr: `${stderr}${error.message}` }));
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+export default workflow({
+  name: "verify-counter",
+  description: "Prove the Increment button changes the Count field in the Counter window.",
+  inputs: { artifactsDir: Type.String({ description: "Directory for before/after state JSON and screenshots" }) },
+  outputs: { result: Type.String(), detail: Type.String() },
+  run: async (ctx) => {
+    const preflight = await ctx.tool(
+      "cua-preflight",
+      { platform: process.platform },
+      async ({ signal }) => {
+        const version = await run("cua-driver", ["--version"], signal);
+        if (version.code !== 0) {
+          return { ready: false, reason: "cua-driver is not installed; run /bin/bash -c \"$(curl -fsSL https://cua.ai/driver/install.sh)\" (Windows: irm https://cua.ai/driver/install.ps1 | iex), then cua-driver telemetry disable" };
+        }
+        const status = await run("cua-driver", ["status"], signal);
+        const daemon = status.code === 0;
+        if (process.platform === "darwin" && daemon) {
+          const permissions = await run("cua-driver", ["permissions", "status", "--json"], signal);
+          const grants = permissions.code === 0
+            ? (JSON.parse(permissions.stdout) as { accessibility?: boolean; screen_recording?: boolean })
+            : {};
+          if (grants.accessibility !== true || grants.screen_recording !== true) {
+            return { ready: false, reason: "Missing macOS grant: run `cua-driver permissions grant`, toggle CuaDriver on under System Settings → Privacy & Security → Accessibility and Screen & System Audio Recording, then relaunch the daemon with `open -n -g -a CuaDriver --args serve`" };
+          }
+        }
+        const apps = await run("cua-driver", ["call", "list_apps"], signal);
+        if (apps.code !== 0) {
+          return { ready: false, reason: `cua-driver call list_apps failed; start the daemon (macOS: open -n -g -a CuaDriver --args serve; Windows: cua-driver serve in the interactive session; Linux: cua-driver serve inside the graphical session): ${apps.stderr.trim()}` };
+        }
+        return { ready: true, daemon };
+      },
+      { timeoutMs: 60_000 },
+    );
+    if (!preflight.ready) {
+      return ctx.exit({ status: "blocked", reason: preflight.reason });
+    }
+
+    const scenario = await ctx.tool(
+      "verify-counter-scenario",
+      { artifactsDir: ctx.inputs.artifactsDir, daemon: preflight.daemon },
+      async ({ signal }) => {
+        const args = JSON.stringify({ daemon: preflight.daemon, artifactsDir: ctx.inputs.artifactsDir });
+        const child = await run("node", ["verify-counter.mjs", args], signal, sdkDir);
+        const line = child.stdout.trim().split("\n").at(-1) ?? "";
+        const parsed = line.startsWith("{") ? (JSON.parse(line) as { result: string; detail: string }) : undefined;
+        const result = parsed?.result ?? "unknown";
+        if (result !== "verified") {
+          throw new Error(`desktop verification ${result}: ${parsed?.detail ?? child.stderr.trim()}`);
+        }
+        return { result, detail: parsed?.detail ?? "" };
+      },
+      { timeoutMs: 5 * 60_000 },
+    );
+
+    return scenario;
+  },
+});
+```
+
+A `verified` result is cached durably, so a resumed run does not click again. A thrown `refuted`, `blocked`, or `unknown` result fails the node and is not replayed from cache; a new run executes the preflight and the scenario again from a fresh snapshot, and a durable retry of a resumable failure replays the completed preflight checkpoint and re-runs only the scenario. Keep the artifacts directory outside the repository unless the evidence belongs in the deliverable, and never post the installation UUID from `cua-driver telemetry status` in a result or reason. Safety is the same on both faces: one controller per desktop, a dedicated session or account where practical, and an explicit stopping point before destructive or publishing actions.
+
 ### Workflow Composition
 
 Use workflow composition when a workflow calls a reusable user-defined workflow from the project or package, or a bundled builtin workflow, and consumes its outputs as a tracked boundary stage. Import the child definition with a normal TypeScript import, then pass it directly to `ctx.workflow(workflowDefinition, options)`. `ctx.workflow(...)` does not accept registry names, path objects, or string aliases.

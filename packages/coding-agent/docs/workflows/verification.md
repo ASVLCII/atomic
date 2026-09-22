@@ -2,7 +2,7 @@
 
 Verify the behavior that changed, then give the reviewer enough evidence to understand the result. A small fix may need a focused test and a short explanation. An interactive change usually needs a real user scenario as well. A video is useful when it shows something a test log or screenshot cannot; it is not required for every PR.
 
-For tool installation, automation techniques, platform permissions, and general work in applications, read [Computer use](/computer-use). That guide covers Herdr for terminals, agent-browser for browsers, and PyAutoGUI with uv for desktop CUA on macOS, Linux, and Windows. It also covers native accessibility and application tools when they are easier or more reliable.
+For tool installation, automation techniques, platform permissions, and general work in applications, read [Computer use](/computer-use). That guide covers Herdr for terminals, agent-browser for browsers, and Cua Driver for desktop, simulator, and emulator CUA on macOS, Linux, and Windows. It also covers native accessibility and application tools when they are easier or more reliable.
 
 <a id="select-the-verification-environment" />
 
@@ -13,8 +13,8 @@ Start with the project's existing tests, build, typecheck, and lint commands. Ad
 | Changed behavior | Preferred mechanism | What to check |
 | --- | --- | --- |
 | Interactive terminal or TUI | **Herdr**, under its explicit-request and managed-pane requirements; tmux or native Windows psmux as fallbacks | Actual input, rendered output, navigation, resizing, and exit behavior relevant to the change. |
-| Browser/frontend | **agent-browser** | The user flow and its visible result, with DOM or network assertions where useful. |
-| Desktop app, simulator, or emulator | **PyAutoGUI with uv**, supplemented by native/app APIs | The visible app scenario and its saved or exported result. |
+| Browser/frontend, Electron desktop app, Slack, or cloud browser | **agent-browser**, for the scope its skill covers; Cua Driver when agent-browser hits a limitation | The user flow and its visible result, with DOM or network assertions where useful. |
+| Native desktop app, iOS simulator, or Android emulator | **Cua Driver**: the `cua-driver` CLI through the bundled skill when a model chooses actions, or the `@trycua/cua-driver` SDK inside `ctx.tool` when workflow code owns the scenario; supplemented by native/app APIs | The exact window's before/after accessibility state and screenshots, a checked postcondition, and the saved or exported result. |
 | API, library, script, or other non-UI behavior | Existing test runner and shell commands | Inputs, outputs, error handling, and relevant build/type contracts. |
 | Documentation | Documentation checks and example review | Links, navigation, command accuracy, and whether a reader can follow the instructions. |
 
@@ -72,11 +72,15 @@ See [terminal setup and capture commands](/computer-use#terminal-automation-with
 
 ### Desktop, simulator, and emulator changes
 
-Run PyAutoGUI through uv in a dedicated graphical session, using [the desktop guide](/computer-use#desktop-automation-with-pyautogui-and-uv). Native accessibility tools or application APIs can give more reliable assertions than pixel matching. For example, check a saved document through the app API after exercising the visible Save flow.
+Use Cua Driver in a dedicated graphical session, following [the desktop guide](/computer-use#desktop-automation-with-cua-driver). When a language model chooses each action, whether in an interactive session or in any workflow stage acting outside `ctx.tool`, load the bundled `cua-driver` skill and drive the exact window with one-shot `cua-driver call <tool>` commands, running every command with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false`. When a custom workflow's TypeScript owns the scenario and its postcondition, run it with the `@trycua/cua-driver` SDK inside `ctx.tool` as shown in [workflow authoring](/workflows/authoring#desktop-verification-with-cua-driver-in-ctx-tool). Either way the loop is the same: snapshot the window with `get_window_state`, act through a snapshot-bound element token, take a fresh snapshot, and check a postcondition with a bounded poll deadline. Application APIs can still give the strongest assertion, for example checking a saved document through the app API after exercising the visible Save flow.
 
-Capture the actual application or simulator. A browser recording is not desktop or iOS evidence. PyAutoGUI can interact with a visible simulator/emulator window, but does not directly control an arbitrary physical phone. Use supported native tooling where needed, and name the device or emulator actually exercised.
+Evidence is the structured window state plus screenshots, not a screenshot alone. Save each `get_window_state` JSON result and its `screenshot_out_file` image (before and after the action) to the artifacts directory, and state the postcondition that was checked. A `degraded` or `truncated` snapshot is a failed observation, not a reason to act.
 
-Keep failsafes enabled and release held keys/buttons after interruption. Inspect saved files and exports rather than assuming a completed click means a completed operation. Screenshots show appearance, not necessarily persistence or correctness.
+Capture the actual application or simulator. A browser recording is not desktop or iOS evidence. Cua Driver can interact with a visible simulator/emulator window, but does not directly control an arbitrary physical phone. Use supported native tooling where needed, and name the device or emulator actually exercised.
+
+Missing readiness is a blocked finding, not a failure to work around. Before the first action the stage checks `cua-driver --version` (one bounded install attempt with upstream's one-line installer if it is missing, then `cua-driver telemetry disable`), `cua-driver status`, `cua-driver doctor`, and `cua-driver call list_apps`, plus `cua-driver permissions status` on macOS. A builtin Goal or Ralph stage reports a missing macOS Accessibility or Screen Recording grant, a non-interactive Windows session, no graphical Linux session, or a refused or failed install as `blocked`/`needs_human` with the exact remediation (for macOS: `cua-driver permissions grant`, toggle CuaDriver on under System Settings → Privacy & Security → Accessibility and Screen & System Audio Recording, then relaunch the daemon with `open -n -g -a CuaDriver --args serve`), and re-runs the readiness check when the run resumes. A custom workflow does the same from a preflight `ctx.tool` that calls `ctx.exit({ status: "blocked", reason })`. Unlike a builtin stage, a blocked author exit is terminal and not resumable: after the user grants the permission, start a new run, whose fresh preflight checks again rather than replaying a cached result.
+
+Inspect saved files and exports rather than assuming a returned action means a completed operation. An action that times out before its response is `unknown`; resolve it with a fresh snapshot and the postcondition, never by replaying the action.
 
 ## Use evidence in a workflow
 
@@ -121,7 +125,7 @@ Give the reviewer a short summary before linking logs or media. For example, rep
 - Limits: <checks/platforms not exercised>
 ```
 
-Attach a screenshot for a visual state, a short recording for an interaction, or logs for command behavior. Include reproduction steps even when media is available. Label local-only paths as local; reviewers cannot open a file on your machine. CI artifact links are useful when readers have access, but note retention limits where relevant.
+Attach a screenshot for a visual state, a short recording for an interaction, or logs for command behavior. When a run used Cua Driver, the evidence is the before/after `screenshot_out_file` PNGs from `get_window_state`, one pair per verified postcondition, with the window-state JSON kept locally and cited by name; when it used agent-browser, the evidence is its `screenshot` PNGs and `record` recordings. Put them in the PR body next to the scenario they prove. Include reproduction steps even when media is available. Label local-only paths as local; reviewers cannot open a file on your machine. CI artifact links are useful when readers have access, but note retention limits where relevant.
 
 Only upload to an authorized repository or destination. Inspect and redact secrets, personal information, private source content, and unrelated windows before attaching files. Permission to collect local evidence is not permission to publish it.
 
@@ -129,7 +133,16 @@ Only upload to an authorized repository or destination. Inspect and redact secre
 
 [GitHub CLI 2.99.0 and newer](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/) supports repeatable `--attach` on issue and PR `create`, `edit`, and `comment` commands. Check `gh --version`, the specific command's `--help`, and the host's [attachment support and limits](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
 
-For an authorized PR comment, replace the target and file paths:
+Attach evidence when the PR is created so the body carries it from the first review; replace the file paths:
+
+```sh
+gh pr create --title "Fix settings save" --body-file body.md \
+  --attach 'before.png#Settings panel before saving' \
+  --attach 'after.png#Settings panel after saving' \
+  --attach flow.webm
+```
+
+For evidence produced after the PR exists, use `gh pr edit` or an authorized PR comment the same way:
 
 ```sh
 gh pr comment 123 --repo owner/repo --body-file evidence.md \

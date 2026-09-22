@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the bundled `cua-driver` skill, vendored verbatim from [trycua/cua](https://github.com/trycua/cua) `libs/cua-driver/rust/Skills/cua-driver` at tag `cua-driver-rs-v0.28.2` (MIT, © 2025 Cua AI, Inc.), with all eight upstream files including the macOS, Windows, and Linux platform guides. Only the `SKILL.md` frontmatter is Atomic-owned. It teaches the `cua-driver` CLI's snapshot → act → fresh snapshot → verify loop for desktop, simulator, and emulator computer use, replacing the previous PyAutoGUI guidance ([#3181](https://github.com/bastani-inc/atomic/issues/3181)).
+
 ## [0.9.20-alpha.5] - 2026-09-20
 
 ### Changed

@@ -66,7 +66,7 @@ test("computer use and initialization troubleshooting have live learning-path de
 	const computer = await readDoc("computer-use.md");
 	for (const heading of [
 		"Application scripting and APIs",
-		"Desktop automation with PyAutoGUI and uv",
+		"Desktop automation with Cua Driver",
 		"Browser automation with agent-browser",
 		"Terminal automation with Herdr",
 		"macOS",
@@ -77,6 +77,90 @@ test("computer use and initialization troubleshooting have live learning-path de
 	}
 	assert.match(await readDoc("intercom.md"), /\/intercom\/operations#troubleshooting-initialization/);
 	assert.match(await readDoc("intercom/operations.md"), /### Troubleshooting initialization/);
+});
+
+// #3181: desktop CUA guidance routes to Cua Driver with telemetry off on every documented path.
+test("computer-use guides route desktop CUA to Cua Driver and never to PyAutoGUI (#3181)", async () => {
+	const computer = await readDoc("computer-use.md");
+	const verification = await readDoc("workflows/verification.md");
+	const authoring = await readDoc("workflows/authoring.md");
+	const skills = await readDoc("skills.md");
+	for (const [name, text] of [
+		["computer-use.md", computer],
+		["workflows/verification.md", verification],
+		["workflows/authoring.md", authoring],
+		["skills.md", skills],
+	] as const) {
+		assert.doesNotMatch(text, /PyAutoGUI|pyautogui/i, `${name} still names PyAutoGUI`);
+		assert.doesNotMatch(text, /uv run --with pyautogui/, `${name} still runs pyautogui through uv`);
+		assert.match(text, /cua-driver/, `${name} does not route desktop CUA to cua-driver`);
+	}
+	for (const [name, text] of [
+		["computer-use.md", computer],
+		["workflows/verification.md", verification],
+	] as const) {
+		assert.match(text, /Electron desktop app/, `${name} does not scope agent-browser by its skill`);
+		assert.match(
+			text,
+			/agent-browser hits a limitation/,
+			`${name} does not route agent-browser limitations to Cua Driver`,
+		);
+		assert.match(text, /iOS simulator/, `${name} does not route iOS simulators to Cua Driver`);
+	}
+	assert.match(
+		verification,
+		/gh pr create --title "Fix settings save" --body-file body\.md \\\n {2}--attach 'before\.png#Settings panel before saving'/,
+	);
+	assert.match(
+		verification,
+		/before\/after `screenshot_out_file` PNGs from `get_window_state`[\s\S]*`screenshot` PNGs and `record` recordings/,
+	);
+	assert.match(computer, /attach the before\/after PNGs to the PR body/);
+	assert.match(computer, /Keep `screenshot` PNGs and `record` recordings from the verified flow/);
+	for (const heading of ["### Install if missing", "### Turn telemetry off", "### Check readiness"]) {
+		assert.ok(computer.includes(heading), `computer-use.md lacks ${heading}`);
+	}
+	assert.match(
+		computer,
+		/when a model chooses the next action, use the CLI; when TypeScript code owns the sequence and the postcondition, use the SDK/,
+	);
+	assert.match(computer, /\/bin\/bash -c "\$\(curl -fsSL https:\/\/cua\.ai\/driver\/install\.sh\)"/);
+	assert.match(computer, /irm https:\/\/cua\.ai\/driver\/install\.ps1 \| iex/);
+	assert.match(computer, /Do not run `cua-driver skills install`/);
+	assert.match(computer, /telemetry[^.]*\*\*by default, from every face\*\*/);
+	assert.match(computer, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/);
+	assert.match(computer, /`cua-driver telemetry disable`/);
+	assert.match(computer, /`cua-driver telemetry status --json`/);
+	assert.match(computer, /CUA_DRIVER_RS_UPDATE_CHECK=false/);
+	assert.match(computer, /`cua-driver config set update_check_enabled false`/);
+	assert.match(computer, /open -n -g -a CuaDriver --args serve/);
+	assert.match(computer, /`cua-driver update --apply` once/);
+	assert.match(computer, /`CuaDriver\.connect\(\)`[\s\S]*`CuaDriver\.create\(\)`/);
+	assert.match(computer, /\/workflows\/authoring#desktop-verification-with-cua-driver-in-ctx-tool/);
+	assert.match(verification, /\| Native desktop app, iOS simulator, or Android emulator \| \*\*Cua Driver\*\*/);
+	assert.match(verification, /`blocked`\/`needs_human`/);
+	assert.match(verification, /ctx\.exit\(\{ status: "blocked", reason \}\)/);
+	assert.match(verification, /structured window state plus screenshots, not a screenshot alone/);
+	assert.ok(authoring.includes('<a id="desktop-verification-with-cua-driver-in-ctx-tool" />'));
+	assert.match(authoring, /CUA_DRIVER_RS_TELEMETRY_ENABLED: "false"/);
+	assert.match(authoring, /daemon \? await CuaDriver\.connect\(\) : CuaDriver\.create\(undefined\)/);
+	assert.match(authoring, /ctx\.exit\(\{ status: "blocked", reason: preflight\.reason \}\)/);
+	assert.match(authoring, /InputDeliveryMode\.Background/);
+	assert.match(authoring, /timeoutMs: 5 \* 60_000/);
+	assert.match(authoring, /uniffiDestroy/);
+	for (const [name, text] of [
+		["workflows/verification.md", verification],
+		["workflows/authoring.md", authoring],
+	] as const) {
+		assert.match(text, /blocked author exit is terminal and not resumable/, `${name} must state the engine's rule`);
+		assert.doesNotMatch(
+			text,
+			/`workflow resume` re-runs the preflight/,
+			`${name} promises a resume the engine never does`,
+		);
+	}
+	assert.match(skills, /cua-driver-rs-v0\.28\.2/);
+	assert.match(skills, /MIT licensed, © 2025 Cua AI, Inc\./);
 });
 
 // #2847: upstream wording changes must not break previously published fragments.

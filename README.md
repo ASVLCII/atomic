@@ -985,6 +985,7 @@ Skills are reusable expert instructions and process modules. Atomic can select o
 | `tdd`               | Apply a red-green-refactor loop and testing guidance.                                        |
 | `tmux`              | Drive and verify terminal applications.                                                      |
 | `agent-browser`     | Automate browser interactions and end-to-end UI checks.                                      |
+| `cua-driver`        | Drive native desktop, simulator, and emulator windows through Cua Driver (trycua/cua, MIT).  |
 | `qlty`              | Lint, auto-format, and measure code quality across 70+ linters via the qlty CLI.              |
 | `liteparse`         | Extract text, tables, and values from documents and images.                                  |
 | `impeccable`        | Design, audit, and refine frontend interfaces.                                               |
