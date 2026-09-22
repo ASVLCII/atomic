@@ -6,6 +6,7 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 ### Added
 
+- Added Claude Opus 5.5, GPT-6 Sol, and GPT-6 Luna to the GitHub Copilot catalog.
 - Added GPT-6 Sol and GPT-6 Luna for OpenAI API keys and OpenAI Codex subscriptions, with full reasoning-effort, prompt-caching, tool-search, long-context pricing, and official cost metadata.
 - Added `getDecisionModels()` and a generated models.dev decision-model catalog (`type: "decision"`, fetched from `https://models.dev/api.json?type=all` by `npm run generate-decision-models`) listing TypeSafe Jev on the gateways that resell it, with context limits and prices.
 - Added Claude Opus 5.5 to the built-in Anthropic model catalog with adaptive thinking, 1M context, and official pricing metadata.
@@ -14,6 +15,7 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 - Fixed Anthropic OAuth requests for Claude Opus 5.5 rejected with `claude_code_version_too_old` by advertising Claude Code version `2.1.280`, the minimum the API requires.
 - Fixed Fast-mode usage costs for GPT-6 models being recorded at standard rates when OpenAI reports the tier as `service_tier: "fast"` instead of `priority`.
+- Fixed Claude Opus 5.5 offering thinking levels other than low, medium, high, xhigh, and max when models.dev lists the model before its effort metadata is complete.
 
 ## [0.9.20-alpha.6] - 2026-09-22
 
