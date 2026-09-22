@@ -23,7 +23,7 @@ Start with the state you can observe. The existing sections below explain the co
 
 ## How Connection Works
 
-Intercom connects when you use its tool, `/intercom`, or ALT+M. Launching an Intercom-enabled subagent may also connect the parent to authorize supervisor communication; the child connects when it needs the channel. Connections are cleaned up when the session closes or is replaced.
+Intercom connects when you use its tool, `/intercom`, or ALT+M. Launching an Intercom-enabled subagent may also connect the parent to authorize supervisor communication. An admitted subagent child connects as soon as its session starts, so it appears in its supervisor's and peers' `intercom list` and can receive `send`/`ask` before it ever uses Intercom itself; if the broker is unavailable at that moment, the child falls back to connecting on its next Intercom use. Connections are cleaned up when the session closes or is replaced.
 
 A session becomes intercom-connected when all of these are true:
 

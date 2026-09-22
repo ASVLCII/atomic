@@ -518,6 +518,16 @@ export default function intercom(pi: ExtensionAPI, options: LightweightIntercomO
         if (!isRecoverableIntercomDisconnect(error)) throw error;
         scheduleWarmUpRetry(ctx, lease, generation, pendingStageDelivery, error);
       }
+    } else if (typedIdentity) {
+      try {
+        await loadHeavy(ctx);
+      } catch (error) {
+        // An admitted child registers at start so its supervisor and peers can
+        // list and steer it before it ever calls Intercom itself. A recoverable
+        // broker disconnect must not abort the child's launch; the child still
+        // connects lazily on its next Intercom use. Everything else escapes.
+        if (!isRecoverableIntercomDisconnect(error)) throw error;
+      }
     } else if (loadedHeavy) {
       await ensureSessionStartReplayed(loadedHeavy.heavy, lease);
     }
