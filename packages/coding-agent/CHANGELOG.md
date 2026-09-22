@@ -25,6 +25,7 @@
 
 - A custom message sent with `triggerTurn: false` during an active run is still appended after the current turn's tool results rather than steered into it, and, because provider requests now use the canonical session projection, it is visible to that run's next request instead of only a later turn.
 - Changed the default xAI model to Grok 4.7.
+- Replaced the routing evals snapshot with one Artificial Analysis table of the top 26 catalog models by Intelligence Index, accessed 2026-09-21, with each published benchmark as a column. Grok 4.7 is a row in that table. Auto routing sends that snapshot in full, with the model-selection guide, inside Jev's 32k-token state-plus-longest-question limit.
 
 ### Fixed
 

@@ -58,21 +58,25 @@ Price is per task. Candidate cost is USD per million tokens, and roles differ in
 An explicit user request wins over these defaults, but the requested level must exist for the selected catalog entry. Do not invent unsupported suffixes. If \`xhigh\` is unavailable, use \`high\` rather than automatically promoting to \`max\`; choose another catalog model or leave the stage unpinned if neither fits.
 `;
 
-const MODEL_SELECTION_EVALS_JSON_BYTES = 16_000;
+// Jev 1.13 allows 32k tokens for state plus the longest question. Routing charges
+// one byte per token and stays under 30_000. This is what remains for the full
+// evals snapshot after the model-selection guide, a 9_000-byte task, and a
+// nine-candidate question.
+export const MODEL_SELECTION_EVALS_JSON_BYTES = 14_200;
+const EVALS_BUDGET_ERROR = `Auto routing requires a nonempty evals.md document within ${MODEL_SELECTION_EVALS_JSON_BYTES.toLocaleString("en-US")} JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.`;
+function jsonBytes(value: string): number {
+	return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
 
 async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {
 		const evals = await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
-		// Markdown tables of default-source rows fit with the 12 KB task excerpt under
-		// Jev's 30 KB state+longest-question proof (below TypeSafe's 32k-token limit).
-		if (!evals.trim() || Buffer.byteLength(JSON.stringify(evals), "utf8") > MODEL_SELECTION_EVALS_JSON_BYTES)
-			throw new Error("Invalid evals");
+		if (!evals.trim() || jsonBytes(evals) > MODEL_SELECTION_EVALS_JSON_BYTES) throw new Error(EVALS_BUDGET_ERROR);
 		return evals;
-	} catch {
+	} catch (error) {
 		signal?.throwIfAborted();
-		throw new Error(
-			`Auto routing requires a nonempty evals.md document within ${MODEL_SELECTION_EVALS_JSON_BYTES.toLocaleString("en-US")} JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.`,
-		);
+		if (error instanceof Error && error.message === EVALS_BUDGET_ERROR) throw error;
+		throw new Error(EVALS_BUDGET_ERROR);
 	}
 }
 

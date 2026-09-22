@@ -5,93 +5,79 @@ description: "Primary-source benchmark facts used by Atomic automatic model rout
 
 # Evals
 
-Facts only; accessed 2026-09-20. `∅`=source null/absent, not zero.
+Last Accessed: 2026-09-21.
+
+Key:
+
+- `∅`=source null/absent, not zero.
+- Values are rounded to 1 decimal from the [model leaderboard](https://artificialanalysis.ai/leaderboards/models) payload, Coding Index and Agentic Index fields on free `GET /api/v2/language/models/free`, and default-chart constituent fields on the [Intelligence Index](https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index) page.
+- A chart label may show the nearest integer of `idx`.
+- `idx`: Intelligence Index points.
+- `Cod`: Coding Index points.
+- `Agt`: Agentic Index points.
+- `Brief`: AA-Briefcase normalized Elo `clamp((Elo-500)/2000)*100`.
+- `Gn`: GDPval-AA normalized Elo `clamp((Elo-500)/2000)*100`.
+- `Omni`: Omniscience Index, -100 to 100.
+- `Open`: Openness Index points.
+- Other score columns are percent.
+- `OA`: Omniscience accuracy.
+- `ONH`: the 6,000-question ONH rate `(partial+notattempted)/(incorrect+partial+notattempted)`, not 1 minus the hallucination rate.
+- `PDF`: GDP.pdf All-pass.
+- `Auto`: AutomationBench-AA.
+- `TB4`: Terminal-Bench 4.0.
+- `TB21`: Terminal-Bench 2.1.
+- `TBh`: Terminal-Bench Hard.
+- `Sci`: SciCode.
+- `HLE`: Humanity's Last Exam.
+- `Crit`: CritPt.
+- `LCR`: AA-LCR.
+- `GPQA`: GPQA Diamond.
+- `IF`: IFBench.
+- `MMMU`: MMMU-Pro.
+- `tau2`: τ².
+- `tauB`: τ²-Banking.
+- `Analyst`: Analyst Agent.
+- `ITB`: ITBench SRE.
+- `Apex`: Apex Agents.
+- `AIME`: AIME 2025.
+- `LCB`: LiveCodeBench.
+- `Harvey`: Harvey Lab.
+- `MLCR`: MLCR overall.
+- `Ent`: EnterpriseOps Gym.
+- `Brief`, `Auto`, `PDF`, `AIME`, `LCB`, `Harvey`, `MLCR`, `Open`, and `Ent` are published for default-chart models; other rows are `∅` for those columns.
 
 ## Artificial Analysis Intelligence Index v4.3.2
 
-The [Intelligence Index](https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index) (v4.3.2, [methodology](https://artificialanalysis.ai/methodology/intelligence-benchmarking)) is Artificial Analysis's synthesis of overall model intelligence across reasoning, knowledge, and programming, weighted Agents 30%, Coding 20%, Scientific Reasoning 20%, General 30%; text-based, English. Constituents: [AA-Briefcase v1.1](https://artificialanalysis.ai/evaluations/aa-briefcase) multi-week knowledge-work projects with file deliverables; [GDPval-AA v2.1](https://artificialanalysis.ai/evaluations/gdpval-aa) economically valuable tasks across 44 US occupations; AutomationBench-AA SaaS workflow automation through REST APIs; Terminal-Bench 4.0 terminal tasks across software engineering, sysadmin, data, and security; SciCode Python for scientific computing; AA-Omniscience factual knowledge and hallucination; GDP.pdf reasoning over long professional PDFs; [AA-LCR v1.1](https://artificialanalysis.ai/evaluations/artificial-analysis-long-context-reasoning) reasoning across ~100k-token document sets; [Humanity's Last Exam](https://artificialanalysis.ai/evaluations/humanitys-last-exam) frontier academic questions; CritPt research-level physics. GPQA and MMMU-Pro are not constituents.
+Table: top 26 catalog models by Intelligence Index. Fifty does not fit. Jev allows 32k tokens for state plus the longest question, and this snapshot is sent in full with the model-selection guide.
 
-Table: 47-config default-chart union, 31 aggregate Index rows plus default constituent selections (311 displayed constituent records; CritPt has 32). Columns: `idx`=Index points; `Bn`/`Gn`=normalized Elo `clamp((Elo−500)/2000)*100`; `Auto`/`TB`/`Sci`/`HLE`/`PDF`/`Crit`/`OA`/`ONH`/`LCR`=percent, where `OA` is Omniscience accuracy and `ONH` is the 6,000-question ONH rate `(partial+notattempted)/(incorrect+partial+notattempted)`; `PDF` is GDP.pdf All-pass. Row labels use source `chart_label`, or `full_config_label` when the chart omits settings. Fable rows use Adaptive Reasoning; Fable 5 fallback=Opus 4.8, Fable 5.1 Default Fallback. Inkling AA `xhigh` is distinct from Frontier `0.99`.
-
-| ID | Model | idx | Bn | Gn | Auto | TB | Sci | HLE | PDF | Crit | OA | ONH | LCR |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| A01 | Claude Fable 5.1 (max with fallback) | 53 | 58.9 | 61.7 | 59.4 | 52 | 63.1 | 59.1 | 26.2 | 29.7 | 67.2 | 27.4 | 85.3 |
-| A02 | Claude Fable 5.1 (xhigh with fallback) | 53 | 58.4 | 61 | 57.8 | 55.1 | 60.9 | 58.7 | 26.2 | 31.1 | 66.2 | 29.5 | 83 |
-| A03 | GPT-6 Astra (max) | 53 | 53.4 | 52.1 | 68.5 | 59.1 | 56.5 | 54.7 | 31 | 31.7 | 62.6 | 48.7 | 80.7 |
-| A04 | GPT-6 Astra (xhigh) | 52 | 52.2 | 50.8 | 67.2 | 59.6 | 55.7 | 54.6 | 32.2 | 31.4 | 61.9 | 51.7 | 80 |
-| A05 | Claude Fable 5.1 (high with fallback) | 51 | 54.6 | 55.9 | 55.3 | 52 | 58.7 | 55.9 | 26.8 | 30.3 | 64.9 | 31.2 | 83.7 |
-| A06 | GPT-6 Astra (high) | 51 | 50.3 | 49.2 | 66.6 | 54 | 55.4 | 53.1 | 31 | 28.9 | 61.1 | 55.2 | 80 |
-| A07 | Claude Opus 5 (max) | 51 | 58.7 | 60.4 | 56.6 | 49 | 56.4 | 54.9 | 21.6 | 29.1 | 60.9 | 39.2 | 79.3 |
-| A08 | Claude Opus 5 (xhigh) | 50 | 57.5 | 58.8 | 53.2 | 46.5 | 55.7 | 54.4 | 21 | 27.7 | 59.5 | 40.5 | 80.3 |
-| A09 | Claude Fable 5 (Adaptive Reasoning, Max Effort, Opus 4.8 Fallback) | 50 | 52.2 | 54.8 | 54.1 | 42.4 | 61 | 55.5 | 24 | 28.6 | 65.3 | 36.4 | 82.3 |
-| A10 | GPT-6 Astra (medium) | 50 | 48 | 48.4 | 64.6 | 49.5 | 54.2 | 52.7 | 30.4 | 29.1 | 60.6 | 53.5 | 79.7 |
-| A11 | Claude Fable 5.1 (medium with fallback) | 49 | 52.1 | 51.8 | 54.7 | 44.9 | 56.4 | 53.8 | 26.8 | 29.1 | 63.1 | 30.9 | 84.7 |
-| A12 | Claude Opus 5 (high) | 48 | 53.7 | 54 | 53.6 | 46 | 55.4 | 52.8 | 19.6 | 28.3 | 58.9 | 38.8 | 79 |
-| A13 | Muse Spark 1.3 (max) | 48 | 54.9 | 58.7 | 57.9 | 33.3 | 58.8 | 48.7 | 26.6 | 24.9 | 43.6 | 67.1 | 83 |
-| A14 | GPT-5.6 Sol (max) | 47 | 49.4 | 54.4 | 60.1 | 39.9 | 57.1 | 49.5 | 27.2 | 32.3 | 59.4 | 7.8 | 84 |
-| A15 | Claude Fable 5.1 (low with fallback) | 47 | 49.5 | 47.5 | 52.2 | 40.4 | 56.7 | 48.9 | 28 | 27.7 | 60.2 | 34.4 | 82.3 |
-| A16 | GPT-6 Astra (low) | 46 | 38 | 43.3 | 59.1 | 41.9 | 54.1 | 49.2 | 30.4 | 26.3 | 59.5 | 53.1 | 80 |
-| A17 | Qwen3.8 Max (0902) | 45 | 57.1 | 58.4 | 56.2 | 38.9 | 52.1 | 43.1 | 22.8 | 17.7 | 31.7 | 71.2 | 80.3 |
-| A18 | Muse Spark 1.3 (xhigh) | 45 | 49.7 | 56.4 | 56.8 | 16.7 | 59.7 | 47.5 | 24.2 | 26 | 41.5 | 68.5 | 83 |
-| A19 | GLM-5.3 (max) | 45 | 51.3 | 57.3 | 62.2 | 41.9 | 59 | 42.3 | 11.2 | 19.1 | 33.9 | 70.4 | 79.7 |
-| A20 | Grok 4.6 (high) | 44 | 51.2 | 55.3 | 66.7 | 21.2 | 56.5 | 42.9 | 17 | 17.1 | 48.2 | 65.7 | 80.3 |
-| A21 | Grok 4.6 (xhigh) | 44 | 52.8 | 56.6 | 67 | 17.2 | 53 | 44.1 | 17.2 | 19.7 | 43 | 76 | 81 |
-| A22 | Step 5 Preview | 44 | 46.7 | 53.3 | 51 | 33.3 | 58.9 | 46.5 | 14.8 | 20.9 | 41.5 | 57 | 88.3 |
-| A23 | Kimi K3 (max) | 44 | 50.6 | 51.2 | 58.3 | 12.6 | 59.5 | 46.9 | 22 | 23.4 | 47.6 | 46.8 | 88.7 |
-| A24 | Grok 4.6 (medium) | 43 | 49.6 | 55.2 | 63.2 | 13.1 | 55.9 | 42.1 | 17.8 | 17.7 | 41.9 | 76 | 81 |
-| A25 | GPT-5.6 Terra (max) | 42 | 41.9 | 46.6 | 59.6 | 35.4 | 55 | 42.9 | 24 | 30 | 46.8 | 12.1 | 83 |
-| A26 | GLM-5.3-Flash | 42 | 48 | 57 | 60.4 | 32.8 | 51.6 | 39.9 | 15.4 | 15.4 | 27.5 | 72.4 | 80 |
-| A27 | Gemini 3.8 Flash (high) | 41 | 35.1 | 45.6 | 59.9 | 19.7 | 56.6 | 47.8 | 21 | 18.3 | 54.6 | 44.8 | 81.3 |
-| A28 | Qwen3.8-Flash-Next | 40 | 54.9 | 55.6 | 55.9 | 25.3 | 50.6 | 38 | 15.6 | 11.1 | 24.5 | 54.7 | 79.7 |
-| A29 | Gemini 3.8 Flash (medium) | 40 | 33.9 | 45.4 | 60.9 | 19.7 | 55.1 | 42.1 | 22.8 | 12.3 | 53 | 48.1 | 84 |
-| A30 | Gemini 3.7 Flash (medium) | 40 | ∅ | 42 | ∅ | ∅ | 59.8 | 39 | ∅ | 9.4 | 54 | 34.1 | 83 |
-| A31 | DeepSeek V4.1 Flash (Reasoning, Max Effort) | 39 | 46.7 | 55 | 68.9 | 26.8 | 51.9 | 39.2 | 12.8 | 14.3 | 46.4 | 3.5 | 84 |
-| A32 | GPT-5.5 (xhigh) | 38 | 32 | 41.8 | 47.3 | 14.6 | 55.8 | 45.8 | 21.2 | 27.1 | 58 | 11 | 84.3 |
-| A33 | GPT-5.6 Luna (max) | 37 | 42.3 | 47.1 | 50.2 | 11.6 | 53.6 | 39.5 | 24 | 20.6 | 42.7 | 7.4 | 83.7 |
-| A34 | GPT-5.5 (high) | 37 | 29.5 | 40.5 | 44.3 | 9.1 | 56.1 | 45 | 22.6 | 25.4 | 57 | 10.9 | 84.3 |
-| A35 | DeepSeek V4 Pro 0813 (Reasoning, Max Effort) | 36 | 38.1 | 47.1 | 56.7 | 14.1 | 51 | 41 | 11.4 | 18 | 49.1 | 5.2 | 80.3 |
-| A36 | Muse Spark 1.1 (xhigh) | 34 | 17.3 | 35.4 | 38.8 | 6.1 | 58.8 | 46.2 | 14.4 | 15.1 | 52 | 50 | 77.7 |
-| A37 | Qwen3.8 27B (xhigh) | 34 | 45.2 | 45.4 | 48.2 | 5.6 | 46.6 | 33.9 | 16.6 | 5.4 | 15.6 | 69.7 | 82 |
-| A38 | K2 Horizon 375B A23B | 31 | 40.2 | 42.5 | 37.2 | 1.5 | 42.9 | 32 | 7.4 | 4.6 | 18.2 | 74.1 | 80 |
-| A39 | MiniMax-M3 | 29 | 29.7 | 36.5 | 21.3 | 2 | 47.1 | 39 | 9.8 | 3.7 | 16.7 | 81.6 | 83 |
-| A40 | Inkling (xhigh) | 25 | 16.5 | 28.2 | 5 | 1 | 47 | 31.9 | 12.8 | 5.4 | 41.5 | 32.3 | 77.3 |
-| A41 | Nemotron 3 Ultra 550B A55B (Reasoning) | 23 | 18.7 | 25 | 3 | 0.5 | 40.3 | 28.4 | 5 | 3.1 | 22.6 | 70.3 | 79.3 |
-| A42 | Gemini 3.5 Flash-Lite | 22 | 7.1 | 23.5 | 25 | 1 | 41.3 | 18.8 | 13.6 | 0 | 29.5 | 65.6 | 76 |
-| A43 | Muse Glimmer (high) | 17 | 0 | 13.7 | 6.8 | 0.5 | 44.9 | 22 | 10 | 2.6 | 27 | 18.1 | 83.3 |
-| A44 | Mistral Medium 3.5 | 14 | 0.7 | 12.4 | 6.3 | 0 | 40.2 | 13.8 | 2.8 | 0 | 24.7 | 18.4 | 69.3 |
-| A45 | gpt-oss-120b (high) | 12 | 0 | 4.8 | 0.2 | 0 | 34 | 19.6 | 4 | 1.1 | 21.8 | 9.2 | 52 |
-| A46 | GPT-5.4 Pro (xhigh) | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 30 | ∅ | ∅ | ∅ |
-| A47 | GPT-5.5 Pro (xhigh) | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 30.6 | ∅ | ∅ | ∅ |
-
-## DeepSWE v1.1
-
-[DeepSWE](https://deepswe.datacurve.ai/) v1.1 (update 2026-09-03; [changelog](https://deepswe.datacurve.ai/changelog)) measures whether a coding agent can complete original, long-horizon software-engineering tasks in real repositories: 113 tasks written from scratch (no model has seen the solution) across 91 repositories and 5 languages, with prompts about half SWE-bench Pro's length and solutions needing 5.5x more code. Verifiers are hand-written to check behavior, not implementation. All models run on mini-swe-agent.
-
-Table: all 21 default Best rows in source order, each with `n_runs=4`. Columns: model, effort, pass@1±95% run-to-run CI (percent) with CI=`1.96*std(runs)/sqrt(R)`, USD/task, output k-tokens, and steps. Source costs are not billed Atomic cost: GPT-6 Astra uses expected launch pricing, DeepSeek peak rates (off-peak half), GPT-5.6 Sol promotional pricing.
-
-| ID | Model | Effort | pass@1±CI | USD/task | output k-tokens | steps |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| D01 | gpt-6-astra | xhigh | 74±3 | 6.52 | 30 | 29 |
-| D02 | gemini-3.8-flash | high | 74±1 | 2.36 | 143 | 166 |
-| D03 | claude-opus-5 | max | 74±4 | 11.84 | 118 | 99 |
-| D04 | gpt-5.6-sol | max | 73±3 | 6.46 | 60 | 61 |
-| D05 | claude-fable-5 | xhigh | 70±3 | 13.41 | 80 | 68 |
-| D06 | glm-5.3 | max | 69±3 | 3.99 | 80 | 124 |
-| D07 | kimi-k3 | max | 69±5 | 4.65 | 81 | 98 |
-| D08 | grok-4.6 | medium | 67±2 | 3.45 | 50 | 70 |
-| D09 | gpt-5.6-luna | max | 67±4 | 0.61 | 73 | 102 |
-| D10 | gpt-5.5 | xhigh | 67±6 | 7.23 | 46 | 82 |
-| D11 | gemini-3.7-flash | medium | 65±3 | 2.03 | 94 | 117 |
-| D12 | glm-5.3-flash | max | 63±4 | 0.24 | 73 | 123 |
-| D13 | deepseek-v4-pro | max | 63±6 | 1.67 | 106 | 155 |
-| D14 | claude-opus-4.8 | max | 59±2 | 13.22 | 135 | 120 |
-| D15 | qwen3.8-max | xhigh | 57±3 | 3.73 | 95 | 111 |
-| D16 | muse-spark-1.2 | xhigh | 55±2 | 3.70 | 99 | 101 |
-| D17 | claude-sonnet-5 | max | 54±4 | 26.40 | 214 | 268 |
-| D18 | deepseek-v4-flash | max | 53±4 | 0.46 | 108 | 153 |
-| D19 | gemini-3.6-flash | high | 47±4 | 2.21 | 96 | 117 |
-| D20 | glm-5.2 | max | 44±2 | 3.92 | 78 | 129 |
-| D21 | gemini-3.5-flash | high | 36±4 | 3.45 | 76 | 105 |
+| slug | Model | idx | Brief | Gn | Auto | TB4 | Sci | HLE | PDF | Crit | OA | ONH | LCR | Cod | Agt | Omni | GPQA | TB21 | TBh | IF | MMMU | tau2 | tauB | Analyst | ITB | Apex | AIME | LCB | Harvey | MLCR | Open | Ent |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| claude-fable-5-1 | Claude Fable 5.1 (Adaptive Reasoning, Max Effort, Default Fallback) | 53.4 | 58.9 | 61.7 | 59.4 | 52 | 63.1 | 59.1 | 26.2 | 29.7 | 67.2 | 27.4 | 85.3 | 81.6 | 57.9 | 43.5 | 93.7 | 91.4 | ∅ | ∅ | ∅ | ∅ | 47.2 | 57.5 | ∅ | ∅ | ∅ | ∅ | 93 | 71.1 | ∅ | ∅ |
+| claude-fable-5-1-xhigh | Claude Fable 5.1 (Adaptive Reasoning, Xhigh Effort, Default Fallback) | 53.2 | 58.4 | 61 | 57.8 | 55.1 | 60.9 | 58.7 | 26.2 | 31.1 | 66.2 | 29.5 | 83 | 80.7 | 57.2 | 42.4 | 93.4 | 91 | ∅ | ∅ | ∅ | ∅ | 45.8 | ∅ | ∅ | ∅ | ∅ | ∅ | 93.3 | ∅ | ∅ | ∅ |
+| gpt-6-astra | GPT-6 Astra (max) | 52.7 | 53.4 | 52.1 | 68.5 | 59.1 | 56.5 | 54.7 | 31 | 31.7 | 62.6 | 48.7 | 80.7 | 76.9 | 51 | 43.4 | 96.1 | 88.4 | ∅ | ∅ | 86.9 | ∅ | 41.4 | 51.3 | ∅ | ∅ | ∅ | ∅ | ∅ | 35 | ∅ | ∅ |
+| gpt-6-astra-xhigh | GPT-6 Astra (xhigh) | 52.4 | 52.2 | 50.8 | 67.2 | 59.6 | 55.7 | 54.6 | 32.2 | 31.4 | 61.9 | 51.7 | 80 | 75.9 | 50.2 | 43.4 | 96.3 | 89.1 | ∅ | ∅ | 86.2 | ∅ | 43.1 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| claude-fable-5-1-high | Claude Fable 5.1 (Adaptive Reasoning, High Effort, Default Fallback) | 51.2 | 54.6 | 55.9 | 55.3 | 52 | 58.7 | 55.9 | 26.8 | 30.3 | 64.9 | 31.2 | 83.7 | 79.1 | 53.1 | 40.8 | 90.6 | 89.9 | ∅ | ∅ | ∅ | ∅ | 43.1 | ∅ | ∅ | ∅ | ∅ | ∅ | 93 | ∅ | ∅ | ∅ |
+| gpt-6-astra-high | GPT-6 Astra (high) | 50.9 | 50.3 | 49.2 | 66.6 | 54 | 55.4 | 53.1 | 31 | 28.9 | 61.1 | 55.2 | 80 | 77.1 | 48.2 | 43.7 | 94.9 | 89.9 | ∅ | ∅ | 86.4 | ∅ | 40 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| claude-opus-5 | Claude Opus 5 (Adaptive Reasoning, Max Effort) | 50.8 | 58.7 | 60.4 | 56.6 | 49 | 56.4 | 54.9 | 21.6 | 29.1 | 60.9 | 39.2 | 79.3 | 78 | 56.5 | 37.1 | 93.2 | 89.1 | ∅ | ∅ | 84.7 | ∅ | 42.1 | 53.8 | ∅ | ∅ | ∅ | ∅ | 93.5 | 55.6 | ∅ | 47.5 |
+| claude-opus-5-xhigh | Claude Opus 5 (Adaptive Reasoning, Xhigh Effort) | 49.7 | 57.5 | 58.8 | 53.2 | 46.5 | 55.7 | 54.4 | 21 | 27.7 | 59.5 | 40.5 | 80.3 | 77 | 55.6 | 35.4 | 93.7 | 88 | ∅ | ∅ | 84 | ∅ | 43.3 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 58.3 | ∅ | ∅ |
+| claude-fable-5 | Claude Fable 5 (Adaptive Reasoning, Max Effort, Opus 4.8 Fallback) | 49.6 | ∅ | 54.8 | 54.1 | 42.4 | 61 | 55.5 | 24 | 28.6 | 65.4 | 36.4 | 82.3 | 76.5 | 50.7 | 43.3 | 92.6 | 84.6 | 62.9 | 63.5 | ∅ | 98.5 | 38.1 | 48.8 | ∅ | ∅ | ∅ | ∅ | 93.6 | 64.4 | ∅ | 51.1 |
+| gpt-6-astra-medium | GPT-6 Astra (medium) | 49.6 | ∅ | 48.4 | 64.6 | 49.5 | 54.2 | 52.7 | 30.4 | 29.1 | 60.6 | 53.5 | 79.7 | 76.7 | 46 | 42.2 | 93.9 | 89.5 | ∅ | ∅ | 85.1 | ∅ | 35.5 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| claude-fable-5-1-medium | Claude Fable 5.1 (Adaptive Reasoning, Medium Effort, Default Fallback) | 48.9 | ∅ | 51.8 | 54.7 | 44.9 | 56.4 | 53.8 | 26.8 | 29.1 | 63.1 | 30.9 | 84.7 | 77.1 | 50.2 | 37.6 | 88.6 | 88 | ∅ | ∅ | ∅ | ∅ | 41 | ∅ | ∅ | ∅ | ∅ | ∅ | 92.6 | ∅ | ∅ | ∅ |
+| claude-opus-5-high | Claude Opus 5 (Adaptive Reasoning, High Effort) | 48.1 | ∅ | 54.1 | 53.6 | 46 | 55.4 | 52.8 | 19.6 | 28.3 | 58.9 | 38.8 | 79 | 76.5 | 52.3 | 33.7 | 93.7 | 87.6 | ∅ | ∅ | 82.4 | ∅ | 44.7 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 59.4 | ∅ | ∅ |
+| muse-spark-1-3 | Muse Spark 1.3 (max) | 48.1 | 54.9 | 58.7 | 57.9 | 33.3 | 58.8 | 48.7 | 26.6 | 24.9 | 43.6 | 67.1 | 83 | 75.8 | 55.5 | 25 | 93.5 | 84.3 | ∅ | ∅ | ∅ | ∅ | 50.5 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 43.3 | ∅ | ∅ |
+| gpt-5-6-sol | GPT-5.6 Sol (max) | 47 | 49.4 | 54.4 | 60.1 | 39.9 | 57.1 | 49.5 | 27.2 | 32.3 | 59.4 | 7.8 | 84 | 77.4 | 50.2 | 22 | 94.1 | 88 | 65.9 | 72.7 | 83.4 | 85.1 | 44.3 | 47.5 | 56.2 | ∅ | ∅ | ∅ | 87.2 | 26.1 | ∅ | 42.9 |
+| claude-fable-5-1-low | Claude Fable 5.1 (Adaptive Reasoning, Low Effort, Default Fallback) | 46.8 | ∅ | 47.5 | 52.2 | 40.4 | 56.7 | 48.9 | 28 | 27.7 | 60.2 | 34.4 | 82.3 | 75.2 | 47.1 | 34.1 | 88.1 | 85 | ∅ | ∅ | ∅ | ∅ | 39 | ∅ | ∅ | ∅ | ∅ | ∅ | 92.3 | ∅ | ∅ | ∅ |
+| grok-4-7 | Grok 4.7 (xhigh) | 46.4 | 57.9 | 59.8 | 65.6 | 25.8 | 57.4 | 43.1 | 20 | 17.7 | 47.5 | 70.7 | 76.7 | ∅ | ∅ | 32 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 15 | ∅ | ∅ |
+| grok-4-7-high | Grok 4.7 (high) | 46.3 | 57.2 | 59.7 | 63.5 | 24.7 | 57.8 | 42.3 | 23.2 | 18 | 47.8 | 67.6 | 77 | ∅ | ∅ | 30.9 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| mimo-v2-6-pro | MiMo-V2.6-Pro | 46.3 | 51.1 | 58.7 | 58.6 | 34.8 | 60.9 | 49.4 | 19.2 | 26.6 | 34.9 | 59.4 | 86.3 | ∅ | ∅ | 8.4 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| gpt-6-astra-low | GPT-6 Astra (low) | 45.8 | ∅ | 43.3 | 59.1 | 41.9 | 54.1 | 49.2 | 30.4 | 26.3 | 59.5 | 53.1 | 80 | 75.7 | 38.8 | 40.6 | 93.1 | 88 | ∅ | ∅ | 84.6 | ∅ | 32 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| qwen3-8-max | Qwen3.8 Max (0902) | 45.4 | 57 | 58.4 | 56.2 | 38.9 | 52.1 | 43.1 | 22.8 | 17.7 | 31.7 | 71.2 | 80.3 | 76.2 | 56 | 12 | 92.8 | 88.8 | ∅ | ∅ | 82.8 | ∅ | 47.8 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 20 | ∅ | ∅ |
+| muse-spark-1-3-xhigh | Muse Spark 1.3 (xhigh) | 45.1 | ∅ | 56.4 | 56.8 | 16.7 | 59.7 | 47.5 | 24.2 | 26 | 41.5 | 68.5 | 83 | 76.5 | 51.5 | 23.1 | 94.1 | 85.4 | ∅ | ∅ | 82 | ∅ | 47.2 | ∅ | ∅ | ∅ | ∅ | ∅ | 95.5 | ∅ | ∅ | ∅ |
+| claude-opus-5-medium | Claude Opus 5 (Adaptive Reasoning, Medium Effort) | 44.8 | ∅ | 48.8 | 54.3 | 34.3 | 51.5 | 51.3 | 20 | 26.9 | 57.1 | 39.3 | 82 | 74.3 | 46.2 | 31 | 91.9 | 86.1 | ∅ | ∅ | 81.6 | ∅ | 38.6 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 56.1 | ∅ | ∅ |
+| glm-5-3 | GLM-5.3 (max) | 44.8 | 51.2 | 57.3 | 62.2 | 41.9 | 59 | 42.3 | 11.2 | 19.1 | 33.9 | 70.4 | 79.7 | 74.8 | 53.1 | 14.3 | 91.7 | 83.9 | ∅ | ∅ | ∅ | ∅ | 50.3 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 48.3 | 33.3 | 36.4 |
+| grok-4-6 | Grok 4.6 (high) | 44.3 | 52.3 | 55.3 | 66.7 | 21.2 | 56.5 | 42.9 | 17 | 17.1 | 48.2 | 65.7 | 80.3 | 76.8 | 53 | 30.5 | 94.9 | 88.4 | ∅ | ∅ | ∅ | ∅ | 50.7 | 41.3 | ∅ | ∅ | ∅ | ∅ | ∅ | 12.2 | ∅ | 48.3 |
+| grok-4-6-xhigh | Grok 4.6 (xhigh) | 44.2 | ∅ | 56.6 | 67 | 17.2 | 53 | 44.1 | 17.2 | 19.7 | 43 | 76 | 81 | 75.9 | 52.5 | 29.3 | 93.5 | 88 | ∅ | ∅ | ∅ | ∅ | 43.3 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
+| gpt-5-6-sol-xhigh | GPT-5.6 Sol (xhigh) | 44 | ∅ | 52.4 | 55.3 | 24.7 | 57.1 | 47.3 | 27.6 | 28.6 | 58.8 | 8.1 | 82.3 | 78.3 | 47.4 | 21 | 93.1 | 89.5 | 61.4 | 71 | 82.7 | 84.8 | 38.1 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 18.3 | ∅ | ∅ |
 
 ## Cognition FrontierCode 1.1
 

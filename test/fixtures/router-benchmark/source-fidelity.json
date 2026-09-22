@@ -1,7 +1,6 @@
 {
   "sources": {
     "aa": "aa-constituent-matrix-default-union.csv + aa-index-components-default-union.csv + aa-default-chart-scores.csv",
-    "deepswe": "deepswe-best-default.csv",
     "frontier": "frontier-main-best.csv + frontier-extended-best.csv"
   },
   "counts": {
@@ -9,7 +8,6 @@
     "aaAggregateRows": 31,
     "aaDisplayedConstituentRecords": 311,
     "aaDisplayedTotalRecords": 342,
-    "deepsweRows": 21,
     "frontierMainRows": 36,
     "frontierExtendedRows": 36
   },
@@ -62,29 +60,6 @@
     "A46 GPT-5.4 Pro (xhigh)|∅/∅/∅/∅/∅/∅/∅/∅/30/∅/∅/∅",
     "A47 GPT-5.5 Pro (xhigh)|∅/∅/∅/∅/∅/∅/∅/∅/30.6/∅/∅/∅"
   ],
-  "deepSweRows": [
-    "D01 gpt-6-astra[xhigh] 74±3 6.52 30 29",
-    "D02 gemini-3.8-flash[high] 74±1 2.36 143 166",
-    "D03 claude-opus-5[max] 74±4 11.84 118 99",
-    "D04 gpt-5.6-sol[max] 73±3 6.46 60 61",
-    "D05 claude-fable-5[xhigh] 70±3 13.41 80 68",
-    "D06 glm-5.3[max] 69±3 3.99 80 124",
-    "D07 kimi-k3[max] 69±5 4.65 81 98",
-    "D08 grok-4.6[medium] 67±2 3.45 50 70",
-    "D09 gpt-5.6-luna[max] 67±4 0.61 73 102",
-    "D10 gpt-5.5[xhigh] 67±6 7.23 46 82",
-    "D11 gemini-3.7-flash[medium] 65±3 2.03 94 117",
-    "D12 glm-5.3-flash[max] 63±4 0.24 73 123",
-    "D13 deepseek-v4-pro[max] 63±6 1.67 106 155",
-    "D14 claude-opus-4.8[max] 59±2 13.22 135 120",
-    "D15 qwen3.8-max[xhigh] 57±3 3.73 95 111",
-    "D16 muse-spark-1.2[xhigh] 55±2 3.70 99 101",
-    "D17 claude-sonnet-5[max] 54±4 26.40 214 268",
-    "D18 deepseek-v4-flash[max] 53±4 0.46 108 153",
-    "D19 gemini-3.6-flash[high] 47±4 2.21 96 117",
-    "D20 glm-5.2[max] 44±2 3.92 78 129",
-    "D21 gemini-3.5-flash[high] 36±4 3.45 76 105"
-  ],
   "frontierRows": [
     "F01 Claude Fable 5[xhigh;cc] 53.5/58.9/0.3/13.09/58.6",
     "F02 Claude Opus 5[medium;cc] 53.4/58.9/0.6/4.31/33.6",
@@ -126,7 +101,6 @@
   "sentinels": {
     "aaFable5Fallback": "A09 claude-fable-5|50/52.2/54.8/54.1/42.4/61/55.5/24/28.6/65.3/36.4/82.3",
     "aaInkling": "A40 inkling|25/16.5/28.2/5/1/47/31.9/12.8/5.4/41.5/32.3/77.3",
-    "deepsweGlmFlash": "D12 glm-5.3-flash[max] 63±4 0.24 73 123",
     "frontierInkling": "F32 Inkling[0.99;msa] 14.0/15.9/7.6/3.60/33.6",
     "frontierNullFlag": "F03 GPT-6 Astra[max;codex] 53.3/58.8/—/4.59/30.1",
     "frontierZeroFlag": "F04 Claude Fable 5.1[medium;cc] 50.9/55.5/0.0/3.28/26.1"
@@ -151,13 +125,6 @@
       "units": "idx/Bn/Gn points; Auto/TB/Sci/HLE/PDF/Crit/OA/ONH/LCR percent",
       "valueShape": "idx,Bn,Gn,Auto,TB,Sci,HLE,PDF,Crit,OA,ONH,LCR; ∅ preserved"
     },
-    "deepswe": {
-      "url": "https://deepswe.datacurve.ai/",
-      "accessed": "2026-09-20",
-      "version": "v1.1",
-      "units": "pass@1±95% run-to-run CI (percent)",
-      "valueShape": "model[effort],pass±CI,cost,output,steps"
-    },
     "frontier": {
       "url": "https://cognition.com/frontiercode",
       "dataUrl": "https://cognition.com/data/frontiercode-leaderboard/data.json",
@@ -173,11 +140,6 @@
       "values": 12,
       "null": "∅",
       "zero": "0"
-    },
-    "deepSweRows": {
-      "ordered": true,
-      "values": 5,
-      "null": "none"
     },
     "frontierMainRows": {
       "ordered": true,
