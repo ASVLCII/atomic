@@ -107,8 +107,8 @@ test("execution routing keeps the real evals, guide, budget-sized task, and nine
 		maxTotal = Math.max(maxTotal, size.total);
 		maxStateAndLongest = Math.max(maxStateAndLongest, size.stateAndLongestQuestion);
 		const request = JSON.parse(body) as JevFixtureRequest;
-		assert.ok(Buffer.byteLength(JSON.stringify(request.state.evals), "utf8") <= 16_000);
-		assert.match(String(request.state.evals), /\| slug \| Model \| idx \|/);
+		assert.equal(request.state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
+		assert.equal(request.state.model_selection_guide, MODEL_SELECTION_GUIDE);
 		for (const question of Object.values(request.questions)) {
 			for (const [key, value] of Object.entries(question.criteria)) {
 				const candidate = JSON.parse(value) as { model: string };
@@ -176,8 +176,8 @@ test("auto routing receives the shipped evals document verbatim", async () => {
 		/If `xhigh` is unavailable, use `high` rather than automatically promoting to `max`/,
 	);
 	assert.match(state.evals, /# Evals/);
-	assert.match(state.evals, /656 catalog models/);
-	assert.ok(Buffer.byteLength(JSON.stringify(state.evals), "utf8") <= 16_000);
+	assert.match(state.evals, /top 26 catalog models/);
+	assert.equal(state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
 	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 30_000);
 	assert.equal(options?.maxRetries, 0);
 });
@@ -477,7 +477,7 @@ for (const evalsCase of ["missing", "empty", "oversized"] as const) {
 		if (evalsCase === "oversized") read.mockResolvedValueOnce("evals ".repeat(3_000));
 		await assert.rejects(
 			f.route(),
-			/Auto routing requires a nonempty evals\.md document within 16,000 JSON-encoded bytes/,
+			/Auto routing requires a nonempty evals\.md document within 14,200 JSON-encoded bytes/,
 		);
 		assert.equal(f.infer.mock.calls.length, 0);
 	});
@@ -670,8 +670,8 @@ test("hello-world routing receives evals and fits one small Jev request", async 
 	const body = String(transport.mock.calls[0]![1].body);
 	const payload = JSON.parse(body);
 	assert.equal(payload.state.task, "Reply with exactly: Hello, world! No tools or file changes.");
-	assert.ok(Buffer.byteLength(JSON.stringify(payload.state.evals), "utf8") <= 16_000);
-	assert.match(String(payload.state.evals), /\| slug \| Model \| idx \|/);
+	assert.equal(payload.state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
+	assert.equal(payload.state.model_selection_guide, MODEL_SELECTION_GUIDE);
 	const stateAndQuestionBytes = Math.max(
 		...Object.entries(payload.questions as Record<string, unknown>).map(([id, question]) =>
 			Buffer.byteLength(
@@ -706,7 +706,7 @@ test("maximal real eval routing payload preserves prompt and stays under conserv
 		assert.ok(bytes.total <= 48_000, String(bytes.total));
 		const request = JSON.parse(body) as JevFixtureRequest & { model: string };
 		assert.equal(request.state.task, task);
-		assert.ok(Buffer.byteLength(JSON.stringify(request.state.evals), "utf8") <= 16_000);
+		assert.equal(request.state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
 		assert.match(String(request.state.task), /{"quoted":"value\\n"}/);
 		assert.match(String(request.state.task), /Ω界/);
 		assert.ok(Object.keys(request.questions.pair.criteria).length <= 2);
@@ -733,7 +733,7 @@ test("real eval routing tournament preserves evals in every Jev request", async 
 		assert.ok(bytes.stateAndLongestQuestion <= 30_000, String(bytes.stateAndLongestQuestion));
 		assert.ok(bytes.total <= 48_000, String(bytes.total));
 		const request = JSON.parse(body) as JevFixtureRequest;
-		assert.ok(Buffer.byteLength(JSON.stringify(request.state.evals), "utf8") <= 16_000);
+		assert.equal(request.state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
 		for (const question of Object.values(request.questions)) {
 			for (const criterion of Object.values(question.criteria)) seen.add(JSON.parse(criterion).model as string);
 		}
@@ -845,13 +845,14 @@ test("auto routing keeps exact benchmark identity and provenance distinctions", 
 		id: "claude-fable-5",
 	}));
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(models);
+	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	let rank = 0;
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		assert.match(String(state.evals), /Harness: `cc`=claude-code, `gb`=grok-build, `msa`=mini-swe-agent/);
 		assert.match(String(state.evals), /\| claude-fable-5 /);
 		assert.match(String(state.evals), /\| F01 \| Claude Fable 5 \|/);
-		assert.ok(Buffer.byteLength(JSON.stringify(state.evals), "utf8") <= 16_000);
+		assert.equal(state.evals, evals);
 		assert.equal(state.model_selection_guide, MODEL_SELECTION_GUIDE);
 		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
 	});

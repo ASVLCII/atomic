@@ -111,7 +111,7 @@ test("the general model-selection guide stays compact and points to factual eval
 	assert.doesNotMatch(guide, /narrow domain tasks should use/i);
 });
 
-test("the factual evals document is one Artificial Analysis table for every catalog model", async () => {
+test("the factual evals document keeps the top Intelligence Index rows that fit Jev", async () => {
 	const evals = await readText("packages/coding-agent/docs/models/evals.md");
 	const fixture = await sourceFixture();
 	assert.match(evals, /Artificial Analysis Intelligence Index v4\.3\.2/);
@@ -119,23 +119,17 @@ test("the factual evals document is one Artificial Analysis table for every cata
 	assert.match(evals, /Terminal-Bench 4\.0/);
 	assert.match(evals, /normalized Elo.*clamp/);
 	assert.match(evals, /6,000-question ONH.*\(partial\+notattempted\)\/\(incorrect\+partial\+notattempted\)/);
-	assert.match(evals, /656 catalog models/);
+	assert.match(evals, /top 26 catalog models/);
+	assert.match(evals, /32k tokens for state plus the longest question/);
 	assert.doesNotMatch(evals, /^## Grok 4\.7$/m);
 	assert.match(evals, /\| slug \| Model \| idx \| Brief \| Gn \| Auto \| TB4 \|/);
 	assert.match(evals, /\| grok-4-7 \| Grok 4\.7 \(xhigh\) \| 46\.4 \| 57\.9 \| 59\.8 \| 65\.6 \| 25\.8 \|/);
 	assert.match(evals, /\| grok-4-7-high \| Grok 4\.7 \(high\) \| 46\.3 \| 57\.2 \| 59\.7 \| 63\.5 \| 24\.7 \|/);
-	assert.equal(
-		evals
-			.split("\n")
-			.filter(
-				(line) =>
-					line.startsWith("| grok-") ||
-					line.startsWith("| claude-") ||
-					line.startsWith("| gpt-") ||
-					line.startsWith("| "),
-			).length > 600,
-		true,
-	);
+	const aaRows = evals
+		.slice(evals.indexOf("| --- |"), evals.indexOf("## Cognition"))
+		.split("\n")
+		.filter((line) => line.startsWith("| ") && !line.startsWith("| ---"));
+	assert.equal(aaRows.length, 26);
 	assert.doesNotMatch(evals, /no suffix=`?max|slug model names are exact source labels/i);
 	assertSourceRows(evals, fixture.frontierRows, "F", fixture.shapeChecks.frontierMainRows.values);
 	assert.match(evals, /\| GPT-6 Astra \| max \| codex \|/);
