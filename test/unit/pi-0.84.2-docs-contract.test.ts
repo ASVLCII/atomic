@@ -268,8 +268,9 @@ describe("pi 0.84.2 docs contract — every shipped door is documented", () => {
 		assert.doesNotMatch(programmatic, /`atomic --rpc`/u);
 
 		const args = packageFile("coding-agent", "src/cli/args.ts");
-		assert.match(args, /arg === "--mode" && i \+ 1 < args\.length/u);
-		assert.match(args, /mode === "text" \|\| mode === "json" \|\| mode === "rpc"/u);
+		assert.match(args, /arg === "--mode"/u);
+		assert.match(args, /mode !== "text" && mode !== "json" && mode !== "rpc"/u);
+		assert.match(args, /Invalid mode "\$\{mode\}"\. Valid values: text, json, rpc/u);
 	});
 });
 
