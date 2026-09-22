@@ -613,7 +613,7 @@ try {
 }
 ```
 
-The workflow runs a readiness preflight as its own `ctx.tool` first, so a missing permission or session ends the run with `ctx.exit({ status: "blocked", reason })` and `workflow resume` re-runs the preflight after the user acts. The scenario tool spawns `node` with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false` in the child environment, forwards `signal` so a quit or targeted abort kills the child, and maps anything but `verified` to a nonzero outcome:
+The workflow runs a readiness preflight as its own `ctx.tool` first, so a missing permission or session ends the run with `ctx.exit({ status: "blocked", reason })`. A blocked author exit is terminal and not resumable (see [Early exit with `ctx.exit()`](#early-exit-with-ctx-exit)), and the preflight's `{ ready: false }` result is a completed, cached checkpoint, so after the user grants the permission start a new run: its fresh preflight checks again instead of replaying the cached result. The scenario tool spawns `node` with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false` in the child environment, forwards `signal` so a quit or targeted abort kills the child, and maps anything but `verified` to a nonzero outcome:
 
 ```ts
 import { spawn } from "node:child_process";
@@ -695,7 +695,7 @@ export default workflow({
 });
 ```
 
-A `verified` result is cached durably, so a resumed run does not click again. A thrown `refuted`, `blocked`, or `unknown` result fails the node and is not replayed from cache; on resume the preflight and the scenario run again from a fresh snapshot. Keep the artifacts directory outside the repository unless the evidence belongs in the deliverable, and never post the installation UUID from `cua-driver telemetry status` in a result or reason. Safety is the same on both faces: one controller per desktop, a dedicated session or account where practical, and an explicit stopping point before destructive or publishing actions.
+A `verified` result is cached durably, so a resumed run does not click again. A thrown `refuted`, `blocked`, or `unknown` result fails the node and is not replayed from cache; a new run executes the preflight and the scenario again from a fresh snapshot, and a durable retry of a resumable failure replays the completed preflight checkpoint and re-runs only the scenario. Keep the artifacts directory outside the repository unless the evidence belongs in the deliverable, and never post the installation UUID from `cua-driver telemetry status` in a result or reason. Safety is the same on both faces: one controller per desktop, a dedicated session or account where practical, and an explicit stopping point before destructive or publishing actions.
 
 ### Workflow Composition
 

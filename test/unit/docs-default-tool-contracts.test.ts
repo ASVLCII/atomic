@@ -126,6 +126,17 @@ test("computer-use guides route desktop CUA to Cua Driver and never to PyAutoGUI
 	assert.match(authoring, /InputDeliveryMode\.Background/);
 	assert.match(authoring, /timeoutMs: 5 \* 60_000/);
 	assert.match(authoring, /uniffiDestroy/);
+	for (const [name, text] of [
+		["workflows/verification.md", verification],
+		["workflows/authoring.md", authoring],
+	] as const) {
+		assert.match(text, /blocked author exit is terminal and not resumable/, `${name} must state the engine's rule`);
+		assert.doesNotMatch(
+			text,
+			/`workflow resume` re-runs the preflight/,
+			`${name} promises a resume the engine never does`,
+		);
+	}
 	assert.match(skills, /cua-driver-rs-v0\.28\.2/);
 	assert.match(skills, /MIT licensed, © 2025 Cua AI, Inc\./);
 });

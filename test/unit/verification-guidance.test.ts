@@ -48,7 +48,13 @@ function verificationContract(prompt: string): void {
 	assert.match(prompt, /For TUI\/terminal automation\/testing, prefer the herdr skill on macOS, Linux and Windows/);
 	assert.match(prompt, /Install Herdr if missing[\s\S]*fall back to the tmux skill or native Windows psmux/);
 	assert.match(prompt, /explicit-request and HERDR_ENV=1 requirements/);
-	assert.match(prompt, /For desktop and accessible simulator\/emulator windows, load the cua-driver skill/);
+	assert.match(prompt, /For desktop and accessible simulator\/emulator windows, use Cua Driver/);
+	assert.match(prompt, /when a model chooses the next action, as in this stage, use the `cua-driver` CLI/);
+	assert.match(
+		prompt,
+		/when workflow TypeScript code owns the sequence and the postcondition, the @trycua\/cua-driver TypeScript SDK inside `ctx\.tool` is the face instead/,
+	);
+	assert.match(prompt, /load the cua-driver skill and drive the exact window/);
 	assert.match(prompt, /one-shot `cua-driver call <tool>` commands/);
 	assert.match(prompt, /snapshot -> act -> fresh snapshot -> verify loop/);
 	assert.match(prompt, /one bounded attempt with upstream's one-line installer/);
@@ -73,6 +79,7 @@ function verificationContract(prompt: string): void {
 	assert.doesNotMatch(prompt, /uv run --with pyautogui/);
 	assert.doesNotMatch(prompt, /openai-cua-sample-app/);
 	assert.doesNotMatch(prompt, /CUA_DRIVER_RS_UPDATE_CHECK=false/);
+	assert.doesNotMatch(prompt, /`workflow resume` re-runs the preflight/);
 	assert.match(
 		prompt,
 		/Known offline\/restricted installation is sufficient evidence not to attempt prohibited downloads/,
@@ -221,6 +228,11 @@ test("authoring guidance states the Cua Driver face rule for custom workflows (#
 		prompt,
 		/readiness preflight as its own `ctx\.tool` that calls `ctx\.exit\(\{ status: "blocked", reason \}\)` on a missing permission/,
 	);
+	assert.match(
+		prompt,
+		/a blocked author exit is terminal and not resumable, so after the user grants the permission start a new run/,
+	);
+	assert.doesNotMatch(prompt, /`workflow resume` re-runs the preflight/);
 	assert.match(
 		prompt,
 		/`CuaDriver\.connect\(\)` when `cua-driver status` reports a running daemon and fall back to `CuaDriver\.create\(\)` only when no daemon is reachable/,
