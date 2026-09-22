@@ -242,7 +242,10 @@ test("authoring guidance states the Cua Driver face rule for custom workflows (#
 		/in-process fallback attributes Accessibility\/Screen Recording grants to the node host rather than CuaDriver\.app/,
 	);
 	assert.match(prompt, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/);
-	assert.match(prompt, /requires node \(preferred\) or bun on the host, and their absence is a reported limitation/);
+	assert.match(
+		prompt,
+		/requires node \(preferred\) or bun on the host, so install one in a single bounded attempt when both are missing/,
+	);
 	assert.match(prompt, /agent-browser for browsers/);
 	assert.match(prompt, /prefer herdr for terminal automation\/testing[\s\S]*fall back to tmux\/native Windows psmux/);
 	assert.doesNotMatch(prompt, /PyAutoGUI|pyautogui/i);
