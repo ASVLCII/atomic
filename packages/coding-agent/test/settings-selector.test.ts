@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Container } from "@earendil-works/pi-tui";
-import { setKeybindings } from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache, setCapabilities, setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, expect, test, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -95,6 +95,21 @@ test("keeps the configured fixed theme marked while browsing", () => {
 	output = render(submenu);
 	expect(output).toContain("  ✓ dark");
 	expect(output).toContain("→   light");
+});
+
+// Regression for #2814: the informational Keybindings row stays first, and every
+// other row keeps its original relative order (Auto-compact immediately after it)
+// in both image-capability branches.
+test("keeps existing rows in place below the Keybindings row", () => {
+	for (const images of ["kitty", null] as const) {
+		setCapabilities({ images, trueColor: true, hyperlinks: false });
+		const ids = buildSettingsItems(settingsConfig(), {} as SettingsCallbacks).map(({ id }) => id);
+		const expected = images
+			? ["keybindings", "autocompact", "show-images", "image-width-cells", "auto-resize-images", "block-images"]
+			: ["keybindings", "autocompact", "auto-resize-images", "block-images"];
+		expect(ids.slice(0, expected.length)).toEqual(expected);
+	}
+	resetCapabilitiesCache();
 });
 
 test("keeps a configured automatic theme marked while browsing", () => {

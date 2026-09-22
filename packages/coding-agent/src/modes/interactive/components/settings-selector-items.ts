@@ -18,14 +18,14 @@ const NO_DEFAULT_MODELS_VALUE = "__no-models__";
 function insertImageItems(items: SettingItem[], config: SettingsConfig): void {
 	if (!getCapabilities().images) return;
 
-	items.splice(1, 0, {
+	insertAfter(items, "autocompact", {
 		id: "show-images",
 		label: "Show images",
 		description: "Render images inline in terminal",
 		currentValue: config.showImages ? "true" : "false",
 		values: ["true", "false"],
 	});
-	items.splice(2, 0, {
+	insertAfter(items, "show-images", {
 		id: "image-width-cells",
 		label: "Image width",
 		description: "Preferred inline image width in terminal cells",
@@ -41,7 +41,7 @@ function insertAfter(items: SettingItem[], afterId: string, item: SettingItem): 
 
 function insertUiToggles(items: SettingItem[], config: SettingsConfig): void {
 	const supportsImages = getCapabilities().images;
-	items.splice(supportsImages ? 3 : 1, 0, {
+	insertAfter(items, supportsImages ? "image-width-cells" : "autocompact", {
 		id: "auto-resize-images",
 		label: "Auto-resize images",
 		description: "Resize large images to 2000x2000 max for better model compatibility",
