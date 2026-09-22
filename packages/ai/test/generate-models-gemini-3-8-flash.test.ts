@@ -334,6 +334,7 @@ test("generates the GitHub Copilot entry from models.dev metadata", () => {
 		supportsStore: false,
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: true,
+		supportsStrictMode: true,
 	});
 	assert.deepEqual(model.thinkingLevelMap, {
 		off: null,
@@ -361,6 +362,7 @@ test("pins the opencode, OpenRouter, and Vercel AI Gateway mirrors", () => {
 		baseUrl: "https://opencode.ai/zen/v1",
 		reasoning: true,
 		input: ["text", "image"],
+		inputLimits: { images: { resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4718592, jpegQuality: 80 } } },
 		cost: { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 65_536,
@@ -384,6 +386,7 @@ test("pins the opencode, OpenRouter, and Vercel AI Gateway mirrors", () => {
 	assert.deepEqual(openrouter.cost, { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.041667 });
 	assert.deepEqual(openrouter.compat, {
 		supportsDeveloperRole: false,
+		supportsStrictMode: true,
 		thinkingFormat: "openrouter",
 		sendSessionAffinityHeaders: true,
 	});

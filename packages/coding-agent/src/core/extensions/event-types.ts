@@ -1,6 +1,7 @@
 import type { CacheWarmingDecisionEvent } from "../cache-warmer.ts";
 import type {
 	AfterProviderResponseEvent,
+	AgentBeforeSettleEvent,
 	AgentEndEvent,
 	AgentSettledEvent,
 	AgentStartEvent,
@@ -8,6 +9,7 @@ import type {
 	BeforeProviderHeadersEvent,
 	BeforeProviderRequestEvent,
 	ContextEvent,
+	ContextWithSystemEvent,
 	InputEvent,
 	MessageEndEvent,
 	MessageStartEvent,
@@ -35,12 +37,14 @@ export type ExtensionEvent =
 	| ResourcesDiscoverEvent
 	| SessionEvent
 	| ContextEvent
+	| ContextWithSystemEvent
 	| BeforeProviderRequestEvent
 	| BeforeProviderHeadersEvent
 	| AfterProviderResponseEvent
 	| BeforeAgentStartEvent
 	| AgentStartEvent
 	| AgentEndEvent
+	| AgentBeforeSettleEvent
 	| AgentSettledEvent
 	| UIPromptStartEvent
 	| UIPromptEndEvent

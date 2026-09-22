@@ -6,10 +6,11 @@ import {
 	type CompactionUrgency,
 	calculateContextTokens,
 	estimateContextTokens,
+	estimateProjectedContextTokens,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { MIN_RESPONSES_MAX_OUTPUT_TOKENS } from "./openai-responses-payload-sanitizer.ts";
-import { getLatestCompactionBoundaryEntry } from "./session-manager.ts";
+import { type ContextEditEntry, getLatestCompactionBoundaryEntry } from "./session-manager.ts";
 
 /**
  * Upper bound on direct continuations after a response reaches its requested
@@ -84,7 +85,41 @@ export async function _checkCompaction(
 		this.model !== undefined &&
 		assistantMessage.provider === this.model.provider &&
 		assistantMessage.model === this.model.id;
-	const contextOverflow = sameModel && isContextOverflow(assistantMessage, contextWindow);
+	// Usage and overflow signals belong to the request that produced this assistant.
+	// A later context edit or compaction changes what the next request contains, so
+	// only a projected, unedited assistant may drive usage-based decisions; an explicit
+	// provider overflow error still recovers while its attempt is retained.
+	// Guarded because fallback suites drive this function on a synthetic session.
+	const projectionAware =
+		typeof this.sessionManager?.buildSessionProjection === "function" &&
+		typeof this._findPersistedMessageEntryId === "function";
+	const currentProjection = projectionAware ? this.sessionManager.buildSessionProjection() : undefined;
+	const branch = projectionAware ? this.sessionManager.getBranch() : [];
+	const assistantEntryId = projectionAware ? this._findPersistedMessageEntryId(assistantMessage) : undefined;
+	const assistantIsProjected =
+		assistantEntryId === undefined ||
+		currentProjection?.entries.some(
+			(entry) =>
+				entry.sourceEntry.id === assistantEntryId && entry.messages.some((message) => message.role === "assistant"),
+		) === true;
+	const assistantIndex = assistantEntryId ? branch.findIndex((entry) => entry.id === assistantEntryId) : -1;
+	const entriesAfterAssistant = assistantIndex >= 0 ? branch.slice(assistantIndex + 1) : [];
+	const hasPostAssistantContextEdit = entriesAfterAssistant.some((entry) => entry.type === "context_edit");
+	const latestAssistantEdit = entriesAfterAssistant
+		.filter(
+			(entry): entry is ContextEditEntry => entry.type === "context_edit" && entry.targetId === assistantEntryId,
+		)
+		.at(-1);
+	const assistantRetainedForExplicitRecovery =
+		assistantEntryId === undefined ||
+		(!entriesAfterAssistant.some((entry) => entry.type === "compaction") &&
+			latestAssistantEdit?.replacement !== null);
+	const assistantUsageMatchesProjection = assistantIsProjected && !hasPostAssistantContextEdit;
+	const explicitOverflow = assistantMessage.stopReason === "error" && isContextOverflow(assistantMessage);
+	const contextOverflow =
+		sameModel &&
+		((explicitOverflow && assistantRetainedForExplicitRecovery) ||
+			(assistantUsageMatchesProjection && isContextOverflow(assistantMessage, contextWindow)));
 	if (!settings.enabled) {
 		// Compaction cannot recover this turn, so a configured fallback chain may
 		// advance to a larger-context candidate instead of dead-ending.
@@ -113,7 +148,10 @@ export async function _checkCompaction(
 	// deletion records from a compaction planner response and is not involved here.
 	const desiredMaxOutput = this.model?.maxTokens ?? 0;
 	const recoverableLength =
-		isLiveTurnCompletion && sameModel && isRecoverableLength(assistantMessage, desiredMaxOutput);
+		isLiveTurnCompletion &&
+		sameModel &&
+		assistantIsProjected &&
+		isRecoverableLength(assistantMessage, desiredMaxOutput);
 	if (contextOverflow || recoverableLength) {
 		const willRetry = assistantMessage.stopReason !== "stop";
 		if (!willRetry) {
@@ -184,7 +222,12 @@ export async function _checkCompaction(
 	// Case 2: Threshold - context is getting large
 	// For errors or all-zero provider usage, estimate from message content.
 	let contextTokens = calculateContextTokens(assistantMessage.usage, assistantMessage.api);
-	if (assistantMessage.stopReason === "error" || contextTokens === 0) {
+	const hasContextEdits =
+		currentProjection?.entries.some((entry) => entry.sourceEntry.type === "context_edit") === true;
+	if (currentProjection && hasContextEdits) {
+		// Edited context invalidates usage captured before the edit; estimate the projection.
+		contextTokens = estimateProjectedContextTokens(currentProjection, branch).tokens;
+	} else if (assistantMessage.stopReason === "error" || contextTokens === 0) {
 		const messages = this.agent.state.messages;
 		const estimate = estimateContextTokens(messages);
 		// Without provider usage, estimate.tokens is the pure message-size estimate.
@@ -328,13 +371,11 @@ export function shouldRetryAfterThresholdCompaction(
  */
 
 export function _dropTrailingAutoCompactionRetryAssistantIfPresent(this: AgentSession): void {
-	const messages = this.agent.state.messages;
-	const lastMsg = messages[messages.length - 1];
-	if (lastMsg?.role !== "assistant") return;
-	const stopReason = (lastMsg as AssistantMessage).stopReason;
-	if (stopReason === "error" || stopReason === "length") {
-		this.agent.state.messages = messages.slice(0, -1);
-	}
+	// The attempt stays in raw session history; a durable context edit omits it from
+	// the model projection so the continuation resumes from the preceding input.
+	this._omitTrailingAssistantAttempt(
+		(assistant) => assistant.stopReason === "error" || assistant.stopReason === "length",
+	);
 }
 
 /**

@@ -116,6 +116,6 @@ test("provider guidance distinguishes main-chat defaults from automatic builtin 
 	])
 		assert.ok(!guide.includes(obsolete), `Obsolete builtin policy: ${obsolete}`);
 	assert.match(guide, /Builtin workflows and subagents default to `model: "auto"`/);
-	assert.ok(guide.includes("Atomic defaults xAI sessions to `grok-4.6`"));
+	assert.ok(guide.includes("Atomic defaults xAI sessions to `grok-4.7`"));
 	assert.ok(guide.includes("Z.AI and Z.AI Coding Plan (China) default to `glm-5.3`"));
 });

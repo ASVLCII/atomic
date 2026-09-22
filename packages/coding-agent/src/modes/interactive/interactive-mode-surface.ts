@@ -292,6 +292,7 @@ declare module "./interactive-mode-base.ts" {
 		shutdown(options?: { fromSignal?: boolean }): Promise<void>;
 		emergencyTerminalExit(): never;
 		uncaughtCrash(error: Error): never;
+		getCrashExtensionHint(error: unknown): string | undefined;
 		checkShutdownRequested(): Promise<void>;
 		registerSignalHandlers(): void;
 		unregisterSignalHandlers(): void;

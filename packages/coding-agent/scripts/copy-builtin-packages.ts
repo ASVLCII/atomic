@@ -92,6 +92,13 @@ const HOST_PROVIDED_EXTERNALS = [
 	"winston-transport",
 ];
 
+// Bun.build folds `process.env.NODE_ENV` into a constant taken from the build
+// environment. Builtins read it at runtime to pick test-host stubs over real
+// stage and subagent sessions, so a build run with NODE_ENV=test (vitest sets
+// it) would ship a bundle whose workflow stages never create a real session.
+// Keep the read literal so the shipped bundle decides at runtime.
+const RUNTIME_ENV_DEFINES = { "process.env.NODE_ENV": "process.env.NODE_ENV" };
+
 const SELF_CONTAINED_BUILTIN_PLUGINS: Bun.BunPlugin[] = [
 	{
 		name: "atomic-builtin-dependency-resolution",
@@ -282,6 +289,7 @@ async function bundleEntrypoint(entry: string, outfile: string, label: string): 
 		target: "node",
 		format: "esm",
 		external: HOST_PROVIDED_EXTERNALS,
+		define: RUNTIME_ENV_DEFINES,
 		plugins: SELF_CONTAINED_BUILTIN_PLUGINS,
 	});
 	const output = result.outputs[0];
@@ -302,6 +310,7 @@ async function bundleWorkflowBuiltins(): Promise<void> {
 		target: "node",
 		format: "esm",
 		external: HOST_PROVIDED_EXTERNALS,
+		define: RUNTIME_ENV_DEFINES,
 		plugins: SELF_CONTAINED_BUILTIN_PLUGINS,
 		splitting: true,
 	});

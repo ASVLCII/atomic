@@ -6,7 +6,7 @@ import { getThemeByName, theme } from "../modes/interactive/theme/theme.js";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import type { SessionStats } from "./agent-session-types.js";
-import { calculateContextTokens, estimateContextTokens } from "./compaction/index.ts";
+import { calculateContextTokens, estimateProjectedContextTokens } from "./compaction/index.ts";
 import type { ToolHtmlRenderer } from "./export-html/index.ts";
 import type { ContextUsage, ReplacedSessionContext } from "./extensions/index.js";
 import { CURRENT_SESSION_VERSION, getLatestCompactionBoundaryEntry, type SessionHeader } from "./session-manager.ts";
@@ -74,33 +74,34 @@ export function getContextUsage(this: AgentSession): ContextUsage | undefined {
 	// After compaction, the last assistant usage reflects pre-compaction context size.
 	// We can only trust usage from an assistant that responded after the latest compaction.
 	// If no such assistant exists, context token count is unknown until the next LLM response.
+	const projection = this.sessionManager.buildSessionProjection();
 	const branchEntries = this.sessionManager.getBranch();
 	const latestCompactionBoundary = getLatestCompactionBoundaryEntry(branchEntries);
 
 	if (latestCompactionBoundary) {
-		// Check if there's a valid assistant usage after the compaction boundary
-		const compactionIndex = branchEntries.lastIndexOf(latestCompactionBoundary);
-		let hasPostCompactionUsage = false;
-		for (let i = branchEntries.length - 1; i > compactionIndex; i--) {
-			const entry = branchEntries[i];
-			if (entry.type === "message" && entry.message.role === "assistant") {
-				const assistant = entry.message;
-				if (assistant.stopReason !== "aborted" && assistant.stopReason !== "error") {
-					const contextTokens = calculateContextTokens(assistant.usage, assistant.api);
-					if (contextTokens > 0) {
-						hasPostCompactionUsage = true;
-					}
-					break;
-				}
-			}
-		}
-
-		if (!hasPostCompactionUsage) {
-			return { tokens: null, contextWindow, percent: null };
-		}
+		// Only a projected (not omitted) assistant that responded after the boundary
+		// carries trustworthy usage.
+		const projectedAssistants = new Set(
+			projection.entries.flatMap((entry) =>
+				entry.messages.some(
+					(message) =>
+						message.role === "assistant" &&
+						message.stopReason !== "aborted" &&
+						message.stopReason !== "error" &&
+						calculateContextTokens(message.usage, message.api) > 0,
+				)
+					? [entry.sourceEntry.id]
+					: [],
+			),
+		);
+		const compactionIndex = branchEntries.findIndex((entry) => entry.id === latestCompactionBoundary.id);
+		const hasPostCompactionUsage = branchEntries
+			.slice(compactionIndex + 1)
+			.some((entry) => projectedAssistants.has(entry.id));
+		if (!hasPostCompactionUsage) return { tokens: null, contextWindow, percent: null };
 	}
 
-	const estimate = estimateContextTokens(this.messages);
+	const estimate = estimateProjectedContextTokens(projection, branchEntries);
 	const percent = (estimate.tokens / contextWindow) * 100;
 
 	return {

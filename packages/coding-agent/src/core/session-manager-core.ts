@@ -11,6 +11,7 @@ import { classifiedWorkflowMetadata, validSessionWorkflowMetadata } from "./sess
 import {
 	createBranchSummaryEntry,
 	createCompactionEntry,
+	createContextEditEntry,
 	createCustomEntry,
 	createCustomMessageEntry,
 	createLabelEntry,
@@ -24,7 +25,13 @@ import {
 	getEntriesWithoutHeader,
 	getLatestSessionName,
 } from "./session-manager-entries.ts";
-import { buildSessionContext, buildSessionIndex, buildSessionTree, getBranchPath } from "./session-manager-history.ts";
+import {
+	buildContextEntries,
+	buildSessionIndex,
+	buildSessionProjection,
+	buildSessionTree,
+	getBranchPath,
+} from "./session-manager-history.ts";
 import { listAllSessions, listProjectSessions } from "./session-manager-list.ts";
 import { migrateToCurrentVersion } from "./session-manager-migrations.ts";
 import { getDefaultSessionDir, getDefaultSessionDirPath } from "./session-manager-paths.ts";
@@ -41,6 +48,7 @@ import {
 } from "./session-manager-storage.ts";
 import type {
 	BranchSummaryEntry,
+	ContextEditEntry,
 	FileEntry,
 	NewSessionOptions,
 	SessionContext,
@@ -49,6 +57,7 @@ import type {
 	SessionInfo,
 	SessionListProgress,
 	SessionNameState,
+	SessionProjection,
 	SessionTreeNode,
 	SessionWorkflowMetadata,
 	UsageEntry,
@@ -86,9 +95,26 @@ export class SessionManager {
 
 		if (sessionFile) {
 			this._setSessionFile(sessionFile, preloadedFileEntries);
+		} else if (preloadedFileEntries?.length) {
+			this._loadEntries(preloadedFileEntries, newSessionOptions);
 		} else {
 			this.newSession(newSessionOptions);
 		}
+	}
+
+	private _loadEntries(entries: FileEntry[], options?: NewSessionOptions): void {
+		const header = entries.find((entry) => entry.type === "session") as SessionHeader | undefined;
+		if (header) {
+			this.fileEntries = entries;
+			this.sessionId = header.id;
+			if (migrateToCurrentVersion(this.fileEntries)) {
+				this._rewriteFile();
+			}
+		} else {
+			this.newSession(options);
+			this.fileEntries = this.fileEntries.concat(entries);
+		}
+		this._buildIndex();
 	}
 
 	/** Switch to a different session file (used for resume and branching) */
@@ -288,7 +314,7 @@ export class SessionManager {
 			this.byId,
 			this.leafId,
 		);
-		const systemMessage = getCurrentSystemMessage(this.buildSessionContext().messages);
+		const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
 		if (systemMessage) entry.systemMessage = { ...systemMessage, timestamp: new Date(entry.timestamp).getTime() };
 		this._appendEntry(entry);
 		return entry.id;
@@ -298,6 +324,40 @@ export class SessionManager {
 	writeBackupSnapshot(label = "compact"): string | undefined {
 		if (!this.persist) return undefined;
 		return createBackupSnapshot(this.sessionFile, this.fileEntries, label);
+	}
+
+	/** Append a branch-local edit to an earlier model-visible entry. */
+	appendContextEdit(targetId: string, replacement: ContextEditEntry["replacement"]): string {
+		if (
+			replacement !== null &&
+			(typeof replacement !== "object" ||
+				!("content" in replacement) ||
+				(typeof replacement.content !== "string" && !Array.isArray(replacement.content)))
+		) {
+			throw new Error("Context edit replacement must be null or contain string/array content");
+		}
+		const target = this.byId.get(targetId);
+		if (!target) throw new Error(`Entry ${targetId} not found`);
+		if (!this.getBranch().some((entry) => entry.id === targetId)) {
+			throw new Error(`Entry ${targetId} is not on the active branch`);
+		}
+		const editable =
+			target.type === "custom_message" ||
+			(target.type === "message" &&
+				(target.message.role === "user" ||
+					target.message.role === "assistant" ||
+					target.message.role === "toolResult"));
+		if (!editable) throw new Error(`Entry ${targetId} does not contribute editable model content`);
+		const targetRole = target.type === "message" ? target.message.role : "custom";
+		const normalizedReplacement =
+			replacement !== null &&
+			(targetRole === "assistant" || targetRole === "toolResult") &&
+			typeof replacement.content === "string"
+				? { content: [{ type: "text" as const, text: replacement.content }] }
+				: replacement;
+		const entry = createContextEditEntry(targetId, normalizedReplacement, this.byId, this.leafId);
+		this._appendEntry(entry);
+		return entry.id;
 	}
 
 	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
@@ -411,9 +471,20 @@ export class SessionManager {
 		return getBranchPath(fromId ?? this.leafId, this.byId);
 	}
 
+	/** Return the active branch entries after applying the latest compaction boundary. */
+	buildContextEntries(): SessionEntry[] {
+		return buildContextEntries(this.getEntries(), this.leafId, this.byId);
+	}
+
+	/** Build provenance-preserving, compaction-aware model context from the current leaf. */
+	buildSessionProjection(): SessionProjection {
+		return buildSessionProjection(this.getEntries(), this.leafId, this.byId);
+	}
+
 	/** Build the session context (what gets sent to the LLM). */
 	buildSessionContext(): SessionContext {
-		return buildSessionContext(this.getEntries(), this.leafId, this.byId);
+		const { messages, thinkingLevel, model } = this.buildSessionProjection();
+		return { messages, thinkingLevel, model };
 	}
 
 	/** Get session header. */
@@ -521,9 +592,9 @@ export class SessionManager {
 		return new SessionManager(cwd, dir, mostRecent ?? undefined, true);
 	}
 
-	/** Create an in-memory session (no file persistence) */
-	static inMemory(cwd: string = process.cwd(), options?: NewSessionOptions): SessionManager {
-		return new SessionManager(cwd, "", undefined, false, options);
+	/** Create an in-memory session (no file persistence), optionally preloaded with entries. */
+	static inMemory(cwd: string = process.cwd(), options?: NewSessionOptions, entries?: FileEntry[]): SessionManager {
+		return new SessionManager(cwd, "", undefined, false, options, entries);
 	}
 
 	/** Fork a session from another project directory into the current project. */

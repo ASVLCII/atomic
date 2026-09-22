@@ -1,5 +1,13 @@
 import type { ProviderHeaders } from "@bastani/pi-ai";
-import type { Api, AssistantMessage, ImageContent, Message, Model, TextContent } from "@bastani/pi-ai/compat";
+import type {
+	Api,
+	AssistantMessage,
+	ImageContent,
+	Message,
+	Model,
+	TextContent,
+	ToolResultMessage,
+} from "@bastani/pi-ai/compat";
 import type {
 	Agent,
 	AgentEvent,
@@ -31,6 +39,8 @@ import type {
 	VerbatimCompactionResult,
 } from "./compaction/index.ts";
 import type {
+	AgentActivityOutcome,
+	BoundaryContextPreview,
 	ContextUsage,
 	ExtensionCommandContextActions,
 	ExtensionErrorListener,
@@ -41,6 +51,7 @@ import type {
 	ReplacedSessionContext,
 	SendMessageOptions,
 	SendMessagesOptions,
+	SessionBoundaryDraft,
 	SessionStartEvent,
 	ToolDefinition,
 	ToolInfo,
@@ -50,7 +61,7 @@ import type { ExtensionProviderTransaction, ModelRuntime } from "./model-runtime
 import type { PathMetadata } from "./package-manager.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
-import type { BranchSummaryEntry, SessionManager } from "./session-manager.ts";
+import type { BranchSummaryEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { NormalizedBuildSystemPromptOptions } from "./system-prompt.ts";
 import type { BashOperations } from "./tools/bash.js";
@@ -142,6 +153,29 @@ export interface AgentSessionMethodSurface extends AgentSessionQueuePauseControl
 	): Promise<{ apiKey?: string; headers?: ProviderHeaders; baseUrl?: string }>;
 	_installAgentToolHooks(): void;
 	_installAgentNextTurnRefresh(): void;
+	_installAgentRequestProjection(): void;
+	_installAgentBoundaryHooks(): void;
+	_refreshFinalizedContext(): void;
+	_projectFinalizedMessages(): AgentMessage[];
+	refreshContext(): void;
+	_dispatchTurnEndBoundary(
+		message: AssistantMessage,
+		toolResults: ToolResultMessage[],
+		awaitPersistence?: boolean,
+	): Promise<boolean>;
+	_applyBoundaryDrafts(manager: SessionManager, drafts: SessionBoundaryDraft[]): SessionEntry[];
+	_createBoundaryPreviewManager(drafts: SessionBoundaryDraft[]): SessionManager;
+	_getPendingBoundaryMessages(): AgentMessage[];
+	_buildBoundaryContext(
+		drafts: SessionBoundaryDraft[],
+		boundary: "turn_end" | "agent_before_settle",
+	): BoundaryContextPreview;
+	_commitBoundaryDrafts(drafts: SessionBoundaryDraft[]): void;
+	_reportInvalidBoundaryContinuation(event: "turn_end" | "agent_before_settle"): void;
+	_findPersistedMessageEntryId(message: AgentMessage): string | undefined;
+	_omitRecoveryAttempt(message: AssistantMessage, toolResults?: AgentMessage[]): void;
+	_omitTrailingAssistantAttempt(accept?: (message: AssistantMessage) => boolean): boolean;
+	_runBeforeSettleBoundary(): Promise<boolean>;
 	_emit(event: AgentSessionEvent): void;
 	_emitQueueUpdate(): void;
 	_createRetryPromiseForAgentEnd(event: AgentEvent): void;
@@ -422,6 +456,7 @@ export interface AgentSessionPublicSurface
 		| "getUserMessagesForForking"
 		| "getSessionStats"
 		| "getContextUsage"
+		| "refreshContext"
 		| "exportToHtml"
 		| "exportToJsonl"
 		| "getLastAssistantText"
@@ -496,6 +531,15 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_pendingBashMessages: BashExecutionMessage[];
 	_extensionRunner: ExtensionRunner;
 	_turnIndex: number;
+	readonly _entryIdsByMessage: WeakMap<object, string>;
+	readonly _boundaryDispatchedMessages: WeakSet<object>;
+	_lastAssistantToolResults: AgentMessage[];
+	_lastActivityOutcome: AgentActivityOutcome;
+	_isBeforeSettle: boolean;
+	_abortDuringBeforeSettle: boolean;
+	_isEmittingAgentSettled: boolean;
+	readonly _deferredSettledActions: Array<() => Promise<void>>;
+	_callerReplacedNextRequestContext: boolean;
 	_resourceLoader: ResourceLoader;
 	_customTools: ToolDefinition[];
 	_baseToolDefinitions: Map<string, ToolDefinition>;
@@ -532,6 +576,7 @@ export interface AgentSessionInternalSurface extends AgentSessionMethodSurface, 
 	_toolPromptGuidelines: Map<string, string[]>;
 	_baseSystemPromptOptions: NormalizedBuildSystemPromptOptions;
 	_systemPromptTransform?: (prompt: string) => string;
+	_contextProjectionTransform?: (messages: AgentMessage[]) => AgentMessage[];
 	_runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
 	_lastAssistantMessage: AssistantMessage | undefined;
 	_tempStorageLease: import("./tools/session-temp-dir.ts").ProtectedPathLease | undefined;

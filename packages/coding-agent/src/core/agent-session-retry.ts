@@ -331,10 +331,8 @@ export async function _trySwitchToFallbackModel(this: AgentSession, message: Ass
 			attempt: this._fallbackAttemptedKeys.size - 1,
 		});
 
-		const messages = this.agent.state.messages;
-		if (messages.length > 0 && messages[messages.length - 1]?.role === "assistant") {
-			this.agent.state.messages = messages.slice(0, -1);
-		}
+		// Keep the failed attempt in raw history while durably omitting it from model projection.
+		this._omitTrailingAssistantAttempt();
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		applyFallbackThinkingLevel.call(this, nextLevel);
@@ -441,11 +439,8 @@ export async function _handleRetryableError(this: AgentSession, message: Assista
 		errorMessage: message.errorMessage || "Unknown error",
 	});
 
-	// Remove error message from agent state (keep in session for history)
-	const messages = this.agent.state.messages;
-	if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-		this.agent.state.messages = messages.slice(0, -1);
-	}
+	// Keep the failed attempt in raw history while durably omitting it from model projection.
+	this._omitTrailingAssistantAttempt();
 
 	// Wait with exponential backoff (abortable)
 	if (this._agentRunAbortRequested) this._retryAbortController.abort();

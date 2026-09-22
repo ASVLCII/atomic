@@ -163,3 +163,23 @@ test("keeps tool images unchanged when automatic resizing is disabled", async ()
 	expect(images).toHaveLength(1);
 	expect(images[0]?.data).toBe(oversizedImage);
 });
+
+// Regression test for https://github.com/earendil-works/pi/issues/9631
+test("resizes tool images to the current model's image input profile", async () => {
+	const harness = await createHarness({ tools: [screenshotTool] });
+	harnesses.push(harness);
+	if (!harness.session.model) throw new Error("Expected a model");
+	harness.session.model.inputLimits = {
+		images: { resize: { maxWidth: 1200, maxHeight: 1000, maxBytes: 500000, jpegQuality: 70 } },
+	};
+	harness.setResponses([
+		fauxAssistantMessage([fauxToolCall("screenshot", {})], { stopReason: "toolUse" }),
+		fauxAssistantMessage("done"),
+	]);
+
+	await harness.session.prompt("take a screenshot");
+
+	const images = historyImages(harness);
+	expect(images).toHaveLength(1);
+	expect(pngWidth(images[0]!.data)).toBeLessThanOrEqual(1200);
+});

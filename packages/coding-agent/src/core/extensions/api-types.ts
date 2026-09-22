@@ -12,6 +12,7 @@ import type { DefaultResourceLoaderInheritanceSnapshot } from "../resource-loade
 import type { SlashCommandInfo } from "../slash-commands.js";
 import type {
 	AfterProviderResponseEvent,
+	AgentBeforeSettleEvent,
 	AgentEndEvent,
 	AgentSettledEvent,
 	AgentStartEvent,
@@ -19,6 +20,7 @@ import type {
 	BeforeProviderHeadersEvent,
 	BeforeProviderRequestEvent,
 	ContextEvent,
+	ContextWithSystemEvent,
 	InputEvent,
 	InputEventResult,
 	MessageEndEvent,
@@ -39,6 +41,7 @@ import type {
 import type { RegisteredCommand } from "./command-types.ts";
 import type { ExtensionContext } from "./context-types.ts";
 import type {
+	AgentBeforeSettleEventResult,
 	BeforeAgentStartEventResult,
 	BeforeProviderRequestEventResult,
 	ContextEventResult,
@@ -49,6 +52,7 @@ import type {
 	SessionBeforeTreeResult,
 	ToolCallEventResult,
 	ToolResultEventResult,
+	TurnEndEventResult,
 	UserBashEventResult,
 } from "./event-results.ts";
 import type {
@@ -133,6 +137,7 @@ export interface ExtensionAPI {
 	): () => void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): () => void;
 	on(event: "context", handler: ExtensionHandler<ContextEvent, ContextEventResult>): () => void;
+	on(event: "context_with_system", handler: ExtensionHandler<ContextWithSystemEvent, ContextEventResult>): () => void;
 	on(
 		event: "before_provider_request",
 		handler: ExtensionHandler<BeforeProviderRequestEvent, BeforeProviderRequestEventResult>,
@@ -145,11 +150,15 @@ export interface ExtensionAPI {
 	): () => void;
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): () => void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): () => void;
+	on(
+		event: "agent_before_settle",
+		handler: ExtensionHandler<AgentBeforeSettleEvent, AgentBeforeSettleEventResult>,
+	): () => void;
 	on(event: "agent_settled", handler: ExtensionHandler<AgentSettledEvent>): () => void;
 	on(event: "ui_prompt_start", handler: ExtensionHandler<UIPromptStartEvent>): () => void;
 	on(event: "ui_prompt_end", handler: ExtensionHandler<UIPromptEndEvent>): () => void;
 	on(event: "turn_start", handler: ExtensionHandler<TurnStartEvent>): () => void;
-	on(event: "turn_end", handler: ExtensionHandler<TurnEndEvent>): () => void;
+	on(event: "turn_end", handler: ExtensionHandler<TurnEndEvent, TurnEndEventResult>): () => void;
 	on(event: "message_start", handler: ExtensionHandler<MessageStartEvent>): () => void;
 	on(event: "message_update", handler: ExtensionHandler<MessageUpdateEvent>): () => void;
 	on(event: "message_end", handler: ExtensionHandler<MessageEndEvent, MessageEndEventResult>): () => void;

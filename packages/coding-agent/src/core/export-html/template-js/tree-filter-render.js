@@ -74,6 +74,9 @@
           case 'context_window_change':
             parts.push('context window', String(entry.contextWindow));
             break;
+          case 'context_edit':
+            parts.push('context edit', entry.replacement === null ? 'omit' : 'replace', entry.targetId);
+            break;
         }
 
         return parts.join(' ').toLowerCase();
@@ -102,7 +105,7 @@
           }
 
           // Apply filter mode
-          const isSettingsEntry = ['label', 'custom', 'model_change', 'thinking_level_change', 'context_window_change'].includes(entry.type);
+          const isSettingsEntry = ['label', 'custom', 'context_edit', 'model_change', 'thinking_level_change', 'context_window_change'].includes(entry.type);
           let passesFilter;
 
           switch (filterMode) {
@@ -415,6 +418,8 @@
             return labelHtml + `<span class="tree-muted">[thinking: ${escapeHtml(entry.thinkingLevel)}]</span>`;
           case 'context_window_change':
             return labelHtml + `<span class="tree-muted">[context window: ${escapeHtml(String(entry.contextWindow))}]</span>`;
+          case 'context_edit':
+            return labelHtml + `<span class="tree-muted">[context ${entry.replacement === null ? 'omit' : 'replace'}: ${escapeHtml(entry.targetId)}]</span>`;
           default:
             return labelHtml + `<span class="tree-muted">[${escapeHtml(entry.type)}]</span>`;
         }

@@ -8,10 +8,11 @@
 
 import { join } from "node:path";
 import type { Api, AssistantMessage, Model } from "@bastani/pi-ai/compat";
-import type { Agent, AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Agent, AgentMessage, AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { installAgentSessionAccessors } from "./agent-session-accessors.ts";
 import { agentSessionAutoCompactionMethods } from "./agent-session-auto-compaction.ts";
 import { agentSessionBashMethods } from "./agent-session-bash.ts";
+import { agentSessionBoundaryMethods } from "./agent-session-boundaries.ts";
 import { agentSessionCompactionMethods } from "./agent-session-compaction.ts";
 import { agentSessionCustomMessageCommitMethods } from "./agent-session-custom-message-commit.ts";
 import { agentSessionEventsMethods } from "./agent-session-events.ts";
@@ -38,6 +39,7 @@ import type {
 } from "./agent-session-types.js";
 import type { VerbatimCompactionResult } from "./compaction/index.ts";
 import type {
+	AgentActivityOutcome,
 	ExtensionCommandContextActions,
 	ExtensionErrorListener,
 	ExtensionMode,
@@ -162,6 +164,18 @@ class AgentSessionBase {
 	protected _pendingBashMessages: BashExecutionMessage[] = [];
 	protected _extensionRunner!: ExtensionRunner;
 	protected _turnIndex = 0;
+	/** Source entry IDs for projected messages, so boundaries and omissions resolve provenance. */
+	protected readonly _entryIdsByMessage = new WeakMap<object, string>();
+	/** Assistant messages whose actionable turn_end already ran from finishTurn. */
+	protected readonly _boundaryDispatchedMessages = new WeakSet<object>();
+	protected _lastAssistantToolResults: AgentMessage[] = [];
+	protected _lastActivityOutcome: AgentActivityOutcome = "completed";
+	protected _isBeforeSettle = false;
+	protected _abortDuringBeforeSettle = false;
+	protected _isEmittingAgentSettled = false;
+	protected readonly _deferredSettledActions: Array<() => Promise<void>> = [];
+	/** Set when a caller's prepareNextTurnWithContext replaced the next request's context. */
+	protected _callerReplacedNextRequestContext = false;
 	protected _resourceLoader: ResourceLoader;
 	protected _customTools: ToolDefinition[];
 	protected _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
@@ -191,6 +205,7 @@ class AgentSessionBase {
 	protected _toolPromptGuidelines: Map<string, string[]> = new Map();
 	protected _baseSystemPromptOptions!: NormalizedBuildSystemPromptOptions;
 	protected _systemPromptTransform?: (prompt: string) => string;
+	protected _contextProjectionTransform?: (messages: AgentMessage[]) => AgentMessage[];
 	protected _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
 	protected _lastAssistantMessage: AssistantMessage | undefined = undefined;
 	/** Protection claim on this session's temp tree and tool-results directory. */
@@ -262,6 +277,7 @@ class AgentSessionBase {
 				}
 			}
 			this._systemPromptTransform = config.systemPromptTransform;
+			this._contextProjectionTransform = config.contextProjectionTransform;
 			const stageContext =
 				config.orchestrationContext?.kind === "workflow-stage" ? config.orchestrationContext : undefined;
 			this._workflowStageAdmission =
@@ -316,6 +332,8 @@ class AgentSessionBase {
 			this._unsubscribeAgent = this.agent.subscribe(internals._handleAgentEvent);
 			internals._installAgentToolHooks();
 			internals._installAgentNextTurnRefresh();
+			internals._installAgentRequestProjection();
+			internals._installAgentBoundaryHooks();
 			internals._buildRuntime({
 				activeToolNames: this._initialActiveToolNames,
 				includeAllExtensionTools: true,
@@ -358,6 +376,7 @@ installAgentSessionAccessors(AgentSession.prototype as unknown as AgentSessionIn
 Object.assign(
 	AgentSession.prototype,
 	agentSessionToolHooksMethods,
+	agentSessionBoundaryMethods,
 	agentSessionEventsMethods,
 	agentSessionStateMethods,
 	agentSessionPromptMethods,

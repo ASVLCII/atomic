@@ -2638,7 +2638,10 @@ test("closing preserves queued message persistence and completion hooks", async 
 		noExtensions: true,
 		extensionFactories: [
 			(pi) => {
-				pi.on("agent_start", async () => {
+				// Provider requests wait for queued session events to settle, so the gate
+				// holds the run open after the conversation events completed instead of
+				// blocking the first request.
+				pi.on("agent_end", async () => {
 					entered.resolve();
 					await release.promise;
 				});

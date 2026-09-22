@@ -229,7 +229,7 @@ export async function _applyVerbatimCompaction(
 		details,
 		compacted.usage,
 	);
-	this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+	this._refreshFinalizedContext();
 	const result: VerbatimCompactionResult = {
 		compactedText: compacted.text,
 		firstKeptEntryId,

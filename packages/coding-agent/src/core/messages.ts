@@ -275,6 +275,56 @@ function getToolResultCallId(message: AgentMessage): string | undefined {
 }
 
 /**
+ * Keep every tool result adjacent to the assistant turn that announced it.
+ *
+ * A message admitted while a tool batch is still running (an Intercom delivery, a
+ * workflow lifecycle card, a durable stage admission) is persisted between the tool
+ * call and its result in raw history. The provider requires the results to follow the
+ * call directly, so derived context defers such messages until the batch is answered.
+ * The durable transcript keeps its admission order.
+ */
+export function deferMessagesInterleavedWithToolBatch<TMessage extends AgentMessage>(messages: TMessage[]): TMessage[] {
+	let pending: Set<string> | undefined;
+	let deferred: TMessage[] = [];
+	let changed = false;
+	const ordered: TMessage[] = [];
+	const flushDeferred = (): void => {
+		if (deferred.length > 0) {
+			ordered.push(...deferred);
+			deferred = [];
+		}
+		pending = undefined;
+	};
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			flushDeferred();
+			ordered.push(message);
+			const calls = collectAssistantToolCalls(message);
+			pending =
+				message.stopReason === "toolUse" && calls.length > 0 ? new Set(calls.map((call) => call.id)) : undefined;
+			continue;
+		}
+		if (pending) {
+			const toolCallId = getToolResultCallId(message);
+			if (toolCallId !== undefined && pending.has(toolCallId)) {
+				ordered.push(message);
+				pending.delete(toolCallId);
+				if (pending.size === 0) flushDeferred();
+				continue;
+			}
+			if (message.role !== "system") {
+				deferred.push(message);
+				changed = true;
+				continue;
+			}
+		}
+		ordered.push(message);
+	}
+	flushDeferred();
+	return changed ? ordered : messages;
+}
+
+/**
  * Enforce the provider's tool-pairing invariant on a converted message list.
  *
  * A provider rejects orphaned/duplicate `tool_result` blocks and any later turn
@@ -349,6 +399,13 @@ export function repairOrphanToolResults<TMessage extends AgentMessage>(
 				continue;
 			}
 			changed = true;
+			continue;
+		}
+		// A context-excluded card admitted while a tool was still running sits between
+		// the call and its result in raw history but never reaches the provider, so it
+		// cannot close the pending batch.
+		if (!messageStartsLlmUserTurn(message)) {
+			repaired.push(message);
 			continue;
 		}
 		flushUnanswered();

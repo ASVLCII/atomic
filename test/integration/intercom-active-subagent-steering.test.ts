@@ -33,7 +33,7 @@ const amendment: Message = {
 async function childHarness(
 	tools: AgentTool[] = [],
 	extensions: ExtensionFactory[] = [],
-	shouldStopAfterTurn?: () => boolean,
+	stopAfterTurn?: () => boolean,
 	orchestrationContext?: OrchestrationContext,
 ) {
 	const ended = new AbortController();
@@ -41,7 +41,14 @@ async function childHarness(
 	let context!: ExtensionContext;
 	const harness = await createHarness({
 		tools,
-		shouldStopAfterTurn,
+		finishTurn: stopAfterTurn
+			? (turn) => {
+					// shouldStopAfterTurn previously ran only for normal responses; keep
+					// the predicate off the error/aborted hard exits finishTurn now sees.
+					if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
+					return stopAfterTurn() ? ({ action: "end" } as const) : undefined;
+				}
+			: undefined,
 		orchestrationContext,
 		subagentPolicy: {
 			managementActions: "restricted",

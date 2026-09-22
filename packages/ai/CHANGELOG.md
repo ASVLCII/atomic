@@ -7,6 +7,13 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 ### Added
 
 - Added Meta provider (Model API key and Muse subscription OAuth) with Muse Spark models.
+- Added model image-input limit and cache-safe resize metadata (`inputLimits`) to the `Model` type and the generated catalog ([#9631](https://github.com/earendil-works/pi/issues/9631)).
+- Added Grok 4.7 to the built-in xAI model catalog with long-context pricing metadata.
+
+### Fixed
+
+- Fixed unknown OpenAI-compatible Chat Completions endpoints receiving strict tool schemas unless they explicitly advertise support (`compat.supportsStrictMode` now defaults to `false`), while preserving strict tools for capable built-in models ([#9816](https://github.com/earendil-works/pi/issues/9816)).
+- Fixed image-only user messages being rejected by some OpenAI-compatible providers because they included an empty text part ([#9797](https://github.com/earendil-works/pi/issues/9797)).
 
 ## [0.9.20-alpha.4] - 2026-09-20
 

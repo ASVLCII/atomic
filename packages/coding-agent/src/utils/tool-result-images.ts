@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent } from "@bastani/pi-ai";
+import type { ImageContent, ModelImageResizeOptions, TextContent } from "@bastani/pi-ai";
 import { processImage } from "./image-process.ts";
 
 export type ToolResultContent = TextContent | ImageContent;
@@ -6,6 +6,8 @@ export type ToolResultContent = TextContent | ImageContent;
 export interface NormalizeToolResultImagesOptions {
 	/** Whether oversized images are resized to inline provider limits. Default: true */
 	autoResizeImages?: boolean;
+	/** Model-specific resize profile. Uses the conservative built-in defaults when omitted. */
+	resizeOptions?: ModelImageResizeOptions;
 }
 
 /**
@@ -35,7 +37,10 @@ export async function normalizeToolResultImages(
 			continue;
 		}
 
-		const processed = await processImage(Buffer.from(block.data, "base64"), block.mimeType, { autoResizeImages });
+		const processed = await processImage(Buffer.from(block.data, "base64"), block.mimeType, {
+			autoResizeImages,
+			resizeOptions: options?.resizeOptions,
+		});
 		if (!processed.ok) {
 			// Keep a tool-produced image when its backend is unavailable or cannot decode it.
 			normalized.push(block);

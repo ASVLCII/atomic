@@ -161,6 +161,8 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 /** Named in the removal bullets, so they must not resolve — that is the point of naming them. */
 const removedNames = new Set([
 	"DEFAULT_STRUCTURED_OUTPUT_TIMEOUT_MS",
+	// pi-agent-core 0.87.0 replaced the inherited stop hook with finishTurn.
+	"shouldStopAfterTurn",
 	// PR #3114: the former TypeSafe environment variable is no longer recognized.
 	"TYPESAFE_AI_API_KEY",
 	"ATOMIC_CODEX_FAST_MODE",
@@ -297,6 +299,32 @@ const proseNames = new Set([
 	// `WriteOperations` members, defined by an implementation, never exported on their own.
 	"readFile",
 	"writeFile",
+	// pi 0.87.0 sync: agent-core hook names, extension event names, boundary event fields,
+	// session entry type names, and settings/tool names, none of which are package-root exports.
+	"finishTurn",
+	"prepareNextTurnWithContext",
+	"agent_before_settle",
+	"agent_settled",
+	"agent_start",
+	"agent_end",
+	"before_agent_start",
+	"turn_start",
+	"turn_end",
+	"message_start",
+	"message_end",
+	"context",
+	"context_with_system",
+	"context_edit",
+	"custom",
+	"custom_message",
+	"compaction",
+	"entries",
+	"continue",
+	"outcome",
+	"messageEntryId",
+	"toolResultEntryIds",
+	"read",
+	"GIF",
 ]);
 
 function unreleasedBlock(changelogPath: string): string {

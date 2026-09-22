@@ -77,7 +77,7 @@ export interface HarnessOptions {
 	withConfiguredAuth?: boolean;
 	subagentPolicy?: SubagentChildPolicy;
 	orchestrationContext?: OrchestrationContext;
-	shouldStopAfterTurn?: Agent["shouldStopAfterTurn"];
+	finishTurn?: Agent["finishTurn"];
 }
 
 export interface Harness {
@@ -139,6 +139,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 				api: registeredModel.api,
 				reasoning: registeredModel.reasoning,
 				input: registeredModel.input,
+				inputLimits: registeredModel.inputLimits,
 				cost: registeredModel.cost,
 				contextWindow: registeredModel.contextWindow,
 				maxTokens: registeredModel.maxTokens,
@@ -149,7 +150,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 
 	const agent = new Agent({
 		streamFn: streamSimple,
-		shouldStopAfterTurn: options.shouldStopAfterTurn,
+		finishTurn: options.finishTurn,
 		getApiKey: () => (withConfiguredAuth ? "faux-key" : undefined),
 		initialState: {
 			model,

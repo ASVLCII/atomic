@@ -97,13 +97,15 @@ export function recordBashResult(
 	if (this.isStreaming && options?.defer !== false) {
 		// Queue for later - will be flushed on agent_end
 		this._pendingBashMessages.push(bashMessage);
+	} else if (options?.persist !== false) {
+		// Persist first, then refresh the finalized context from the canonical projection.
+		this.sessionManager.appendMessage(bashMessage);
+		this._refreshFinalizedContext();
 	} else {
-		// Add to agent state immediately
-		this.agent.state.messages.push(bashMessage);
-
 		// Avoid writing a source-owned result into a shared manager that an
-		// in-memory fork changed while this execution was active.
-		if (options?.persist !== false) this.sessionManager.appendMessage(bashMessage);
+		// in-memory fork changed while this execution was active. The result stays
+		// visible to this run only, so it must be added to agent state directly.
+		this.agent.state.messages.push(bashMessage);
 	}
 }
 
@@ -126,14 +128,10 @@ export function _flushPendingBashMessages(this: AgentSession): void {
 	if (this._pendingBashMessages.length === 0) return;
 
 	for (const bashMessage of this._pendingBashMessages) {
-		// Add to agent state
-		this.agent.state.messages.push(bashMessage);
-
-		// Save to session
 		this.sessionManager.appendMessage(bashMessage);
 	}
-
 	this._pendingBashMessages = [];
+	this._refreshFinalizedContext();
 }
 
 // =========================================================================

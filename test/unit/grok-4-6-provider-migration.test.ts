@@ -19,8 +19,8 @@ function shippedSourceFiles(): string[] {
 	return shippedModelSources.flatMap((relativePath) => recursivelyListFiles(join(root, relativePath)));
 }
 
-test("xAI defaults to Grok 4.6", () => {
-	assert.equal(defaultModelPerProvider.xai, "grok-4.6");
+test("xAI defaults to Grok 4.7", () => {
+	assert.equal(defaultModelPerProvider.xai, "grok-4.7");
 });
 
 test("builtin workflow and subagent sources contain no stale Grok 4.5 references", () => {

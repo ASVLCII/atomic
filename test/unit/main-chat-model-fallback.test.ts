@@ -42,6 +42,18 @@ function retryableMessage(overrides: Partial<AssistantMessage> = {}): AssistantM
 	} as AssistantMessage;
 }
 
+/**
+ * Synthetic-session stand-in for the projection-backed omission: these sessions have no
+ * SessionManager projection, so dropping the failed attempt from agent state is the
+ * observable equivalent the assertions below check.
+ */
+function omitTrailingAssistantAttempt(this: { agent: { state: { messages: AssistantMessage[] } } }): boolean {
+	const messages = this.agent.state.messages;
+	if (messages.length === 0 || messages[messages.length - 1]?.role !== "assistant") return false;
+	this.agent.state.messages = messages.slice(0, -1);
+	return true;
+}
+
 test("main-chat retry classifies structured provider transport diagnostics", () => {
 	const session = { model: model("openai-codex", "gpt-5.5") };
 	const diagnostics = [
@@ -137,6 +149,7 @@ test("main-chat fallback switches models after same-model retry exhaustion", asy
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: (next: Model<Api>, previous: Model<Api> | undefined, source: string) =>
 			events.push({ type: "model_changed", next: next.id, previous: previous?.id, source }),
 		_emitModelSelect: async (next: Model<Api>, previous: Model<Api> | undefined, source: string) =>
@@ -198,6 +211,7 @@ test("main-chat fallback remains the session model after its lifecycle settles",
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: (next: Model<Api>, previous: Model<Api> | undefined, source: string) =>
 			events.push({ type: "model_changed", next: next.id, previous: previous?.id, source }),
 		_emitModelSelect: async () => undefined,
@@ -252,6 +266,7 @@ test("a transient failure can still change reasoning on the same provider/model"
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: (event: { type: string; [key: string]: unknown }) => events.push(event),
@@ -314,6 +329,7 @@ test("main-chat retry-disabled fallback keeps prompt waiting for fallback comple
 		_isSafetyRefusal: () => false,
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: () => undefined,
@@ -382,6 +398,7 @@ test("main-chat fallback rejection settles the retry wait", async () => {
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: (event: { type: string; [key: string]: unknown }) => events.push(event),
@@ -447,6 +464,7 @@ test("main-chat fallback continuation resolution does not mark assistant errors 
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: (event: { type: string; [key: string]: unknown }) => events.push(event),
@@ -501,6 +519,7 @@ test("a rejected codex credential advances to the next candidate without re-requ
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: (event: { type: string; [key: string]: unknown }) => events.push(event),
@@ -556,6 +575,7 @@ test("an explicit /model choice during a fallback remains selected after settlem
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: (next: Model<Api>, previous: Model<Api> | undefined, source: string) =>
 			events.push({ type: "model_changed", next: next.id, previous: previous?.id, source }),
 		_emitModelSelect: async () => undefined,
@@ -749,6 +769,7 @@ test("a failed overflow compaction advances the real fallback chain end to end",
 		_schedulePostAutoCompactionContinuationProbe: () => undefined,
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_applyInterruptAbortMessage: () => undefined,
 		_applyProviderErrorGuidance: () => undefined,
 		_emitExtensionEvent: async () => undefined,
@@ -822,6 +843,7 @@ function thinkingLevelFallbackSession(
 		_extensionRunner: { emit: async () => undefined },
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: (next: Model<Api>, previous: Model<Api> | undefined, source: string) =>
 			events.push({ type: "model_changed", next: next.id, previous: previous?.id, source }),
 		_emitModelSelect: async () => undefined,
@@ -918,6 +940,7 @@ test("a terminal provider failure skips reasoning-only variants of the failed mo
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: (event: { type: string; [key: string]: unknown }) => events.push(event),
@@ -980,6 +1003,7 @@ test("a blocked model stays blocked for the rest of the turn", async () => {
 		},
 		_withContextWindowForModelSwitch: (candidate: Model<Api>) => candidate,
 		_refreshBaseSystemPromptFromActiveTools: () => undefined,
+		_omitTrailingAssistantAttempt: omitTrailingAssistantAttempt,
 		_emitModelChanged: () => undefined,
 		_emitModelSelect: async () => undefined,
 		_emit: (event: { type: string; [key: string]: unknown }) => events.push(event),

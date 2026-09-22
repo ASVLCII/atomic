@@ -337,15 +337,16 @@ describe("AgentSession auto-compaction queue resume", () => {
 			errorMessage: "prompt is too long",
 			timestamp: Date.now(),
 		};
-		const rebuiltMessages: AgentMessage[] = [
-			{ role: "user", content: [{ type: "text", text: "retry this" }], timestamp: Date.now() - 1 },
-			trailingOverflowError,
-		];
-		vi.spyOn(sessionManager, "buildSessionContext").mockReturnValue({
-			messages: rebuiltMessages,
-			thinkingLevel: "off",
-			model: null,
+		// The overflow attempt is persisted like any finalized assistant; recovery must
+		// omit it from the canonical projection before compaction_end listeners observe state.
+		sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "retry this" }],
+			timestamp: Date.now() - 1,
 		});
+		sessionManager.appendMessage(trailingOverflowError);
+		session.refreshContext();
+		expect(session.agent.state.messages.at(-1)).toBe(trailingOverflowError);
 
 		let streamingStarted = false;
 		const isStreamingSpy = vi.spyOn(session, "isStreaming", "get").mockImplementation(() => streamingStarted);
@@ -368,8 +369,10 @@ describe("AgentSession auto-compaction queue resume", () => {
 
 		await runAutoCompaction("overflow", true);
 
-		expect(listenerObservedLastMessage).toMatchObject({ role: "user" });
-		expect(session.agent.state.messages.at(-1)).toMatchObject({ role: "user" });
+		expect(listenerObservedLastMessage?.role).not.toBe("assistant");
+		expect(session.agent.state.messages.at(-1)?.role).not.toBe("assistant");
+		expect(session.agent.state.messages).toEqual(sessionManager.buildSessionProjection().messages);
+		expect(session.agent.state.messages).not.toContain(trailingOverflowError);
 
 		await vi.advanceTimersByTimeAsync(100);
 

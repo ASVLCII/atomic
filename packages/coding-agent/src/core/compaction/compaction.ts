@@ -2,10 +2,11 @@
  * Neutral context-usage metrics for deciding when a session needs compaction.
  */
 
+import { getCurrentSystemMessage } from "@bastani/pi-ai";
 import type { Api, AssistantMessage, Usage } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { messageIsLlmVisible, userLikeContentBlockIsLlmVisible } from "../messages.ts";
-import type { SessionEntry } from "../session-manager.ts";
+import type { SessionEntry, SessionProjection } from "../session-manager.ts";
 
 export interface CompactionSettings {
 	enabled: boolean;
@@ -144,6 +145,44 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 	};
 }
 
+/** Estimate projected context without trusting usage captured before a later edit or compaction. */
+export function estimateProjectedContextTokens(
+	projection: SessionProjection,
+	branchEntries: SessionEntry[],
+): ContextUsageEstimate {
+	const estimate = estimateContextTokens(projection.messages);
+	if (estimate.lastUsageIndex !== null) {
+		let projectedMessageIndex = 0;
+		let usageEntryId: string | undefined;
+		for (const entry of projection.entries) {
+			const nextMessageIndex = projectedMessageIndex + entry.messages.length;
+			if (estimate.lastUsageIndex < nextMessageIndex) {
+				usageEntryId = entry.sourceEntry.id;
+				break;
+			}
+			projectedMessageIndex = nextMessageIndex;
+		}
+
+		const usageEntryIndex = usageEntryId ? branchEntries.findIndex((entry) => entry.id === usageEntryId) : -1;
+		let latestInvalidatingEntryIndex = -1;
+		for (let i = branchEntries.length - 1; i >= 0; i--) {
+			const entry = branchEntries[i];
+			if (entry.type === "context_edit" || entry.type === "compaction") {
+				latestInvalidatingEntryIndex = i;
+				break;
+			}
+		}
+		if (usageEntryIndex > latestInvalidatingEntryIndex) return estimate;
+	}
+
+	const currentSystem = getCurrentSystemMessage(projection.messages);
+	let tokens = currentSystem ? estimateTokens(currentSystem) : 0;
+	for (const message of projection.messages) {
+		if (message.role !== "system") tokens += estimateTokens(message);
+	}
+	return { tokens, usageTokens: 0, trailingTokens: tokens, lastUsageIndex: null };
+}
+
 /**
  * Check if compaction should trigger based on context usage.
  */
@@ -245,7 +284,11 @@ export function estimateTokens(message: AgentMessage): number {
 
 	switch (message.role) {
 		case "system": {
-			const system = message as { content?: unknown; sections?: Record<string, string | null> };
+			const system = message as {
+				content?: unknown;
+				sections?: Record<string, string | null>;
+				toolsAdded?: unknown;
+			};
 			let chars = 0;
 			if (typeof system.content === "string") chars += system.content.length;
 			else if (Array.isArray(system.content)) {
@@ -258,6 +301,7 @@ export function estimateTokens(message: AgentMessage): number {
 			for (const value of Object.values(system.sections ?? {})) {
 				if (typeof value === "string") chars += value.length;
 			}
+			if (system.toolsAdded) chars += safeSerializedPayloadLength(system.toolsAdded, "");
 			return chars > 0 ? Math.ceil(chars / 4) : 0;
 		}
 		case "user":

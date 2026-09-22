@@ -1,7 +1,8 @@
+import { findExtensionStackMatches } from "../../core/crash-log.ts";
 import { terminateInteractiveEngine } from "../interactive-engine/extension-ui-bridge.ts";
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import { APP_TITLE, chalk, killTrackedDetachedChildren } from "./interactive-mode-deps.ts";
-import { formatResumeCommand, isDeadTerminalError } from "./interactive-mode-helpers.ts";
+import { formatCrashExtensionHint, formatResumeCommand, isDeadTerminalError } from "./interactive-mode-helpers.ts";
 import { pauseAndAbortInteractiveSession } from "./interactive-pause.ts";
 import { restoreFailedSubmissionDraft } from "./interactive-prompt-restore.ts";
 import { isWindowsSubshellActive, openWindowsSubshell } from "./interactive-windows-subshell.ts";
@@ -124,7 +125,25 @@ InteractiveModeBase.prototype.uncaughtCrash = function (this: InteractiveModeBas
 	} catch {}
 	console.error(`${APP_TITLE} exiting due to uncaughtException:`);
 	console.error(error);
+	const extensionHint = this.getCrashExtensionHint(error);
+	if (extensionHint) console.error(`\n${extensionHint}`);
 	process.exit(1);
+};
+
+InteractiveModeBase.prototype.getCrashExtensionHint = function (
+	this: InteractiveModeBase,
+	error: unknown,
+): string | undefined {
+	try {
+		return formatCrashExtensionHint(
+			findExtensionStackMatches(
+				error instanceof Error ? error.stack : undefined,
+				this.session.resourceLoader.getExtensions().extensions,
+			),
+		);
+	} catch {
+		return undefined;
+	}
 };
 
 InteractiveModeBase.prototype.checkShutdownRequested = async function (this: InteractiveModeBase): Promise<void> {

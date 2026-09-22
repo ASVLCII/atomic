@@ -1,6 +1,6 @@
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
-import { type AgentSession, setRegisteredThemes, stopThemeWatcher } from "./interactive-mode-deps.ts";
+import { type AgentSession, setRegisteredThemes, stopThemeWatcher, Text, theme } from "./interactive-mode-deps.ts";
 
 InteractiveModeBase.prototype.bindCurrentSessionExtensions = async function (this: InteractiveModeBase): Promise<void> {
 	const uiContext = this.createExtensionUIContext();
@@ -139,6 +139,10 @@ InteractiveModeBase.prototype.handleFatalRuntimeError = async function (
 ): Promise<never> {
 	const message = error instanceof Error ? error.message : String(error);
 	this.showError(`${prefix}: ${message}`);
+	const extensionHint = this.getCrashExtensionHint(error);
+	if (extensionHint) {
+		this.chatContainer.addChild(new Text(theme.fg("warning", extensionHint), this.outputPad, 0));
+	}
 	stopThemeWatcher();
 	// A fatal exit keeps the transcript visible: the error the user just saw
 	// must remain on screen after the process dies, whatever the setting says.

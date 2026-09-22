@@ -27,7 +27,6 @@ import type {
 	ToolExecutionEndEvent,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
-	TurnEndEvent,
 	TurnStartEvent,
 } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
@@ -92,9 +91,13 @@ export function _handleAgentEvent(this: AgentSession, event: AgentEvent): Promis
 	);
 	this._agentEventQueue = processing;
 
-	// Keep queue alive if an event handler fails. Agent-core must additionally
-	// await protected persistence and fallback reconciliation before the next
-	// provider request; other listener work stays nonblocking.
+	// Keep queue alive if an event handler fails. Per event, agent-core awaits only
+	// protected persistence and fallback reconciliation; other listener work is
+	// nonblocking for that event. The queue as a whole is still drained before each
+	// provider request (`prepareRequest` in agent-session-boundaries.ts): message_end
+	// handlers may replace the message that gets persisted, and the request is built
+	// from the persisted canonical projection, so every queued handler gates the next
+	// request rather than only the persistence step.
 	processing.catch((error) => {
 		// #3105: callbacks interrupted by terminal disposal remain observable at shutdown.
 		if (this._disposed) {
@@ -165,6 +168,12 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			? event.message
 			: undefined;
 	// Public notifications remain serialized behind extension events.
+	if (event.type === "agent_start") {
+		// A caller replacement prepared for a turn that never reached its provider
+		// request must not leak into this run's first request. `prepareRequest`
+		// awaits this queue, so the reset lands before the run's first projection.
+		this._callerReplacedNextRequestContext = false;
+	}
 	if (event.type === "message_start" && event.message.role === "user") {
 		this._overflowRecoveryAttempted = false;
 		this._recoverableLengthRecoveryAttempted = false;
@@ -192,15 +201,19 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			retryConsumedProtectedStreamingCustomMessages(this);
 		}
 	}
-	if (event.type === "turn_end") this._flushPendingCustomMessages();
+	if (event.type === "turn_end") {
+		this._lastAssistantToolResults = event.toolResults;
+		this._flushPendingCustomMessages();
+	}
 
 	// Handle session persistence
 	if (event.type === "message_end") {
+		let entryId: string | undefined;
 		// Check if this is a custom message from extensions
 		if (event.message.role === "custom") {
 			const admitted = event.message as StageAdmittedCustomMessage;
 			if (protectedMessage === undefined) {
-				this.sessionManager.appendCustomMessageEntry(
+				entryId = this.sessionManager.appendCustomMessageEntry(
 					event.message.customType,
 					event.message.content,
 					event.message.display,
@@ -217,8 +230,9 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			event.message.role === "toolResult"
 		) {
 			// Regular LLM message - persist as SessionMessageEntry
-			this.sessionManager.appendMessage(event.message);
+			entryId = this.sessionManager.appendMessage(event.message);
 		}
+		if (entryId) this._entryIdsByMessage.set(event.message, entryId);
 		// Other message types (bashExecution, branchSummary) are persisted elsewhere
 
 		// Track assistant message for auto-compaction (checked on agent_end)
@@ -444,13 +458,12 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 		};
 		await this._extensionRunner.emit(extensionEvent, undefined, true);
 	} else if (event.type === "turn_end") {
-		const extensionEvent: TurnEndEvent = {
-			type: "turn_end",
-			turnIndex: this._turnIndex,
-			message: event.message,
-			toolResults: event.toolResults,
-		};
-		await this._extensionRunner.emit(extensionEvent, undefined, true);
+		// finishTurn already dispatched the actionable boundary for loop-driven turns.
+		// Synthetic turns (for example a run that fails before the loop's finishTurn)
+		// still reach extensions here.
+		if (event.message.role === "assistant" && !this._boundaryDispatchedMessages.delete(event.message)) {
+			await this._dispatchTurnEndBoundary(event.message, event.toolResults);
+		}
 		this._turnIndex++;
 	} else if (event.type === "message_start") {
 		const extensionEvent: MessageStartEvent = {

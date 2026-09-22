@@ -1,3 +1,4 @@
+import { getCurrentSystemMessage } from "@bastani/pi-ai";
 import type { ImageContent } from "@bastani/pi-ai/compat";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { runCallback } from "../callback-activity.ts";
@@ -8,11 +9,15 @@ import {
 	normalizeBuildSystemPromptOptions,
 } from "../system-prompt.ts";
 import type {
+	AgentBeforeSettleEvent,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
 	BeforeProviderRequestEvent,
+	BoundaryContextPreview,
+	BoundaryResult,
 	ContextEvent,
 	ContextEventResult,
+	ContextWithSystemEvent,
 	Extension,
 	ExtensionContext,
 	ExtensionError,
@@ -29,10 +34,12 @@ import type {
 	SessionBeforeForkResult,
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
+	SessionBoundaryDraft,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
 	ToolResultEventResult,
+	TurnEndEvent,
 	UserBashEvent,
 	UserBashEventResult,
 } from "./types.ts";
@@ -57,12 +64,26 @@ export type RunnerEmitEvent = Exclude<
 	| ToolResultEvent
 	| UserBashEvent
 	| ContextEvent
+	| ContextWithSystemEvent
 	| BeforeProviderRequestEvent
 	| BeforeAgentStartEvent
 	| MessageEndEvent
 	| ResourcesDiscoverEvent
 	| InputEvent
+	| TurnEndEvent
+	| AgentBeforeSettleEvent
 >;
+
+export type BoundaryBaseEvent =
+	| Omit<TurnEndEvent, "entries" | "continue" | "context">
+	| Omit<AgentBeforeSettleEvent, "entries" | "continue" | "context">;
+
+export interface BoundaryDispatchResult {
+	entries: SessionBoundaryDraft[];
+	continue: boolean;
+	context: BoundaryContextPreview;
+	valid: boolean;
+}
 
 type SessionBeforeEvent = Extract<
 	RunnerEmitEvent,
@@ -311,6 +332,33 @@ export async function runUserBashHandlers(
 	return undefined;
 }
 
+function sameMessages(left: AgentMessage[], right: AgentMessage[]): boolean {
+	return left.length === right.length && left.every((message, index) => message === right[index]);
+}
+
+/**
+ * Re-attach the prompt and tool state after a `context` handler. Handlers only see the
+ * conversation; the system messages belong to Atomic. An unchanged conversation keeps every
+ * system message in place, so models with mid-conversation support keep their cached
+ * prefix. A changed one gets the replayed prompt sections and tool declarations as one
+ * leading system message, so pruning, windowing, or slicing from a compaction summary
+ * cannot drop them.
+ */
+function restoreSystemMessages(
+	current: AgentMessage[],
+	visible: AgentMessage[],
+	returned: AgentMessage[],
+): AgentMessage[] {
+	if (sameMessages(returned, visible)) return current;
+	const head = getCurrentSystemMessage(current);
+	return head ? [head, ...returned] : returned;
+}
+
+/**
+ * Run the request-time transforms in two phases. `context` handlers see the conversation
+ * only and Atomic restores the prompt and tool state after each; `context_with_system`
+ * handlers then see the full transcript and their output is used as returned.
+ */
 export async function runContextHandlers(
 	extensions: Extension[],
 	ctx: ExtensionContext,
@@ -322,21 +370,104 @@ export async function runContextHandlers(
 	for (const { ext, handlers } of snapshotEventHandlers(extensions, "context")) {
 		for (const handler of handlers) {
 			try {
-				const event: ContextEvent = { type: "context", messages: currentMessages };
-				const handlerResult = await runCallback(
+				const visibleMessages = currentMessages.filter((message) => message.role !== "system");
+				const visibleSnapshot = visibleMessages.slice();
+				const event: ContextEvent = { type: "context", messages: visibleMessages };
+				const handlerResult = (await runCallback(
 					{ kind: "extension.hook", name: event.type, sourcePath: ext.path },
 					() => handler(event, ctx),
-				);
-				if (handlerResult && (handlerResult as ContextEventResult).messages) {
-					currentMessages = (handlerResult as ContextEventResult).messages!;
-				}
+				)) as ContextEventResult | undefined;
+
+				// Handlers may return a new list or edit event.messages in place.
+				const returned =
+					handlerResult?.messages ??
+					(sameMessages(visibleMessages, visibleSnapshot) ? undefined : visibleMessages);
+				if (!returned) continue;
+				currentMessages = restoreSystemMessages(currentMessages, visibleSnapshot, returned);
 			} catch (error) {
 				emitCaughtError(emitError, ext.path, "context", error);
 			}
 		}
 	}
 
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, "context_with_system")) {
+		for (const handler of handlers) {
+			try {
+				const hadLeadingSystemMessage = currentMessages[0]?.role === "system";
+				const event: ContextWithSystemEvent = { type: "context_with_system", messages: currentMessages };
+				const handlerResult = (await runCallback(
+					{ kind: "extension.hook", name: event.type, sourcePath: ext.path },
+					() => handler(event, ctx),
+				)) as ContextEventResult | undefined;
+				currentMessages = handlerResult?.messages ?? currentMessages;
+				// Providers read the prompt and initial tools from the leading system message.
+				// Losing it is never intended; report it but honor the handler's output.
+				if (hadLeadingSystemMessage && currentMessages[0]?.role !== "system") {
+					emitError({
+						extensionPath: ext.path,
+						event: "context_with_system",
+						error: "Handler removed the leading system message; the request has no prompt or initial tool declarations. Keep it at index 0 or replace a dropped prefix with getCurrentSystemMessage().",
+					});
+				}
+			} catch (error) {
+				emitCaughtError(emitError, ext.path, "context_with_system", error);
+			}
+		}
+	}
+
 	return currentMessages;
+}
+
+/** Dispatch an actionable boundary event, revalidating the context preview after every handler. */
+export async function runBoundaryHandlers(
+	extensions: Extension[],
+	ctx: ExtensionContext,
+	baseEvent: BoundaryBaseEvent,
+	buildContext: (entries: SessionBoundaryDraft[]) => BoundaryContextPreview | Promise<BoundaryContextPreview>,
+	emitError: EmitExtensionError,
+): Promise<BoundaryDispatchResult> {
+	let entries: SessionBoundaryDraft[] = [];
+	let shouldContinue = false;
+	let context = await buildContext(entries);
+	let valid = true;
+
+	for (const { ext, handlers } of snapshotEventHandlers(extensions, baseEvent.type)) {
+		for (const handler of handlers) {
+			const event = {
+				...baseEvent,
+				entries,
+				continue: shouldContinue,
+				context,
+			} as TurnEndEvent | AgentBeforeSettleEvent;
+			try {
+				const handlerResult = (await runCallback(
+					{ kind: "extension.hook", name: event.type, sourcePath: ext.path },
+					() => handler(event, ctx),
+				)) as BoundaryResult | undefined;
+				if (handlerResult?.entries !== undefined) entries = handlerResult.entries;
+				if (handlerResult?.continue !== undefined) shouldContinue = handlerResult.continue;
+			} catch (error) {
+				emitCaughtError(emitError, ext.path, baseEvent.type, error);
+			}
+
+			try {
+				context = await buildContext(entries);
+				valid = true;
+			} catch (error) {
+				valid = false;
+				emitError({
+					extensionPath: ext.path,
+					event: baseEvent.type,
+					error: `Invalid boundary entries: ${error instanceof Error ? error.message : String(error)}`,
+					stack: error instanceof Error ? error.stack : undefined,
+				});
+			}
+		}
+	}
+
+	return valid
+		? { entries, continue: shouldContinue, context, valid: true }
+		: { entries: [], continue: false, context, valid: false };
 }
 
 export async function runBeforeProviderRequestHandlers(

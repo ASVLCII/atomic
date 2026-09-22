@@ -109,7 +109,7 @@ describeModelRegistry((context) => {
 			const sonnet = models.find((model) => model.id === "anthropic/claude-sonnet-4");
 			expect(sonnet?.samplingParams).toEqual({ top_p: 0.9, min_p: 0.05 });
 
-			const opus = models.find((model) => model.id === "anthropic/claude-opus-4");
+			const opus = models.find((model) => model.id === "anthropic/claude-opus-4.1");
 			expect(opus?.samplingParams).toBeUndefined();
 		});
 

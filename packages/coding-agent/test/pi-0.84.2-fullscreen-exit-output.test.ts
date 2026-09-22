@@ -234,12 +234,17 @@ test("a fatal runtime error always exits through the transcript, whatever the se
 	const mode = {
 		...createStopThis("resume-hint"),
 		showError: vi.fn(),
+		getCrashExtensionHint: vi.fn(() => undefined),
 		stop,
 	};
 
 	const handleFatalRuntimeError = InteractiveMode.prototype as unknown as {
 		handleFatalRuntimeError(
-			this: { showError: (message: string) => void; stop: typeof stop },
+			this: {
+				showError: (message: string) => void;
+				getCrashExtensionHint: (error: unknown) => string | undefined;
+				stop: typeof stop;
+			},
 			prefix: string,
 			error: unknown,
 		): Promise<never>;

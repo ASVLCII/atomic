@@ -1,4 +1,5 @@
 import { CACHE_TTL_MS, detectCacheMiss } from "../../core/cache-stats.ts";
+import { createCustomMessage } from "../../core/messages.ts";
 import { IsolatedInteractiveRuntime } from "../interactive-engine/isolated-runtime.js";
 import { RemoteToolExecutionComponent } from "../interactive-engine/remote-renderer.ts";
 import type { JsonAgentSessionEvent } from "../json-event.ts";
@@ -149,7 +150,30 @@ InteractiveModeBase.prototype.handleEvent = async function (
 			break;
 
 		case "entry_appended":
-			if (event.entry.type === "custom") this.addCustomEntryToChat(event.entry);
+			if (event.entry.type === "custom") {
+				this.addCustomEntryToChat(event.entry);
+			} else if (event.entry.type === "custom_message" && event.entry.display) {
+				// Boundary-appended context (turn_end / agent_before_settle drafts) never
+				// passes through agent-core message events, so it is rendered from the entry.
+				this.addMessageToChat(
+					createCustomMessage(
+						event.entry.customType,
+						event.entry.content,
+						event.entry.display,
+						event.entry.details,
+						event.entry.timestamp,
+						event.entry.excludeFromContext,
+					),
+				);
+			} else if (event.entry.type === "compaction") {
+				// A boundary-committed compaction has no compaction_end event. Re-render the
+				// transcript from the retained context once it becomes the active boundary.
+				const entries = this.sessionManager.buildContextEntries();
+				if (entries[0]?.id === event.entry.id) {
+					this.rebuildChatFromMessages();
+					this.footer.invalidate();
+				}
+			}
 			this.ui.requestRender();
 			break;
 
