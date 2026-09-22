@@ -2,7 +2,7 @@
 
 Verify the behavior that changed, then give the reviewer enough evidence to understand the result. A small fix may need a focused test and a short explanation. An interactive change usually needs a real user scenario as well. A video is useful when it shows something a test log or screenshot cannot; it is not required for every PR.
 
-For tool installation, automation techniques, platform permissions, and general work in applications, read [Computer use](/computer-use). That guide covers Herdr for terminals, agent-browser for browsers, and PyAutoGUI with uv for desktop CUA on macOS, Linux, and Windows. It also covers native accessibility and application tools when they are easier or more reliable.
+For tool installation, automation techniques, platform permissions, and general work in applications, read [Computer use](/computer-use). That guide covers Herdr for terminals, agent-browser for browsers, and Cua Driver for desktop, simulator, and emulator CUA on macOS, Linux, and Windows. It also covers native accessibility and application tools when they are easier or more reliable.
 
 <a id="select-the-verification-environment" />
 
@@ -14,7 +14,7 @@ Start with the project's existing tests, build, typecheck, and lint commands. Ad
 | --- | --- | --- |
 | Interactive terminal or TUI | **Herdr**, under its explicit-request and managed-pane requirements; tmux or native Windows psmux as fallbacks | Actual input, rendered output, navigation, resizing, and exit behavior relevant to the change. |
 | Browser/frontend | **agent-browser** | The user flow and its visible result, with DOM or network assertions where useful. |
-| Desktop app, simulator, or emulator | **PyAutoGUI with uv**, supplemented by native/app APIs | The visible app scenario and its saved or exported result. |
+| Desktop app, simulator, or emulator | **Cua Driver**: the `cua-driver` CLI through the bundled skill when a model chooses actions, or the `@trycua/cua-driver` SDK inside `ctx.tool` when workflow code owns the scenario; supplemented by native/app APIs | The exact window's before/after accessibility state and screenshots, a checked postcondition, and the saved or exported result. |
 | API, library, script, or other non-UI behavior | Existing test runner and shell commands | Inputs, outputs, error handling, and relevant build/type contracts. |
 | Documentation | Documentation checks and example review | Links, navigation, command accuracy, and whether a reader can follow the instructions. |
 
@@ -72,11 +72,15 @@ See [terminal setup and capture commands](/computer-use#terminal-automation-with
 
 ### Desktop, simulator, and emulator changes
 
-Run PyAutoGUI through uv in a dedicated graphical session, using [the desktop guide](/computer-use#desktop-automation-with-pyautogui-and-uv). Native accessibility tools or application APIs can give more reliable assertions than pixel matching. For example, check a saved document through the app API after exercising the visible Save flow.
+Use Cua Driver in a dedicated graphical session, following [the desktop guide](/computer-use#desktop-automation-with-cua-driver). When a model chooses each action, which is how builtin Goal and Ralph stages and authored model stages work, load the bundled `cua-driver` skill and drive the exact window with one-shot `cua-driver call <tool>` commands, running every command with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false`. When a custom workflow's TypeScript owns the scenario and its postcondition, run it with the `@trycua/cua-driver` SDK inside `ctx.tool` as shown in [workflow authoring](/workflows/authoring#desktop-verification-with-cua-driver-in-ctx-tool). Either way the loop is the same: snapshot the window with `get_window_state`, act through a snapshot-bound element token, take a fresh snapshot, and check a postcondition with a bounded poll deadline. Application APIs can still give the strongest assertion, for example checking a saved document through the app API after exercising the visible Save flow.
 
-Capture the actual application or simulator. A browser recording is not desktop or iOS evidence. PyAutoGUI can interact with a visible simulator/emulator window, but does not directly control an arbitrary physical phone. Use supported native tooling where needed, and name the device or emulator actually exercised.
+Evidence is the structured window state plus screenshots, not a screenshot alone. Save each `get_window_state` JSON result and its `screenshot_out_file` image (before and after the action) to the artifacts directory, and state the postcondition that was checked. A `degraded` or `truncated` snapshot is a failed observation, not a reason to act.
 
-Keep failsafes enabled and release held keys/buttons after interruption. Inspect saved files and exports rather than assuming a completed click means a completed operation. Screenshots show appearance, not necessarily persistence or correctness.
+Capture the actual application or simulator. A browser recording is not desktop or iOS evidence. Cua Driver can interact with a visible simulator/emulator window, but does not directly control an arbitrary physical phone. Use supported native tooling where needed, and name the device or emulator actually exercised.
+
+Missing readiness is a blocked finding, not a failure to work around. Before the first action the stage checks `cua-driver --version` (one bounded install attempt with upstream's one-line installer if it is missing, then `cua-driver telemetry disable`), `cua-driver status`, `cua-driver doctor`, and `cua-driver call list_apps`, plus `cua-driver permissions status` on macOS. A builtin Goal or Ralph stage reports a missing macOS Accessibility or Screen Recording grant, a non-interactive Windows session, no graphical Linux session, or a refused or failed install as `blocked`/`needs_human` with the exact remediation (for macOS: `cua-driver permissions grant`, toggle CuaDriver on under System Settings → Privacy & Security → Accessibility and Screen & System Audio Recording, then relaunch the daemon with `open -n -g -a CuaDriver --args serve`), and re-runs the readiness check when the run resumes. A custom workflow does the same from a preflight `ctx.tool` that calls `ctx.exit({ status: "blocked", reason })`, so `workflow resume` re-runs the preflight rather than replaying a cached failure.
+
+Inspect saved files and exports rather than assuming a returned action means a completed operation. An action that times out before its response is `unknown`; resolve it with a fresh snapshot and the postcondition, never by replaying the action.
 
 ## Use evidence in a workflow
 

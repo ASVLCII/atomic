@@ -9,7 +9,7 @@ Atomic can work in applications, not just edit code. Computer-use automation, or
 
 This guide explains tool selection, setup, and safe operation. To test a software change and attach the results to a PR, see [Verification and evidence](/workflows/verification).
 
-Jump to [application scripting](#application-scripting-and-apis), [desktop CUA](#desktop-automation-with-pyautogui-and-uv), [browser automation](#browser-automation-with-agent-browser), [terminal automation](#terminal-automation-with-herdr), or [creative workflows](#creative-work-and-cua-workflows). Platform setup: [macOS](#macos), [Linux](#linux), [Windows](#windows).
+Jump to [application scripting](#application-scripting-and-apis), [desktop CUA](#desktop-automation-with-cua-driver), [browser automation](#browser-automation-with-agent-browser), [terminal automation](#terminal-automation-with-herdr), or [creative workflows](#creative-work-and-cua-workflows). Platform setup: [macOS](#macos), [Linux](#linux), [Windows](#windows).
 
 ## Choose the right tool
 
@@ -20,11 +20,11 @@ Start with the result you need, not the application you could click through. If 
 | Create or edit files, such as presentations, documents, spreadsheets, or media | **A file library or CLI** | Use an app API or UI when the library cannot preserve required features, or when you need rendering or visual adjustments. |
 | Interactive terminal or TUI | **Herdr** | Use tmux on macOS/Linux or native Windows psmux when Herdr cannot be used. Ordinary shell commands need no multiplexer. |
 | Browser page or web application | **agent-browser** | Use desktop CUA for browser chrome or OS dialogs that browser automation cannot reach. Keep existing browser test suites for repeatable tests. |
-| Desktop application or work across apps | **PyAutoGUI, run with uv** | Use native accessibility tools, application scripting, or a CLI when they make the task easier, safer, or more reliable. |
+| Desktop application, simulator, emulator, or work across apps | **Cua Driver**: the `cua-driver` CLI through the bundled `cua-driver` skill when a model chooses each action; the `@trycua/cua-driver` TypeScript SDK inside `ctx.tool` when workflow code owns the scenario | Use application scripting or a CLI when they make the task easier, safer, or more reliable. |
 
-You can combine tools without driving the whole task through a desktop. Generate a presentation with `python-pptx`, then inspect rendered slides for layout problems. Use Blender's Python API to generate repeated objects, then PyAutoGUI for adjustments in the visible editor. Use browser DOM controls rather than desktop clicks for a web form. For a supported web-service operation that does not require browser interaction, an authorized API request may be enough.
+You can combine tools without driving the whole task through a desktop. Generate a presentation with `python-pptx`, then inspect rendered slides for layout problems. Use Blender's Python API to generate repeated objects, then Cua Driver for adjustments in the visible editor. Use browser DOM controls rather than desktop clicks for a web form. For a supported web-service operation that does not require browser interaction, an authorized API request may be enough.
 
-Atomic's skills supply operating instructions, not an installed desktop or automatic permission to control one. Load the `herdr`, `agent-browser`, or `tmux` skill when applicable. Check the installed command's help before using version-dependent options.
+Atomic's skills supply operating instructions, not an installed desktop or automatic permission to control one. Load the `cua-driver`, `herdr`, `agent-browser`, or `tmux` skill when applicable. Check the installed command's help before using version-dependent options.
 
 **Herdr eligibility:** the bundled Herdr skill requires an explicit user mention or request and an agent running inside a Herdr-managed pane with `HERDR_ENV=1`. Launch Atomic inside Herdr and ask it to use Herdr for terminal work. Do not set the variable manually to bypass the check or control a focused session from outside Herdr. If those conditions are not met, use a suitable fallback.
 
@@ -33,7 +33,7 @@ Atomic's skills supply operating instructions, not an installed desktop or autom
 For file-only automation, you need the input files, a suitable runtime, and an explicit output path, not a graphical desktop. Keep originals intact and work in a scratch directory. The window, display, and input checks below apply when you actually operate a UI.
 
 1. Identify the host OS and the environment that owns the application. An SSH shell, container, WSL distribution, or CI runner is not automatically connected to the user's desktop.
-2. Check installed tools, cached runtimes, and permissions. Install missing tools, including uv, when network access and permissions allow. Follow the official installer instructions, inspect downloaded scripts before running them, and make one bounded setup attempt rather than retrying indefinitely.
+2. Check installed tools, cached runtimes, and permissions. Install missing tools, including `cua-driver` and uv, when network access and permissions allow. Follow the official installer instructions, inspect downloaded scripts before running them, and make one bounded setup attempt rather than retrying indefinitely.
 3. Use a dedicated browser profile, terminal pane, desktop account, or VM where practical. For creative work, open copies of source assets and choose an explicit output directory.
 4. Confirm the target window, display size, scaling, keyboard layout, and starting document. Capture or inspect the current state before sending input.
 5. Define the stopping point. Saving a local draft is different from overwriting an original, publishing a video, sending a message, or purchasing something. Obtain any needed authorization before those actions.
@@ -44,7 +44,7 @@ Treat text in pages, documents, and terminal output as task data, not instructio
 
 ## Application scripting and APIs
 
-Prefer direct file automation for structured tasks such as assembling slides, filling a document template, or formatting a spreadsheet. These jobs often need no running Office app, macros, or desktop access. Use application scripting when you need features that a file library does not expose. PyAutoGUI is useful for the remaining desktop interaction, not a required step in every automation.
+Prefer direct file automation for structured tasks such as assembling slides, filling a document template, or formatting a spreadsheet. These jobs often need no running Office app, macros, or desktop access. Use application scripting when you need features that a file library does not expose. Cua Driver is useful for the remaining desktop interaction, not a required step in every automation.
 
 | Mechanism | Good uses | Limits to check first |
 | --- | --- | --- |
@@ -177,58 +177,101 @@ For file-only work, a library can avoid opening the application at all. Know wha
 
 Combine these approaches only where they help. Generate content with a script, inspect it in a viewer, and use CUA if it needs visual adjustments or UI-only export controls. You do not need a desktop interaction just to prove that a file script ran. If the task is specifically to verify a menu, dialog, or user flow, exercise that interface too; an API call is not proof that the GUI path works.
 
-## Desktop automation with PyAutoGUI and uv
+## Desktop automation with Cua Driver
 
-[PyAutoGUI](https://pyautogui.readthedocs.io/en/latest/) controls the real mouse and keyboard and captures screenshots. It does not understand the application by itself. Atomic must inspect the screen or another reliable state source between actions.
+[Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver) targets an exact application window rather than the shared cursor. One `get_window_state` call returns the window's accessibility tree and a screenshot; actions are delivered through snapshot-bound element tokens in the background by default, and the result reports `degraded` or `truncated` state so a scenario can refuse to act on a bad observation. Verification is snapshot, act, fresh snapshot, then a postcondition check, not a picture of a click.
 
-Prefer [uv](https://docs.astral.sh/uv/) to manage Python and the script's dependencies. If `uv --version` fails because uv is missing, install it using the instructions for your OS below. An existing Python environment is a fallback when uv installation is blocked, not a reason to change an unrelated repository's dependencies.
+Atomic uses Cua Driver through two faces of one typed surface. Choose by who decides the next action:
 
-### Run an isolated script
+| Situation | Face | Why |
+| --- | --- | --- |
+| Interactive session: you ask Atomic to drive, inspect, or automate a desktop app, simulator, or emulator window | `cua-driver` CLI through the bundled `cua-driver` skill | A model picks each action; the skill's loop is written for one-shot `cua-driver call <tool>` commands. |
+| Builtin Goal or Ralph stage doing end-to-end desktop verification | `cua-driver` CLI through the bundled `cua-driver` skill | The stage is a model deciding turn by turn; its evidence is the JSON results and `screenshot_out_file` images it saves. |
+| Authored model stage in a custom or dynamic workflow doing ad hoc desktop work | `cua-driver` CLI through the bundled `cua-driver` skill | Same as above. |
+| Deterministic scenario that workflow TypeScript owns, run inside `ctx.tool(name, args, fn, { timeoutMs })` | `@trycua/cua-driver` TypeScript SDK | Code owns the sequence and the postcondition; the result is durably checkpointed and replayed on resume. |
 
-Save the following as `desktop_probe.py` in a scratch directory. It takes a screenshot and reports geometry without clicking or typing:
+The rule of thumb: **when a model chooses the next action, use the CLI; when TypeScript code owns the sequence and the postcondition, use the SDK.** Browsers stay with [agent-browser](#browser-automation-with-agent-browser). Terminals stay with [Herdr](#terminal-automation-with-herdr), falling back to tmux or psmux. Both faces share tool names (`list_apps`, `list_windows`, `get_window_state`, `click`, `type_text`, and the rest), so a scenario worked out interactively translates directly into code.
 
-```python
-from pathlib import Path
+The bundled `cua-driver` skill is the upstream skill, vendored verbatim, and is the only place the driving loop is described. Do not run `cua-driver skills install`: it links the skill into `~/.agents/skills`, `~/.claude/skills`, and similar directories that Atomic does not own. The bundled copy is the skill.
 
-import pyautogui as gui
+### Install if missing
 
-gui.FAILSAFE = True
-gui.PAUSE = 0.25
-
-output = Path("artifacts")
-output.mkdir(exist_ok=True)
-print(f"Screen: {gui.size()}; pointer: {gui.position()}")
-gui.screenshot().save(output / "desktop-before.png")
-```
-
-Run it from that directory:
+Check `cua-driver --version`. If the executable is missing, make **one bounded attempt** with upstream's one-line installer for the host. It needs no administrator access:
 
 ```sh
-uv run --no-project --with pyautogui --with pillow python desktop_probe.py
+# macOS (14 Sonoma or later) and Linux
+/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
 ```
 
-`--no-project` avoids discovering or syncing an unrelated Python project. uv can download a Python runtime and dependencies if needed, so this first run may require network access. OS screenshot and accessibility dependencies still need separate setup. For a reusable script, declare dependencies in [inline script metadata](https://docs.astral.sh/uv/guides/scripts/#declaring-script-dependencies), pin versions, and use uv's script locking support. Keep scratch environments and captures out of the application's repository unless they belong in the deliverable.
+```powershell
+# Windows PowerShell
+irm https://cua.ai/driver/install.ps1 | iex
+```
 
-Open the captured image and confirm it shows the intended desktop. A successful import is not proof that screenshots or input work. Test a harmless action in a disposable document before running a longer sequence.
+Report what the installer did. On macOS it places `CuaDriver.app` in `/Applications`, creates the `~/.local/bin/cua-driver` symlink, and appends an `export PATH=…` line to your `zsh`, `bash`, or `fish` rc file when `~/.local/bin` is not already on `PATH`; open a new shell or source the rc file before retrying `cua-driver --version`. On Linux it downloads into `~/.cua-driver/packages/releases/` and creates the same symlink; a minimal image may first need `sudo apt install libxi6 at-spi2-core`. On Windows it installs under `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin`, appends that directory to the user `Path`, and registers a `cua-driver-serve` autostart task when the session is interactive.
 
-### Observe, act, and check
+Never loop on the installer. In a workflow stage, a refused or failed install is reported as `blocked`/`needs_human` together with the exact installer command above, not worked around with an alternative tool.
 
-- Use short action sequences. Inspect the result after opening a menu, changing focus, or switching applications.
-- Prefer named accessibility controls or application APIs where available. If using coordinates, derive them from the current screen rather than an old screenshot.
-- Keep the target on the primary monitor. PyAutoGUI's multi-monitor support is limited. Retina and DPI scaling can make screenshot pixels differ from input coordinates; compare screenshot dimensions with `gui.size()` before clicking.
-- `gui.write()` sends keystrokes to the focused window and is not a general Unicode text-insertion API. For non-ASCII content, prefer app scripting or a controlled clipboard paste. Clipboard contents may be sensitive, so preserve and restore them when appropriate.
-- For image matching, crop to the relevant region and use fixtures from the same theme and scaling. Handle a missing image as a failed observation, not a reason to click a default location. PyAutoGUI's `confidence` option requires OpenCV in the Python environment.
-- Wait for an observable result with a deadline. A fixed sleep alone does not prove a render, export, or save has finished.
+If the installed driver is older than the bundled skill's `version` (`0.28.2`), run `cua-driver update --apply` once and restart the daemon with the platform's startup command below. If it is newer, proceed and note the skew in the report. `cua-driver check-update` only checks; it changes nothing.
 
-See PyAutoGUI's [keyboard controls](https://pyautogui.readthedocs.io/en/latest/keyboard.html), [mouse controls](https://pyautogui.readthedocs.io/en/latest/mouse.html), and [screenshot functions](https://pyautogui.readthedocs.io/en/latest/screenshot.html) for API details.
+### Turn telemetry off
 
-### Stop and recover safely
+Cua Driver sends content-free, pseudonymous product telemetry to PostHog **by default, from every face**: the CLI, the daemon, the MCP server, and the Python and TypeScript SDKs. It is keyed by a persisted installation UUID, so it is pseudonymous rather than anonymous. Atomic's guidance turns it off before the first driver call on every path; it does not claim the driver is telemetry-free.
 
-Keep `FAILSAFE` enabled and leave a pause between calls. Moving the pointer to a corner of the primary monitor causes a subsequent PyAutoGUI call to raise `FailSafeException`. Keep a separate way to interrupt the automation process available too.
+- **Every invocation.** Run every `cua-driver` command, every SDK scenario, and every `ctx.tool` child process with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false` in the environment. The environment override takes precedence over any saved preference and needs no executable, so it is the control Atomic standardizes on.
+- **After an executable install.** Additionally run `cua-driver telemetry disable` once, so the preference persists for daemon-owned sessions Atomic does not spawn (on macOS the daemon is launched through `open`, which does not inherit the agent's shell environment). Confirm with `cua-driver telemetry status --json`.
+- Never post the installation UUID from `telemetry status` in an issue, an evidence artifact, or a transcript.
 
-Prefer complete actions such as `press`, `hotkey`, and `click` over holding input across several steps. If a script must hold a key or mouse button, track what it holds and release it in cleanup. An interrupt or failsafe can itself prevent PyAutoGUI cleanup calls. Stop the script, check for held input, and release it manually or through a safe native mechanism before resuming. Do not disable the failsafe in order to keep clicking.
+The startup update check is separate from telemetry. It carries no installation ID or usage data, fires only on `mcp`, `serve`, and `doctor` with a 20-hour cache, and is how you learn that `cua-driver update --apply` is warranted. Atomic leaves it at the upstream default. If you want the GitHub request gone, set `CUA_DRIVER_RS_UPDATE_CHECK=false` for one invocation, or run `cua-driver config set update_check_enabled false` to persist it.
 
-After a timeout or interruption, inspect the current document and any output files. A save or export may have completed even if its acknowledgement was lost. Do not repeat destructive actions blindly.
+### Check readiness
+
+A version string verifies the binary, not desktop access. Before the first action:
+
+```sh
+export CUA_DRIVER_RS_TELEMETRY_ENABLED=false
+cua-driver status          # the daemon is running
+cua-driver doctor          # session, display, accessibility bus, telemetry setup
+cua-driver call list_apps  # a GUI app you recognize appears
+```
+
+`cua-driver call <tool>` is call-owned: it connects to the running daemon, prints one result, and exits. When no daemon is reachable it fails rather than executing in the CLI process, so a stopped daemon looks like a failed call. `list-tools`, `describe <tool>`, and `dump-docs` read the tool inventory without a runtime.
+
+- **macOS.** Start a stopped daemon with `open -n -g -a CuaDriver --args serve`, never with a bare `cua-driver serve` from a terminal: LaunchServices attributes the process to `CuaDriver.app` (`com.trycua.driver`), so the Accessibility and Screen Recording grants attach to the app and survive upgrades, while a terminal-launched daemon is attributed to the terminal app. Then run `cua-driver permissions status`; it reads the daemon's grants and reports `unknown` when no daemon is running. To grant, run `cua-driver permissions grant`, then toggle CuaDriver on under System Settings → Privacy & Security → Accessibility and under Screen & System Audio Recording. The prompt only registers the app; the toggle grants. macOS does not always raise both prompts in one pass, so rerun the pair and relaunch the daemon afterwards.
+- **Windows.** The daemon must run in the interactive user session; Session 0 cannot see the desktop. If the autostart task was not registered, run `cua-driver serve` in an interactive desktop terminal and use a second terminal for the checks. Standard-user automation cannot drive elevated apps or the UAC secure desktop.
+- **Linux.** Require a graphical X11 or XWayland session with `DISPLAY` set and AT-SPI available, and run `cua-driver serve` in the foreground inside that session. Native Wayland is opt-in with `CUA_DRIVER_RS_ENABLE_WAYLAND=1` and has compositor-specific limits; do not claim full Wayland support.
+
+A missing macOS Accessibility or Screen Recording grant, a non-interactive Windows session, or no graphical Linux session is a `blocked`/`needs_human` finding in a workflow stage. Report the exact fix from the list above and re-run the readiness check on resume. Let the user grant permissions; do not script around consent dialogs.
+
+### Drive a window from the shell
+
+Load the `cua-driver` skill and follow its loop. The shape, with `CUA_DRIVER_RS_TELEMETRY_ENABLED=false` exported as above, is:
+
+```sh
+cua-driver call list_apps
+cua-driver call list_windows '{"pid":844}'
+cua-driver call get_window_state '{"pid":844,"window_id":10725,"screenshot_out_file":"artifacts/before.png"}' > artifacts/before.json
+# Pick one element_token from before.json, then act on it in the background.
+cua-driver call click '{"pid":844,"element_token":"s0000002a:14"}'
+cua-driver call get_window_state '{"pid":844,"window_id":10725,"screenshot_out_file":"artifacts/after.png"}' > artifacts/after.json
+```
+
+Replace the pid, window id, and token with values read from your own output; tokens are bound to the snapshot that produced them and must be re-read after any UI change. Check the postcondition in `after.json` with a bounded poll deadline, never a fixed sleep and never a repeated click. A `degraded` or `truncated` snapshot is a reason to stop and re-observe, and a refused background action is an escalation signal, not something to retry. Foreground delivery is an explicit escalation. Keep the JSON results and the `screenshot_out_file` images as evidence.
+
+### Run a scenario from workflow code
+
+When a custom workflow owns the scenario, use the `@trycua/cua-driver` TypeScript SDK inside `ctx.tool` so the observe → act → re-observe → assert loop is a durable, replayable node. The [workflow authoring guide](/workflows/authoring#desktop-verification-with-cua-driver-in-ctx-tool) has the runnable example; the summary is:
+
+- **Prerequisite.** `node` (preferred) or `bun` on the host. Their absence is a reported limitation, not something to work around.
+- **Install.** `npm install @trycua/cua-driver@<exact pin matching cua-driver --version>` into a scratch directory outside the user's repository, one bounded attempt. The package ships per-platform native optional dependencies, so it is self-contained. Pin the exact driver version: daemon-backed clients verify contract, tool-schema, capability, and protocol versions before each action and refuse on mismatch.
+- **Acquire the driver.** When `cua-driver status` reports a running daemon, use `CuaDriver.connect()` so the scenario reuses the daemon's permission identity (on macOS, `CuaDriver.app`'s grants) and the persisted telemetry-off preference; upstream describes `connect()` as a compatibility and app-hosting path, and that is exactly the role it plays here. Only when no daemon is reachable, fall back to `CuaDriver.create()`, which loads the runtime into the node process. On macOS that in-process fallback attributes Accessibility and Screen Recording to the node host, normally the terminal app, as a **separate grant**; `checkPermissions` is then read-only, and the host must fully quit and relaunch after granting.
+- **Telemetry.** Set `CUA_DRIVER_RS_TELEMETRY_ENABLED=false` in the child environment before constructing the driver.
+- **Loop.** `listApps` → `listWindows` → `getWindowState` (refuse `degraded`/`truncated`) → resolve exactly one element → act by `elementToken` with `InputDeliveryMode.Background` → `getWindowState` again → bounded-poll the postcondition. `shutdown()` in `finally`, then `uniffiDestroy()` when present.
+- **Result.** Machine-readable `verified` / `refuted` / `blocked` / `unknown`; the wrapper maps anything but `verified` to a nonzero outcome. An action that times out before its response is `unknown`, resolved by the postcondition, never by replaying the mutation.
+
+### Stay safe
+
+One controller owns a desktop at a time. Use a dedicated session or account where practical, keep unrelated windows out of captures, and define an explicit stopping point before destructive or publishing actions such as overwriting an original, sending a message, or purchasing. After a timeout or interruption, inspect the current document and any output files before acting again; a save or export may have completed even if its acknowledgement was lost. Never disable OS security controls to make automation work.
 
 ## Browser automation with agent-browser
 
@@ -326,11 +369,12 @@ For modified-key setup in Atomic, see [tmux setup](/tmux). For behavioral checks
 
 ### Desktop and native tools
 
-- Install missing uv with `brew install uv` when Homebrew is available, or use the reviewed macOS installer from [uv installation](https://docs.astral.sh/uv/getting-started/installation/). Confirm `uv --version` in the launching shell.
-- Allow the application launching automation, such as Terminal or your IDE, in System Settings > Privacy & Security > Accessibility. Screenshot capture also needs Screen Recording permission, which may be labelled Screen & System Audio Recording on newer macOS versions. Relaunch the affected app if macOS requests it.
+- Install a missing `cua-driver` with the [one-line installer](#install-if-missing) (macOS 14 Sonoma or later), run `cua-driver telemetry disable` once, and open a new shell so `~/.local/bin` is on `PATH`. Install missing uv with `brew install uv` when Homebrew is available, or use the reviewed macOS installer from [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
+- The daemon is `CuaDriver.app`. Start it with `open -n -g -a CuaDriver --args serve` so macOS attributes the process, and its Accessibility and Screen Recording grants, to `com.trycua.driver` rather than to Terminal or your IDE. A daemon started from a terminal is the right binary with the wrong privacy identity.
+- Grant with `cua-driver permissions grant`, then toggle CuaDriver on under System Settings > Privacy & Security > Accessibility and under Screen & System Audio Recording, and relaunch the daemon. Confirm with `cua-driver permissions status`. If CuaDriver is missing from either list, click **+** and add `/Applications/CuaDriver.app`.
+- An in-process `CuaDriver.create()` runtime is attributed to the node host that imported it, normally the terminal app. That is a separate grant from the app's, `checkPermissions` is read-only there, and the host must fully quit and relaunch after a change.
 - AppleScript automation may also prompt for Automation permission to control another app. Let the user grant permissions; do not script around consent dialogs.
-- PyAutoGUI depends on native Python bindings on macOS. If import or capture fails, check the installed release's [installation requirements](https://pyautogui.readthedocs.io/en/latest/install.html) before adding dependencies to the uv environment.
-- Check Retina scaling and keep the target on the primary display. A black or incomplete capture usually needs permission or display troubleshooting, not more clicks.
+- Window screenshots use the window's own coordinate space and report their scale factor; act by element token where possible and read dimensions from the same snapshot before any pixel action. A black or incomplete capture usually needs permission or display troubleshooting, not more clicks.
 
 Use `osascript` for AppleScript or JavaScript for Automation when an app's scripting dictionary exposes the operation you need. See [application scripting and recipes](#application-scripting-and-apis) for a runnable example and Office automation choices. `System Events` UI scripting and native accessibility APIs can address menus and controls more reliably than coordinates; consult Apple's [UI scripting guide](https://developer.apple.com/library/archive/documentation/LanguagesUtilities/Conceptual/MacAutomationScriptingGuide/AutomatetheUserInterface.html).
 
@@ -346,11 +390,10 @@ Herdr is the first choice for interactive terminals when eligible. Homebrew prov
 
 ### Desktop and native tools
 
-- Install missing uv through the [official Linux installer](https://docs.astral.sh/uv/getting-started/installation/) or an available distribution package. Review the installer before executing it, then confirm `uv --version`.
-- PyAutoGUI's Linux input backend uses X11. Run in an accessible graphical X11 session with the correct `DISPLAY` and authorization. Installing Python packages does not create a desktop session.
-- Check the distribution's screenshot and Python support packages. PyAutoGUI documents `scrot` and Python Tk/development packages for Linux; the required capture backend varies with the installed Pillow/PyScreeze versions. Use the distribution package manager with permission, not guessed cross-distribution commands.
-- A Wayland session is not equivalent to X11. XWayland does not grant access to every native Wayland app. Prefer compositor-supported capture/input tools, desktop portals, or native accessibility APIs when they support the operation. Do not weaken session security or claim PyAutoGUI has full Wayland support.
-- For unattended X11 work, a dedicated virtual display such as Xvfb can be useful. It does not prove behavior on a real Wayland desktop, GPU configuration, or physical display. Creative applications may require working graphics acceleration.
+- Install a missing `cua-driver` with the [one-line installer](#install-if-missing); a minimal image may first need `sudo apt install libxi6 at-spi2-core`. Run `cua-driver telemetry disable` once and open a new shell so `~/.local/bin` is on `PATH`. Install missing uv through the [official Linux installer](https://docs.astral.sh/uv/getting-started/installation/) or an available distribution package.
+- Installing the binary does not start the daemon or create a desktop session. Run `cua-driver serve` in the foreground in a terminal inside the graphical session that owns the apps, with the same `DISPLAY` and AT-SPI session bus, and run `cua-driver doctor` from a second terminal in that session.
+- X11 and XWayland are the supported routes by default; toolkit-specific limits apply. Native Wayland is opt-in with `CUA_DRIVER_RS_ENABLE_WAYLAND=1` and depends on the compositor. Do not weaken session security or claim full Wayland support.
+- For unattended X11 work, a dedicated virtual display such as Xvfb with a desktop session (for example `xfce4`) can be useful. It does not prove behavior on a real Wayland desktop, GPU configuration, or physical display. Creative applications may require working graphics acceleration.
 
 [AT-SPI](https://gnome.pages.gitlab.gnome.org/at-spi2-core/) can expose named controls in accessible applications. `xdotool` and `wmctrl` can help with focus and window placement on X11; they are not general Wayland replacements. On Wayland, choose tools for the actual compositor and inspect their permission requirements. Use app APIs where custom canvases do not expose useful accessibility controls.
 
@@ -366,13 +409,14 @@ Herdr is preferred when eligible; tmux is a practical fallback on local or remot
 
 ### Desktop and native tools
 
-- Install missing uv with `winget install --id=astral-sh.uv -e` or use the reviewed PowerShell installer from [uv installation](https://docs.astral.sh/uv/getting-started/installation/). Open a new shell if PATH changed, then run `uv --version`.
-- Run PyAutoGUI and uv in the Windows graphical session that owns the app. Running them inside WSL does not automatically control native Windows windows.
+- Install a missing `cua-driver` with the [PowerShell one-liner](#install-if-missing) and run `cua-driver telemetry disable` once. Open a new shell if `Path` changed, then run `cua-driver --version`. Install missing uv with `winget install --id=astral-sh.uv -e` or use the reviewed PowerShell installer from [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
+- The daemon must run in the interactive user session (Session 1 or later); Session 0 services cannot see the desktop. The installer registers a `cua-driver-serve` autostart task when the session is interactive; otherwise run `cua-driver serve` in an interactive desktop terminal and use a second terminal for the checks.
+- Run `cua-driver` in the Windows graphical session that owns the app. Running it inside WSL does not control native Windows windows.
 - Keep the session unlocked and available during automation. A disconnected or minimized Remote Desktop session can change rendering or input behavior; verify the actual remote-session setup before relying on it.
 - Use a consistent display scale and primary monitor. Check coordinates again after moving a window between displays with different DPI settings.
 - Standard-user automation cannot reliably drive elevated apps or the UAC secure desktop. Stop for the user or choose an authorized non-elevated path rather than escalating just to force input through.
 
-[Windows UI Automation](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-overview) exposes controls by name and automation ID. Tools such as [pywinauto](https://pywinauto.readthedocs.io/en/latest/) can be easier than pixel matching for accessible Windows apps. For structured document operations, start with [file libraries and app scripting](#application-scripting-and-apis). Use PyAutoGUI for the remaining visual interactions.
+[Windows UI Automation](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-overview) exposes controls by name and automation ID. Cua Driver reads that UIA tree in `get_window_state` and acts on it in the background, so prefer element tokens over pixel matching for accessible Windows apps. For structured document operations, start with [file libraries and app scripting](#application-scripting-and-apis). Use Cua Driver for the remaining visual interactions.
 
 Snipping Tool or OBS can capture desktop evidence. Check the selected window and saved recording before sharing it.
 
@@ -390,22 +434,22 @@ Choose the deliverable first. A library or application API may produce it withou
 
 | Task | Practical approach | Useful deliverables |
 | --- | --- | --- |
-| Blender 3D modeling | Use Blender Python for repeatable geometry or scene setup; use PyAutoGUI for visible editor operations and visual inspection. | Editable `.blend` file, exported model if requested, preview render. |
+| Blender 3D modeling | Use Blender Python for repeatable geometry or scene setup; use Cua Driver for visible editor operations and visual inspection. | Editable `.blend` file, exported model if requested, preview render. |
 | Presentations | Generate structured slides with `python-pptx`, inspect them in a compatible viewer, and use CUA for visual refinements or slideshow interaction when needed. | Editable deck plus PDF or slide previews exported through a compatible application. |
 | Video editing | Use the editor's scripting API or media CLI for repetitive operations; use CUA to adjust the timeline, inspect transitions, and review playback. | Editable project, required source references, final export. |
-| Work across applications | Use native scripting for named windows and file operations; use PyAutoGUI where the task needs visual interaction. | Saved documents and a concise record of completed steps. |
+| Work across applications | Use native scripting for named windows and file operations; use Cua Driver where the task needs visual interaction, addressing each window by pid and window id. | Saved documents and a concise record of completed steps. |
 
 Do not substitute a screenshot for the editable project or final export the user requested. Reopen saved files, check missing assets and fonts, and inspect the actual export. For video, check audio and timing as well as a still frame. Keep originals intact and use explicit save paths. Rendering, uploading, or exporting through a paid service may need separate authorization.
 
-When the user specifically wants a CUA workflow, include PyAutoGUI in the stage that operates the desktop. For artifact-only requests, keep script-based work outside the desktop session and omit UI stages that add no useful operation or check. A desktop sequence is:
+When the user specifically wants a CUA workflow, give the stage that operates the desktop the `cua-driver` skill, or put a code-owned scenario in `ctx.tool` with the SDK. For artifact-only requests, keep script-based work outside the desktop session and omit UI stages that add no useful operation or check. A desktop sequence is:
 
 1. Prepare assets and confirm the intended application, output formats, and permissions.
 2. Open the dedicated desktop and inspect its starting state.
-3. Create or edit with PyAutoGUI and suitable native/app APIs, saving checkpoints.
+3. Create or edit with Cua Driver and suitable native/app APIs, saving checkpoints.
 4. Reopen and inspect the deliverables, then make bounded corrections if needed.
 5. Hand off local files. Publish or upload only to an authorized target.
 
-Pass scripts, project files, and artifact paths between stages rather than long click transcripts. Give one stage exclusive desktop ownership and use finite deadlines for renders and exports. Stop on unexpected dialogs, lost focus, missing permissions, or failed observations. On resume, inspect the app and files before repeating an action.
+Pass scripts, project files, and artifact paths between stages rather than long click transcripts. Give one stage exclusive desktop ownership and use finite deadlines for renders and exports. Stop on unexpected dialogs, degraded or truncated snapshots, missing permissions, or failed observations. On resume, inspect the app and files before repeating an action.
 
 See [workflow authoring](/workflows/authoring) for stages and human-input gates. Use durable `ctx.tool` calls for workflow-owned external operations, with finite timeouts and cancellation; model stages can use the appropriate automation tools to operate the app. If the user asks to work inline, keep the same safety and deliverable checks without creating a workflow.
 
@@ -413,7 +457,11 @@ See [workflow authoring](/workflows/authoring) for stages and human-input gates.
 
 | Symptom | What to check |
 | --- | --- |
-| uv or another command is missing | Install it when permitted, refresh PATH, and check its version in the same shell that will launch automation. |
+| `cua-driver`, uv, or another command is missing | Install it when permitted with one bounded attempt, refresh PATH, and check its version in the same shell that will launch automation. |
+| `cua-driver call` fails or `permissions status` reports `unknown` | The daemon is not running. Start it with `open -n -g -a CuaDriver --args serve` on macOS, an interactive-session `cua-driver serve` on Windows, or a foreground `cua-driver serve` inside the graphical session on Linux, then rerun `cua-driver status`. |
+| Grants look correct but actions or captures are refused | Stale TCC grants. Toggle CuaDriver off and on under Accessibility and Screen & System Audio Recording, or click **+** and re-add `/Applications/CuaDriver.app`, then fully relaunch the daemon. An in-process SDK runtime needs the node host relaunched instead. |
+| Contract, schema, or protocol mismatch | Version skew between the bundled skill (`0.28.2`), the `@trycua/cua-driver` pin, and `cua-driver --version`. Run `cua-driver update --apply` once, restart the daemon, and reinstall the SDK at the exact driver version. |
+| Snapshot reports `degraded` or `truncated` | Do not act on it. Re-observe, narrow the query, or fall back to a pixel action from the same snapshot only where the skill allows it. |
 | Black screenshot or no desktop | Check screen permissions, display/session ownership, X11 versus Wayland, and remote-session state. |
 | Input reaches the wrong app | Stop. Confirm focus, window identity, scaling, and that no other controller shares the desktop. |
 | Browser element reference no longer works | Take a fresh snapshot and locate the current control. |

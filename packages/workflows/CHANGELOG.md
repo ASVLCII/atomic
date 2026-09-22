@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Goal and Ralph end-to-end verification guidance and the workflow-authoring guidance now direct desktop, simulator, and emulator verification to Cua Driver: builtin stages load the bundled `cua-driver` skill and drive the exact window with `cua-driver call <tool>` under `CUA_DRIVER_RS_TELEMETRY_ENABLED=false`, save `get_window_state` JSON and `screenshot_out_file` images as evidence, and report a missing permission, session, or refused install as `blocked`/`needs_human` with exact remediation; custom workflows run code-owned scenarios with the `@trycua/cua-driver` SDK inside `ctx.tool` with `timeoutMs` and `signal`, after a preflight `ctx.tool` that exits `blocked` on missing permissions. The OpenAI CUA sample-app reference was removed ([#3181](https://github.com/bastani-inc/atomic/issues/3181)).
+
 ### Fixed
 
 - Docker fallback Postgres is no longer treated as ready when the published port accepts TCP during `initdb`. Atomic waits for a PostgreSQL query using the endpoint, credentials and TLS settings DBOS will use, retries transient startup resets and refusals (including a connection that terminates while the container is still starting), and shuts down a failed DBOS executor before continuing with the in-memory backend. Invalid readiness ports now fail before connecting rather than leaving a delayed process-crashing error.
