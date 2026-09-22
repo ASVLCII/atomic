@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added inherited Claude Opus 5.5 support for Anthropic with adaptive thinking and a 1M context window.
+
+### Changed
+
+- Recorded Artificial Analysis Intelligence Index and Cognition FrontierCode 1.1 results for Claude Opus 5.5 in the evals snapshot used by automatic model routing.
+
+### Fixed
+
+- Fixed the RPC extension UI example to disable extensions with the supported `--no-extensions` flag and safely frame split UTF-8 output.
+
 ## [0.9.20-alpha.6] - 2026-09-22
 
 ### Breaking Changes

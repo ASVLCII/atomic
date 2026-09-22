@@ -5,7 +5,7 @@ description: "Primary-source benchmark facts used by Atomic automatic model rout
 
 # Evals
 
-Last Accessed: 2026-09-21.
+Last Accessed: 2026-09-22.
 
 Key:
 
@@ -52,11 +52,15 @@ Table: top 26 catalog models by Intelligence Index. Fifty does not fit. Jev allo
 
 | slug | Model | idx | Brief | Gn | Auto | TB4 | Sci | HLE | PDF | Crit | OA | ONH | LCR | Cod | Agt | Omni | GPQA | TB21 | TBh | IF | MMMU | tau2 | tauB | Analyst | ITB | Apex | AIME | LCB | Harvey | MLCR | Open | Ent |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| claude-opus-5-5 | Claude Opus 5.5 (Adaptive Reasoning, Max Effort, Default Fallback) | 57.6 | 66.1 | 67.3 | 69.5 | 59.6 | 66.9 | 61.4 | 26.2 | 31.7 | 66.2 | 41.4 | 84.7 | ∅ | ∅ | 46.4 | ∅ | ∅ | ∅ | ∅ | 87.7 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 91.2 | ∅ | ∅ | ∅ |
+| claude-opus-5-5-xhigh | Claude Opus 5.5 (Adaptive Reasoning, Xhigh Effort, Default Fallback) | 56 | 64 | 66 | 65 | 59.6 | 65 | 57.5 | 26.6 | 31.7 | 65.4 | 34.3 | 84.7 | ∅ | ∅ | 42.7 | ∅ | ∅ | ∅ | ∅ | 86.6 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 91.2 | ∅ | ∅ | ∅ |
+| claude-opus-5-5-high | Claude Opus 5.5 (Adaptive Reasoning, High Effort, Default Fallback) | 53.6 | 60.2 | 59.6 | 63.2 | 56.6 | 60.4 | 55.6 | 28.8 | 30.9 | 64.6 | 32.4 | 82.7 | ∅ | ∅ | 40.6 | ∅ | ∅ | ∅ | ∅ | 85.8 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 90.9 | ∅ | ∅ | ∅ |
 | claude-fable-5-1 | Claude Fable 5.1 (Adaptive Reasoning, Max Effort, Default Fallback) | 53.4 | 58.9 | 61.7 | 59.4 | 52 | 63.1 | 59.1 | 26.2 | 29.7 | 67.2 | 27.4 | 85.3 | 81.6 | 57.9 | 43.5 | 93.7 | 91.4 | ∅ | ∅ | ∅ | ∅ | 47.2 | 57.5 | ∅ | ∅ | ∅ | ∅ | 93 | 71.1 | ∅ | ∅ |
 | claude-fable-5-1-xhigh | Claude Fable 5.1 (Adaptive Reasoning, Xhigh Effort, Default Fallback) | 53.2 | 58.4 | 61 | 57.8 | 55.1 | 60.9 | 58.7 | 26.2 | 31.1 | 66.2 | 29.5 | 83 | 80.7 | 57.2 | 42.4 | 93.4 | 91 | ∅ | ∅ | ∅ | ∅ | 45.8 | ∅ | ∅ | ∅ | ∅ | ∅ | 93.3 | ∅ | ∅ | ∅ |
 | gpt-6-astra | GPT-6 Astra (max) | 52.7 | 53.4 | 52.1 | 68.5 | 59.1 | 56.5 | 54.7 | 31 | 31.7 | 62.6 | 48.7 | 80.7 | 76.9 | 51 | 43.4 | 96.1 | 88.4 | ∅ | ∅ | 86.9 | ∅ | 41.4 | 51.3 | ∅ | ∅ | ∅ | ∅ | ∅ | 35 | ∅ | ∅ |
 | gpt-6-astra-xhigh | GPT-6 Astra (xhigh) | 52.4 | 52.2 | 50.8 | 67.2 | 59.6 | 55.7 | 54.6 | 32.2 | 31.4 | 61.9 | 51.7 | 80 | 75.9 | 50.2 | 43.4 | 96.3 | 89.1 | ∅ | ∅ | 86.2 | ∅ | 43.1 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
 | claude-fable-5-1-high | Claude Fable 5.1 (Adaptive Reasoning, High Effort, Default Fallback) | 51.2 | 54.6 | 55.9 | 55.3 | 52 | 58.7 | 55.9 | 26.8 | 30.3 | 64.9 | 31.2 | 83.7 | 79.1 | 53.1 | 40.8 | 90.6 | 89.9 | ∅ | ∅ | ∅ | ∅ | 43.1 | ∅ | ∅ | ∅ | ∅ | ∅ | 93 | ∅ | ∅ | ∅ |
+| claude-opus-5-5-medium | Claude Opus 5.5 (Adaptive Reasoning, Medium Effort, Default Fallback) | 51.2 | 57.1 | 53.8 | 61.2 | 52.5 | 59.3 | 54.7 | 25.6 | 27.7 | 64.6 | 31.6 | 84.3 | ∅ | ∅ | 40.3 | ∅ | ∅ | ∅ | ∅ | 85.7 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 90.3 | ∅ | ∅ | ∅ |
 | gpt-6-astra-high | GPT-6 Astra (high) | 50.9 | 50.3 | 49.2 | 66.6 | 54 | 55.4 | 53.1 | 31 | 28.9 | 61.1 | 55.2 | 80 | 77.1 | 48.2 | 43.7 | 94.9 | 89.9 | ∅ | ∅ | 86.4 | ∅ | 40 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
 | claude-opus-5 | Claude Opus 5 (Adaptive Reasoning, Max Effort) | 50.8 | 58.7 | 60.4 | 56.6 | 49 | 56.4 | 54.9 | 21.6 | 29.1 | 60.9 | 39.2 | 79.3 | 78 | 56.5 | 37.1 | 93.2 | 89.1 | ∅ | ∅ | 84.7 | ∅ | 42.1 | 53.8 | ∅ | ∅ | ∅ | ∅ | 93.5 | 55.6 | ∅ | 47.5 |
 | claude-opus-5-xhigh | Claude Opus 5 (Adaptive Reasoning, Xhigh Effort) | 49.7 | 57.5 | 58.8 | 53.2 | 46.5 | 55.7 | 54.4 | 21 | 27.7 | 59.5 | 40.5 | 80.3 | 77 | 55.6 | 35.4 | 93.7 | 88 | ∅ | ∅ | 84 | ∅ | 43.3 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 58.3 | ∅ | ∅ |
@@ -74,10 +78,6 @@ Table: top 26 catalog models by Intelligence Index. Fifty does not fit. Jev allo
 | qwen3-8-max | Qwen3.8 Max (0902) | 45.4 | 57 | 58.4 | 56.2 | 38.9 | 52.1 | 43.1 | 22.8 | 17.7 | 31.7 | 71.2 | 80.3 | 76.2 | 56 | 12 | 92.8 | 88.8 | ∅ | ∅ | 82.8 | ∅ | 47.8 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 20 | ∅ | ∅ |
 | muse-spark-1-3-xhigh | Muse Spark 1.3 (xhigh) | 45.1 | ∅ | 56.4 | 56.8 | 16.7 | 59.7 | 47.5 | 24.2 | 26 | 41.5 | 68.5 | 83 | 76.5 | 51.5 | 23.1 | 94.1 | 85.4 | ∅ | ∅ | 82 | ∅ | 47.2 | ∅ | ∅ | ∅ | ∅ | ∅ | 95.5 | ∅ | ∅ | ∅ |
 | claude-opus-5-medium | Claude Opus 5 (Adaptive Reasoning, Medium Effort) | 44.8 | ∅ | 48.8 | 54.3 | 34.3 | 51.5 | 51.3 | 20 | 26.9 | 57.1 | 39.3 | 82 | 74.3 | 46.2 | 31 | 91.9 | 86.1 | ∅ | ∅ | 81.6 | ∅ | 38.6 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 56.1 | ∅ | ∅ |
-| glm-5-3 | GLM-5.3 (max) | 44.8 | 51.2 | 57.3 | 62.2 | 41.9 | 59 | 42.3 | 11.2 | 19.1 | 33.9 | 70.4 | 79.7 | 74.8 | 53.1 | 14.3 | 91.7 | 83.9 | ∅ | ∅ | ∅ | ∅ | 50.3 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 48.3 | 33.3 | 36.4 |
-| grok-4-6 | Grok 4.6 (high) | 44.3 | 52.3 | 55.3 | 66.7 | 21.2 | 56.5 | 42.9 | 17 | 17.1 | 48.2 | 65.7 | 80.3 | 76.8 | 53 | 30.5 | 94.9 | 88.4 | ∅ | ∅ | ∅ | ∅ | 50.7 | 41.3 | ∅ | ∅ | ∅ | ∅ | ∅ | 12.2 | ∅ | 48.3 |
-| grok-4-6-xhigh | Grok 4.6 (xhigh) | 44.2 | ∅ | 56.6 | 67 | 17.2 | 53 | 44.1 | 17.2 | 19.7 | 43 | 76 | 81 | 75.9 | 52.5 | 29.3 | 93.5 | 88 | ∅ | ∅ | ∅ | ∅ | 43.3 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ |
-| gpt-5-6-sol-xhigh | GPT-5.6 Sol (xhigh) | 44 | ∅ | 52.4 | 55.3 | 24.7 | 57.1 | 47.3 | 27.6 | 28.6 | 58.8 | 8.1 | 82.3 | 78.3 | 47.4 | 21 | 93.1 | 89.5 | 61.4 | 71 | 82.7 | 84.8 | 38.1 | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 18.3 | ∅ | ∅ |
 
 ## Cognition FrontierCode 1.1
 
@@ -87,39 +87,40 @@ Table: Main Best rows in source order. Columns: model, source effort label, harn
 
 | ID | Model | Effort | Harness | score | pass | flag | USD/task | output k-tokens |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| F01 | Claude Fable 5 | xhigh | cc | 53.5 | 58.9 | 0.3 | 13.09 | 58.6 |
-| F02 | Claude Opus 5 | medium | cc | 53.4 | 58.9 | 0.6 | 4.31 | 33.6 |
-| F03 | GPT-6 Astra | max | codex | 53.3 | 58.8 | — | 4.59 | 30.1 |
-| F04 | Claude Fable 5.1 | medium | cc | 50.9 | 55.5 | 0.0 | 3.28 | 26.1 |
-| F05 | SWE-2 | max | devin | 50.0 | 55.5 | — | 1.18 | 72.8 |
-| F06 | Grok 4.6 | high | gb | 48.0 | 53.1 | 0.7 | 2.88 | 36.8 |
-| F07 | GPT-5.6 Sol | max | codex | 47.5 | 52.9 | 0.0 | 5.19 | 33.2 |
-| F08 | Claude Opus 4.8 | max | cc | 46.5 | 51.6 | 0.6 | 9.62 | 95.9 |
-| F09 | Kimi K3 | none | msa | 44.2 | 48.9 | 0.2 | 3.82 | 53.6 |
-| F10 | Gemini 3.7 Flash | medium | chisel | 43.6 | 48.9 | 0.0 | 1.82 | 51.1 |
-| F11 | GPT-5.5 | xhigh | codex | 43.0 | 48.2 | 0.4 | 4.03 | 25.0 |
-| F12 | Claude Sonnet 5 | xhigh | cc | 42.7 | 47.6 | 0.5 | 10.07 | 87.9 |
-| F13 | Grok 4.5 | high | gb | 42.4 | 47.2 | 0.0 | 1.30 | 15.3 |
-| F14 | SWE-1.7 | none | chisel | 42.0 | 47.4 | 1.2 | 1.97 | 64.8 |
-| F15 | GPT-5.6 Terra | max | codex | 41.3 | 46.3 | 0.1 | 1.87 | 40.5 |
-| F16 | Gemini 3.8 Flash | medium | chisel | 41.2 | 46.7 | 0.0 | 2.60 | 78.9 |
-| F17 | GLM 5.3 | max | chisel | 40.1 | 44.7 | 0.0 | 16.91 | 112.2 |
-| F18 | GPT-5.6 Luna | max | codex | 39.8 | 44.7 | 0.1 | 0.37 | 37.4 |
-| F19 | Claude Opus 4.7 | max | cc | 38.5 | 42.8 | 0.1 | 9.09 | 49.1 |
-| F20 | Gemini 3.6 Flash | medium | chisel | 34.4 | 38.9 | 0.0 | 4.04 | 46.7 |
-| F21 | GLM 5.3 Flash | max | chisel | 31.8 | 35.7 | 0.0 | 1.15 | 169.3 |
-| F22 | Kimi K2.7 | none | msa | 30.1 | 33.6 | 0.0 | 3.01 | 43.9 |
-| F23 | DeepSeek V4 Pro 0813 | high | chisel | 28.5 | 31.8 | 10.6 | 1.81 | 104.7 |
-| F24 | GPT-5.4-mini | xhigh | codex | 27.0 | 30.8 | 0.0 | 1.52 | 90.9 |
-| F25 | Claude Opus 4.6 | high | cc | 26.6 | 29.7 | 0.1 | 3.98 | 26.7 |
-| F26 | Composer 2.5 | none | cursor | 25.6 | 29.3 | 2.4 | 3.09 | 16.0 |
-| F27 | GLM 5.2 | none | msa | 24.5 | 27.4 | 0.0 | 2.47 | 17.8 |
-| F28 | Claude Sonnet 4.6 | max | cc | 24.3 | 27.5 | 0.2 | 2.90 | 44.2 |
-| F29 | DeepSeek V4 Flash 0731 | high | chisel | 18.8 | 21.1 | 25.5 | 1.53 | 94.4 |
-| F30 | DeepSeek V4 Pro | none | msa | 17.6 | 20.0 | 1.0 | 1.55 | 28.8 |
-| F31 | MiniMax M3 | none | msa | 14.7 | 16.6 | 1.5 | 0.68 | 34.0 |
-| F32 | Inkling | 0.99 | msa | 14.0 | 15.9 | 7.6 | 3.60 | 33.6 |
-| F33 | Nemotron 3 Ultra | none | chisel | 13.6 | 15.4 | 0.2 | 1.47 | 27.7 |
-| F34 | Qwen 3.7 Plus | none | msa | 10.2 | 11.5 | 0.9 | 0.24 | 45.3 |
-| F35 | SWE-1.6 | none | chisel | 9.4 | 10.4 | 0.0 | 0.49 | 19.8 |
-| F36 | Mistral 3.5 Medium | none | chisel | 8.0 | 9.0 | 0.6 | 1.35 | 22.5 |
+| F01 | Claude Opus 5.5 | medium | cc | 54.6 | 59.6 | 0.0 | 0.80 | 18.5 |
+| F02 | Claude Fable 5 | xhigh | cc | 53.5 | 58.9 | 0.3 | 13.09 | 58.6 |
+| F03 | Claude Opus 5 | medium | cc | 53.4 | 58.9 | 0.6 | 4.31 | 33.6 |
+| F04 | GPT-6 Astra | max | codex | 53.3 | 58.8 | — | 4.59 | 30.1 |
+| F05 | Claude Fable 5.1 | medium | cc | 50.9 | 55.5 | 0.0 | 3.28 | 26.1 |
+| F06 | SWE-2 | max | devin | 50.0 | 55.5 | — | 1.18 | 72.8 |
+| F07 | Grok 4.6 | high | gb | 48.0 | 53.1 | 0.7 | 2.88 | 36.8 |
+| F08 | GPT-5.6 Sol | max | codex | 47.5 | 52.9 | 0.0 | 5.19 | 33.2 |
+| F09 | Claude Opus 4.8 | max | cc | 46.5 | 51.6 | 0.6 | 9.62 | 95.9 |
+| F10 | Kimi K3 | none | msa | 44.2 | 48.9 | 0.2 | 3.82 | 53.6 |
+| F11 | Gemini 3.7 Flash | medium | chisel | 43.6 | 48.9 | 0.0 | 1.82 | 51.1 |
+| F12 | GPT-5.5 | xhigh | codex | 43.0 | 48.2 | 0.4 | 4.03 | 25.0 |
+| F13 | Claude Sonnet 5 | xhigh | cc | 42.7 | 47.6 | 0.5 | 10.07 | 87.9 |
+| F14 | Grok 4.5 | high | gb | 42.4 | 47.2 | 0.0 | 1.30 | 15.3 |
+| F15 | SWE-1.7 | none | chisel | 42.0 | 47.4 | 1.2 | 1.97 | 64.8 |
+| F16 | GPT-5.6 Terra | max | codex | 41.3 | 46.3 | 0.1 | 1.87 | 40.5 |
+| F17 | Gemini 3.8 Flash | medium | chisel | 41.2 | 46.7 | 0.0 | 2.60 | 78.9 |
+| F18 | GLM 5.3 | max | chisel | 40.1 | 44.7 | 0.0 | 16.91 | 112.2 |
+| F19 | GPT-5.6 Luna | max | codex | 39.8 | 44.7 | 0.1 | 0.37 | 37.4 |
+| F20 | Claude Opus 4.7 | max | cc | 38.5 | 42.8 | 0.1 | 9.09 | 49.1 |
+| F21 | Gemini 3.6 Flash | medium | chisel | 34.4 | 38.9 | 0.0 | 4.04 | 46.7 |
+| F22 | GLM 5.3 Flash | max | chisel | 31.8 | 35.7 | 0.0 | 1.15 | 169.3 |
+| F23 | Kimi K2.7 | none | msa | 30.1 | 33.6 | 0.0 | 3.01 | 43.9 |
+| F24 | DeepSeek V4 Pro 0813 | high | chisel | 28.5 | 31.8 | 10.6 | 1.81 | 104.7 |
+| F25 | GPT-5.4-mini | xhigh | codex | 27.0 | 30.8 | 0.0 | 1.52 | 90.9 |
+| F26 | Claude Opus 4.6 | high | cc | 26.6 | 29.7 | 0.1 | 3.98 | 26.7 |
+| F27 | Composer 2.5 | none | cursor | 25.6 | 29.3 | 2.4 | 3.09 | 16.0 |
+| F28 | GLM 5.2 | none | msa | 24.5 | 27.4 | 0.0 | 2.47 | 17.8 |
+| F29 | Claude Sonnet 4.6 | max | cc | 24.3 | 27.5 | 0.2 | 2.90 | 44.2 |
+| F30 | DeepSeek V4 Flash 0731 | high | chisel | 18.8 | 21.1 | 25.5 | 1.53 | 94.4 |
+| F31 | DeepSeek V4 Pro | none | msa | 17.6 | 20.0 | 1.0 | 1.55 | 28.8 |
+| F32 | MiniMax M3 | none | msa | 14.7 | 16.6 | 1.5 | 0.68 | 34.0 |
+| F33 | Inkling | 0.99 | msa | 14.0 | 15.9 | 7.6 | 3.60 | 33.6 |
+| F34 | Nemotron 3 Ultra | none | chisel | 13.6 | 15.4 | 0.2 | 1.47 | 27.7 |
+| F35 | Qwen 3.7 Plus | none | msa | 10.2 | 11.5 | 0.9 | 0.24 | 45.3 |
+| F36 | SWE-1.6 | none | chisel | 9.4 | 10.4 | 0.0 | 0.49 | 19.8 |
+| F37 | Mistral 3.5 Medium | none | chisel | 8.0 | 9.0 | 0.6 | 1.35 | 22.5 |
