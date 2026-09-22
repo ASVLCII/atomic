@@ -500,8 +500,7 @@ Analyze GitHub issue(s): $ARGUMENTS`,
 });
 
 describe("loadPromptTemplates - diagnostics", () => {
-	// Regression test for #9354.
-	test("reports invalid YAML frontmatter and keeps valid siblings", () => {
+	test("reports invalid YAML frontmatter and keeps valid siblings (#9354)", () => {
 		const testDir = mkdtempSync(join(tmpdir(), "pi-test-prompts-invalid-"));
 		const invalidPromptPath = join(testDir, "invalid.md");
 		try {

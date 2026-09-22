@@ -28,8 +28,7 @@ describeModelRegistry((context) => {
 			expect(opus?.name).not.toBe("Custom Sonnet Name");
 		});
 
-		// Regression test for https://github.com/earendil-works/pi/issues/9631
-		test("model override deep-merges image resize limits", async () => {
+		test("model override deep-merges image resize limits (#9631)", async () => {
 			writeRawModelsJson({
 				test: {
 					baseUrl: "https://example.com",

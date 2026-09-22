@@ -46,8 +46,7 @@ Prompt content.`,
 			expect(prompts.some((p) => p.name === "test-prompt")).toBe(true);
 		});
 
-		// Regression test for #9354.
-		it("should report invalid prompt frontmatter while loading valid siblings", async () => {
+		it("should report invalid prompt frontmatter while loading valid siblings (#9354)", async () => {
 			const promptsDir = join(agentDir, "prompts");
 			const invalidPromptPath = join(promptsDir, "invalid.md");
 			mkdirSync(promptsDir, { recursive: true });
