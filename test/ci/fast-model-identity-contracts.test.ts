@@ -267,6 +267,9 @@ const proseNames = new Set([
 	// Bundled skill name and its engine environment variable, not package-root exports.
 	"impeccable",
 	"IMPECCABLE_BIN",
+	// PR #3185: Goal stage status values a desktop-verification stage reports, not package-root exports.
+	"blocked",
+	"needs_human",
 	// Extension event names, not package-root exports.
 	"compaction_start",
 	"session_before_compact",
