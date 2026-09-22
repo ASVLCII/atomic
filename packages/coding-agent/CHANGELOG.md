@@ -39,6 +39,7 @@
 - Fixed inherited unknown OpenAI-compatible Chat Completions endpoints receiving strict tool schemas unless they explicitly advertise support ([#9816](https://github.com/earendil-works/pi/issues/9816)).
 - Structured decisions and automatic model selection no longer fail at a fixed 30-second deadline, including during model ranking, output repairs and Jev-to-chat fallback. Explicit cancellation and independent provider and tool-request limits still apply.
 - Workflow reviewers and other stages no longer fail extension startup with a misleading `Live workflow-stage route is owned by another active session` when their workflow owner is re-registering with the Intercom broker, when the previous attempt's session is still being torn down, or when a later review round reuses a stage name whose earlier occurrence is still connected. Refusals now name the actual condition, transient ones recover through the bounded stage warm-up retry, and genuine duplicate owners are still refused. See [Intercom operations](/intercom/operations#workflow-stage-route-refusals) ([#3163](https://github.com/bastani-inc/atomic/issues/3163)).
+- Fixed missing or invalid `--mode` values being silently ignored instead of reporting an error and exiting with a nonzero status ([#9045](https://github.com/earendil-works/pi/issues/9045)).
 
 ## [0.9.20-alpha.5] - 2026-09-20
 
