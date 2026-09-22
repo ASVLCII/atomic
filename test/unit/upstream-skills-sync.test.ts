@@ -25,6 +25,7 @@ const root = resolve(moduleDir(import.meta.url), "../..");
 const subagentSkills = join(root, "packages/subagents/skills");
 const workflowSkills = join(root, "packages/workflows/skills");
 const liteparseSkill = join(subagentSkills, "liteparse");
+const cuaDriverSkill = join(subagentSkills, "cua-driver");
 
 // run-llama/llamaparse-agent-skills `main` at 2dcef7c62417bd2ec4671fce4621bb1e8cce48d0
 // ships exactly these two files under `skills/liteparse/`, both tracked as 100644.
@@ -39,6 +40,29 @@ const liteparseAdaptations: ReadonlyArray<readonly [atomic: string, canonical: s
 	["\nscripts/search.py /tmp/doc.txt", "\n./.claude/skills/effective-liteparse/scripts/search.py /tmp/doc.txt"],
 ];
 const liteparseCanonicalSkillSha256 = "c4982f937fe569cd109801e9c6f0bd80219df93835d9a206bae6958c5e3c841c";
+
+// trycua/cua `libs/cua-driver/rust/Skills/cua-driver` at tag cua-driver-rs-v0.28.2
+// (tree bcd5714fc3b102b0ebb1e2b9331feaf4f6c390ad, commit fc188250b4ca8549b8e61f937fdb1fb560770e86)
+// ships exactly these eight files, all tracked as 100644. The seven companion
+// files are byte-identical to upstream; only SKILL.md's frontmatter is Atomic-owned,
+// so its body after the closing `---` is pinned separately.
+const cuaDriverUpstream = {
+	repo: "https://github.com/trycua/cua",
+	path: "libs/cua-driver/rust/Skills/cua-driver",
+	ref: "refs/tags/cua-driver-rs-v0.28.2",
+	treeSha: "bcd5714fc3b102b0ebb1e2b9331feaf4f6c390ad",
+} as const;
+const cuaDriverCompanionTree: ReadonlyArray<readonly [path: string, sha256: string]> = [
+	["BROWSER.md", "376960a136247d8ac2850f789fb7761c9619967c85e0f30c410f32890902e5d4"],
+	["EMBEDDING.md", "206e2c5ad3b5be5d7d5a0214975df9fa9e59026e72165c97eed4b59669db9715"],
+	["LINUX.md", "4d096f19eab5c56f0231bed98e2048abc09f969a92e70311be9e1f5ecc5209e0"],
+	["MACOS.md", "8e5013cb7a9a3cb4cbae6fe43593f14627597f1f41395d769602ed9e3c0e1603"],
+	["README.md", "07580cc0a7df49dc088939e88d8c95ae387aeb4a94d61142f4527fade4b4328c"],
+	["RECORDING.md", "16bfe5732d25bdebded8a8cb0c13cd367405dd264a6da8af8970bfa4151ca7c5"],
+	["WINDOWS.md", "0f42710550c9b6583f7cb705fbc1ffe320c790350b6a829c3689887747c909c5"],
+];
+const cuaDriverTree = ["SKILL.md", ...cuaDriverCompanionTree.map(([path]) => path)].sort();
+const cuaDriverUpstreamSkillBodySha256 = "2ed5d656232f32af46ff9f96316a754be783d4e0a5ced2b7752b77765c2dc91f";
 
 // pbakaus/impeccable authoritative `.pi/skills/impeccable` distribution:
 // skill-v4.3.1 at cd12f8660e2dde57b9615c8a6b8ea674101f9cfc (engine 0.1.5)
@@ -115,6 +139,29 @@ function canonicalText(contents: string | Buffer): string {
 
 function assertLiteParseContent(path: string, expected: string, displayPath: string): void {
 	assert.equal(sha256(canonicalText(readFileSync(path))), expected, `LiteParse content drift: ${displayPath}`);
+}
+
+/** Splits a SKILL.md into its YAML frontmatter and the body after the closing `---` line. */
+function splitFrontmatter(contents: string): { frontmatter: string; body: string } {
+	const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/u.exec(contents);
+	assert.ok(match, "SKILL.md must open with a YAML frontmatter block");
+	return { frontmatter: match[1], body: match[2] };
+}
+
+function trackedModes(path: string): string[] {
+	const staged = spawnSyncCollect(["git", "ls-files", "--stage", "--", path], {
+		cwd: root,
+		env: createGitEnvironment(),
+	});
+	assert.equal(staged.exitCode, 0, staged.stderr.toString());
+	return staged.stdout
+		.toString()
+		.trim()
+		.split("\n")
+		.map((line) => {
+			const [metadata, filePath] = line.split("\t");
+			return `${metadata.split(" ")[0]} ${filePath}`;
+		});
 }
 
 function runFixtureGit(cwd: string, args: readonly string[]): string {
@@ -197,8 +244,8 @@ const BUILTIN_LOADER_RELOAD_TIMEOUT_MS = 120_000;
 describe("synced upstream skill trees", () => {
 	test("discovers the renamed subagent skills and removes the old name", () => {
 		clearSkillCache();
-		const result = resolveSkills(["agent-browser", "liteparse", "effective-liteparse"], root);
-		assert.deepEqual(result.resolved.map((skill) => skill.name).sort(), ["agent-browser", "liteparse"]);
+		const result = resolveSkills(["agent-browser", "cua-driver", "liteparse", "effective-liteparse"], root);
+		assert.deepEqual(result.resolved.map((skill) => skill.name).sort(), ["agent-browser", "cua-driver", "liteparse"]);
 		assert.deepEqual(result.missing, ["effective-liteparse"]);
 		assert.match(readFileSync(join(subagentSkills, "liteparse/SKILL.md"), "utf8"), /^---\r?\nname: liteparse\r?$/m);
 		assert.equal(existsSync(join(subagentSkills, "effective-liteparse")), false);
@@ -226,6 +273,7 @@ describe("synced upstream skill trees", () => {
 
 	test("bundles meaningful upstream skill content without Atomic scaffolding", () => {
 		assertFiles(join(subagentSkills, "agent-browser"), ["SKILL.md"]);
+		assertFiles(cuaDriverSkill, cuaDriverTree);
 		assertFiles(join(subagentSkills, "liteparse"), ["SKILL.md", "scripts/search.py"]);
 		assertFiles(join(workflowSkills, "impeccable"), [
 			"SKILL.md",
@@ -271,11 +319,13 @@ describe("synced upstream skill trees", () => {
 			assert.equal(existsSync(join(workflowSkills, "impeccable", stale)), false, `stale upstream file: ${stale}`);
 		}
 		assertNoScaffolding(join(subagentSkills, "agent-browser"));
+		assertNoScaffolding(cuaDriverSkill);
 		assertNoScaffolding(join(subagentSkills, "liteparse"));
 		assertNoScaffolding(join(workflowSkills, "impeccable"));
 		assertPacked(join(root, "packages/subagents"), [
 			"skills/agent-browser/SKILL.md",
 			"skills/liteparse/scripts/search.py",
+			...cuaDriverTree.map((path) => `skills/cua-driver/${path}`),
 		]);
 		assertPacked(join(root, "packages/workflows"), [
 			"skills/impeccable/scripts/impeccable",
@@ -351,6 +401,49 @@ describe("synced upstream skill trees", () => {
 		assert.doesNotMatch(readFileSync(join(liteparseSkill, "SKILL.md"), "utf8"), /effective-liteparse/u);
 	});
 
+	test("ships the exact upstream cua-driver skill tree with Atomic-owned frontmatter only (#3181)", () => {
+		assert.deepEqual(collectFiles(cuaDriverSkill, [], cuaDriverSkill).sort(), cuaDriverTree);
+		for (const [path, expected] of cuaDriverCompanionTree) {
+			assert.equal(
+				sha256(canonicalText(readFileSync(join(cuaDriverSkill, path)))),
+				expected,
+				`cua-driver content drift: ${path}`,
+			);
+		}
+		const { frontmatter, body } = splitFrontmatter(canonicalText(readFileSync(join(cuaDriverSkill, "SKILL.md"))));
+		assert.equal(sha256(body), cuaDriverUpstreamSkillBodySha256, "cua-driver SKILL.md body diverges from upstream");
+		// Frontmatter mirrors agent-browser: upstream name/description/version kept,
+		// Atomic adds hidden/allowed-tools and the github-* provenance pins, and drops
+		// upstream's OpenClaw requirement schema.
+		assert.match(frontmatter, /^name: cua-driver$/mu);
+		assert.match(frontmatter, /^version: 0\.28\.2$/mu);
+		assert.match(
+			frontmatter,
+			/^description: Drive a native GUI app \(macOS, Windows, Linux\) via the cua-driver CLI \(default\)/mu,
+		);
+		assert.match(frontmatter, /^hidden: true$/mu);
+		assert.match(frontmatter, /^allowed-tools: Bash\(cua-driver:\*\)$/mu);
+		const frontmatterLines = frontmatter.split("\n");
+		for (const [key, value] of [
+			["github-repo", cuaDriverUpstream.repo],
+			["github-path", cuaDriverUpstream.path],
+			["github-ref", cuaDriverUpstream.ref],
+			["github-tree-sha", cuaDriverUpstream.treeSha],
+		] as const) {
+			assert.ok(frontmatterLines.includes(`    ${key}: ${value}`), `frontmatter metadata.${key} must be ${value}`);
+		}
+		assert.doesNotMatch(frontmatter, /openclaw/u);
+		assert.doesNotMatch(body, /PyAutoGUI|pyautogui/iu);
+		assert.deepEqual(
+			trackedModes("packages/subagents/skills/cua-driver"),
+			cuaDriverTree.map((path) => `100644 packages/subagents/skills/cua-driver/${path}`),
+		);
+		assert.deepEqual(
+			packedPaths(join(root, "packages/subagents")).filter((path) => path.startsWith("skills/cua-driver/")),
+			cuaDriverTree.map((path) => `skills/cua-driver/${path}`),
+		);
+	});
+
 	test("validates LiteParse content across LF and CRLF checkouts without hiding real drift", () => {
 		const fixture = mkdtempSync(join(tmpdir(), "atomic-liteparse-line-endings-"));
 		const expected = liteparseTree[0][1];
@@ -378,21 +471,8 @@ describe("synced upstream skill trees", () => {
 	});
 
 	test("tracks the LiteParse tree as non-executable and packs exactly its two files", () => {
-		const staged = spawnSyncCollect(["git", "ls-files", "--stage", "--", "packages/subagents/skills/liteparse"], {
-			cwd: root,
-			env: createGitEnvironment(),
-		});
-		assert.equal(staged.exitCode, 0, staged.stderr.toString());
-		const trackedModes = staged.stdout
-			.toString()
-			.trim()
-			.split("\n")
-			.map((line) => {
-				const [metadata, path] = line.split("\t");
-				return `${metadata.split(" ")[0]} ${path}`;
-			});
 		assert.deepEqual(
-			trackedModes,
+			trackedModes("packages/subagents/skills/liteparse"),
 			liteparseTree.map(([path]) => `100644 packages/subagents/skills/liteparse/${path}`),
 		);
 		const packed = packedPaths(join(root, "packages/subagents"));
@@ -404,6 +484,7 @@ describe("synced upstream skill trees", () => {
 
 	test("contains no accidental symlinks", () => {
 		assertRegularTree(join(subagentSkills, "agent-browser"));
+		assertRegularTree(cuaDriverSkill);
 		assertRegularTree(join(subagentSkills, "liteparse"));
 		assertRegularTree(join(workflowSkills, "impeccable"));
 	});

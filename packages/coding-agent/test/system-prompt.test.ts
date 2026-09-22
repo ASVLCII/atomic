@@ -253,7 +253,25 @@ describe("buildSystemPrompt", () => {
 		assert.match(prompt, /https:\/\/artificialanalysis\.ai\//);
 		assert.match(prompt, /relevant benchmark charts and methodology/);
 		assert.match(prompt, /If live evidence is unavailable, label the dated docs snapshot/);
-		assert.match(prompt, /CUA\), use PyAutoGUI/);
+		assert.match(
+			prompt,
+			/CUA\) on desktop apps, simulators and emulators, use Cua Driver through the cua-driver skill/,
+		);
+		assert.match(prompt, /one-shot `cua-driver call <tool>` commands/);
+		assert.match(
+			prompt,
+			/when a model chooses the next action[\s\S]*use the CLI; when workflow TypeScript code owns the sequence and postcondition, use the @trycua\/cua-driver TypeScript SDK inside ctx\.tool/,
+		);
+		assert.match(
+			prompt,
+			/If `cua-driver --version` fails, make one bounded attempt with upstream's one-line installer/,
+		);
+		assert.match(prompt, /never run `cua-driver skills install`/);
+		assert.match(prompt, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/);
+		assert.match(prompt, /computer-use\.md/);
+		assert.doesNotMatch(prompt, /PyAutoGUI|pyautogui/i);
+		assert.doesNotMatch(prompt, /uv run --with pyautogui/);
+		assert.doesNotMatch(prompt, /CUA_DRIVER_RS_UPDATE_CHECK=false/);
 		assert.match(prompt, /browser automation use the agent-browser skill/);
 		assert.match(prompt, /terminal automation\/testing, prefer herdr on macOS, Linux and Windows/);
 		assert.match(prompt, /install it if missing/);
