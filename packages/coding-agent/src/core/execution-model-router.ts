@@ -58,21 +58,97 @@ Price is per task. Candidate cost is USD per million tokens, and roles differ in
 An explicit user request wins over these defaults, but the requested level must exist for the selected catalog entry. Do not invent unsupported suffixes. If \`xhigh\` is unavailable, use \`high\` rather than automatically promoting to \`max\`; choose another catalog model or leave the stage unpinned if neither fits.
 `;
 
-const MODEL_SELECTION_EVALS_JSON_BYTES = 16_000;
+export const MODEL_SELECTION_EVALS_JSON_BYTES = 16_000;
+const EVALS_BUDGET_ERROR = `Auto routing requires a nonempty evals.md document within ${MODEL_SELECTION_EVALS_JSON_BYTES.toLocaleString("en-US")} JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.`;
+function jsonBytes(value: string): number {
+	return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function modelToken(id: string): string {
+	return (id.split("/").pop() ?? id).toLowerCase().replace(/[._]/g, "-");
+}
+
+function rowMatches(line: string, tokens: readonly string[]): boolean {
+	const cells = line.split("|").map((cell) => cell.trim().toLowerCase());
+	const slug = (cells[1] ?? "").replace(/[._]/g, "-");
+	const name = (cells[2] ?? "").replace(/[._]/g, " ").replace(/-/g, " ");
+	return tokens.some((token) => {
+		const spaced = token.replace(/-/g, " ");
+		return slug === token || slug.startsWith(`${token}-`) || name === spaced || name.startsWith(`${spaced} `);
+	});
+}
+
+/** Keep the factual legend and rows for the eligible models inside the routing byte budget. */
+export function selectRoutingEvals(document: string, modelIds: readonly string[]): string {
+	if (!document.trim()) throw new Error(EVALS_BUDGET_ERROR);
+	if (jsonBytes(document) <= MODEL_SELECTION_EVALS_JSON_BYTES) return document;
+	const tokens = [...new Set(modelIds.map(modelToken))].filter((token) => token.length >= 4);
+	const lines = document.split("\n");
+	const kept: string[] = [];
+	let header: string[] = [];
+	let matched: string[] = [];
+	let sample: string[] = [];
+	let inTable = false;
+	const flush = () => {
+		if (!inTable) return;
+		const rows = matched.length > 0 ? matched : sample;
+		kept.push(...header, ...rows);
+		header = [];
+		matched = [];
+		sample = [];
+		inTable = false;
+	};
+	for (const line of lines) {
+		if (line.startsWith("|")) {
+			if (!inTable) inTable = true;
+			if (header.length < 2) header.push(line);
+			else if (rowMatches(line, tokens)) matched.push(line);
+			else if (sample.length < 8) sample.push(line);
+			continue;
+		}
+		flush();
+		kept.push(line);
+	}
+	flush();
+	const assemble = (limit: number) => {
+		const compact: string[] = [];
+		let tableHeader: string[] = [];
+		let tableRows: string[] = [];
+		let tableOpen = false;
+		const flushTable = () => {
+			if (!tableOpen) return;
+			compact.push(...tableHeader, ...tableRows.slice(0, limit));
+			tableHeader = [];
+			tableRows = [];
+			tableOpen = false;
+		};
+		for (const line of kept) {
+			if (line.startsWith("|")) {
+				tableOpen = true;
+				if (tableHeader.length < 2) tableHeader.push(line);
+				else tableRows.push(line);
+				continue;
+			}
+			flushTable();
+			compact.push(line);
+		}
+		flushTable();
+		return `${compact.join("\n").trim()}\n`;
+	};
+	for (const limit of [Number.POSITIVE_INFINITY, 8, 4, 1]) {
+		const text = assemble(limit);
+		if (jsonBytes(text) <= MODEL_SELECTION_EVALS_JSON_BYTES) return text;
+	}
+	throw new Error(EVALS_BUDGET_ERROR);
+}
 
 async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {
-		const evals = await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
-		// Markdown tables of default-source rows fit with the 12 KB task excerpt under
-		// Jev's 30 KB state+longest-question proof (below TypeSafe's 32k-token limit).
-		if (!evals.trim() || Buffer.byteLength(JSON.stringify(evals), "utf8") > MODEL_SELECTION_EVALS_JSON_BYTES)
-			throw new Error("Invalid evals");
-		return evals;
-	} catch {
+		return await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
+	} catch (error) {
 		signal?.throwIfAborted();
-		throw new Error(
-			`Auto routing requires a nonempty evals.md document within ${MODEL_SELECTION_EVALS_JSON_BYTES.toLocaleString("en-US")} JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.`,
-		);
+		if (error instanceof Error && error.message === EVALS_BUDGET_ERROR) throw error;
+		throw new Error(EVALS_BUDGET_ERROR);
 	}
 }
 
@@ -123,7 +199,10 @@ export async function routeExecutionModel(input: {
 		const state = {
 			task: input.task,
 			agent: { name: input.agent.name, description: input.agent.description },
-			evals: await readModelSelectionEvals(signal),
+			evals: selectRoutingEvals(
+				await readModelSelectionEvals(signal),
+				candidates.map((candidate) => candidate.model),
+			),
 			model_selection_guide: MODEL_SELECTION_GUIDE,
 		};
 		if (!state.task.trim()) throw new Error("Auto routing requires task instructions.");

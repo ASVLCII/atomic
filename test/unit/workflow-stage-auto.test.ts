@@ -146,7 +146,7 @@ test("public stage auto uses actual prompt and shipped evals before admission", 
 	assert.equal(state.policy, undefined);
 	assert.equal(state.evidence, undefined);
 	assert.match(state.evals, /# Evals/);
-	assert.match(state.evals, /DeepSWE/);
+	assert.match(state.evals, /656 catalog models/);
 	assert.match(state.model_selection_guide, /^## Benchmarks are evidence, not policy\n/);
 	assert.match(state.model_selection_guide, /## Role-based thinking effort/);
 	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 18_000);

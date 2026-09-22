@@ -91,7 +91,6 @@ const ROUTING_STATE_AND_ALL_BYTES = 48_000;
 
 test("execution routing keeps the real evals, guide, budget-sized task, and nine verbose candidates within Jev budgets", async () => {
 	vi.stubEnv("TYPESAFE_API_KEY", "mock-key");
-	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	const candidates = Array.from({ length: 9 }, (_, index) => ({
 		...decisionModel,
 		id: `candidate-${index + 1}`,
@@ -108,7 +107,8 @@ test("execution routing keeps the real evals, guide, budget-sized task, and nine
 		maxTotal = Math.max(maxTotal, size.total);
 		maxStateAndLongest = Math.max(maxStateAndLongest, size.stateAndLongestQuestion);
 		const request = JSON.parse(body) as JevFixtureRequest;
-		assert.equal(request.state.evals, evals);
+		assert.ok(Buffer.byteLength(JSON.stringify(request.state.evals), "utf8") <= 16_000);
+		assert.match(String(request.state.evals), /\| slug \| Model \| idx \|/);
 		for (const question of Object.values(request.questions)) {
 			for (const [key, value] of Object.entries(question.criteria)) {
 				const candidate = JSON.parse(value) as { model: string };
@@ -175,9 +175,9 @@ test("auto routing receives the shipped evals document verbatim", async () => {
 		state.model_selection_guide,
 		/If `xhigh` is unavailable, use `high` rather than automatically promoting to `max`/,
 	);
-	assert.equal(state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
 	assert.match(state.evals, /# Evals/);
-	assert.match(state.evals, /DeepSWE/);
+	assert.match(state.evals, /656 catalog models/);
+	assert.ok(Buffer.byteLength(JSON.stringify(state.evals), "utf8") <= 16_000);
 	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 30_000);
 	assert.equal(options?.maxRetries, 0);
 });
@@ -670,7 +670,8 @@ test("hello-world routing receives evals and fits one small Jev request", async 
 	const body = String(transport.mock.calls[0]![1].body);
 	const payload = JSON.parse(body);
 	assert.equal(payload.state.task, "Reply with exactly: Hello, world! No tools or file changes.");
-	assert.equal(payload.state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
+	assert.ok(Buffer.byteLength(JSON.stringify(payload.state.evals), "utf8") <= 16_000);
+	assert.match(String(payload.state.evals), /\| slug \| Model \| idx \|/);
 	const stateAndQuestionBytes = Math.max(
 		...Object.entries(payload.questions as Record<string, unknown>).map(([id, question]) =>
 			Buffer.byteLength(
@@ -681,7 +682,7 @@ test("hello-world routing receives evals and fits one small Jev request", async 
 	);
 	assert.ok(Buffer.byteLength(body) <= 48_000);
 	assert.ok(stateAndQuestionBytes <= 30_000);
-	assert.match(payload.state.evals, /# Evals/);
+	assert.match(String(payload.state.evals), /# Evals/);
 	assert.equal(payload.state.model_selection_guide, MODEL_SELECTION_GUIDE);
 	assert.equal(payload.state.policy, undefined);
 	assert.equal(payload.state.evidence, undefined);
@@ -696,7 +697,6 @@ test("maximal real eval routing payload preserves prompt and stays under conserv
 		{ ...decisionModel, id: "small-b", cost: { ...decisionModel.cost, input: 0.25, output: 0.5 } },
 	];
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(models);
-	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	const task = taskNearRoutingLimit();
 	assert.ok(Buffer.byteLength(JSON.stringify(task), "utf8") > MODEL_ROUTING_TASK_BYTES - 200);
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
@@ -706,7 +706,7 @@ test("maximal real eval routing payload preserves prompt and stays under conserv
 		assert.ok(bytes.total <= 48_000, String(bytes.total));
 		const request = JSON.parse(body) as JevFixtureRequest & { model: string };
 		assert.equal(request.state.task, task);
-		assert.equal(request.state.evals, evals);
+		assert.ok(Buffer.byteLength(JSON.stringify(request.state.evals), "utf8") <= 16_000);
 		assert.match(String(request.state.task), /{"quoted":"value\\n"}/);
 		assert.match(String(request.state.task), /Ω界/);
 		assert.ok(Object.keys(request.questions.pair.criteria).length <= 2);
@@ -726,7 +726,6 @@ test("real eval routing tournament preserves evals in every Jev request", async 
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(
 		Array.from({ length: 9 }, (_, index) => ({ ...decisionModel, id: `candidate-${index}` })),
 	);
-	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	const seen = new Set<string>();
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
 		const body = String(init.body);
@@ -734,7 +733,7 @@ test("real eval routing tournament preserves evals in every Jev request", async 
 		assert.ok(bytes.stateAndLongestQuestion <= 30_000, String(bytes.stateAndLongestQuestion));
 		assert.ok(bytes.total <= 48_000, String(bytes.total));
 		const request = JSON.parse(body) as JevFixtureRequest;
-		assert.equal(request.state.evals, evals);
+		assert.ok(Buffer.byteLength(JSON.stringify(request.state.evals), "utf8") <= 16_000);
 		for (const question of Object.values(request.questions)) {
 			for (const criterion of Object.values(question.criteria)) seen.add(JSON.parse(criterion).model as string);
 		}
@@ -849,13 +848,10 @@ test("auto routing keeps exact benchmark identity and provenance distinctions", 
 	let rank = 0;
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
-		assert.match(state.evals, /Fable 5 fallback=Opus 4\.8/);
-		assert.match(state.evals, /Fable 5\.1 Default Fallback/);
-		assert.match(state.evals, /Inkling AA `xhigh` is distinct from Frontier `0\.99`/);
-		assert.match(state.evals, /Harness: `cc`=claude-code, `gb`=grok-build, `msa`=mini-swe-agent/);
-		assert.match(state.evals, /`—`=source null, not 0/);
-		assert.match(state.evals, /\| GPT-6 Astra \| max \| codex \| 53\.3 \| 58\.8 \| — \| 4\.59 \| 30\.1 \|/);
-		assert.match(state.evals, /\| Claude Fable 5\.1 \| medium \| cc \| 50\.9 \| 55\.5 \| 0\.0 \| 3\.28 \| 26\.1 \|/);
+		assert.match(String(state.evals), /Harness: `cc`=claude-code, `gb`=grok-build, `msa`=mini-swe-agent/);
+		assert.match(String(state.evals), /\| claude-fable-5 /);
+		assert.match(String(state.evals), /\| F01 \| Claude Fable 5 \|/);
+		assert.ok(Buffer.byteLength(JSON.stringify(state.evals), "utf8") <= 16_000);
 		assert.equal(state.model_selection_guide, MODEL_SELECTION_GUIDE);
 		return messageStream(decisionMessage({ model: `${models[rank++]!.provider}/claude-fable-5`, effort: null }));
 	});

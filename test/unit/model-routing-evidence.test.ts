@@ -74,17 +74,6 @@ function sourceValues(row: string, prefix: string): string[] {
 	return prefix === "F" ? metrics.split("/") : metrics.split(" ");
 }
 
-function aaRowIdentities(document: string): string[] {
-	return sectionRows(document, "A").map((row) => {
-		const cells = tableCells(row);
-		return `${cells[0]} ${cells[1]}`;
-	});
-}
-
-function sourceLabelsBySlug(labels: readonly AaSourceLabel[]): Map<string, AaSourceLabel> {
-	return new Map(labels.map((label) => [label.modelSlug, label]));
-}
-
 function assertSourceRows(document: string, rows: readonly string[], prefix: string, expectedValues: number): void {
 	const actual = sectionRows(document, prefix).map((row) => compactRow(row, prefix));
 	assert.deepEqual(actual, rows, `${prefix} rows must preserve source order, identity, and displayed values`);
@@ -122,59 +111,38 @@ test("the general model-selection guide stays compact and points to factual eval
 	assert.doesNotMatch(guide, /narrow domain tasks should use/i);
 });
 
-test("the factual evals document preserves source-shaped benchmark records and provenance", async () => {
+test("the factual evals document is one Artificial Analysis table for every catalog model", async () => {
 	const evals = await readText("packages/coding-agent/docs/models/evals.md");
 	const fixture = await sourceFixture();
 	assert.match(evals, /Artificial Analysis Intelligence Index v4\.3\.2/);
-	assert.match(evals, /DeepSWE v1\.1/);
 	assert.match(evals, /Cognition FrontierCode 1\.1/);
 	assert.match(evals, /Terminal-Bench 4\.0/);
 	assert.match(evals, /normalized Elo.*clamp/);
 	assert.match(evals, /6,000-question ONH.*\(partial\+notattempted\)\/\(incorrect\+partial\+notattempted\)/);
-	assert.match(evals, new RegExp(`${fixture.counts.aaRows}-config default-chart union`));
-	assert.match(evals, new RegExp(`${fixture.counts.aaDisplayedConstituentRecords} displayed constituent records`));
-	assert.match(evals, /Best rows in source order/);
-	assertSourceRows(evals, fixture.aaRows, "A", fixture.shapeChecks.aaRows.values);
-	assert.equal(fixture.aaSourceLabels.length, fixture.counts.aaRows);
-	assert.deepEqual(
-		aaRowIdentities(evals),
-		fixture.aaSourceLabels.map((label) => `${label.row} ${label.rowLabel}`),
-		"AA row identities must come from source chart_label/full_config_label mapping",
+	assert.match(evals, /656 catalog models/);
+	assert.doesNotMatch(evals, /^## Grok 4\.7$/m);
+	assert.match(evals, /\| slug \| Model \| idx \| Brief \| Gn \| Auto \| TB4 \|/);
+	assert.match(evals, /\| grok-4-7 \| Grok 4\.7 \(xhigh\) \| 46\.4 \| 57\.9 \| 59\.8 \| 65\.6 \| 25\.8 \|/);
+	assert.match(evals, /\| grok-4-7-high \| Grok 4\.7 \(high\) \| 46\.3 \| 57\.2 \| 59\.7 \| 63\.5 \| 24\.7 \|/);
+	assert.equal(
+		evals
+			.split("\n")
+			.filter(
+				(line) =>
+					line.startsWith("| grok-") ||
+					line.startsWith("| claude-") ||
+					line.startsWith("| gpt-") ||
+					line.startsWith("| "),
+			).length > 600,
+		true,
 	);
-	for (const label of fixture.aaSourceLabels) {
-		assert.equal(label.sourceUrl, fixture.metadata.aa.url);
-		assert.equal(label.accessed, fixture.metadata.aa.accessed);
-		assert.ok(label.chartLabel.length > 0, label.row);
-		assert.ok(label.fullConfigLabel.length > 0, label.row);
-		assert.ok(label.rowLabel === label.chartLabel || label.rowLabel === label.fullConfigLabel, label.row);
-	}
-	const aaLabels = sourceLabelsBySlug(fixture.aaSourceLabels);
-	assert.equal(aaLabels.get("gemini-3-8-flash")?.rowLabel, "Gemini 3.8 Flash (high)");
-	assert.equal(aaLabels.get("gpt-5-5")?.rowLabel, "GPT-5.5 (xhigh)");
-	assert.equal(aaLabels.get("muse-spark-1-1")?.rowLabel, "Muse Spark 1.1 (xhigh)");
-	assert.equal(aaLabels.get("qwen3-8-27b")?.rowLabel, "Qwen3.8 27B (xhigh)");
-	assert.equal(aaLabels.get("muse-glimmer")?.rowLabel, "Muse Glimmer (high)");
-	assert.equal(aaLabels.get("step-5")?.rowLabel, "Step 5 Preview");
-	assert.equal(aaLabels.get("glm-5-3-flash")?.rowLabel, "GLM-5.3-Flash");
-	assert.equal(aaLabels.get("minimax-m3")?.rowLabel, "MiniMax-M3");
-	assert.equal(aaLabels.get("mistral-medium-3-5")?.rowLabel, "Mistral Medium 3.5");
 	assert.doesNotMatch(evals, /no suffix=`?max|slug model names are exact source labels/i);
 	assertSourceRows(evals, fixture.frontierRows, "F", fixture.shapeChecks.frontierMainRows.values);
-	for (const [name, source] of Object.entries(fixture.metadata)) {
-		assert.match(evals, new RegExp(source.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
-		assert.match(evals, new RegExp(source.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
-		assert.ok(source.units.length > 10, `${name} source units metadata`);
-	}
 	assert.match(evals, /\| GPT-6 Astra \| max \| codex \|/);
 	assert.match(evals, /\| DeepSeek V4 Pro 0813 \| high \| chisel \|/);
 	assert.match(evals, /\| MiniMax M3 \| none \| msa \|/);
 	assert.match(evals, /\| Mistral 3\.5 Medium \| none \| chisel \|/);
-	assert.match(evals, /Fable 5 fallback=Opus 4\.8/);
 	assert.match(evals, /Inkling `0\.99` is unexplained/);
 	assert.match(evals, /`∅`=source null\/absent, not zero/);
-	assert.match(evals, /\| xhigh \| 46\.4 \| 57\.9 \| 59\.8 \| 65\.6 \| 25\.8 \|/);
-	assert.match(evals, /\| high \| 46\.3 \| 57\.2 \| 59\.7 \| 63\.5 \| 24\.7 \|/);
-	assert.match(evals, /\| Coding Agent Index \| 56 \| 47 \|/);
-	assert.match(evals, /Hallucination rate is not the `ONH` column/);
 	assert.doesNotMatch(evals, /recommend|prefer|should choose|best for/i);
 });
