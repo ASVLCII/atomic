@@ -564,7 +564,10 @@ try {
       }),
     );
     if (state.degraded || state.truncated) throw new Error(`${label} snapshot is degraded or truncated`);
-    writeFileSync(join(artifactsDir, `${label}.json`), JSON.stringify(state.elements ?? [], null, 2));
+    // Keep the whole result (snapshot id, screenshot reference, degraded/truncated flags), not just
+    // the elements, so the retained tree is provably from a complete snapshot. Ids are bigint.
+    const json = JSON.stringify(state, (_key, value) => (typeof value === "bigint" ? value.toString() : value), 2);
+    writeFileSync(join(artifactsDir, `${label}.json`), json);
     return state;
   };
 
