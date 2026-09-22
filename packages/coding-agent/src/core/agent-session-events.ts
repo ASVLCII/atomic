@@ -168,6 +168,12 @@ export async function _processAgentEvent(this: AgentSession, event: AgentEvent):
 			? event.message
 			: undefined;
 	// Public notifications remain serialized behind extension events.
+	if (event.type === "agent_start") {
+		// A caller replacement prepared for a turn that never reached its provider
+		// request must not leak into this run's first request. `prepareRequest`
+		// awaits this queue, so the reset lands before the run's first projection.
+		this._callerReplacedNextRequestContext = false;
+	}
 	if (event.type === "message_start" && event.message.role === "user") {
 		this._overflowRecoveryAttempted = false;
 		this._recoverableLengthRecoveryAttempted = false;

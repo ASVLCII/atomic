@@ -1301,4 +1301,53 @@ describe("post-tool compaction preflight", () => {
 		expect(harness.session.isCompacting).toBe(false);
 		expect(harness.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
 	});
+
+	it("does not carry a caller replacement prepared for an unissued request into the next run", async () => {
+		const harness = await createHarnessWithExtensions({
+			responses: ["first response", "second response"],
+			configureAgent: (agent) => {
+				agent.prepareNextTurnWithContext = (turn) => ({
+					context: {
+						...turn.context,
+						messages: [
+							...turn.context.messages,
+							{ role: "user", content: [{ type: "text", text: "[caller prepared tail]" }], timestamp: 1 },
+						],
+					},
+				});
+			},
+		});
+		harnesses.push(harness);
+		await wireHarness(harness);
+
+		await harness.session.prompt("omitted later");
+		expect(harness.faux.callCount).toBe(1);
+
+		// A turn was prepared with the caller's replacement, but its provider request
+		// never happened: the run ended between preparation and the request.
+		const lastAssistant = harness.session.messages.at(-1);
+		assert.ok(lastAssistant?.role === "assistant");
+		await harness.agent.prepareNextTurnWithContext?.({
+			message: lastAssistant,
+			toolResults: [],
+			context: { systemPrompt: "", messages: harness.agent.state.messages, tools: [] },
+			newMessages: [],
+		});
+
+		// Edit the canonical context without refreshing the agent's finalized transcript,
+		// so the projection and `agent.state.messages` differ for the next request.
+		const firstUserId = harness.sessionManager
+			.getEntries()
+			.find((entry) => entry.type === "message" && entry.message.role === "user")?.id;
+		assert.ok(firstUserId);
+		harness.sessionManager.appendContextEdit(firstUserId, null);
+
+		await harness.session.prompt("second run");
+
+		expect(harness.faux.callCount).toBe(2);
+		const secondRequest = JSON.stringify(harness.faux.contexts[1]?.messages);
+		expect(secondRequest).not.toContain("omitted later");
+		expect(secondRequest).not.toContain("[caller prepared tail]");
+		expect(secondRequest).toContain("second run");
+	});
 });

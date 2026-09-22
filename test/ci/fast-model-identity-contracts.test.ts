@@ -323,10 +323,8 @@ const proseNames = new Set([
 	"outcome",
 	"messageEntryId",
 	"toolResultEntryIds",
-	"modelOverrides",
 	"read",
 	"GIF",
-	"undefined",
 ]);
 
 function unreleasedBlock(changelogPath: string): string {
