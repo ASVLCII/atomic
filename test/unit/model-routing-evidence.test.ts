@@ -18,13 +18,11 @@ interface SourceFidelityFixture {
 		readonly aaAggregateRows: number;
 		readonly aaDisplayedConstituentRecords: number;
 		readonly aaDisplayedTotalRecords: number;
-		readonly deepsweRows: number;
 		readonly frontierMainRows: number;
 		readonly frontierExtendedRows: number;
 	};
 	readonly aaRows: readonly string[];
 	readonly aaSourceLabels: readonly AaSourceLabel[];
-	readonly deepSweRows: readonly string[];
 	readonly frontierRows: readonly string[];
 	readonly sentinels: Record<string, string>;
 	readonly metadata: Record<
@@ -131,7 +129,6 @@ test("the factual evals document preserves source-shaped benchmark records and p
 	assert.match(evals, /DeepSWE v1\.1/);
 	assert.match(evals, /Cognition FrontierCode 1\.1/);
 	assert.match(evals, /Terminal-Bench 4\.0/);
-	assert.match(evals, /pass@1±95% run-to-run CI \(percent\)/);
 	assert.match(evals, /normalized Elo.*clamp/);
 	assert.match(evals, /6,000-question ONH.*\(partial\+notattempted\)\/\(incorrect\+partial\+notattempted\)/);
 	assert.match(evals, new RegExp(`${fixture.counts.aaRows}-config default-chart union`));
@@ -162,7 +159,6 @@ test("the factual evals document preserves source-shaped benchmark records and p
 	assert.equal(aaLabels.get("minimax-m3")?.rowLabel, "MiniMax-M3");
 	assert.equal(aaLabels.get("mistral-medium-3-5")?.rowLabel, "Mistral Medium 3.5");
 	assert.doesNotMatch(evals, /no suffix=`?max|slug model names are exact source labels/i);
-	assertSourceRows(evals, fixture.deepSweRows, "D", fixture.shapeChecks.deepSweRows.values - 1);
 	assertSourceRows(evals, fixture.frontierRows, "F", fixture.shapeChecks.frontierMainRows.values);
 	for (const [name, source] of Object.entries(fixture.metadata)) {
 		assert.match(evals, new RegExp(source.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
@@ -176,5 +172,9 @@ test("the factual evals document preserves source-shaped benchmark records and p
 	assert.match(evals, /Fable 5 fallback=Opus 4\.8/);
 	assert.match(evals, /Inkling `0\.99` is unexplained/);
 	assert.match(evals, /`∅`=source null\/absent, not zero/);
+	assert.match(evals, /\| xhigh \| 46\.4 \| 57\.9 \| 59\.8 \| 65\.6 \| 25\.8 \|/);
+	assert.match(evals, /\| high \| 46\.3 \| 57\.2 \| 59\.7 \| 63\.5 \| 24\.7 \|/);
+	assert.match(evals, /\| Coding Agent Index \| 56 \| 47 \|/);
+	assert.match(evals, /Hallucination rate is not the `ONH` column/);
 	assert.doesNotMatch(evals, /recommend|prefer|should choose|best for/i);
 });

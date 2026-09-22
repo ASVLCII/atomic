@@ -5,7 +5,7 @@ description: "Primary-source benchmark facts used by Atomic automatic model rout
 
 # Evals
 
-Facts only; accessed 2026-09-20. `∅`=source null/absent, not zero.
+Facts only; accessed 2026-09-20. Grok 4.7 section accessed 2026-09-21. `∅`=source null/absent, not zero.
 
 ## Artificial Analysis Intelligence Index v4.3.2
 
@@ -63,35 +63,27 @@ Table: 47-config default-chart union, 31 aggregate Index rows plus default const
 | A46 | GPT-5.4 Pro (xhigh) | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 30 | ∅ | ∅ | ∅ |
 | A47 | GPT-5.5 Pro (xhigh) | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | 30.6 | ∅ | ∅ | ∅ |
 
-## DeepSWE v1.1
 
-[DeepSWE](https://deepswe.datacurve.ai/) v1.1 (update 2026-09-03; [changelog](https://deepswe.datacurve.ai/changelog)) measures whether a coding agent can complete original, long-horizon software-engineering tasks in real repositories: 113 tasks written from scratch (no model has seen the solution) across 91 repositories and 5 languages, with prompts about half SWE-bench Pro's length and solutions needing 5.5x more code. Verifiers are hand-written to check behavior, not implementation. All models run on mini-swe-agent.
+## Grok 4.7
 
-Table: all 21 default Best rows in source order, each with `n_runs=4`. Columns: model, effort, pass@1±95% run-to-run CI (percent) with CI=`1.96*std(runs)/sqrt(R)`, USD/task, output k-tokens, and steps. Source costs are not billed Atomic cost: GPT-6 Astra uses expected launch pricing, DeepSeek peak rates (off-peak half), GPT-5.6 Sol promotional pricing.
+Accessed 2026-09-21. Not in the 2026-09-20 chart union. https://artificialanalysis.ai/models/grok-4-7 https://artificialanalysis.ai/models/grok-4-7-high https://artificialanalysis.ai/agents/coding-agents . Chart label 46. Hallucination rate is not the `ONH` column.
 
-| ID | Model | Effort | pass@1±CI | USD/task | output k-tokens | steps |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| D01 | gpt-6-astra | xhigh | 74±3 | 6.52 | 30 | 29 |
-| D02 | gemini-3.8-flash | high | 74±1 | 2.36 | 143 | 166 |
-| D03 | claude-opus-5 | max | 74±4 | 11.84 | 118 | 99 |
-| D04 | gpt-5.6-sol | max | 73±3 | 6.46 | 60 | 61 |
-| D05 | claude-fable-5 | xhigh | 70±3 | 13.41 | 80 | 68 |
-| D06 | glm-5.3 | max | 69±3 | 3.99 | 80 | 124 |
-| D07 | kimi-k3 | max | 69±5 | 4.65 | 81 | 98 |
-| D08 | grok-4.6 | medium | 67±2 | 3.45 | 50 | 70 |
-| D09 | gpt-5.6-luna | max | 67±4 | 0.61 | 73 | 102 |
-| D10 | gpt-5.5 | xhigh | 67±6 | 7.23 | 46 | 82 |
-| D11 | gemini-3.7-flash | medium | 65±3 | 2.03 | 94 | 117 |
-| D12 | glm-5.3-flash | max | 63±4 | 0.24 | 73 | 123 |
-| D13 | deepseek-v4-pro | max | 63±6 | 1.67 | 106 | 155 |
-| D14 | claude-opus-4.8 | max | 59±2 | 13.22 | 135 | 120 |
-| D15 | qwen3.8-max | xhigh | 57±3 | 3.73 | 95 | 111 |
-| D16 | muse-spark-1.2 | xhigh | 55±2 | 3.70 | 99 | 101 |
-| D17 | claude-sonnet-5 | max | 54±4 | 26.40 | 214 | 268 |
-| D18 | deepseek-v4-flash | max | 53±4 | 0.46 | 108 | 153 |
-| D19 | gemini-3.6-flash | high | 47±4 | 2.21 | 96 | 117 |
-| D20 | glm-5.2 | max | 44±2 | 3.92 | 78 | 129 |
-| D21 | gemini-3.5-flash | high | 36±4 | 3.45 | 76 | 105 |
+| Config | idx | Bn | Gn | Auto | TB | Sci | HLE | PDF | Crit | OA | LCR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| xhigh | 46.4 | 57.9 | 59.8 | 65.6 | 25.8 | 57.4 | 43.1 | 20 | 17.7 | 47.5 | 76.7 |
+| high | 46.3 | 57.2 | 59.7 | 63.5 | 24.7 | 57.8 | 42.3 | 23.2 | 18 | 47.8 | 77 |
+
+Elo 1657.2/1695.21 xhigh, 1643.88/1693.72 high. Omniscience 32.0/30.9. Hallucination 29.3%/32.4%. Output 80.6k/65.9k. Median speed 39/53 t/s. $2/$6, cache $0.50, 500k context.
+
+Coding Agent Index v1.5, Grok Build. DeepSWE here is that index component, not a separate mini-swe-agent leaderboard.
+
+| Measure | 4.7 xhigh | 4.6 xhigh |
+| --- | ---: | ---: |
+| Coding Agent Index | 56 | 47 |
+| DeepSWE v1.1 | 73% | 65% |
+| Terminal-Bench 4.0 | 33% | 18% |
+| SWE-Atlas-QnA | 63% | 58% |
+
 
 ## Cognition FrontierCode 1.1
 

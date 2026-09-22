@@ -25,6 +25,7 @@
 
 - A custom message sent with `triggerTurn: false` during an active run is still appended after the current turn's tool results rather than steered into it, and, because provider requests now use the canonical session projection, it is visible to that run's next request instead of only a later turn.
 - Changed the default xAI model to Grok 4.7.
+- Added Grok 4.7 Artificial Analysis scores, accessed 2026-09-21, to the routing evals snapshot, and removed the mini-swe-agent DeepSWE leaderboard from that snapshot. The 2026-09-20 Intelligence Index and FrontierCode rows are unchanged.
 
 ### Fixed
 
