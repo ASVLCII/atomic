@@ -181,6 +181,8 @@ Combine these approaches only where they help. Generate content with a script, i
 
 [Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver) targets an exact application window rather than the shared cursor. One `get_window_state` call returns the window's accessibility tree and a screenshot; actions are delivered through snapshot-bound element tokens in the background by default, and the result reports `degraded` or `truncated` state so a scenario can refuse to act on a bad observation. Verification is snapshot, act, fresh snapshot, then a postcondition check, not a picture of a click.
 
+The bundled `cua-driver` skill carries the driving loop and the per-platform notes. For anything it does not cover, such as the full tool reference, SDK API, permissions model, or process model, read the upstream documentation: the [Cua docs index](https://cua.ai/docs/llms.txt) lists every page as a plain-text URL, so an agent can fetch the one it needs, for example the [process model](https://cua.ai/docs/reference/cua-driver/process-model.md), [macOS permissions](https://cua.ai/docs/reference/cua-driver/macos-permissions.md), [telemetry](https://cua.ai/docs/reference/cua-driver/telemetry.md), and [SDK reference](https://cua.ai/docs/reference/cua-driver/sdk-reference.md).
+
 Atomic uses Cua Driver through two faces of one typed surface. Choose by who decides the next action:
 
 | Situation | Face | Why |
