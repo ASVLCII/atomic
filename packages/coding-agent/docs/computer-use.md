@@ -254,7 +254,7 @@ cua-driver call click '{"pid":844,"element_token":"s0000002a:14"}'
 cua-driver call get_window_state '{"pid":844,"window_id":10725,"screenshot_out_file":"artifacts/after.png"}' > artifacts/after.json
 ```
 
-Replace the pid, window id, and token with values read from your own output; tokens are bound to the snapshot that produced them and must be re-read after any UI change. Check the postcondition in `after.json` with a bounded poll deadline, never a fixed sleep and never a repeated click. A `degraded` or `truncated` snapshot is a reason to stop and re-observe, and a refused background action is an escalation signal, not something to retry. Foreground delivery is an explicit escalation. Keep the JSON results and the `screenshot_out_file` images as evidence.
+Replace the pid, window id, and token with values read from your own output; tokens are bound to the snapshot that produced them and must be re-read after any UI change. Check the postcondition in `after.json` with a bounded poll deadline, never a fixed sleep and never a repeated click. A `degraded` or `truncated` snapshot is a reason to stop and re-observe, and a refused background action is an escalation signal, not something to retry. Foreground delivery is an explicit escalation. Keep the JSON results and the `screenshot_out_file` images as evidence. When the work ends in a PR, attach the before/after PNGs to the PR body (`gh pr create --body-file body.md --attach 'before.png#Before' --attach 'after.png#After'` on supported GitHub) next to the scenario they prove, and cite the JSON by name as a local artifact; see [Verification and evidence](/workflows/verification#native-github-media).
 
 ### Run a scenario from workflow code
 
@@ -306,6 +306,7 @@ For a real task, act between the snapshot and final capture. Read element refere
 - Inspect visible results and relevant console/network output (`agent-browser console`, `agent-browser errors`, `agent-browser network requests`). Keep semantic locators and assertions in a maintained browser test suite for repeatable regression coverage.
 - Use the CLI's file-upload support for supported file inputs rather than driving an OS file picker. Switch to CUA or native tooling only for UI outside the page, and then recheck focus before returning to browser control.
 - Treat cookies, saved authentication state, and network logs as sensitive. Do not commit or attach a browser profile as evidence.
+- Keep `screenshot` PNGs and `record` recordings from the verified flow; when the work ends in a PR, attach them to the PR body with `gh pr create --attach` on supported GitHub, each next to the scenario it proves. See [Verification and evidence](/workflows/verification#native-github-media).
 - Browser mobile emulation tests a web viewport, not a native Android or iOS application.
 
 For verification captures and recordings, see [browser evidence](/workflows/verification#browser-changes).

@@ -135,6 +135,14 @@ for (const name of ["goal", "ralph"] as const) {
 						assert.match(prompt, /Local evidence collection does not authorize uploads/);
 						assert.match(
 							prompt,
+							/attach it to the PR body when the provider supports uploads: cua-driver `screenshot_out_file` before\/after PNGs[\s\S]*agent-browser `screenshot` PNGs and `record` recordings/,
+						);
+						assert.match(
+							prompt,
+							/gh pr create --body-file <body\.md> --attach 'before\.png#State before the action'/,
+						);
+						assert.match(
+							prompt,
 							/gh pr comment <number> --repo <owner\/repo> --body-file <body.md> --attach <proof.mp4>/,
 						);
 						assert.match(prompt, /Read back[\s\S]*confirm usable GitHub-hosted links/);
@@ -246,6 +254,10 @@ test("authoring guidance states the Cua Driver face rule for custom workflows (#
 		/in-process fallback attributes Accessibility\/Screen Recording grants to the node host rather than CuaDriver\.app/,
 	);
 	assert.match(prompt, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/);
+	assert.match(
+		prompt,
+		/attach the image and video evidence the run produced \(cua-driver `screenshot_out_file` before\/after PNGs, agent-browser screenshots and `record` recordings\) to the PR body/,
+	);
 	assert.match(
 		prompt,
 		/requires node \(preferred\) or bun on the host, so install one in a single bounded attempt when both are missing/,

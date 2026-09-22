@@ -125,7 +125,7 @@ Give the reviewer a short summary before linking logs or media. For example, rep
 - Limits: <checks/platforms not exercised>
 ```
 
-Attach a screenshot for a visual state, a short recording for an interaction, or logs for command behavior. Include reproduction steps even when media is available. Label local-only paths as local; reviewers cannot open a file on your machine. CI artifact links are useful when readers have access, but note retention limits where relevant.
+Attach a screenshot for a visual state, a short recording for an interaction, or logs for command behavior. When a run used Cua Driver, the evidence is the before/after `screenshot_out_file` PNGs from `get_window_state`, one pair per verified postcondition, with the window-state JSON kept locally and cited by name; when it used agent-browser, the evidence is its `screenshot` PNGs and `record` recordings. Put them in the PR body next to the scenario they prove. Include reproduction steps even when media is available. Label local-only paths as local; reviewers cannot open a file on your machine. CI artifact links are useful when readers have access, but note retention limits where relevant.
 
 Only upload to an authorized repository or destination. Inspect and redact secrets, personal information, private source content, and unrelated windows before attaching files. Permission to collect local evidence is not permission to publish it.
 
@@ -133,7 +133,16 @@ Only upload to an authorized repository or destination. Inspect and redact secre
 
 [GitHub CLI 2.99.0 and newer](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/) supports repeatable `--attach` on issue and PR `create`, `edit`, and `comment` commands. Check `gh --version`, the specific command's `--help`, and the host's [attachment support and limits](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
 
-For an authorized PR comment, replace the target and file paths:
+Attach evidence when the PR is created so the body carries it from the first review; replace the file paths:
+
+```sh
+gh pr create --title "Fix settings save" --body-file body.md \
+  --attach 'before.png#Settings panel before saving' \
+  --attach 'after.png#Settings panel after saving' \
+  --attach flow.webm
+```
+
+For evidence produced after the PR exists, use `gh pr edit` or an authorized PR comment the same way:
 
 ```sh
 gh pr comment 123 --repo owner/repo --body-file evidence.md \

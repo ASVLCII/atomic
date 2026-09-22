@@ -107,6 +107,16 @@ test("computer-use guides route desktop CUA to Cua Driver and never to PyAutoGUI
 		);
 		assert.match(text, /iOS simulator/, `${name} does not route iOS simulators to Cua Driver`);
 	}
+	assert.match(
+		verification,
+		/gh pr create --title "Fix settings save" --body-file body\.md \\\n {2}--attach 'before\.png#Settings panel before saving'/,
+	);
+	assert.match(
+		verification,
+		/before\/after `screenshot_out_file` PNGs from `get_window_state`[\s\S]*`screenshot` PNGs and `record` recordings/,
+	);
+	assert.match(computer, /attach the before\/after PNGs to the PR body/);
+	assert.match(computer, /Keep `screenshot` PNGs and `record` recordings from the verified flow/);
 	for (const heading of ["### Install if missing", "### Turn telemetry off", "### Check readiness"]) {
 		assert.ok(computer.includes(heading), `computer-use.md lacks ${heading}`);
 	}
