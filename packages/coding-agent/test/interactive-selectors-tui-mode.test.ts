@@ -16,6 +16,7 @@ import {
 	InteractiveMode,
 } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { getHomeDir } from "../src/utils/paths.ts";
 
 const previousKeybindings = getKeybindings();
 
@@ -38,9 +39,8 @@ class SelectorTerminal implements Terminal {
 	setProgress(_active: boolean): void {}
 }
 
-function openSettingsSelector() {
+function openSettingsSelector(agentDir = "C:\\Users\\dev\\custom-atomic-agent") {
 	const settingsManager = SettingsManager.inMemory({});
-	const agentDir = "C:\\Users\\dev\\custom-atomic-agent";
 	let selector: SettingsSelectorComponent | undefined;
 	const renderer = createInteractiveTui({
 		showHardwareCursor: false,
@@ -118,5 +118,15 @@ test("/settings renders keybinding guidance for the active agent directory", () 
 	expect(rendered).toContain("/reload");
 	expect(rendered).toContain("/hotkeys shows common active and extension shortcuts");
 	expect(rendered).toContain("Keybindings documentation is the complete reference");
+	mode.ui.stop();
+});
+
+test("/settings renders a home-relative keybindings path that survives 80 columns (#2629)", () => {
+	const agentDir = path.join(getHomeDir(), ".atomic", "agent");
+	const { mode, selector } = openSettingsSelector(agentDir);
+	const rendered = stripTerminalSequences(selector.getSettingsList().render(80).join("\n"));
+
+	expect(rendered).toContain(path.join("~", ".atomic", "agent", "keybindings.json"));
+	expect(rendered).not.toContain(getHomeDir());
 	mode.ui.stop();
 });

@@ -17,7 +17,7 @@ This page is the exhaustive settings reference: every field, its default, and it
 
 ## Keybindings
 
-`/settings` shows the active agent directory's `keybindings.json` path in its informational **Keybindings** row. This reflects custom agent directories and Windows paths instead of assuming `~/.atomic/agent/keybindings.json`. Edit that file and run `/reload` to apply the changes. `/hotkeys` shows common active and extension shortcuts; see [Keybindings](/keybindings) for the complete reference and configuration format.
+`/settings` shows the active agent directory's `keybindings.json` path in its informational **Keybindings** row. This reflects custom agent directories and Windows paths instead of assuming `~/.atomic/agent/keybindings.json`; paths inside your home directory are shown with `~`. Edit that file and run `/reload` to apply the changes. `/hotkeys` shows common active and extension shortcuts; see [Keybindings](/keybindings) for the complete reference and configuration format.
 
 ## Project Trust
 

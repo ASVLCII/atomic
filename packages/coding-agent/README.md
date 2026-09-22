@@ -180,7 +180,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/model` | Switch models and automatically save the startup default |
 | `/thinking` | Switch thinking level and automatically save the startup default |
 | `/scoped-models` | Enable/disable models for CTRL+P cycling |
-| `/settings` | Theme, message delivery, transport, and other preferences |
+| `/settings` | Keybinding configuration, theme, message delivery, transport, and other preferences |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -193,7 +193,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/export [file]` | Export session to HTML file |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files (themes hot-reload automatically) |
-| `/hotkeys` | Show all keyboard shortcuts |
+| `/hotkeys` | Show common active and extension shortcuts; see [Keybindings](docs/keybindings.md) for the complete reference |
 | `/changelog` | Display version history |
 | `/exit` | Exit Atomic |
 | `/quit` | Quit Atomic |
