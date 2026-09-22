@@ -313,7 +313,7 @@ Same codebase:
 ```bash
 cmux new-split right
 sleep 0.5
-cmux send --surface right 'cd /path/to/current/repo && pi\n'
+cmux send --surface right 'cd /path/to/current/repo && atomic\n'
 ```
 
 Reference codebase:
@@ -321,7 +321,7 @@ Reference codebase:
 ```bash
 cmux new-split right
 sleep 0.5
-cmux send --surface right 'cd /path/to/reference/repo && pi\n'
+cmux send --surface right 'cd /path/to/reference/repo && atomic\n'
 ```
 
 ### Optional Fallback: tmux Worker or Scout Session
@@ -329,21 +329,21 @@ cmux send --surface right 'cd /path/to/reference/repo && pi\n'
 Same codebase:
 
 ```bash
-SOCKET_DIR=${TMPDIR:-/tmp}/pi-tmux-sockets
+SOCKET_DIR=${TMPDIR:-/tmp}/atomic-tmux-sockets
 mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/pi.sock"
-SESSION=pi-worker
-tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/current/repo" 'pi'
+SOCKET="$SOCKET_DIR/atomic.sock"
+SESSION=atomic-worker
+tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/current/repo" 'atomic'
 ```
 
 Reference codebase:
 
 ```bash
-SOCKET_DIR=${TMPDIR:-/tmp}/pi-tmux-sockets
+SOCKET_DIR=${TMPDIR:-/tmp}/atomic-tmux-sockets
 mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/pi.sock"
-SESSION=pi-reference-auth
-tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/reference/repo" 'pi'
+SOCKET="$SOCKET_DIR/atomic.sock"
+SESSION=atomic-reference-auth
+tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/reference/repo" 'atomic'
 ```
 
 When you use `tmux`, tell the user how to watch it:
@@ -510,7 +510,7 @@ if (!result.delivered) {
 ### Session not appearing in list
 
 1. Check Intercom connection status: `intercom({ action: "status" })`
-2. Verify the target session has loaded pi-intercom
+2. Verify the target session has loaded Atomic's bundled Intercom extension
 3. Ensure both sessions are on the same machine (intercom is same-machine only)
 
 ### Message not delivered
