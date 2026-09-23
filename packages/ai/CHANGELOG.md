@@ -4,6 +4,15 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 ## [Unreleased]
 
+### Added
+
+- Added `onProviderStreamEvent` to observe parsed provider stream events before normalization, including provider-specific fields not retained in assistant messages ([#9784](https://github.com/earendil-works/pi/issues/9784)).
+
+### Fixed
+
+- Fixed Claude Opus 5.5 on GitHub Copilot offering thinking levels other than low, medium, high, xhigh, and max when models.dev lists the model before its effort metadata is complete.
+- Fixed 1-hour Anthropic cache writes reported by Vercel AI Gateway in streaming deltas being priced at the 5-minute rate ([#9210](https://github.com/earendil-works/pi/issues/9210)).
+
 ## [0.9.20-alpha.7] - 2026-09-22
 
 ### Added

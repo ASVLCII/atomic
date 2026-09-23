@@ -843,6 +843,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				streamDeadline.deadlineMs,
 				streamDeadline.abort,
 			)) {
+				await options?.onProviderStreamEvent?.(event, model);
 				if (event.type === "message_start") {
 					output.responseId = event.message.id;
 					const responseModel = event.message.model;
@@ -1046,6 +1047,13 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 						// its Usage type, so read it through a narrow cast. Verified against the live API.
 						const thinkingTokens = (event.usage as { output_tokens_details?: { thinking_tokens?: number } })
 							.output_tokens_details?.thinking_tokens;
+						// Vercel AI Gateway includes the TTL breakdown in deltas, though the SDK only types it on message_start.
+						const cacheCreation = (
+							event.usage as typeof event.usage & { cache_creation?: { ephemeral_1h_input_tokens?: number } }
+						).cache_creation;
+						if (cacheCreation?.ephemeral_1h_input_tokens != null) {
+							output.usage.cacheWrite1h = cacheCreation.ephemeral_1h_input_tokens;
+						}
 						if (thinkingTokens != null) {
 							output.usage.reasoning = thinkingTokens;
 						}
