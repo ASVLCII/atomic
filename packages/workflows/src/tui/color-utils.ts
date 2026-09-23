@@ -3,6 +3,9 @@
  * cross-ref: spec §5.4.1, v0.x packages/atomic-sdk/src/components/color-utils.ts
  */
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { BoundedTextCache } from "./text-helpers.js";
+
+const filledBackgroundLines = new BoundedTextCache(1024);
 
 function parseHex(hex: string): [number, number, number] {
 	const h = hex.replace(/^#/, "");
@@ -50,14 +53,16 @@ export const BOLD = "\x1b[1m";
 
 /** Keep a filled row intact across pi-tui truncation and nested style resets. */
 export function fillBackground(text: string, width: number, background: string): string {
-	return (
-		new Text(
-			truncateToWidth(text, width, "…"),
-			0,
-			0,
-			(line) => `${background}${line.replace(/\x1b\[(?:0|49)?m/g, (reset) => reset + background)}${RESET}`,
-		).render(width)[0] ?? ""
-	);
+	return filledBackgroundLines.get(`${width}\0${background}\0${text}`, () => {
+		return (
+			new Text(
+				truncateToWidth(text, width, "…"),
+				0,
+				0,
+				(line) => `${background}${line.replace(/\x1b\[(?:0|49)?m/g, (reset) => reset + background)}${RESET}`,
+			).render(width)[0] ?? ""
+		);
+	});
 }
 
 /**

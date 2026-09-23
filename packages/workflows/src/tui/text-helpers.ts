@@ -43,7 +43,27 @@ function readAnsiCode(text: string, offset: number): string | null {
  * pi-tui because pi-tui uses that slot for `pad`.
  */
 export function truncateToWidth(text: string, width: number, suffix = "", _preserveAnsi = false): string {
+	if (width > 0 && visibleWidth(text) <= width) return text;
 	return piTruncateToWidth(text, width, suffix, false);
+}
+
+/** Bounded memo for pure text transforms that repaint identical rows every frame. */
+export class BoundedTextCache {
+	private readonly entries = new Map<string, string>();
+	private readonly limit: number;
+
+	constructor(limit: number) {
+		this.limit = limit;
+	}
+
+	get(key: string, compute: () => string): string {
+		const cached = this.entries.get(key);
+		if (cached !== undefined) return cached;
+		const value = compute();
+		if (this.entries.size >= this.limit) this.entries.clear();
+		this.entries.set(key, value);
+		return value;
+	}
 }
 
 /** Use pi-tui's key parser/matcher with typed key identifiers. */
