@@ -32,14 +32,32 @@ everywhere. Where the split differs from pi, the reason is written down.
 | Repository scripts | `bun run scripts/*.ts` | Bun executes `.ts` directly and resolves `.js` specifiers to `.ts` source with no loader hook. Bare `node` cannot; scripts meant for `node --test` are `.mjs` |
 | Binary compilation | `bun build --compile` | Cross-compiles the single-file executables; upstream pi uses Bun for exactly this step too. Bun pinned to 1.4.2 |
 | npm-package smoke tests | Node (`node-version: 22` in CI, matching pi) | `test/integration/installed-package-node-extensions.test.ts` verifies the shipped `atomic` bin under `#!/usr/bin/env node`, which is how npm installs run it |
-| Registry publish | `npm publish --provenance` | npm's OIDC-signed provenance lives in the npm CLI, and npm trusted publishing requires a GitHub-hosted runner |
+| Registry publish | `npm publish --provenance` | npm's OIDC-signed provenance lives in the npm CLI. npm trusted publishing and provenance accept only cloud-hosted runners, so `publish.yml`'s `publish-npm` job must stay GitHub-hosted (`ubuntu-latest`): Namespace runners report `runner_environment=self-hosted` |
 
 **Where this repository deliberately declines pi's shape:** pi's CI is one `ubuntu-latest`
-job with no matrix and no `timeout-minutes`. Do not copy it. This workflow produces eleven
-check contexts including full Windows coverage, runs on Blacksmith runners, and carries
-per-job timeout budgets that `test/ci/test-workflow-topology.test.ts` asserts. Adopting pi's
-topology would delete Windows coverage and orphan the two required check contexts. Parity is
+job with no matrix and no `timeout-minutes`. Do not copy it. This workflow preserves
+full Windows coverage, runs on Namespace runners, and carries per-job timeout budgets.
+Adopting pi's topology would delete Windows coverage and orphan the required
+`test (all platforms)` check. Parity is
 a *toolchain* goal, not a CI-topology goal.
+
+**CI runners:** pull-request-capable workflows (`test.yml`, `codeql.yml`) run every job on a
+repository Namespace runner profile (`namespace-profile-atomic-ci-*`) whose Access Level must be
+Restricted, so fork runs of the committed workflows get no usable Namespace workload token. A fork
+pull request that edits `.github/workflows` runs its own `runs-on`, so maintainer approval is the
+only barrier there: before approving a fork run, check the diff for `.github/` changes (see
+`docs/ci.md`, "Approving fork workflow runs"). The release path
+uses inline labels (`nscloud-*`) except the dedicated macOS release cache profile and
+`publish-npm` on GitHub-hosted Linux (`ubuntu-latest`, required by npm trusted publishing
+and provenance). Both macOS targets build on Namespace Apple Silicon; Intel artifacts
+are cross-compiled and smoke-tested under Rosetta, not on native Intel hardware.
+The required `test (all platforms)` gate aggregates every platform's work jobs.
+`docs/ci.md` ("Runners") has the mapping, the profiles and their dashboard-only settings, the
+checkout/cache trust model, and the follow-ups.
+
+Validate CI configuration through YAML parsing, actionlint, review, and actual hosted runs.
+Do not add tests that duplicate workflow YAML, including runners, matrices, cache settings,
+action pins, permissions, and required checks. Keep product and executable release-tooling tests.
 
 - TypeScript ≥ 5.x (strict, `noUnusedLocals`, `noUnusedParameters`)
 - `@sinclair/typebox` for schema definitions
@@ -144,14 +162,14 @@ enforces the node:sqlite-only loader and rejects those guards.
 
 ### Per-test timeout policy
 
-- The suite-wide per-test budget is **30000 ms**, declared once as `TEST_TIMEOUT_MS` in `test/helpers/test-timeout.ts` and applied by the root `vitest.config.ts` to all three projects. `test/ci/ci-workflow-contracts.test.ts` enforces that the three `test:*` scripts each select a project and that all three resolve to that one value.
-- Do **not** restate the budget in a package script, in `.github/workflows/test.yml`, or in `bunfig.toml`. The contract test rejects a `--timeout` flag in any script, and Bun ignores `[test] timeout` in bunfig anyway — it looks correct and does nothing.
+- The global per-test timeout is **30000 ms**, declared once as `TEST_TIMEOUT_MS` in `test/helpers/test-timeout.ts` and applied by the root `vitest.config.ts` to all three projects. Vitest enforces this timeout; explicit per-test budgets override it.
+- Do **not** restate the budget in a package script, in `.github/workflows/test.yml`, or in `bunfig.toml`.
 - One platform-neutral value, never a Windows-only branch. A Windows-only bump would leave Linux as the only place the budget is enforced and hide Windows regressions until they were far worse. (`packages/coding-agent/vitest.config.ts` keeps its own pre-existing 90 s Windows branch, local to that project.)
 - Add an explicit third-argument timeout only for a test whose cost is *structural* (a full builtin-package loader reload, a real CLI child process, a real `vitest` child, a `tsc` invocation, a built-package install). **Name the constant and keep it at the call site** — `REAL_VITEST_SUITE_TIMEOUT_MS` in `test/unit/test-suite-runner.test.ts` is the pattern; a bare `120_000` says nothing about why the cost is structural rather than a slow test nobody fixed. Never restate the default value — an explicit timeout that merely repeats it silently lowers that test's budget when the default rises.
-- `scripts/run-test-suite.ts` runs each CI suite exactly once — a failing test run is never retried — and scores every duration against that test's effective timeout: warn at 40 % of budget, fail the step at 70 %. It always writes the per-test duration table to `.ci-diagnostics/<suite>-durations.md`, on green runs too. If it fails your test, make the test faster or justify a structural explicit timeout — do not raise the shared default.
-- The gate reads **vitest's JSON reporter**, which the wrapper requests alongside the default one so the step log stays readable. The reporter emits a record per test, so the gate now scores the whole suite rather than the 97 % that printed a duration under Bun's stdout, and `blind` — tests ran, no durations — finally means the harness broke. A report that is missing *or unreadable* counts as blind too: an unparsable report measures exactly as much as one that was never written.
-- The gate reads a budget only from a *vitest* invocation, following one `npm run <script>` indirection into `package.json` and then into the config that script selects. A leading `bun`/`bunx` is the runtime rather than the command and is stepped over. Any other wrapped command leaves the gate disabled rather than scoring output against a budget nothing enforced. Explicit per-test budgets are matched by the fully qualified `scope > name`, so a declaration inside `describe` never lends its budget to a same-named test in another scope.
-- **Do not raise `WARN_RATIO`.** The move to vitest made the heaviest tests materially slower (vite transform cost: `coding-agent builtin resources > loads builtin pi package resources` went 622 ms → ~10 s), and the slowest unit test now sits just under the 40 % warn line. A loaded or Windows runner may start warning. That is the gate working as designed — make the test faster or justify a structural explicit timeout.
+- `scripts/run-test-suite.ts` runs each CI suite exactly once and propagates test failures, including actual Vitest timeouts. Duration headroom is **warning-only** at 40% of each test's effective budget: there is no separate 70% failure threshold. Keep whole-job timeouts for hangs outside individual tests.
+- The wrapper always writes `.ci-diagnostics/<suite>-durations.md`, including on successful runs. It reads Vitest's JSON reporter alongside the readable default reporter. Missing, unreadable, or duration-less reports when tests ran remain harness failures, not passing runs.
+- Budget resolution follows the selected Vitest project and explicit per-test overrides. Unsupported commands leave headroom warnings disabled. Explicit budgets are matched by fully qualified `scope > name`.
+- Keep `WARN_RATIO` at 40% so slow tests remain visible. Warnings are diagnostic, not a reason to increase budgets merely to silence them.
 
 ### Load sensitivity
 
@@ -160,8 +178,7 @@ vitest runs test *files* in parallel by default, and this repository deliberatel
 only passes on an idle machine is a bug in that test. Fix it where it lives: give the real
 work headroom and derive the assertion from a named constant (see `STALLED_ATTEMPT_CAP_MS` in
 `test/unit/subagents-attempt-watchdog-helpers.ts`). Do not skip it, do not serialize the
-suite, and do not shard — `test/ci/test-workflow-topology.test.ts` forbids
-`--parallel|--shard|--concurrent|--max-concurrency` for exactly this reason.
+suite, and do not shard to hide load-sensitive failures.
 
 ### Hook name compatibility
 
