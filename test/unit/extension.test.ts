@@ -112,12 +112,11 @@ test("session_before_switch prompts for /new and /resume when workflows are in f
 			assert.equal(prompts.length, 1);
 			const promptText = `${prompts[0]?.title}\n${prompts[0]?.message}`;
 			assert.match(promptText, reason === "new" ? /new session/i : /resume another session/i);
-			assert.match(promptText, /keeps? .* running/i);
-			assert.match(promptText, /session that started them/i);
-			assert.doesNotMatch(promptText, /\/workflow status/i);
-			assert.match(promptText, /1 in-flight workflow/i);
-			assert.doesNotMatch(promptText, /1 in-flight workflows/i);
-			assert.doesNotMatch(promptText, /stop|kill|clear workflow history/i);
+			assert.match(promptText, /^Quit 1 running workflow and /);
+			assert.match(promptText, /quits 1 running workflow now/);
+			assert.doesNotMatch(promptText, /1 running workflows/);
+			assert.match(promptText, /resumed later with \/workflow resume/);
+			assert.doesNotMatch(promptText, /keeps? .* running/i);
 			assert.equal(store.runs().length, 1);
 			assert.equal(store.runs()[0]?.endedAt, undefined);
 		} finally {
@@ -146,11 +145,11 @@ test("session_before_switch renders plural in-flight workflow counts", async () 
 
 	assert.equal(result, undefined);
 	assert.equal(prompts.length, 1);
-	assert.match(prompts[0]?.title ?? "", /2 in-flight workflows/i);
-	assert.match(prompts[0]?.message ?? "", /2 in-flight workflows/i);
+	assert.match(prompts[0]?.title ?? "", /Quit 2 running workflows/);
+	assert.match(prompts[0]?.message ?? "", /quits 2 running workflows now/);
 });
 
-test("session_before_switch fails open when confirm throws", async () => {
+test("session_before_switch cancels the switch when confirm throws (#3203)", async () => {
 	store.recordRunStart(workflowRun());
 	const handler = getSessionBeforeSwitchHandler();
 
@@ -165,7 +164,7 @@ test("session_before_switch fails open when confirm throws", async () => {
 		},
 	);
 
-	assert.equal(result, undefined);
+	assert.deepEqual(result, { cancel: true });
 	assert.equal(store.runs().length, 1);
 	assert.equal(store.runs()[0]?.endedAt, undefined);
 });
