@@ -11,8 +11,10 @@ import { GraphViewState } from "./graph-view-state.js";
 import { renderOutlinePill } from "./header.js";
 import { APP_ACTION, isKeybindingsLike } from "./keybindings-adapter.js";
 import { NODE_H, NODE_W } from "./layout.js";
-import { sliceColumns, truncateToWidth, visibleWidth } from "./text-helpers.js";
+import { BoundedTextCache, sliceColumns, truncateToWidth, visibleWidth } from "./text-helpers.js";
 import { OVERLAY_HIDDEN_STATUS_KEYS, WORKFLOW_STATUS_KEY } from "./workflow-status.js";
+
+const slicedColumnSegments = new BoundedTextCache(1024);
 
 export function toolExpandKey(piKeybindings: unknown): string {
 	const keybindings = isKeybindingsLike(piKeybindings) ? piKeybindings : undefined;
@@ -291,6 +293,8 @@ export abstract class GraphViewRenderHelpers extends GraphViewState {
 
 	protected _sliceColumns(line: string, fromCol: number, toCol: number): string {
 		if (fromCol >= toCol) return "";
-		return sliceColumns(line, fromCol, toCol - fromCol, true);
+		return slicedColumnSegments.get(`${fromCol}\0${toCol}\0${line}`, () =>
+			sliceColumns(line, fromCol, toCol - fromCol, true),
+		);
 	}
 }

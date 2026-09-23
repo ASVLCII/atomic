@@ -14,6 +14,7 @@ import { copyToClipboard } from "../../utils/clipboard.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
 import { keyDisplayText } from "./components/keybinding-hints.js";
 import { TRANSCRIPT_JUMP_TO_END_URL } from "./components/transcript-follow-indicator.ts";
+import { compositeOverlayLine } from "./overlay-line-composite.ts";
 import { theme } from "./theme/theme.js";
 
 interface TuiOverlayEntry {
@@ -56,6 +57,16 @@ interface TuiAltScreenViewportDeferral {
 
 interface TuiAltScreenScrollToEndIndicatorInternals {
 	handleScrollToEndIndicatorMouseEvent(event: unknown): boolean;
+}
+
+interface TuiOverlayCompositingInternals {
+	compositeLineAt(
+		baseLine: string,
+		overlayLine: string,
+		startCol: number,
+		overlayWidth: number,
+		totalWidth: number,
+	): string;
 }
 
 /** pi-tui 0.85.1's private copy route only understands boolean callbacks. */
@@ -364,6 +375,8 @@ class AtomicTuiAltScreen extends TuiAltScreen {
 		const handleScrollToEndIndicator = indicator.handleScrollToEndIndicatorMouseEvent.bind(this);
 		indicator.handleScrollToEndIndicatorMouseEvent = (event) =>
 			this.isFocusedOverlay() ? false : handleScrollToEndIndicator(event);
+
+		(this as unknown as TuiOverlayCompositingInternals).compositeLineAt = compositeOverlayLine;
 	}
 
 	/**

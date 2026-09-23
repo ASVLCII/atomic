@@ -75,14 +75,13 @@ export function spawnProcessSync(
 		: nodeSpawnSync(command, args, childOptions);
 }
 
-function isWindowsProcessAlive(pid: number): boolean {
-	const result = nodeSpawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/NH"], {
-		encoding: "utf-8",
-		windowsHide: true,
-		env: createChildProcessEnvironment(),
-	});
-	if (result.status !== 0) return true;
-	return new RegExp(`\\b${pid}\\b`).test(result.stdout);
+export function isWindowsProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
 }
 
 function mapSignalExitCode(

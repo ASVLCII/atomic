@@ -42,8 +42,20 @@ type CandidateDraft = {
 	selector: string;
 };
 
-function candidateId(skill: Skill): string {
-	return `skill_${createHash("sha256").update(canonicalizePath(skill.filePath)).digest("hex").slice(0, 20)}`;
+function candidateId(canonicalPath: string): string {
+	return `skill_${createHash("sha256").update(canonicalPath).digest("hex").slice(0, 20)}`;
+}
+
+function createCanonicalPathLookup(): (path: string) => string {
+	const resolved = new Map<string, string>();
+	return (path) => {
+		let canonicalPath = resolved.get(path);
+		if (canonicalPath === undefined) {
+			canonicalPath = canonicalizePath(path);
+			resolved.set(path, canonicalPath);
+		}
+		return canonicalPath;
+	};
 }
 
 function sourceFamily(skill: Skill): string {
@@ -171,16 +183,17 @@ function buildQualifiedSelectors(group: readonly CandidateDraft[]): {
 }
 
 export function buildSkillCatalog(allSkills: readonly Skill[], winners?: readonly Skill[]): SkillCatalog {
+	const canonicalPathOf = createCanonicalPathLookup();
 	const candidateSkills: Skill[] = [];
 	const candidateIndexByPath = new Map<string, number>();
 	for (const skill of allSkills) {
-		const canonicalPath = canonicalizePath(skill.filePath);
+		const canonicalPath = canonicalPathOf(skill.filePath);
 		if (candidateIndexByPath.has(canonicalPath)) continue;
 		candidateIndexByPath.set(canonicalPath, candidateSkills.length);
 		candidateSkills.push(skill);
 	}
 	for (const winner of winners ?? []) {
-		const canonicalPath = canonicalizePath(winner.filePath);
+		const canonicalPath = canonicalPathOf(winner.filePath);
 		const candidateIndex = candidateIndexByPath.get(canonicalPath);
 		if (candidateIndex === undefined) {
 			candidateIndexByPath.set(canonicalPath, candidateSkills.length);
@@ -190,7 +203,7 @@ export function buildSkillCatalog(allSkills: readonly Skill[], winners?: readonl
 		}
 	}
 	const drafts: CandidateDraft[] = candidateSkills.map((skill) => ({
-		id: candidateId(skill),
+		id: candidateId(canonicalPathOf(skill.filePath)),
 		skill,
 		selector: skill.name,
 	}));
@@ -213,7 +226,7 @@ export function buildSkillCatalog(allSkills: readonly Skill[], winners?: readonl
 		const group = groups.get(winner.name);
 		if (!group?.length) continue;
 		const winnerCandidate = group.find(
-			(candidate) => canonicalizePath(candidate.skill.filePath) === canonicalizePath(winner.filePath),
+			(candidate) => canonicalPathOf(candidate.skill.filePath) === canonicalPathOf(winner.filePath),
 		);
 		if (!winnerCandidate) {
 			throw new Error(`Skill catalog winner "${winner.name}" is not represented by a candidate`);

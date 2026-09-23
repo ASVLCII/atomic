@@ -20,10 +20,35 @@ function getBashShellConfig(shell: string): ShellConfig {
 	return isLegacyWslBashPath(shell) ? { shell, args: ["-s"], commandTransport: "stdin" } : { shell, args: ["-c"] };
 }
 
+const MISSING_EXECUTABLE_RECHECK_MS = 30_000;
+
+interface ExecutableLookup {
+	path: string | null;
+	checkedAt: number;
+}
+
+const executablePathLookups = new Map<string, ExecutableLookup>();
+
+function isReusableLookup(lookup: ExecutableLookup): boolean {
+	return lookup.path === null
+		? Date.now() - lookup.checkedAt < MISSING_EXECUTABLE_RECHECK_MS
+		: existsSync(lookup.path);
+}
+
 /**
- * Find bash executable on PATH (cross-platform)
+ * Find an executable on PATH (cross-platform), memoized per PATH value.
+ * A missing executable is looked up again once its result is 30 seconds old.
  */
 function findExecutableOnPath(executable: string): string | null {
+	const key = `${executable}\0${process.env.PATH ?? ""}`;
+	const cached = executablePathLookups.get(key);
+	if (cached && isReusableLookup(cached)) return cached.path;
+	const path = lookupExecutableOnPath(executable);
+	executablePathLookups.set(key, { path, checkedAt: Date.now() });
+	return path;
+}
+
+function lookupExecutableOnPath(executable: string): string | null {
 	if (process.platform === "win32") {
 		// Windows: Use 'where' and verify file exists (where can return non-existent paths)
 		try {

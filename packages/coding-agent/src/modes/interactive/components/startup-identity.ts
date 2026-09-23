@@ -28,6 +28,9 @@ export class StartupIdentityComponent implements Component {
 	private readonly startedAt = Date.now();
 	private settled = false;
 	private timer: ReturnType<typeof setInterval> | undefined;
+	private renderedText: string | undefined;
+	private renderedWidth: number | undefined;
+	private renderedLines: string[] = [];
 
 	constructor(
 		ui: TUI,
@@ -52,7 +55,13 @@ export class StartupIdentityComponent implements Component {
 			: startupStateAtElapsed(Date.now() - this.startedAt);
 		markLifecycleTiming("startup-coherent");
 		if (state.complete) markLifecycleTiming("startup-complete");
-		return new Text(this.compose(width, state), 1, 0).render(width);
+		const text = this.compose(width, state);
+		if (text !== this.renderedText || width !== this.renderedWidth) {
+			this.renderedText = text;
+			this.renderedWidth = width;
+			this.renderedLines = new Text(text, 1, 0).render(width);
+		}
+		return this.renderedLines;
 	}
 
 	settle(): boolean {
@@ -69,5 +78,7 @@ export class StartupIdentityComponent implements Component {
 	}
 
 	setExpanded(_expanded: boolean): void {}
-	invalidate(): void {}
+	invalidate(): void {
+		this.renderedText = undefined;
+	}
 }
