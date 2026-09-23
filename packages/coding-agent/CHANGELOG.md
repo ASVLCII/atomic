@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The bundled `bash` and `powershell` tools work again with OpenAI-compatible gateways that enforce structured-outputs schema rules, including models configured with `compat.supportsStrictMode: false`. Their tool schemas no longer declare top-level `anyOf`/`not`. Inputs that mix a command with a task wait are still rejected before execution ([#3220](https://github.com/bastani-inc/atomic/issues/3220)).
+
 ## [0.9.20-alpha.7] - 2026-09-22
 
 ### Breaking Changes
