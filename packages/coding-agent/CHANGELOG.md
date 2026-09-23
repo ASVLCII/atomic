@@ -5,6 +5,10 @@
 ### Fixed
 
 - The bundled `bash` and `powershell` tools work again with OpenAI-compatible gateways that enforce structured-outputs schema rules, including models configured with `compat.supportsStrictMode: false`. Their tool schemas no longer declare top-level JSON Schema combinators. Inputs that mix a command with a task wait are still rejected before execution ([#3220](https://github.com/bastani-inc/atomic/issues/3220)).
+- Fixed interactive sessions stalling on Windows while agent `bash` and `powershell` commands ran. Each running command polled `tasklist.exe` synchronously 20 times a second, blocking the session for roughly 45 ms per poll; the process-exit check now asks the OS directly without starting a process. With several workflow stages running commands at once, the engine could previously freeze for seconds at a time.
+- Fixed a Windows stall when workflow stages or new sessions start: PowerShell availability was looked up with a synchronous `where` process up to three times per session and on every PowerShell tool call. Lookups are now remembered for the current `PATH`.
+- Reduced interactive CPU use while the workflow graph or another full-screen overlay is open: covered rows are no longer re-scanned behind the overlay on every frame, and the settled startup banner is no longer rewrapped on every frame.
+- Skill catalogs resolve each skill path once per build instead of several times, cutting filesystem work when workflow stages start on Windows.
 
 ## [0.9.20-alpha.7] - 2026-09-22
 

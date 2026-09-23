@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Reduced CPU use of the workflow graph view while stages are running: rows that did not change between animation frames are no longer re-measured, truncated, or re-padded on every frame.
+
 ## [0.9.20-alpha.7] - 2026-09-22
 
 ### Breaking Changes
