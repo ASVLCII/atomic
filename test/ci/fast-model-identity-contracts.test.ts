@@ -331,6 +331,8 @@ const proseNames = new Set([
 	"toolResultEntryIds",
 	"read",
 	"GIF",
+	// The Windows command-lookup executable the PowerShell availability check runs, not a symbol.
+	"where",
 ]);
 
 function unreleasedBlock(changelogPath: string): string {
