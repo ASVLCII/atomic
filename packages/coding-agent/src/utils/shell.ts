@@ -20,10 +20,21 @@ function getBashShellConfig(shell: string): ShellConfig {
 	return isLegacyWslBashPath(shell) ? { shell, args: ["-s"], commandTransport: "stdin" } : { shell, args: ["-c"] };
 }
 
+const executablePathLookups = new Map<string, string | null>();
+
 /**
- * Find bash executable on PATH (cross-platform)
+ * Find an executable on PATH (cross-platform), memoized per PATH value
  */
 function findExecutableOnPath(executable: string): string | null {
+	const key = `${executable}\0${process.env.PATH ?? ""}`;
+	const cached = executablePathLookups.get(key);
+	if (cached === null || (cached !== undefined && existsSync(cached))) return cached;
+	const resolved = lookupExecutableOnPath(executable);
+	executablePathLookups.set(key, resolved);
+	return resolved;
+}
+
+function lookupExecutableOnPath(executable: string): string | null {
 	if (process.platform === "win32") {
 		// Windows: Use 'where' and verify file exists (where can return non-existent paths)
 		try {
