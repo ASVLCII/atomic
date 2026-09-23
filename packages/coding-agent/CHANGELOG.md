@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added fast variants for first-party xAI Grok models, such as `xai/grok-4.7-fast`. They send the base Grok model with xAI Priority Processing (`service_tier: priority`) for lower latency, billed at twice the standard token rates only when xAI confirms the priority tier. `usesXaiFastServiceTier` reports which models qualify.
+
 ### Fixed
 
 - The bundled `bash` and `powershell` tools work again with OpenAI-compatible gateways that enforce structured-outputs schema rules, including models configured with `compat.supportsStrictMode: false`. Their tool schemas no longer declare top-level JSON Schema combinators. Inputs that mix a command with a task wait are still rejected before execution ([#3220](https://github.com/bastani-inc/atomic/issues/3220)).

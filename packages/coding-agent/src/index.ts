@@ -173,6 +173,7 @@ export {
 	isNativeFastRouteApi,
 	usesAnthropicFastMode,
 	usesOpenAIFastServiceTier,
+	usesXaiFastServiceTier,
 	withFastModelVariants,
 } from "./core/fast-model-variants.ts";
 export {

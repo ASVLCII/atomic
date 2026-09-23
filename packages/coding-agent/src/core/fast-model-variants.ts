@@ -92,6 +92,19 @@ export function usesOpenAIFastServiceTier(model: Pick<Model<Api>, "api" | "provi
 	return isNativeFastRouteApi(model.api) && (model.provider === "openai" || model.provider === "openai-codex");
 }
 
+/**
+ * xAI Priority Processing keeps the base upstream Grok model ID and adds the same
+ * `service_tier: "priority"` field on the Responses API. xAI has no `-fast` model slugs for current
+ * Grok models; priority is billed at twice the standard token rates, and only when the response
+ * confirms the tier. https://docs.x.ai/developers/advanced-api-usage/priority-processing
+ *
+ * Eligibility requires the first-party `xai` provider on `openai-responses`. OpenRouter, Vercel AI
+ * Gateway, and renamed or proxied xAI-compatible providers do not qualify.
+ */
+export function usesXaiFastServiceTier(model: Pick<Model<Api>, "api" | "provider">): boolean {
+	return model.api === "openai-responses" && model.provider === "xai";
+}
+
 /** GitHub Copilot advertises real fast sibling model IDs per account; it never uses a service tier. */
 export function isGitHubCopilotModel(model: Pick<Model<Api>, "provider">): boolean {
 	return model.provider === "github-copilot";
@@ -143,7 +156,7 @@ function fastRouteForBaseModel(
 	model: Model<Api>,
 	entitledCopilotFastModelIds: ReadonlySet<string>,
 ): ModelFastRoute | undefined {
-	if (usesOpenAIFastServiceTier(model)) {
+	if (usesOpenAIFastServiceTier(model) || usesXaiFastServiceTier(model)) {
 		return { baseModelId: model.id, upstreamModelId: model.id, serviceTier: FAST_MODEL_SERVICE_TIER };
 	}
 	if (usesAnthropicFastMode(model)) {
