@@ -97,20 +97,20 @@ const bashSchema = Type.Unsafe<ShellCommandInput | ShellWaitInput>({
 		},
 	},
 	required: [],
-	// xAI requires explicit object types on root union branches (see #3031).
-	anyOf: [
-		{
-			type: "object",
-			required: ["command"],
-			not: { anyOf: ["action", "id", "budgetMs"].map((key) => ({ required: [key] })) },
-		},
-		{
-			type: "object",
-			required: ["action", "id"],
-			not: { anyOf: Object.keys(bashBaseSchema.properties).map((key) => ({ required: [key] })) },
-		},
-	],
 });
+const shellCommandKeys = Object.keys(bashBaseSchema.properties);
+
+function prepareShellInput(args: unknown): BashToolInput {
+	if (typeof args !== "object" || args === null || Array.isArray(args)) return args as BashToolInput;
+	const has = (key: string) => Object.hasOwn(args, key);
+	if (has("action")) {
+		if (!has("id") || shellCommandKeys.some(has))
+			throw new Error("Invalid shell wait: expected action wait, id, and optional finite non-negative budgetMs");
+	} else if (!has("command") || has("id") || has("budgetMs")) {
+		throw new Error("Invalid shell command: command is required; id and budgetMs require action wait");
+	}
+	return args as BashToolInput;
+}
 export const bashToolSystemPromptContribution = Object.freeze({
 	snippet: "Execute a shell command.",
 	guidelines: Object.freeze([
@@ -481,6 +481,7 @@ export function createBashToolDefinition(
 		promptSnippet: bashToolSystemPromptContribution.snippet,
 		constrainedSampling: { type: "json_schema", strict: "prefer" },
 		promptGuidelines: exposeSessionEnvironment ? [...bashToolSystemPromptContribution.guidelines] : undefined,
+		prepareArguments: prepareShellInput,
 		parameters: bashSchema,
 		maxResultSizeChars: Infinity,
 		async execute(_toolCallId, bashCommand: BashToolInput, signal?: AbortSignal, onUpdate?, ctx?: ExtensionContext) {

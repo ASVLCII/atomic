@@ -21,6 +21,14 @@ function host(
 	});
 }
 
+function acceptsShellInput(tool: ReturnType<typeof createBashToolDefinition>, input: object): boolean {
+	try {
+		return Value.Check(tool.parameters, tool.prepareArguments?.(input) ?? input);
+	} catch {
+		return false;
+	}
+}
+
 async function release(owner: AgentTaskHost, id: TaskId) {
 	const task = owner.resolveTask(id);
 	assert.ok(task.ok);
@@ -122,7 +130,7 @@ for (const factory of [createBashToolDefinition, createPowerShellToolDefinition]
 			})),
 			...[-1, Infinity, NaN, "1", null].map((budgetMs) => ({ action: "wait", id: "x", budgetMs })),
 		]) {
-			assert.equal(Value.Check(tool.parameters, input), false, JSON.stringify(input));
+			assert.equal(acceptsShellInput(tool, input), false, JSON.stringify(input));
 			await assert.rejects(tool.execute("invalid", input as never), /Invalid/);
 		}
 		for (const input of [
@@ -131,7 +139,7 @@ for (const factory of [createBashToolDefinition, createPowerShellToolDefinition]
 			{ action: "wait", id: " verbatim ", budgetMs: 0 },
 			{ action: "wait", id: "x", budgetMs: 1 },
 		])
-			assert.equal(Value.Check(tool.parameters, input), true);
+			assert.equal(acceptsShellInput(tool, input), true, JSON.stringify(input));
 	});
 	test.runIf(process.platform !== "win32")(
 		`${factory.name} observes one real task across yields and retains terminal output and exit metadata`,
