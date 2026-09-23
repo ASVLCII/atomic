@@ -46,13 +46,12 @@ function noColorRequested(): boolean {
 
 export function renderAtomicAssemblyBanner(gap: number, activeTheme: Theme, thinkingLevel: ThinkingLevel): string[] {
 	const colorize = activeTheme.getThinkingBorderColor(thinkingLevel);
-	const solid = (text: string) => activeTheme.bold(noColorRequested() ? text : colorize(text));
+	const noColor = noColorRequested();
+	const solid = (text: string) => activeTheme.bold(noColor ? text : colorize(text));
 	if (gap <= 0) {
 		return shadowGrid().map((line) =>
 			[...line]
-				.map((char) =>
-					char === SHADOW_CHAR ? (noColorRequested() ? char : activeTheme.fg("dim", char)) : solid(char),
-				)
+				.map((char) => (char === SHADOW_CHAR ? (noColor ? char : activeTheme.fg("dim", char)) : solid(char)))
 				.join(""),
 		);
 	}

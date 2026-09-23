@@ -240,6 +240,19 @@ describe("InteractiveMode startup banner", () => {
 		expect(staticComponent.render(64).join("\n")).toContain('"complete":true');
 	});
 
+	it("reuses the settled identity frame until its text or width changes", () => {
+		let identity = "model-a";
+		const component = new StartupIdentityComponent({ requestRender: vi.fn() } as never, () => identity, false);
+		const first = component.render(64);
+		expect(component.render(64)).toBe(first);
+		expect(component.render(40)).not.toBe(first);
+		identity = "model-b";
+		expect(component.render(40).join("\n")).toContain("model-b");
+		const beforeInvalidate = component.render(40);
+		component.invalidate();
+		expect(component.render(40)).not.toBe(beforeInvalidate);
+	});
+
 	it("settles ordinary input and Ctrl+C through the real TUI listener chain", () => {
 		const tui = new TuiMainScreen(new StartupTerminal());
 		const editorInputs: string[] = [];
