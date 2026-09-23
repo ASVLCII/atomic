@@ -1,5 +1,6 @@
 import {
 	type AgentSession,
+	AutoRoutingInferenceError,
 	type CreateAgentSessionOptions,
 	convertToLlm,
 	type ModelConstraints,
@@ -445,13 +446,26 @@ export class StageSessionController {
 					parseModelConstraints(options?.modelConstraints),
 					...(thinking === undefined ? [] : [{ allowedEfforts: [thinking] }]),
 				].filter((c): c is ModelConstraints => c !== undefined);
-				this.modelRoute = await route({
-					task: text,
-					stageName: this.opts.stageName,
-					constraints,
-					signal: this.startupWait.signal,
-					selection: options?.routerSelection,
-				});
+				try {
+					this.modelRoute = await route({
+						task: text,
+						stageName: this.opts.stageName,
+						constraints,
+						signal: this.startupWait.signal,
+						selection: options?.routerSelection,
+					});
+				} catch (error) {
+					this.startupWait.signal.throwIfAborted();
+					this.opts.signal?.throwIfAborted();
+					// #3206: only a total routing-inference failure (Jev and the chat
+					// structured-output fallback both failed) degrades, and only to a
+					// current chat model that satisfies every routing constraint.
+					if (!(error instanceof AutoRoutingInferenceError) || error.currentModelRoute === undefined) throw error;
+					this.modelRoute = error.currentModelRoute;
+					this.modelCatalog?.recordWarning?.(
+						`workflows: stage auto routing failed; running "${this.opts.stageName}" on the current chat model ${this.modelRoute.modelOverride}.`,
+					);
+				}
 				this.modelRoute.assertCurrent();
 				this.meta.stageOptions = { ...options, model: this.modelRoute.modelOverride };
 				this.opts.onModelFallbackMetaChange?.(this.currentModelFallbackMeta());

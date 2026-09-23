@@ -29,6 +29,38 @@ export interface ModelRoute {
 	assertCurrent(): void;
 	allowsModel(model: Model<Api>, effort?: string): boolean;
 }
+
+/**
+ * Total auto-routing inference failure: Jev and the chat structured-output
+ * fallback both failed before any model was selected (#3206). Validation,
+ * eligibility, and credential-screening errors are never marked.
+ */
+export class AutoRoutingInferenceError extends Error {
+	/**
+	 * Route pinned to the current chat model, present only when that model is
+	 * available and satisfies every routing constraint. Consumers may degrade
+	 * to it; when it is absent the failure stays fatal.
+	 */
+	readonly currentModelRoute?: ModelRoute;
+
+	constructor(message: string, currentModelRoute?: ModelRoute) {
+		super(message);
+		this.name = "AutoRoutingInferenceError";
+		if (currentModelRoute !== undefined) this.currentModelRoute = currentModelRoute;
+	}
+}
+
+/** Degraded routes keep a balanced effort when the constraints leave a choice. */
+const CURRENT_MODEL_EFFORT_PREFERENCE: readonly (string | null)[] = [
+	null,
+	"medium",
+	"high",
+	"low",
+	"xhigh",
+	"minimal",
+	"max",
+	"off",
+];
 const instructions =
 	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals` as evidence and `model_selection_guide` as policy. Match the agent role to the guide's model cost tier and thinking level first, then consider task fit, measured effort, dates, caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly model and effort; null means no configurable reasoning.";
 
@@ -151,8 +183,24 @@ export async function routeExecutionModel(input: {
 		// so it is not surfaced to the user.
 		state.task = modelRoutingTask(state.task);
 		const ranked: ModelRouterOutput[] = [];
+		// Degrade only to a current chat model that is available and eligible under
+		// the same constraints, restored through the normal selection path (#3206).
+		const currentModelRoute = async (): Promise<ModelRoute | undefined> => {
+			const current = ctx.model;
+			const entry = available.find(
+				(candidate) => candidate.model.provider === current?.provider && candidate.model.id === current?.id,
+			);
+			const pair = CURRENT_MODEL_EFFORT_PREFERENCE.map((effort) =>
+				entry?.pairs.find((candidate) => candidate.effort === effort),
+			).find((candidate) => candidate !== undefined);
+			if (pair === undefined) return undefined;
+			return routeExecutionModel({ ...input, selection: { model: pair.model, effort: pair.effort } });
+		};
 		// Rank by repeated bounded choices, excluding all efforts of earlier models.
 		// Probabilities from separate tournament batches are not comparable.
+		// Only a failure before the primary is chosen is a total inference failure:
+		// Jev and its chat structured-output fallback both failed (#3206). A failed
+		// optional fallback-ranking pass keeps the models already ranked.
 		while (ranked.length < Math.min(3, available.length)) {
 			const remaining = pairs.filter((pair) => !ranked.some((selected) => selected.model === pair.model));
 			if (!remaining.length) break;
@@ -173,33 +221,43 @@ export async function routeExecutionModel(input: {
 				required: ["model", "effort"],
 				additionalProperties: false,
 			});
-			const result = await inferRouterDecision(
-				{
-					settings,
-					modelRegistry: ctx.modelRegistry,
-					currentModel: ctx.model,
-					state,
-					instructions,
-					schema,
-					jev: {
-						questions: {
-							pair: {
-								instructions:
-									"Which eligible model and reasoning effort best suit this task and agent role, considering the model_selection_guide role tiers, evals, and candidate capabilities and prices? Prefer cheaper candidates for exploration and routine implementation and stronger ones for review and verification. Candidate cost is USD per million tokens, not benchmark task cost.",
-								criteria,
+			let result: Awaited<ReturnType<typeof inferRouterDecision<typeof schema>>>;
+			try {
+				result = await inferRouterDecision(
+					{
+						settings,
+						modelRegistry: ctx.modelRegistry,
+						currentModel: ctx.model,
+						state,
+						instructions,
+						schema,
+						jev: {
+							questions: {
+								pair: {
+									instructions:
+										"Which eligible model and reasoning effort best suit this task and agent role, considering the model_selection_guide role tiers, evals, and candidate capabilities and prices? Prefer cheaper candidates for exploration and routine implementation and stronger ones for review and verification. Candidate cost is USD per million tokens, not benchmark task cost.",
+									criteria,
+								},
+							},
+							decode: (choices) => {
+								const pair = pairs[Number(choices.pair?.replace(/^pair_/, ""))];
+								if (!pair || choices.pair !== `pair_${pairs.indexOf(pair)}`)
+									throw new Error("Invalid execution model Choice.");
+								return { ...pair };
 							},
 						},
-						decode: (choices) => {
-							const pair = pairs[Number(choices.pair?.replace(/^pair_/, ""))];
-							if (!pair || choices.pair !== `pair_${pairs.indexOf(pair)}`)
-								throw new Error("Invalid execution model Choice.");
-							return { ...pair };
-						},
+						signal,
 					},
-					signal,
-				},
-				(value) => remaining.some((pair) => pair.model === value.model && pair.effort === value.effort),
-			);
+					(value) => remaining.some((pair) => pair.model === value.model && pair.effort === value.effort),
+				);
+			} catch (error) {
+				signal?.throwIfAborted();
+				if (ranked.length > 0) break;
+				throw new AutoRoutingInferenceError(
+					error instanceof Error ? error.message : String(error),
+					await currentModelRoute().catch(() => undefined),
+				);
+			}
 			ranked.push(result.value);
 		}
 		selection = { ...ranked[0]!, ...(ranked.length > 1 ? { fallbacks: ranked.slice(1) } : {}) };

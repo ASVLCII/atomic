@@ -201,8 +201,13 @@ test("long stage prompts are excerpted only for routing, never for execution", a
 	}
 });
 
-test("malformed stage decision admits no execution session", async () => {
+test("malformed stage decision admits no execution session without a current chat model", async () => {
 	const f = await fixture();
+	// No catalog currentModel: the total-routing failure stays fatal (#3206).
+	f.models = workflowModelCatalogFromContext({
+		modelRegistry: f.modelRegistry,
+		getRouterModel: () => "decision-test/chat",
+	});
 	f.infer.mockImplementation(() => messageStream(decisionMessage({ model: "decision-test/chat", effort: "high" })));
 	const def = workflow({
 		name: "invalid-auto",
@@ -217,6 +222,83 @@ test("malformed stage decision admits no execution session", async () => {
 	const result = await run(def, {}, f);
 	assert.equal(result.status, "failed");
 	assert.equal(f.admissions.length, 0);
+	assert.equal(f.infer.mock.calls.length, 4);
+});
+
+test("auto stage total routing failure runs on the current chat model (#3206)", async () => {
+	const f = await fixture();
+	f.infer.mockImplementation(() => {
+		throw new Error("mock router outage");
+	});
+	const def = workflow({
+		name: "degraded-auto",
+		description: "",
+		inputs: {},
+		outputs: {},
+		run: async (ctx) => {
+			await ctx.stage("task", { model: "auto" }).prompt("Solve task");
+			return {};
+		},
+	});
+	const result = await run(def, {}, f);
+	assert.equal(result.status, "completed");
+	assert.deepEqual(f.admissions, ["decision-test/chat"]);
+	assert.equal(f.infer.mock.calls.length, 1);
+});
+
+for (const [allowed, status, admissions] of [
+	["decision-test/chat", "completed", ["decision-test/chat"]],
+	["second-provider/other", "failed", []],
+] as const) {
+	test(`auto stage total routing failure with allowedModels=${allowed} ${status === "completed" ? "degrades to" : "never runs"} the current chat model (#3206)`, async () => {
+		const f = await fixture();
+		vi.spyOn(f.modelRegistry, "getAvailable").mockReturnValue([
+			decisionModel,
+			{ ...decisionModel, provider: "second-provider", id: "other" },
+		]);
+		f.infer.mockImplementation(() => {
+			throw new Error("mock router outage");
+		});
+		const def = workflow({
+			name: "constrained-degraded-auto",
+			description: "",
+			inputs: {},
+			outputs: {},
+			run: async (ctx) => {
+				await ctx
+					.stage("task", { model: "auto", modelConstraints: { allowedModels: [allowed] } })
+					.prompt("Solve task");
+				return {};
+			},
+		});
+		const result = await run(def, {}, f);
+		// A provider-classified routing failure blocks the stage; the run stays resumable.
+		if (status === "completed") assert.equal(result.status, "completed");
+		else {
+			assert.notEqual(result.status, "completed");
+			assert.equal(result.stages[0]?.status, "failed");
+		}
+		assert.deepEqual(f.admissions, [...admissions]);
+		assert.equal(f.infer.mock.calls.length, 1);
+	});
+}
+
+test("auto stage malformed routing decisions degrade to the current chat model (#3206)", async () => {
+	const f = await fixture();
+	f.infer.mockImplementation(() => messageStream(decisionMessage({ model: "decision-test/chat", effort: "high" })));
+	const def = workflow({
+		name: "degraded-malformed-auto",
+		description: "",
+		inputs: {},
+		outputs: {},
+		run: async (ctx) => {
+			await ctx.stage("task", { model: "auto" }).prompt("Solve task");
+			return {};
+		},
+	});
+	const result = await run(def, {}, f);
+	assert.equal(result.status, "completed");
+	assert.deepEqual(f.admissions, ["decision-test/chat"]);
 	assert.equal(f.infer.mock.calls.length, 4);
 });
 
@@ -601,6 +683,12 @@ test("durable session checkpoint roundtrip restores selection without another in
 
 test("parallel failure cancels no-longer-needed sibling routing before any child admission", async () => {
 	const f = await fixture();
+	// No catalog currentModel: the malformed decision stays a fatal routing
+	// failure instead of degrading to the chat model (#3206).
+	f.models = workflowModelCatalogFromContext({
+		modelRegistry: f.modelRegistry,
+		getRouterModel: () => "decision-test/chat",
+	});
 	const failure = createAssistantMessageEventStream();
 	let siblingSignal: AbortSignal | undefined;
 	f.infer.mockImplementation((_model, context, options) => {

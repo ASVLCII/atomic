@@ -1,4 +1,5 @@
 import {
+	AutoRoutingInferenceError,
 	type ModelRoute as ExecutionModelRoute,
 	type ExtensionContext,
 	parseModelConstraints,
@@ -27,13 +28,28 @@ export async function routeSubagentModel(input: {
 		),
 	);
 	const effortOverride = agent.source === "builtin" && agent.thinking !== "" ? agent.thinking : undefined;
-	const route = await routeExecutionModel({
-		ctx,
-		task: input.task?.trim() ? input.task : agent.systemPrompt,
-		agent: { name: agent.name, description: agent.description },
-		constraints: effortOverride === undefined ? constraints : [...constraints, { allowedEfforts: [effortOverride] }],
-		signal: input.signal,
-	});
+	let route: ExecutionModelRoute;
+	try {
+		route = await routeExecutionModel({
+			ctx,
+			task: input.task?.trim() ? input.task : agent.systemPrompt,
+			agent: { name: agent.name, description: agent.description },
+			constraints:
+				effortOverride === undefined ? constraints : [...constraints, { allowedEfforts: [effortOverride] }],
+			signal: input.signal,
+		});
+	} catch (error) {
+		input.signal?.throwIfAborted();
+		// #3206: only a total routing-inference failure (Jev and the chat
+		// structured-output fallback both failed) degrades, and only to a current
+		// chat model that satisfies every routing constraint. Validation,
+		// eligibility and ineligible-current-model failures still fail the launch.
+		if (!(error instanceof AutoRoutingInferenceError) || error.currentModelRoute === undefined) throw error;
+		route = error.currentModelRoute;
+		console.warn(
+			`Subagent auto routing failed; running "${agent.name}" on the current chat model ${route.modelOverride}.`,
+		);
+	}
 	// Legacy thinking selects the primary effort, not a hard limit on suffixed fallbacks.
 	// Restore the recorded selection against only real constraints, without another inference.
 	const fallbackRoute =
