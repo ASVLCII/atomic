@@ -15,6 +15,7 @@ import {
 	isNativeFastRouteApi,
 	usesAnthropicFastMode,
 	usesOpenAIFastServiceTier,
+	usesXaiFastServiceTier,
 	withFastModelVariants,
 } from "../src/core/fast-model-variants.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
@@ -151,6 +152,34 @@ describe("Anthropic fast mode eligibility", () => {
 	});
 });
 
+describe("xAI priority processing eligibility", () => {
+	it.each([
+		["xai", "openai-responses", true],
+		["xai", "openai-completions", false],
+		["xai-proxy", "openai-responses", false],
+		["openrouter", "openai-responses", false],
+		["vercel-ai-gateway", "openai-completions", false],
+	] as const)("%s on %s is priority-tier eligible: %s", (provider, api, eligible) => {
+		assert.equal(usesXaiFastServiceTier({ provider, api }), eligible);
+		const derived = deriveFastModelVariants(provider, [model({ id: "grok-4.6", provider, api })]).models;
+		assert.deepEqual(ids(derived), eligible ? ["grok-4.6", "grok-4.6-fast"] : ["grok-4.6"]);
+	});
+
+	it("routes the base upstream Grok model with the priority service tier", () => {
+		const base = model({ id: "grok-4.7", provider: "xai", api: "openai-responses", name: "Grok 4.7" });
+		const [, fast] = deriveFastModelVariants("xai", [base]).models;
+		assert.ok(fast);
+		assert.equal(fast.id, "grok-4.7-fast");
+		assert.equal(fast.name, "Grok 4.7 (fast)");
+		assert.deepEqual(fast.fastRoute, {
+			baseModelId: "grok-4.7",
+			upstreamModelId: "grok-4.7",
+			serviceTier: FAST_MODEL_SERVICE_TIER,
+		});
+		assert.deepEqual(fast.cost, base.cost);
+	});
+});
+
 describe("deriveFastModelVariants", () => {
 	it("appends a service-tier fast variant after each eligible OpenAI model, preserving order", () => {
 		const base = [
@@ -274,9 +303,10 @@ describe("deriveFastModelVariants", () => {
 	/**
 	 * User amendment (2026-09-03): synthetic `-fast` aliases are limited to the first-party OpenAI
 	 * and OpenAI Codex provider IDs. GitHub Copilot exposes only exact account-advertised real
-	 * `-fast` IDs. OpenRouter and non-first-party providers are explicitly excluded.
+	 * `-fast` IDs. OpenRouter and non-first-party providers are explicitly excluded. First-party xAI
+	 * joined the list once xAI documented `service_tier: "priority"` on its Responses API.
 	 */
-	it("synthesizes fast aliases only for OpenAI and OpenAI Codex", () => {
+	it("synthesizes fast aliases only for OpenAI, OpenAI Codex, and xAI", () => {
 		const providers: Array<[string, Api]> = [
 			["openai", "openai-responses"],
 			["openai-codex", "openai-codex-responses"],
@@ -289,6 +319,7 @@ describe("deriveFastModelVariants", () => {
 			["my-openai-compatible", "openai-responses"],
 			["github-copilot", "openai-responses"],
 			["github-copilot", "anthropic-messages"],
+			["xai", "openai-responses"],
 		];
 		const synthesized: string[] = [];
 		for (const [provider, api] of providers) {
@@ -297,7 +328,11 @@ describe("deriveFastModelVariants", () => {
 			if (models.some((entry) => entry.fastRoute !== undefined)) synthesized.push(`${provider}/${api}`);
 		}
 
-		assert.deepEqual(synthesized, ["openai/openai-responses", "openai-codex/openai-codex-responses"]);
+		assert.deepEqual(synthesized, [
+			"openai/openai-responses",
+			"openai-codex/openai-codex-responses",
+			"xai/openai-responses",
+		]);
 
 		// Copilot derives only for an exact advertised ID, and never as a service-tier route.
 		const copilotBase = [model({ id: "claude-opus-4.8", provider: "github-copilot", api: "anthropic-messages" })];
@@ -430,6 +465,28 @@ describe("ModelRuntime fast model catalog", () => {
 		assert.equal(runtime.getModel("anthropic", "claude-sonnet-5-fast"), undefined);
 		assert.equal(runtime.getModel("anthropic", "claude-opus-4-7-fast"), undefined);
 		assert.equal(runtime.getModel("amazon-bedrock", "claude-opus-5-5-fast"), undefined);
+	});
+
+	it("exposes a priority-tier fast variant for every built-in xAI Grok model", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "atomic-fast-variants-"));
+		tempDirs.push(dir);
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.create(join(dir, "auth.json")),
+			modelsPath: join(dir, "models.json"),
+			allowModelNetwork: false,
+		});
+
+		const baseModels = runtime.getModels("xai").filter((entry) => entry.fastRoute === undefined);
+		assert.ok(baseModels.some((entry) => entry.id === "grok-4.7"));
+		for (const base of baseModels) {
+			const fast = runtime.getModel("xai", `${base.id}-fast`);
+			assert.ok(fast, `xai/${base.id}-fast is missing`);
+			assert.deepEqual(fast.fastRoute, {
+				baseModelId: base.id,
+				upstreamModelId: base.id,
+				serviceTier: FAST_MODEL_SERVICE_TIER,
+			});
+		}
 	});
 
 	it("exposes GPT-6-Astra and its canonical derived fast identity", async () => {

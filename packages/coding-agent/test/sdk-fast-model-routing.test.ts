@@ -610,6 +610,80 @@ describe("createAgentSession fast model routing", () => {
 		}
 	});
 
+	it.each([
+		[FAST_MODEL_SERVICE_TIER, 2],
+		["default", 1],
+	] as const)(
+		"sends built-in xai/grok-4.7-fast as grok-4.7 at priority and bills the %s tier xAI echoes at %sx",
+		async (echoedTier, multiplier) => {
+			const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+			await authStorage.modify("xai", async () => ({ type: "api_key", key: "test-api-key" }));
+			const modelRuntime = await ModelRuntime.create({
+				credentials: authStorage,
+				modelsPath: join(agentDir, "models.json"),
+				allowModelNetwork: false,
+			});
+			const base = modelRuntime.getModel("xai", "grok-4.7");
+			const model = modelRuntime.getModel("xai", "grok-4.7-fast");
+			expect(base).toBeDefined();
+			expect(model).toBeDefined();
+			if (!base || !model) return;
+			let capturedUrl: string | undefined;
+			let capturedPayload: Record<string, unknown> | undefined;
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+					capturedUrl = input instanceof Request ? input.url : String(input);
+					capturedPayload = JSON.parse(await bodyToText(init?.body)) as Record<string, unknown>;
+					const completedEvent = {
+						type: "response.completed",
+						response: {
+							id: "resp_test",
+							status: "completed",
+							service_tier: echoedTier,
+							usage: {
+								input_tokens: 100_000,
+								input_tokens_details: { cached_tokens: 0 },
+								output_tokens: 0,
+								total_tokens: 100_000,
+							},
+						},
+					};
+					return new Response(`data: ${JSON.stringify(completedEvent)}\n\ndata: [DONE]\n\n`, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					});
+				}),
+			);
+
+			const { session } = await createAgentSession({
+				cwd,
+				agentDir,
+				model,
+				authStorage,
+				modelRuntime,
+				settingsManager: SettingsManager.inMemory({}),
+				sessionManager: SessionManager.inMemory(cwd),
+			});
+
+			try {
+				const stream = await session.agent.streamFunction(
+					model,
+					{ messages: [] },
+					{ sessionId: session.sessionId },
+				);
+				const result = await stream.result();
+
+				expect(result.stopReason).toBe("stop");
+				expect(capturedUrl).toBe("https://api.x.ai/v1/responses");
+				expect(capturedPayload).toMatchObject({ model: "grok-4.7", service_tier: FAST_MODEL_SERVICE_TIER });
+				expect(result.usage.cost.input).toBeCloseTo(base.cost.input * 0.1 * multiplier);
+			} finally {
+				session.dispose();
+			}
+		},
+	);
+
 	it("does not grant Codex routing identity to a renamed provider with an explicit route", async () => {
 		const provider = "codex-proxy";
 		const api = "openai-codex-responses" as const;

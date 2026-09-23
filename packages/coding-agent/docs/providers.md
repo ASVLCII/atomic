@@ -74,9 +74,10 @@ Codex describes Astra Fast as "2x speed, increased usage." OpenAI prices Fast at
 
 Fast inference is a model choice, not a mode. Where a provider supports it, Atomic adds a second selectable model whose canonical ID is the base model ID plus `-fast` — for example `openai-codex/gpt-5.6-sol-fast`. It appears in `/model`, in `atomic --list-models`, and in workflow model catalogs alongside its normal sibling, and it is persisted and restored by that exact ID. Select it anywhere you name a model, including with a thinking suffix: `openai-codex/gpt-5.6-sol-fast:medium`.
 
-Three provider paths produce these variants:
+Four provider paths produce these variants:
 
 - Only first-party OpenAI `openai/*` and OpenAI Codex `openai-codex/*` models send the **base** upstream model ID plus the fixed `service_tier: priority`. A renamed provider, proxy, Azure OpenAI, OpenRouter, or generic OpenAI-compatible provider does not receive a synthetic fast variant.
+- First-party xAI `xai/*` models get a fast variant for every Grok model, such as `xai/grok-4.7-fast`. It sends the **base** upstream model ID with xAI's [Priority Processing](https://docs.x.ai/developers/advanced-api-usage/priority-processing) `service_tier: priority`. xAI has no separate `-fast` model IDs for current Grok models. OpenRouter, Vercel AI Gateway, and renamed or proxied xAI-compatible providers do not receive a synthetic fast variant.
 - First-party Anthropic `anthropic/*` exposes [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode) for Claude Opus 5.5, Claude Opus 5, and Claude Opus 4.8: `anthropic/claude-opus-5-5-fast`, `anthropic/claude-opus-5-fast`, and `anthropic/claude-opus-4-8-fast`. Each sends the **base** upstream model ID with `speed: "fast"` and the `fast-mode-2026-02-01` beta header. It works with API keys and Claude subscription logins. Amazon Bedrock, Google Vertex, GitHub Copilot, OpenRouter, and renamed or proxied Anthropic-compatible providers do not receive a synthetic fast variant.
 - GitHub Copilot exposes only the real fast sibling IDs the OAuth model catalog advertises for the signed-in account, and only when the corresponding base model exists in Atomic's Copilot catalog. It sends those suffixed IDs verbatim with no OpenAI service-tier field. Copilot fast models require the account catalog metadata obtained through `/login`; a raw `COPILOT_GITHUB_TOKEN` does not provide that metadata.
 
@@ -137,6 +138,8 @@ Business and enterprise tokens sent to the individual host return `421 Misdirect
 Run `/login xai`, then select **Use a subscription**. `XAI_API_KEY` remains available through **Use an API key**.
 
 Atomic defaults xAI sessions to `grok-4.7`. GitHub Copilot also exposes Grok 4.7 when the account's model policy enables it. Network-backed catalogs refresh and cache these newer entries independently of the bundled catalog snapshot.
+
+`xai/grok-4.7-fast` and the other `xai/*-fast` choices request xAI Priority Processing for lower time-to-first-token and faster streaming. xAI bills priority at twice the standard token rates, and only when the response confirms the priority tier. When priority capacity is unavailable, xAI serves the request at the default tier and Atomic prices it at the standard rate.
 
 Builtin workflows and subagents default to `model: "auto"`, selecting an available model and supported effort for each task rather than using fixed role models or shipped fallback chains. This does not change your main-chat model. To choose the decision provider, use `/settings` → **Router model**. For explicit child models, fallback lists or provider restrictions, see [Subagent reference](/subagents/reference#automatic-model-selection) and [builtin workflow model options](/workflows/builtins#built-in-workflows).
 
