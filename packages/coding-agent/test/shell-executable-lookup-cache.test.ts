@@ -22,6 +22,7 @@ describe("PowerShell executable lookup", () => {
 	afterEach(() => {
 		Object.defineProperty(process, "platform", platform);
 		process.env.PATH = originalPath;
+		vi.useRealTimers();
 	});
 
 	it("resolves PowerShell with one synchronous PATH lookup per PATH value", () => {
@@ -38,5 +39,19 @@ describe("PowerShell executable lookup", () => {
 		process.env.PATH = "C:\\third-lookup-path";
 		getPowerShellConfig();
 		expect(spawnSync).toHaveBeenCalledTimes(2);
+	});
+
+	it("finds PowerShell installed after a missed lookup without a PATH change", () => {
+		vi.useFakeTimers();
+		process.env.PATH = "C:\\install-later-path";
+		spawnSync.mockReturnValue({ status: 1, stdout: "" });
+		expect(() => getPowerShellConfig()).toThrow(/No PowerShell executable found/);
+		const missedLookups = spawnSync.mock.calls.length;
+		expect(() => getPowerShellConfig()).toThrow(/No PowerShell executable found/);
+		expect(spawnSync).toHaveBeenCalledTimes(missedLookups);
+
+		spawnSync.mockReturnValue({ status: 0, stdout: `${process.execPath}\r\n` });
+		vi.advanceTimersByTime(30_000);
+		expect(getPowerShellConfig().shell).toBe(process.execPath);
 	});
 });
