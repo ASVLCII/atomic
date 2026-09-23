@@ -329,6 +329,30 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("interpret ambiguous requests the way they would");
 		});
 
+		test("teaches recording and mining execution history when a shell tool is available", () => {
+			const prompt = buildSystemPrompt({
+				contextFiles: [],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain("**Execution history**");
+			expect(prompt).toContain("`Assistant-workflow: inline` when no workflow was used");
+			expect(prompt).toContain("`Assistant-duration: 42m converged, estimated 30m`");
+			expect(prompt).toContain("`User-preference: <one line, in the user's terms>`");
+			expect(prompt).toContain("never record secrets, credentials");
+			expect(prompt).toContain("Treat fewer than five comparable records as anecdotal");
+			expect(prompt).toContain("This history is a guide, not the decision");
+			expect(prompt).toContain("using the repository's version control system and its hosting CLI");
+			expect(prompt).toContain("`gh pr list --state all --search 'Assistant-workflow in:body'` on GitHub");
+			expect(prompt).toContain("tie it to the requesting user with a `Co-authored-by: <name> <email>` trailer");
+			expect(prompt).toContain("Prioritize preferences tied to the requesting user");
+			expect(prompt).toContain("fall back to other contributors' relevant preferences as repository conventions");
+			expect(prompt).toContain(
+				"If the user, a context file, or `APPEND_SYSTEM.md` asks you not to record some or all of these records, skip those records.",
+			);
+		});
+
 		test("omits repository-intent guidance without a shell tool", () => {
 			const prompt = buildSystemPrompt({
 				selectedTools: ["read", "edit"],
@@ -338,6 +362,7 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).not.toContain("**Repository intent**");
+			expect(prompt).not.toContain("**Execution history**");
 		});
 	});
 

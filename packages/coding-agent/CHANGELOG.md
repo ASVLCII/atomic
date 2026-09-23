@@ -6,10 +6,15 @@
 
 - Added the `provider_stream_event` extension event for observing each parsed provider stream event before normalization, including provider-specific fields that assistant messages drop, plus an opt-in `/debug-provider` example viewer ([#9784](https://github.com/earendil-works/pi/issues/9784)).
 
+### Changed
+
+- When a shell tool is available, the default system prompt now asks the agent to record how each task ran in the commits, PRs, issues, and comments it writes: an `Assistant-workflow` trailer naming the workflow and run (or `Assistant-workflow: inline` when no workflow ran), an `Assistant-duration` trailer with measured time to converge against the estimate, and a `User-preference` trailer for durable preferences you express, tied to you by a `Co-authored-by` trailer. Before choosing between a workflow and inline work, estimating duration, or resolving ambiguity, the agent mines these records for comparable tasks with your version control system and its hosting CLI (for example `git log` and the GitHub CLI), and reports sample size, median, and range. Your own recorded preferences take priority; other contributors' preferences apply only as repository conventions when yours do not cover the situation. The history is used as a guide, not as the decision. Ask in your request, a context file, or `APPEND_SYSTEM.md` to turn off any of these records.
+
 ### Fixed
 
 - Fixed workflow stages with `model: "auto"` (and other stage sessions) crashing with `Cannot read properties of undefined (reading 'baseDir')` when Atomic was launched with `--theme <path>` or other CLI-provided resource paths ([#3229](https://github.com/bastani-inc/atomic/issues/3229)).
 - Managed git packages no longer install Atomic's host-provided peer dependencies (`@bastani/atomic`, `@bastani/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, and TypeBox) when their dependencies are installed with npm, pnpm, or Bun, and package-manager wrappers in the npm command setting, such as `corepack pnpm`, are now recognized. Extension packages that list one of those packages under dependencies instead of peer dependencies now get an extension warning, because an installed copy can load a duplicate runtime ([#9863](https://github.com/earendil-works/pi/issues/9863)).
+- Fixed an assistant reply occasionally disappearing from the live chat when a workflow completion notice arrived just as the reply finished streaming. The reply was still saved to the session, but the conversation shown and sent to the model could omit it until the session was reloaded.
 
 ## [0.9.20-alpha.8] - 2026-09-22
 
