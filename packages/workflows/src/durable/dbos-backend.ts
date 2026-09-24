@@ -95,6 +95,7 @@ export interface DbosStepRecord {
 
 import { getDbosProcessOwner } from "./dbos-process-owner.js";
 import { createRealDbosHandle, type DbosLogger, type DbosStatic, getAtomicExecutorId } from "./dbos-sdk-handle.js";
+import { explicitDbosSystemDatabaseUrl } from "./dbos-system-database-url.js";
 // ---------------------------------------------------------------------------
 // Real SDK handle factory (lazy import, no top-level dependency)
 // ---------------------------------------------------------------------------
@@ -114,13 +115,13 @@ const SILENT_DBOS_LOGGER: DbosLogger = {
 
 /**
  * Effective system database URL: explicit config wins over
- * `DBOS_SYSTEM_DATABASE_URL`. Values are trimmed so env-injected URLs
- * (secrets managers, env files) with trailing whitespace/newlines connect
- * cleanly, and a whitespace-only value means "not set".
+ * `DBOS_SYSTEM_DATABASE_URL`, then the caller-selected URL. Values are trimmed so
+ * env-injected URLs (secrets managers, env files) with trailing
+ * whitespace/newlines connect cleanly, and a whitespace-only value means "not set".
  */
 export function effectiveSystemDatabaseUrl(
 	configUrl: string | undefined,
-	envUrl: string | undefined = process.env.DBOS_SYSTEM_DATABASE_URL,
+	envUrl: string | undefined = explicitDbosSystemDatabaseUrl(),
 ): string | undefined {
 	const url = (configUrl ?? envUrl)?.trim();
 	return url === undefined || url.length === 0 ? undefined : url;

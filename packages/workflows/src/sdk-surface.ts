@@ -43,7 +43,8 @@ export type { ActiveRunEntry, CancellationRegistry } from "./runs/background/can
 export { cancellationRegistry, createCancellationRegistry } from "./runs/background/cancellation-registry.js";
 export type { ResolvedInputs, RunOpts, RunResult } from "./runs/foreground/executor.js";
 
-export { resolveInputs, run } from "./runs/foreground/executor.js";
+export { resolveInputs } from "./runs/foreground/executor.js";
+export { run } from "./runs/foreground/sdk-run.js";
 export type { AgentSessionAdapter, StageAdapters } from "./runs/foreground/stage-runner.js";
 export type { GitWorktreeSetupOptions, GitWorktreeSetupResult } from "./runs/shared/worktree.js";
 export { setupGitWorktree } from "./runs/shared/worktree.js";
@@ -65,6 +66,7 @@ export type {
 } from "./shared/store-types.js";
 export type * from "./shared/types.js";
 export { INTERACTIVE_WORKFLOW_POLICY, NON_INTERACTIVE_WORKFLOW_POLICY } from "./shared/types.js";
+export { WorkflowDurabilityRequiredError } from "./shared/workflow-durability.js";
 export { normalizeWorkflowName, workflowNamesEqual } from "./workflows/identity.js";
 export type { WorkflowRegistry } from "./workflows/registry.js";
 export { createRegistry } from "./workflows/registry.js";
