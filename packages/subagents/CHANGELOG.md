@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.20-alpha.11] - 2026-09-24
+
 ### Changed
 
 - Subagent orchestration guidance no longer lets an absence of workflow history, or history of only inline runs, push every task inline; the agent judges the task first and refines with execution history and your preferences.

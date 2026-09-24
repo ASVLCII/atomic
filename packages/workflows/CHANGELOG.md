@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.20-alpha.11] - 2026-09-24
+
 ### Changed
 
 - Workflow selection guidance now tells the agent that missing, sparse, or mostly inline workflow history is not by itself a reason to work inline; it judges the task's shape first and refines with execution history and your preferences.
