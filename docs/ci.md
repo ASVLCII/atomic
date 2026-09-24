@@ -430,6 +430,7 @@ chain. Each native compile has one bounded retry, with a second failure fatal.
 | `mlugg/setup-zig`, plus one retry | 2 min each |
 | `dtolnay/rust-toolchain` | 4 min |
 | `taiki-e/install-action` | 3 min |
+| `cargo install cargo-xwin` (win32) | 3 min |
 | Verify installed LLVM 18 | 1 min |
 | `cargo-xwin xwin cache xwin` | 8 min |
 
@@ -441,8 +442,8 @@ chain. Each native compile has one bounded retry, with a second failure fatal.
 | linux-arm64-musl | 5 min | 18 min |
 | darwin-x64 | 8 min | 19 min |
 | darwin-arm64 | 5 min | 12 min |
-| win32-x64-msvc | 5 min | 20 min |
-| win32-arm64-msvc | 5 min | 20 min |
+| win32-x64-msvc | 5 min | 21 min |
+| win32-arm64-msvc | 5 min | 21 min |
 
 These caps reserve measured setup, both compile attempts, bounded Zig or xwin
 acquisition and one minute for artifact upload. Re-measure before tightening
@@ -467,6 +468,13 @@ Both Windows legs use cargo-xwin and a bounded CRT/SDK acquisition step backed
 by `actions/cache`, keyed `xwin-v1-<arch>-17`. Each leg sets `XWIN_ARCH` to avoid
 downloading an architecture it does not link.
 
+cargo-xwin is built from crates.io (`cargo install cargo-xwin --version 0.23.0
+--locked`), which links it against glibc, rather than installed as the upstream
+musl release binary. The musl binary spends a cold fetch in allocator system
+calls: on a Namespace amd64 4x16 runner it took 9m56s to populate the arm64
+CRT, past the 8-minute bound, where the glibc build (36s to compile) took 35s.
+Keep the glibc build when bumping cargo-xwin; a cold warmer run is the check.
+
 `XWIN_SDK_VERSION` and `XWIN_CRT_VERSION` default to `latest`, so the key cannot
 express the content version: a cache hit pins the leg to whichever SDK was first
 stored under that key. That is more reproducible than resolving `latest` on every
@@ -484,6 +492,10 @@ Warmers install Node and Bun and download locked npm packages. The separate macO
 
 MSVC CRT/SDK downloads remain in GitHub's branch-scoped Actions cache with the existing keys. That path is not simultaneously mounted by Namespace. Verify a matching default-branch cache hit on an authorized release before relying on cross-ref reuse. Zig setup remains uncached; the former no-op Zig warmer was removed rather than claiming a download persisted when its caching switches were off.
 
+The MSVC CRT warmer's 19-minute job cap reserves its bounded toolchain setup
+(4 minutes), cargo-xwin installation (3 minutes), and cold-cache population
+(8 minutes), plus 4 minutes for runner setup and cache restore/save.
+
 Main-only persistence means pre-merge PR runs cannot demonstrate warmed release volumes. Inspect successful main population and a subsequent authorized release for hits. Do not dispatch publication solely to test a cache, and keep cold-cache installation and acquisition bounds intact.
 
 ### Pinned actions and build tools
@@ -495,9 +507,10 @@ compromised floating tag anywhere in it is a release-integrity event.
 `.github/dependabot.yml` already runs the `github-actions` ecosystem weekly and
 maintains both the pins and the comments.
 
-`taiki-e/install-action` is given exact tool versions (`cargo-zigbuild@0.23.0`,
-`cargo-xwin@0.23.0`). Unversioned, it resolves to `@latest`, which floats the
-build toolchain of a published, provenance-signed native artifact with no diff.
+`taiki-e/install-action` installs `cargo-zigbuild@0.23.0` rather than resolving
+`@latest`. The Windows legs build `cargo-xwin` with
+`cargo install cargo-xwin --version 0.23.0 --locked`. Both pins prevent an
+unreviewed build-tool update in a published, provenance-signed native artifact.
 `test.yml` pins `bun-version: 1.4.2` to match `publish.yml`; `latest` cannot be
 cached by `setup-bun` and left the suite testing a different Bun from the one
 that builds the shipped artifact.
