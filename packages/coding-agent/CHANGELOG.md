@@ -34,6 +34,7 @@
 - Fixed X11 clipboard text being pasted as an image when the clipboard owner accepts image targets it does not advertise. Atomic now reads only an advertised image type ([#9786](https://github.com/earendil-works/pi/issues/9786)).
 - Managed PostgreSQL now runs from a retained runtime separate from workflow data and project checkouts. Removing a source worktree no longer breaks its server; reinstalling a complete healthy package lets automatic recovery replace a damaged runtime, including the same version, even when new database connections are impossible or the server has already exited. A running server's process identity must verify before shutdown; identity mismatches or corruption still require investigation, and Atomic preserves the database.
 - Fixed `structured_output` and workflow stages with a result schema failing on Claude models with `Structured output failed across N model candidate(s)` when the schema bounds a number or string length, such as the builtin `classify-and-act` classifier's `confidence` between 0 and 1.
+- Subagent completion notices and `/tasks` details now take the result excerpt and prompt from the child's own messages. A forked child no longer shows parent text it inherited as its result ([#3251](https://github.com/bastani-inc/atomic/issues/3251)).
 
 ## [0.9.20-alpha.8] - 2026-09-22
 
