@@ -36,6 +36,7 @@ export class OwnerTaskStore {
 	private activityCursors = new Map<TaskId, bigint>();
 	private omittedActivity = new Set<TaskId>();
 	private backgroundIds = new Set<TaskId>();
+	private settlements = new Map<TaskId, bigint>();
 	readonly anchors = new Map<TaskId, TaskAnchor>();
 	private current?: OwnerSnapshot;
 	readonly supervisor: TaskSupervisor;
@@ -60,6 +61,13 @@ export class OwnerTaskStore {
 			(task) => task.wasBackground || isBackground(task.observation) || this.backgroundIds.has(task.ref.taskId),
 		);
 	}
+	/**
+	 * Journal sequence at which each task settled; higher is more recent. Tasks first seen settled in a
+	 * snapshot without their settlement event share that snapshot's sequence, so their order is unknown.
+	 */
+	get settlementOrder(): ReadonlyMap<TaskId, bigint> {
+		return this.settlements;
+	}
 	/** Resolve only within the owner that authorized this store. */
 	resolveTask(id: TaskId): Result<TaskLease, WaitError> {
 		return this.supervisor.lookupTask(this.owner, id);
@@ -82,8 +90,8 @@ export class OwnerTaskStore {
 		if (!watched.ok) return watched;
 		const subscription = watched.value;
 		this.subscription = subscription;
-		this.reconcile(subscription.snapshot);
-		subscription.onReconcile = (snapshot) => this.reconcile(snapshot);
+		this.reconcile(subscription.snapshot, []);
+		subscription.onReconcile = (snapshot, events) => this.reconcile(snapshot, events);
 		void this.observe(subscription);
 		return { ok: true, value: undefined };
 	}
@@ -95,7 +103,7 @@ export class OwnerTaskStore {
 		this.subscription?.dispose();
 		this.subscription = undefined;
 	}
-	private reconcile(snapshot: OwnerSnapshot): void {
+	private reconcile(snapshot: OwnerSnapshot, events: readonly NativeEvent[]): void {
 		if (
 			this.current &&
 			(snapshot.ownerId !== this.current.ownerId || snapshot.generation !== this.current.generation)
@@ -103,6 +111,9 @@ export class OwnerTaskStore {
 			throw new Error("StaleGeneration: cannot replace a task owner projection");
 		if (this.current && BigInt(snapshot.cursor.sequence) <= BigInt(this.current.cursor.sequence)) return;
 		this.current = snapshot;
+		for (const event of events)
+			if (event.payload.kind === "task-settled" && !this.settlements.has(event.payload.ref.taskId))
+				this.settlements.set(event.payload.ref.taskId, BigInt(event.cursor.sequence));
 		for (const task of snapshot.tasks) {
 			const previous = this.records.get(task.ref.taskId);
 			if (isBackground(task.observation) || isBackground(previous?.observation))
@@ -112,6 +123,8 @@ export class OwnerTaskStore {
 				task.ref.taskId,
 				previous?.execution.kind === "settled" ? { ...task, execution: previous.execution } : task,
 			);
+			if (task.execution.kind === "settled" && !this.settlements.has(task.ref.taskId))
+				this.settlements.set(task.ref.taskId, BigInt(snapshot.cursor.sequence));
 			if (!this.anchors.has(task.ref.taskId))
 				this.anchors.set(task.ref.taskId, {
 					taskId: task.ref.taskId,
