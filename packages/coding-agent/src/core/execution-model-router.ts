@@ -17,14 +17,14 @@ import {
 	parseModelConstraints,
 } from "./model-routing-constraints.js";
 import { modelRoutingTask } from "./model-routing-task.js";
-import { inferRouterDecision, resolveRouterModel } from "./structured-output/index.js";
+import { resolveRouterModel, routeModel } from "./structured-output/index.js";
 
 export interface ModelRoutingContext {
 	readonly modelRegistry: Pick<
 		ModelRegistry,
 		"getAll" | "getAvailable" | "streamSimple" | "containsConfiguredCredential"
 	> &
-		Partial<Pick<ModelRegistry, "getProviderAuthStatus" | "getProviderAuth" | "getClassifierModel">>;
+		Partial<Pick<ModelRegistry, "getProviderAuthStatus" | "getProviderAuth" | "getClassifierModel" | "classify">>;
 	readonly model?: Model<Api>;
 	getRouterModel(): string;
 }
@@ -227,9 +227,9 @@ export async function routeExecutionModel(input: {
 				required: ["model", "effort"],
 				additionalProperties: false,
 			});
-			let result: Awaited<ReturnType<typeof inferRouterDecision<typeof schema>>>;
+			let result: Awaited<ReturnType<typeof routeModel<typeof schema>>>;
 			try {
-				result = await inferRouterDecision(
+				result = await routeModel(
 					{
 						settings,
 						modelRegistry: ctx.modelRegistry,
@@ -237,7 +237,7 @@ export async function routeExecutionModel(input: {
 						state,
 						instructions,
 						schema,
-						jev: {
+						classifier: {
 							questions: {
 								pair: {
 									instructions:

@@ -162,8 +162,8 @@ runTest(
 			`installed supervisor construction failed:\n${supervisorProbe.stdout}\n${supervisorProbe.stderr}`,
 		);
 		assert.match(supervisorProbe.stdout, /repeated supervisor construction passed/);
-		// #3089/#3090: exercise the public installed SDK and the host-module map shared
-		// with Bun binaries. No provider inference or real credential is used.
+		// Exercise the public installed SDK and host-module map with a registered classifier.
+		// No real provider request or credential is used.
 		for (const executable of [nodeExe, bunExecutable()]) {
 			const probe = spawnSyncCollect(
 				[
@@ -176,28 +176,40 @@ runTest(
 				import * as sdk from "@bastani/atomic";
 				import { getVirtualModules } from "./dist/core/extensions/loader-host-modules.js";
 				const hosted = (await getVirtualModules())["@bastani/atomic"];
-				assert.equal(hosted.inferStructuredOutput, sdk.inferStructuredOutput);
-				assert.equal(hosted.inferRouterDecision, sdk.inferRouterDecision);
-				assert.equal(hosted.resolveRouterModel, sdk.resolveRouterModel);
+				assert.equal(hosted.generateStructuredOutput, sdk.generateStructuredOutput);
+				for (const name of ["inferRouterDecision", "routeModel", "resolveRouterModel"]) {
+					assert.equal(Object.hasOwn(sdk, name), false);
+					assert.equal(Object.hasOwn(hosted, name), false);
+				}
 				assert.equal(sdk.SettingsManager.inMemory().getRouterModel(), "");
-				assert.equal(sdk.getStructuredOutputProviders()[0].capabilities.chat, false);
-				process.env.TYPESAFE_API_KEY = "mock-installed-key";
-				let requests = 0;
-				globalThis.fetch = async () => {
-					requests++;
-					return Response.json({model: "jev-latest", answers: {result: {
-						type: "choice", choice: "yes", confidence: 1, probabilities: {yes: 1}
-					}}, usage: {input_tokens: 1, output_tokens: 1}});
+				const classifier = {
+					type: "classifier", provider: "fixture", id: "intent", api: "typesafe-system-one",
+					name: "Fixture classifier", baseUrl: "https://example.invalid", input: ["text"],
+					cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: 4096
 				};
-				const result = await sdk.inferRouterDecision({
-					settings: sdk.SettingsManager.inMemory(),
-					modelRegistry: {getAll: () => [], streamSimple: () => {throw Error("unexpected chat request")}},
-					state: {task: "classify this fixture"}, instructions: "Choose yes.",
-					schema: Type.Object({ok: Type.Literal(true)}, {additionalProperties: false}),
-					jev: {questions: {result: {instructions: "Choose yes.", criteria: {yes: "The fixture matches"}}},
-						decode: () => ({ok: true})}
+				let requests = 0;
+				const registry = {
+					getAll: () => [],
+					streamSimple: () => {throw Error("unexpected chat request")},
+					getClassifierModel: (provider, id) => provider === "fixture" && id === "intent" ? classifier : undefined,
+					classify: async (model, context) => {
+						assert.equal(model.provider, "fixture");
+						assert.equal(model.id, "intent");
+						requests++;
+						assert.ok("ok" in context.questions);
+						const question = "ok";
+						const choice = "true";
+						return {api: classifier.api, provider: classifier.provider, model: classifier.id,
+							answers: {[question]: {type: "choice", choice, probabilities: {[choice]: 1}, confidence: 1}},
+							stopReason: "stop", timestamp: Date.now()};
+					}
+				};
+				const schema = Type.Object({ok: Type.Literal(true)}, {additionalProperties: false});
+				const general = await sdk.generateStructuredOutput({
+					model: "fixture/intent", modelRegistry: registry, schema,
+					state: {task: "classify this fixture"}, instructions: "Choose yes."
 				});
-				assert.deepEqual(result.value, {ok: true});
+				assert.deepEqual(general.value, {ok: true});
 				assert.equal(requests, 1);
 				console.log("installed structured decision passed");
 			`,

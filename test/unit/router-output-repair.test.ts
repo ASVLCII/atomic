@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { SettingsManager } from "../../packages/coding-agent/src/core/settings-manager.js";
+import { generateStructuredOutput, routeModel } from "../../packages/coding-agent/src/core/structured-output/index.js";
 import {
-	inferRouterDecision,
-	inferStructuredOutput,
-} from "../../packages/coding-agent/src/core/structured-output/index.js";
-import {
+	classifierResult,
+	decisionClassifier,
 	decisionMessage,
 	decisionModel,
 	decisionRequest,
-	jevResponse,
 	messageStream,
+	structuredOutputRequest,
 } from "../helpers/structured-output.js";
 
 afterEach(() => {
@@ -26,7 +25,7 @@ test("router repairs invalid chat output with sanitized feedback and aggregates 
 		.mockImplementationOnce(() => messageStream(decisionMessage({ route: "private-invalid-output" })))
 		.mockImplementation(() => messageStream(decisionMessage()));
 	request.modelRegistry.streamSimple = stream;
-	const result = await inferRouterDecision(request);
+	const result = await routeModel(request);
 	assert.equal(result.value.route, "review");
 	assert.equal(stream.mock.calls.length, 2);
 	assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 20 });
@@ -40,29 +39,29 @@ test("router accepts fourth attempt and exhausts after four invalid answers", as
 	const request = decisionRequest();
 	let count = 0;
 	request.modelRegistry.streamSimple = () => messageStream(decisionMessage(++count === 4 ? { route: "review" } : {}));
-	await inferRouterDecision(request);
+	await routeModel(request);
 	assert.equal(count, 4);
 	count = 0;
 	request.modelRegistry.streamSimple = () => {
 		count++;
 		return messageStream(decisionMessage({}));
 	};
-	await assert.rejects(inferRouterDecision(request), /exhausted after 4 attempts/);
+	await assert.rejects(routeModel(request), /exhausted after 4 attempts/);
 	assert.equal(count, 4);
 });
 
-test("general structured output remains one shot", async () => {
-	const request = decisionRequest();
+test("general structured output repairs invalid output three times on a single candidate", async () => {
 	const stream = vi.fn(() => messageStream(decisionMessage({})));
-	request.modelRegistry.streamSimple = stream;
 	await assert.rejects(
-		inferStructuredOutput({
-			...request,
-			model: { kind: "chat", fullId: "decision-test/chat", model: decisionModel },
+		generateStructuredOutput({
+			...structuredOutputRequest(),
+			currentModel: undefined,
+			model: "decision-test/chat",
+			modelRegistry: { getAll: () => [decisionModel], streamSimple: stream },
 		}),
-		/No repair request/,
+		/Structured output/,
 	);
-	assert.equal(stream.mock.calls.length, 1);
+	assert.equal(stream.mock.calls.length, 4);
 });
 
 for (const failure of ["transport", "input", "provider"] as const)
@@ -74,79 +73,54 @@ for (const failure of ["transport", "input", "provider"] as const)
 		});
 		request.modelRegistry.streamSimple = stream;
 		await assert.rejects(
-			inferRouterDecision({ ...request, ...(failure === "input" ? { state: {} } : {}) }),
+			routeModel({ ...request, ...(failure === "input" ? { state: {} } : {}) }),
 			(error) => !String(error).includes("private-provider-error"),
 		);
 		assert.equal(stream.mock.calls.length, failure === "input" ? 0 : 1);
 	});
 
-// PR #3118: provider probabilities need not sum to one to use the returned choice.
-test.each([0, 0.5, 0.999, 1.001, 1.5, 2])("Jev accepts total probability %s without repair", async (mass) => {
-	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
-	const response = jevResponse();
-	response.answers.route.probabilities.review = mass / 2;
-	response.answers.route.probabilities.none = mass / 2;
-	const fetch = vi.fn(async () => Response.json(response));
-	vi.stubGlobal("fetch", fetch);
-	const result = await inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() });
-	assert.equal(result.value.route, "review");
-	assert.equal(fetch.mock.calls.length, 1);
-});
-
-// #3206: missing probabilities and probability drift are advisory and decode
-// without repair; only an unknown choice or malformed JSON triggers repair.
-for (const kind of ["missing", "probability"] as const)
-	test(`Jev accepts ${kind} output without repair (#3206)`, async () => {
-		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
-		const bad = jevResponse();
-		if (kind === "missing") Reflect.deleteProperty(bad.answers.route, "probabilities");
-		if (kind === "probability") bad.answers.route.probabilities.none = -1;
-		const fetch = vi.fn(async () => Response.json(bad));
-		vi.stubGlobal("fetch", fetch);
-		const result = await inferRouterDecision({ ...decisionRequest(), settings: SettingsManager.inMemory() });
-		assert.equal(result.value.route, "review");
-		assert.equal(fetch.mock.calls.length, 1);
-	});
-
-for (const kind of ["choice", "json"] as const)
-	test(`Jev repairs ${kind} output without changing criteria`, async () => {
-		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
-		const bad = jevResponse();
-		if (kind === "choice") bad.answers.route.choice = "absent";
-		const fetch = vi
-			.fn()
-			.mockResolvedValueOnce(kind === "json" ? new Response("invalid") : Response.json(bad))
-			.mockImplementation(async () => Response.json(jevResponse()));
-		vi.stubGlobal("fetch", fetch);
-		// No chat fallback: repairs run on Jev only without a current chat model (#3206).
-		const request = { ...decisionRequest(), currentModel: undefined, settings: SettingsManager.inMemory() };
-		const result = await inferRouterDecision(request);
-		assert.equal(result.value.route, "review");
-		assert.equal(fetch.mock.calls.length, 2);
-		const first = JSON.parse(fetch.mock.calls[0][1].body);
-		const second = JSON.parse(fetch.mock.calls[1][1].body);
-		assert.deepEqual(first.state, second.state);
-		assert.deepEqual(first.questions.route.criteria, second.questions.route.criteria);
-		assert.match(second.questions.route.instructions, /previous response failed output validation/);
-		assert.deepEqual(result.usage, {
-			inputTokens: kind === "json" ? 20 : 40,
-			outputTokens: kind === "json" ? 10 : 20,
+test.each([0, 0.5, 0.999, 1.001, 1.5, 2])(
+	"classifier accepts choice regardless of probability sum %s",
+	async (mass) => {
+		const request = decisionRequest();
+		const classify = vi.fn(async () => {
+			const result = classifierResult();
+			const route = result.answers.route;
+			if (route?.type !== "choice") throw new Error("Expected a Choice answer");
+			return {
+				...result,
+				answers: {
+					...result.answers,
+					route: {
+						...route,
+						probabilities: { none: mass / 2, review: mass / 2 },
+					},
+				},
+			};
 		});
-	});
+		const result = await routeModel({
+			...request,
+			settings: SettingsManager.inMemory({ routerModel: "decision-test/classifier" }),
+			modelRegistry: { ...request.modelRegistry, getClassifierModel: () => decisionClassifier, classify },
+		});
+		assert.equal(result.value.route, "review");
+		assert.equal(classify.mock.calls.length, 1);
+	},
+);
 
-test("pinned Jev HTTP authentication failure does not retry and stays fatal without a chat model (#3206)", async () => {
-	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-key");
-	const fetch = vi.fn(async () => new Response("private", { status: 401 }));
-	vi.stubGlobal("fetch", fetch);
+test("classifier invalid choice fails without retry when no chat fallback exists", async () => {
+	const request = decisionRequest();
+	const classify = vi.fn(async () => classifierResult({ route: "absent", budget: "exact" }));
 	await assert.rejects(
-		inferRouterDecision({
-			...decisionRequest(),
+		routeModel({
+			...request,
 			currentModel: undefined,
-			settings: SettingsManager.inMemory({ routerModel: "typesafe/jev-latest" }),
+			settings: SettingsManager.inMemory({ routerModel: "decision-test/classifier" }),
+			modelRegistry: { ...request.modelRegistry, getClassifierModel: () => decisionClassifier, classify },
 		}),
-		/HTTP 401/,
+		/Classifier returned no valid decision/,
 	);
-	assert.equal(fetch.mock.calls.length, 1);
+	assert.equal(classify.mock.calls.length, 1);
 });
 
 test("cancellation after invalid output prevents repair", async () => {
@@ -157,7 +131,7 @@ test("cancellation after invalid output prevents repair", async () => {
 		return messageStream(decisionMessage({}));
 	});
 	request.modelRegistry.streamSimple = stream;
-	await assert.rejects(inferRouterDecision({ ...request, signal: controller.signal }), /cancelled/);
+	await assert.rejects(routeModel({ ...request, signal: controller.signal }), /cancelled/);
 	assert.equal(stream.mock.calls.length, 1);
 });
 
@@ -171,7 +145,7 @@ test("routing repairs can complete after the former 30-second deadline", async (
 		stream.result = () => new Promise((resolve) => setTimeout(() => resolve(response), 20_000));
 		return stream;
 	};
-	const result = inferRouterDecision(request);
+	const result = routeModel(request);
 	const completed = result.then(
 		(value) => value,
 		(error: Error) => error,
@@ -193,7 +167,7 @@ test("correlated model effort validation participates in repairs", async () => {
 		.mockImplementationOnce(() => messageStream(decisionMessage({ route: "none" })))
 		.mockImplementation(() => messageStream(decisionMessage({ route: "review" })));
 	request.modelRegistry.streamSimple = stream;
-	const result = await inferRouterDecision(request, (value) => value.route === "review");
+	const result = await routeModel(request, (value) => value.route === "review");
 	assert.equal(result.value.route, "review");
 	assert.equal(stream.mock.calls.length, 2);
 });
@@ -214,7 +188,7 @@ test("repairs retain the original state, schema, model and router selection", as
 		}
 		return messageStream(decisionMessage());
 	});
-	await inferRouterDecision({
+	await routeModel({
 		...request,
 		state,
 		modelRegistry: { ...request.modelRegistry, getAll, streamSimple: stream },
@@ -233,7 +207,7 @@ for (const valid of [false, true])
 				now += 60_000;
 				return messageStream(decisionMessage(valid || stream.mock.calls.length > 1 ? { route: "review" } : {}));
 			});
-			const result = await inferRouterDecision({
+			const result = await routeModel({
 				...request,
 				modelRegistry: { ...request.modelRegistry, streamSimple: stream },
 			});
@@ -244,26 +218,22 @@ for (const valid of [false, true])
 		}
 	});
 
-test("slow Jev auth can start transport after the former deadline", async () => {
+test("slow classifier request can finish after the former deadline", async () => {
 	let now = 0;
 	const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
-	const fetch = vi.fn(async () => Response.json(jevResponse()));
-	vi.stubGlobal("fetch", fetch);
+	const request = decisionRequest();
+	const classify = vi.fn(async () => {
+		now = 60_000;
+		return classifierResult();
+	});
 	try {
-		const request = decisionRequest();
-		const result = await inferRouterDecision({
+		const result = await routeModel({
 			...request,
-			settings: SettingsManager.inMemory({ routerModel: "typesafe/jev-latest" }),
-			modelRegistry: {
-				...request.modelRegistry,
-				getProviderAuth: async () => {
-					now = 60_000;
-					return { auth: { apiKey: "synthetic-key" } };
-				},
-			},
+			settings: SettingsManager.inMemory({ routerModel: "decision-test/classifier" }),
+			modelRegistry: { ...request.modelRegistry, getClassifierModel: () => decisionClassifier, classify },
 		});
 		assert.equal(result.value.route, "review");
-		assert.equal(fetch.mock.calls.length, 1);
+		assert.equal(classify.mock.calls.length, 1);
 	} finally {
 		clock.mockRestore();
 	}

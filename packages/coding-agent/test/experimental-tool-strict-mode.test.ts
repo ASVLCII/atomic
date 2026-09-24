@@ -1,11 +1,12 @@
+import assert from "node:assert/strict";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { afterEach, describe, expect, it } from "vitest";
-import { createAskUserQuestionToolDefinition } from "../src/core/tools/ask-user-question/index.ts";
-import { QuestionParamsSchema } from "../src/core/tools/ask-user-question/tool/types.ts";
-import { allToolNames, createToolDefinition, type ToolDef } from "../src/core/tools/index.ts";
-import { createStructuredOutputTool } from "../src/core/tools/structured-output.ts";
-import { wrapToolDefinition } from "../src/core/tools/tool-definition-wrapper.ts";
+import { afterEach, describe, it } from "vitest";
+import { createAskUserQuestionToolDefinition } from "../src/core/tools/ask-user-question/index.js";
+import { QuestionParamsSchema } from "../src/core/tools/ask-user-question/tool/types.js";
+import { allToolNames, createToolDefinition, type ToolDef } from "../src/core/tools/index.js";
+import { createStructuredOutputTool, StructuredOutputParameters } from "../src/core/tools/structured-output.js";
+import { wrapToolDefinition } from "../src/core/tools/tool-definition-wrapper.js";
 
 function createBuiltInToolDefinitions(): ToolDef[] {
 	return [...allToolNames].map((name) => createToolDefinition(name, process.cwd()));
@@ -68,18 +69,21 @@ describe("experimental strict built-in tools", () => {
 		process.env.PI_EXPERIMENTAL = "1";
 		const experimentalTools = createBuiltInToolDefinitions();
 
-		expect(experimentalTools.map((tool) => tool.name)).toEqual(normalTools.map((tool) => tool.name));
+		assert.deepEqual(
+			experimentalTools.map((tool) => tool.name),
+			normalTools.map((tool) => tool.name),
+		);
 		for (const [index, tool] of experimentalTools.entries()) {
-			expect(tool.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+			assert.deepEqual(tool.constrainedSampling, { type: "json_schema", strict: "prefer" });
 			// Sampling hints never rewrite the schema.
-			expect(tool.parameters).toEqual(normalTools[index]?.parameters);
+			assert.deepEqual(tool.parameters, normalTools[index]?.parameters);
 			if (["bash", "powershell", "read", "edit", "write"].includes(tool.name)) {
-				expect(normalTools[index]?.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+				assert.deepEqual(normalTools[index]?.constrainedSampling, { type: "json_schema", strict: "prefer" });
 			} else {
-				expect(normalTools[index]?.constrainedSampling).toBeUndefined();
-				expect(Object.hasOwn(normalTools[index]!, "constrainedSampling")).toBe(false);
+				assert.equal(normalTools[index]?.constrainedSampling, undefined);
+				assert.equal(Object.hasOwn(normalTools[index]!, "constrainedSampling"), false);
 			}
-			expect(Object.hasOwn(tool, "constrainedSampling")).toBe(true);
+			assert.equal(Object.hasOwn(tool, "constrainedSampling"), true);
 		}
 	});
 
@@ -87,7 +91,7 @@ describe("experimental strict built-in tools", () => {
 		delete process.env.PI_EXPERIMENTAL;
 		process.env.ATOMIC_EXPERIMENTAL = "1";
 		for (const tool of createBuiltInToolDefinitions()) {
-			expect(tool.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+			assert.deepEqual(tool.constrainedSampling, { type: "json_schema", strict: "prefer" });
 		}
 	});
 
@@ -96,20 +100,20 @@ describe("experimental strict built-in tools", () => {
 		const names = createBuiltInToolDefinitions()
 			.map((tool) => tool.name)
 			.sort();
-		expect(names).toEqual([...allToolNames].sort());
+		assert.deepEqual(names, [...allToolNames].sort());
 	});
 
 	it("ask_user_question option arrays still validate under strict mode", () => {
 		process.env.PI_EXPERIMENTAL = "1";
 		const tool = createAskUserQuestionToolDefinition();
 
-		expect(tool.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+		assert.deepEqual(tool.constrainedSampling, { type: "json_schema", strict: "prefer" });
 		// The schema itself is unchanged, so valid option arrays (2-4 options,
 		// previews, multiSelect) keep passing validation with strict mode on.
-		expect(tool.parameters).toBe(QuestionParamsSchema);
-		expect(Value.Check(QuestionParamsSchema, VALID_QUESTIONNAIRE)).toBe(true);
-		expect(Value.Check(QuestionParamsSchema, { questions: [] })).toBe(false);
-		expect(
+		assert.equal(tool.parameters, QuestionParamsSchema);
+		assert.equal(Value.Check(QuestionParamsSchema, VALID_QUESTIONNAIRE), true);
+		assert.equal(Value.Check(QuestionParamsSchema, { questions: [] }), false);
+		assert.equal(
 			Value.Check(QuestionParamsSchema, {
 				questions: [
 					{
@@ -119,10 +123,11 @@ describe("experimental strict built-in tools", () => {
 					},
 				],
 			}),
-		).toBe(false);
+			false,
+		);
 	});
 
-	it("composes structured-output's own schema constraint with strict mode rather than double-wrapping", () => {
+	it("keeps structured-output's inference arguments outside strict sampling rather than double-wrapping", () => {
 		delete process.env.ATOMIC_EXPERIMENTAL;
 		const schema = Type.Object({ verdict: Type.String() });
 		const normalTool = createStructuredOutputTool({ schema });
@@ -130,23 +135,34 @@ describe("experimental strict built-in tools", () => {
 		process.env.PI_EXPERIMENTAL = "1";
 		const experimentalTool = createStructuredOutputTool({ schema });
 
-		// Layer 1 — structured-output constrains its output with the caller's
-		// schema itself. That constraint is shared, never re-wrapped: the same
-		// schema object, with strict mode on or off.
-		expect(experimentalTool.parameters).toBe(schema);
-		expect(normalTool.parameters).toBe(schema);
+		// Layer 1 — the model-visible arguments are the shared inference request
+		// (instructions, state, optional model and fallbacks), never the caller's
+		// result schema, with strict mode on or off. The result schema constrains
+		// the inferred value instead.
+		assert.equal(experimentalTool.parameters, StructuredOutputParameters);
+		assert.equal(normalTool.parameters, StructuredOutputParameters);
+		assert.notEqual(experimentalTool.parameters, schema);
+		assert.equal(
+			Value.Check(StructuredOutputParameters, {
+				instructions: "Judge the patch.",
+				state: { task: "Review" },
+				model: "typesafe/jev-latest",
+				fallbackModels: ["openai/gpt-5-mini"],
+			}),
+			true,
+		);
+		assert.equal(Value.Check(StructuredOutputParameters, { verdict: "approve" }), false);
 
 		// Layer 2 — experimental strict sampling applies to the built-in tools
-		// only; it does not bolt a second constraint onto a tool whose
-		// constraint already lives in its parameters.
-		expect(experimentalTool.constrainedSampling).toBeUndefined();
-		expect(normalTool.constrainedSampling).toBeUndefined();
+		// only; it does not bolt a constraint onto structured_output.
+		assert.equal(experimentalTool.constrainedSampling, undefined);
+		assert.equal(normalTool.constrainedSampling, undefined);
 
-		// Crossing into the agent runtime preserves both facts: one schema,
-		// zero added wrappers, even with the experimental flag set.
+		// Crossing into the agent runtime preserves both facts, even with the
+		// experimental flag set.
 		const wrapped = wrapToolDefinition(experimentalTool);
-		expect(wrapped.parameters).toBe(schema);
-		expect(wrapped.constrainedSampling).toBeUndefined();
-		expect(Object.hasOwn(wrapped, "constrainedSampling")).toBe(false);
+		assert.equal(wrapped.parameters, StructuredOutputParameters);
+		assert.equal(wrapped.constrainedSampling, undefined);
+		assert.equal(Object.hasOwn(wrapped, "constrainedSampling"), false);
 	});
 });
