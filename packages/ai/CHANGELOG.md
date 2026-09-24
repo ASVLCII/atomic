@@ -4,14 +4,21 @@ This package is a Bastani fork of `@earendil-works/pi-ai`. Upstream history at t
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Image generation now uses `ImageModel` entries in the regular `Provider` and `Models` collection instead of the separate `ImagesModels`/`ImagesProvider` collection. Replace `createImagesModels()`, `createImagesProvider()`, `builtinImagesModels()`, and `openrouterImagesProvider()` with `createModels()`/`builtinModels()` and `models.getModelOfType("image", ...)`/`models.generateImages()`. The old plural image type names are removed; generated image catalog data now ships alongside chat and classifier entries.
+
 ### Added
 
 - Added `onProviderStreamEvent` to observe parsed provider stream events before normalization, including provider-specific fields not retained in assistant messages ([#9784](https://github.com/earendil-works/pi/issues/9784)).
+- Added operation-specific model accessors (`getModelsOfType()`, `getModelOfType()`, `getAvailableOfType()`, `getAllModels()`, `getAllAvailable()`), image and classifier dispatch on providers, and `classify()` for structured choice, score, and bool questions. The built-in TypeSafe `jev-latest` classifier uses `TYPESAFE_API_KEY`; OpenRouter image models share OpenRouter authentication. Chat-only reads and models with no `type` continue to mean chat.
+- Added typed JSON catalog variants (`models.all.json` and `providers/{id}.all.json`) alongside the existing chat-only variants for clients that request all operation types.
 
 ### Fixed
 
 - Fixed Claude Opus 5.5 on GitHub Copilot offering thinking levels other than low, medium, high, xhigh, and max when models.dev lists the model before its effort metadata is complete.
 - Fixed 1-hour Anthropic cache writes reported by Vercel AI Gateway in streaming deltas being priced at the 5-minute rate ([#9210](https://github.com/earendil-works/pi/issues/9210)).
+- Rejected malformed TypeSafe classifier answers when the returned choice, score, confidence, or probability falls outside the submitted question's bounds.
 
 ## [0.9.20-alpha.7] - 2026-09-22
 

@@ -8,6 +8,7 @@ import type { ExtensionContext } from "@bastani/atomic";
 import {
 	type Api,
 	createAssistantMessageEventStream,
+	createProvider,
 	getCurrentTools,
 	type JsonObject,
 	type Model,
@@ -71,6 +72,86 @@ async function fixture() {
 	return { ctx, infer, route: (task = "Fix the approved defect") => routeSubagentModel({ ctx, agent, task }) };
 }
 
+test("auto routing admits multimodal-input chat but excludes image and classifier models, even from a native provider", async () => {
+	const { runtime, registry } = await registeredDecisionRuntime(() => messageStream(decisionMessage()));
+	const multimodal = {
+		...decisionModel,
+		provider: "multimodal",
+		id: "chat",
+		input: ["text", "image"] as ("text" | "image")[],
+	};
+	runtime.registerProvider("multimodal", {
+		api: decisionModel.api,
+		baseUrl: decisionModel.baseUrl,
+		apiKey: "test-key",
+		models: [multimodal],
+	});
+	const image = {
+		...decisionModel,
+		type: "image" as const,
+		provider: "leaky",
+		id: "painter",
+		api: "openrouter-images" as const,
+		output: ["image" as const],
+	};
+	const classifier = {
+		...decisionModel,
+		type: "classifier" as const,
+		provider: "leaky",
+		id: "judge",
+		api: "typesafe-system-one" as const,
+	};
+	runtime.registerNativeProvider({
+		...createProvider({
+			id: "leaky",
+			auth: { apiKey: { name: "test", resolve: async () => ({ auth: { apiKey: "test-key" } }) } },
+			models: [image, classifier],
+			images: {
+				"openrouter-images": {
+					generateImages: async () => {
+						throw new Error("No image request expected");
+					},
+				},
+			},
+			classifiers: {
+				"typesafe-system-one": {
+					classify: async () => {
+						throw new Error("No classification expected");
+					},
+				},
+			},
+		}),
+		// Runtime-loaded native providers can return entries outside the declared chat-only interface.
+		getModels: () => [image, classifier] as never as Model<Api>[],
+	});
+	await runtime.setRuntimeApiKey("leaky", "test-key", {});
+	await runtime.setRuntimeApiKey("openrouter", "test-key", {});
+	await runtime.setRuntimeApiKey("typesafe", "test-key", {});
+	const ctx = { model: decisionModel, getRouterModel: () => "decision-test/chat", modelRegistry: registry };
+	const imageId = "black-forest-labs/flux.2-flex";
+	assert.ok(runtime.getModelOfType("image", "openrouter", imageId));
+	assert.equal(runtime.getModel("openrouter", imageId), undefined);
+	assert.ok(runtime.getModelOfType("classifier", "typesafe", "jev-latest"));
+	assert.ok((await runtime.getAvailableOfType("image", "openrouter")).some((model) => model.id === imageId));
+	assert.ok((await runtime.getAvailableOfType("classifier", "typesafe")).some((model) => model.id === "jev-latest"));
+	await assert.rejects(
+		routeExecutionModel({
+			ctx,
+			task: "Route",
+			agent,
+			constraints: [{ allowedModels: ["leaky/painter", "leaky/judge"] }],
+		}),
+		/no eligible model\/effort pairs/,
+	);
+	const route = (model: string) =>
+		routeExecutionModel({ ctx, task: "Route", agent, selection: { model, effort: null } });
+	assert.ok(registry.getAvailable().some((model) => model.provider === "leaky" && model.id === "painter"));
+	assert.equal((await route("multimodal/chat")).routerSelection.model, "multimodal/chat");
+	for (const id of ["leaky/painter", "leaky/judge", `openrouter/${imageId}`, "typesafe/jev-latest"]) {
+		await assert.rejects(route(id), /no longer eligible/);
+	}
+});
+
 function jevPayloadBytes(body: string): { total: number; stateAndLongestQuestion: number } {
 	const request = JSON.parse(body) as JevFixtureRequest & { model?: string };
 	return {
@@ -122,7 +203,7 @@ test("execution routing keeps the real evals, guide, budget-sized task, and nine
 	const result = await routeExecutionModel({
 		ctx: {
 			model: decisionModel,
-			getRouterModel: () => "typesafe-ai/jev-latest",
+			getRouterModel: () => "typesafe/jev-latest",
 			modelRegistry: {
 				getAll: () => candidates,
 				getAvailable: () => candidates,
@@ -618,7 +699,7 @@ test("Jev uses one Choice over complete pairs and deterministically maps the sel
 	assert.deepEqual((await f.route()).routerSelection, { model: "decision-test/chat", effort: null });
 	assert.equal(fetch.mock.calls.length, 1);
 	assert.equal(f.infer.mock.calls.length, 0);
-	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	f.ctx.getRouterModel = () => "typesafe/jev-latest";
 	vi.spyOn(console, "warn").mockImplementation(() => {});
 	fetch.mockImplementation(async () =>
 		Response.json({
@@ -714,7 +795,7 @@ for (const failure of ["stale", "provider"] as const) {
 			.spyOn(f.ctx.modelRegistry, "getAvailable")
 			.mockReturnValue(Array.from({ length: 256 }, (_, i) => ({ ...decisionModel, id: `m${i}` })));
 		vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
-		f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+		f.ctx.getRouterModel = () => "typesafe/jev-latest";
 		// No current chat model, so the routing failure stays observable (#3206).
 		if (failure === "provider") f.ctx.model = undefined;
 		const fetch = vi.fn(async (_url: string, init: RequestInit) => {
@@ -735,7 +816,7 @@ for (const failure of ["stale", "provider"] as const) {
 test("hello-world routing receives evals and fits one small Jev request", async () => {
 	const f = await fixture();
 	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
-	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	f.ctx.getRouterModel = () => "typesafe/jev-latest";
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([{ ...decisionModel, id: "gpt-5.6-luna" }]);
 	const transport = vi.fn(async (_url: string, init: RequestInit) =>
 		Response.json(jevFixtureResponse(JSON.parse(String(init.body)) as JevFixtureRequest)),
@@ -768,7 +849,7 @@ test("hello-world routing receives evals and fits one small Jev request", async 
 test("maximal real eval routing payload preserves prompt and stays under conservative Jev bytes", async () => {
 	const f = await fixture();
 	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
-	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	f.ctx.getRouterModel = () => "typesafe/jev-latest";
 	const models = [
 		{ ...decisionModel, id: "small-a" },
 		{ ...decisionModel, id: "small-b", cost: { ...decisionModel.cost, input: 0.25, output: 0.5 } },
@@ -799,7 +880,7 @@ test("maximal real eval routing payload preserves prompt and stays under conserv
 test("real eval routing tournament preserves evals in every Jev request", async () => {
 	const f = await fixture();
 	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
-	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	f.ctx.getRouterModel = () => "typesafe/jev-latest";
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(
 		Array.from({ length: 9 }, (_, index) => ({ ...decisionModel, id: `candidate-${index}` })),
 	);
@@ -828,7 +909,7 @@ test("long auto-routing tasks fit Jev while preserving protected requirements an
 	const f = await fixture();
 	const notice = vi.spyOn(console, "warn").mockImplementation(() => {});
 	vi.stubEnv("TYPESAFE_API_KEY", "synthetic-jev-key");
-	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	f.ctx.getRouterModel = () => "typesafe/jev-latest";
 	const protectedText = "<keepContext>Review only. Never edit files.</keepContext>";
 	const task = `Review this change.\n${"reference data ".repeat(10000)}${protectedText}${"more data ".repeat(10000)}\nReport defects.`;
 	const transport = vi.fn(async (_url: string, init: RequestInit) => {
@@ -861,7 +942,7 @@ test("oversized protected tasks still fall back intact or fail when Jev is pinne
 	const transport = vi.fn();
 	vi.stubGlobal("fetch", transport);
 	const task = `<keepContext>${"required detail ".repeat(3000)}</keepContext>`;
-	f.ctx.getRouterModel = () => "typesafe-ai/jev-latest";
+	f.ctx.getRouterModel = () => "typesafe/jev-latest";
 	// #3206: the pinned Jev context overflow falls back to the chat router too.
 	await f.route(task);
 	f.ctx.getRouterModel = () => "";
