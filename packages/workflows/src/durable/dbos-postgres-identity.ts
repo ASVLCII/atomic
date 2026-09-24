@@ -1,7 +1,8 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { endianness } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { Client } from "pg";
 import {
 	assertManagedPostmaster,
@@ -34,6 +35,51 @@ export function availablePostgresPort(preferred: number): Promise<number> {
 			});
 		});
 	});
+}
+
+/** PostgreSQL resolves timezone data relative to its launch executable, not PGDATA. */
+export function managedPostgresRuntimeHealthy(
+	metadata: ManagedPostgresMetadata,
+	port = metadata.server?.port,
+): boolean {
+	return postgresRuntimeFilesExist(managedPostgresLaunchExecutable(metadata, port));
+}
+
+export function managedPostgresLaunchExecutable(
+	metadata: ManagedPostgresMetadata,
+	port = metadata.server?.port,
+): string {
+	const optsPath = join(metadata.dataDir, "postmaster.opts");
+	if (!lstatSync(optsPath).isFile()) throw new Error("Managed Postgres launch options are missing or untrusted.");
+	const command = readFileSync(optsPath, "utf8").trimEnd();
+	const launch = /^(.*[\\/]postgres(?:\.exe)?) "-D" "([^"]+)" "-p" "(\d+)" "-c" "listen_addresses=127\.0\.0\.1"/.exec(
+		command,
+	);
+	const collector =
+		' "-c" "logging_collector=on" "-c" "log_directory=log" "-c" "log_filename=postgresql-%a.log" "-c" "log_truncate_on_rotation=on" "-c" "log_rotation_age=1d" "-c" "log_rotation_size=0"';
+	const unsafe = ' "-c" "fsync=off" "-c" "synchronous_commit=off" "-c" "full_page_writes=off"';
+	if (
+		!launch ||
+		!isAbsolute(launch[1]) ||
+		!isAbsolute(launch[2]) ||
+		!["", collector, collector + unsafe].includes(command.slice(launch[0].length))
+	) {
+		throw new Error("Managed Postgres launch options do not identify Atomic's PostgreSQL runtime.");
+	}
+	if (realpathSync(launch[2]) !== metadata.dataDir || (port !== undefined && Number(launch[3]) !== port)) {
+		throw new Error("Managed Postgres launch options do not match its owned data directory and port.");
+	}
+	return launch[1];
+}
+
+export function postgresRuntimeFilesExist(postgres: string): boolean {
+	const native = dirname(dirname(postgres));
+	const timezoneSets = join(native, "share", ...(postgres.endsWith(".exe") ? [] : ["postgresql"]), "timezonesets");
+	return (
+		lstatSync(postgres, { throwIfNoEntry: false })?.isFile() === true &&
+		lstatSync(timezoneSets, { throwIfNoEntry: false })?.isDirectory() === true &&
+		lstatSync(join(timezoneSets, "Default"), { throwIfNoEntry: false })?.isFile() === true
+	);
 }
 
 /** A pidfile is evidence, never permission to signal a process. */
@@ -96,6 +142,30 @@ export const POSTGRES_IDENTITY_SQL = `SELECT current_setting('data_directory') A
 	split_part(pg_read_file('postmaster.pid'), E'\\n', 3) AS started,
 	system_identifier::text, current_setting('server_version') AS server_version FROM pg_control_system()`;
 
+/** Read-only transaction-local setting that reloads PostgreSQL's timezone-abbreviation file. */
+export const POSTGRES_TIMEZONE_SQL = "SELECT set_config('timezone_abbreviations', 'Default', true)";
+
+export async function probePostgresTimezoneData(port: number): Promise<void> {
+	const client = new Client({
+		host: "127.0.0.1",
+		port,
+		user: "postgres",
+		password: "atomic",
+		database: "postgres",
+		ssl: false,
+		connectionTimeoutMillis: 1000,
+		query_timeout: 1000,
+		statement_timeout: 1000,
+	});
+	client.on("error", () => {});
+	try {
+		await client.connect();
+		await client.query(POSTGRES_TIMEZONE_SQL);
+	} finally {
+		await client.end();
+	}
+}
+
 export async function probePostgresIdentity(port: number): Promise<PostgresIdentityRow | undefined> {
 	const client = new Client({
 		host: "127.0.0.1",
@@ -129,6 +199,53 @@ export async function probePostgresIdentity(port: number): Promise<PostgresIdent
 	} finally {
 		await client.end();
 	}
+}
+
+export type ManagedPostmasterProcess =
+	| { status: "live"; server: ManagedPostgresServer; observedCreateTime: number }
+	| { status: "absent" };
+
+export function verifyManagedPostmasterProcess(
+	metadata: ManagedPostgresMetadata,
+	expected: ManagedPostgresServer,
+): ManagedPostmasterProcess {
+	const pidPath = join(metadata.dataDir, "postmaster.pid");
+	const before = managedPostmaster(metadata);
+	if (
+		metadata.server?.pid !== expected.pid ||
+		metadata.server.started !== expected.started ||
+		metadata.server.port !== expected.port ||
+		metadata.server.systemIdentifier !== expected.systemIdentifier
+	)
+		throw new Error("Managed Postgres published process identity mismatch. Preserve the server and data directory.");
+	if (!before) return { status: "absent" };
+	const beforeFile = readFileSync(pidPath, "utf8");
+	if (
+		before.pid !== expected.pid ||
+		before.started !== expected.started ||
+		before.port !== expected.port ||
+		before.systemIdentifier !== expected.systemIdentifier ||
+		before.pid === process.pid ||
+		before.pid === process.ppid ||
+		realpathSync(beforeFile.split(/\r?\n/)[1]) !== metadata.dataDir
+	)
+		throw new Error("Managed Postgres process identity mismatch. Preserve the server and data directory.");
+	const binding = createRequire(import.meta.url)("@bastani/atomic-natives") as {
+		postgresProcessStartTime(pid: number): { found: boolean; startTime?: number };
+	};
+	const identity = binding.postgresProcessStartTime(before.pid);
+	if (readFileSync(pidPath, "utf8") !== beforeFile)
+		throw new Error("Managed Postgres OS process start identity mismatch. Preserve the server and data directory.");
+	if (!identity.found) return { status: "absent" };
+	if (
+		identity.startTime === undefined ||
+		!Number.isFinite(identity.startTime) ||
+		identity.startTime <= 0 ||
+		identity.startTime > before.started + 1
+	) {
+		throw new Error("Managed Postgres OS process start identity mismatch. Preserve the server and data directory.");
+	}
+	return { status: "live", server: before, observedCreateTime: identity.startTime };
 }
 
 export async function verifyPostgresIdentity(

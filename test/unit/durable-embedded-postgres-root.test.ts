@@ -8,20 +8,26 @@ import {
 	readdirSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
+	renameSync,
 	rmSync,
 	statSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 import {
 	defaultEmbeddedBaseDir,
 	type EmbeddedPostgresRunContext,
+	ensureRuntimeCacheDirectory,
+	fingerprintPreparedRuntime,
 	type LocalCommandRunner,
 	prepareBinariesForOwner,
 	ROOT_EMBEDDED_BASE_DIR,
+	RuntimeGenerationMissingError,
 	resolveEmbeddedRunContext,
 	resolvePrivilegeDrop,
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres-root.js";
@@ -331,33 +337,764 @@ describe("embedded Postgres binaries under a drop-privilege owner", () => {
 		return { baseDir, owner: { uid: 65534, gid: 65534, name: "nobody" }, runAsOwner };
 	}
 
-	test("no owner returns the loaded binaries untouched", async () => {
-		const binaries = {
-			pg_ctl: "/pkg/native/bin/pg_ctl",
-			initdb: "/pkg/native/bin/initdb",
-			postgres: "/pkg/native/bin/postgres",
-		};
-		const context: EmbeddedPostgresRunContext = { baseDir: "/anywhere", runAsOwner: noCommands };
-		assert.equal(await prepareBinariesForOwner(binaries, context, noCommands), binaries);
+	test("non-root runtime survives removal of the package worktree", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-stable-runtime-"));
+		try {
+			const native = join(scratch, "worktree", "node_modules", "@embedded-postgres", "darwin-arm64", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			mkdirSync(join(native, "lib"), { recursive: true });
+			mkdirSync(join(native, "share", "postgresql", "timezonesets"), { recursive: true });
+			for (const binary of ["pg_ctl", "initdb", "postgres"]) {
+				writeFileSync(join(native, "bin", binary), `source ${binary}\n`, { mode: 0o755 });
+			}
+			writeFileSync(join(native, "lib", "libpq.so"), "library\n");
+			writeFileSync(join(native, "share", "postgresql", "timezonesets", "Default"), "timezone\n");
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const selected = await prepareBinariesForOwner(binaries, context, noCommands);
+			const staged = dirname(dirname(selected.postgres));
+			assert.ok(staged.startsWith(join(context.baseDir, "pg-runtime", "native-")));
+			assert.equal(selected.sealedIdentity, await fingerprintPreparedRuntime(selected));
+			removeSealedScratch(join(scratch, "worktree"));
+			assert.equal(readFileSync(selected.postgres, "utf8"), "source postgres\n");
+			assert.equal(readFileSync(join(staged, "lib", "libpq.so"), "utf8"), "library\n");
+			assert.equal(
+				readFileSync(join(staged, "share", "postgresql", "timezonesets", "Default"), "utf8"),
+				"timezone\n",
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
 	});
 
-	test("owner-accessible binaries are used in place", async () => {
-		const calls: FakeCall[] = [];
-		const binaries = {
-			pg_ctl: "/pkg/native/bin/pg_ctl",
-			initdb: "/pkg/native/bin/initdb",
-			postgres: "/pkg/native/bin/postgres",
-		};
-		const result = await prepareBinariesForOwner(
-			binaries,
-			contextWith(
-				"/var/lib/atomic-postgres",
-				fakeRunner(() => ({ exitCode: 0, stdout: "initdb 18.0" }), calls),
-			),
-			noCommands,
-		);
-		assert.equal(result, binaries);
-		assert.deepEqual(calls, [{ command: "/pkg/native/bin/initdb", args: ["--version"], uid: undefined }]);
+	test("package identity reuses the source index without source stat passes", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-package-identity-"));
+		try {
+			const modules = join(scratch, "node_modules");
+			const pkg = join(modules, "@embedded-postgres", "example");
+			const native = join(pkg, "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["initdb", "postgres", "pg_ctl"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const manifest = (version: string) =>
+				writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@embedded-postgres/example", version }));
+			const lock = (version: string) =>
+				writeFileSync(
+					join(modules, ".package-lock.json"),
+					JSON.stringify({
+						packages: {
+							"node_modules/@embedded-postgres/example": { version, integrity: `sha512-${version}` },
+						},
+					}),
+				);
+			manifest("1.0.0");
+			lock("1.0.0");
+			const binaries = Object.fromEntries(
+				["initdb", "postgres", "pg_ctl"].map((name) => [name, join(native, "bin", name)]),
+			) as {
+				initdb: string;
+				postgres: string;
+				pg_ctl: string;
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			await prepareBinariesForOwner(binaries, context, noCommands);
+			vi.resetModules();
+			const fresh = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			let passes = 0;
+			await fresh.prepareBinariesForOwner(binaries, context, noCommands, { onSourceStatPass: () => passes++ });
+			assert.equal(passes, 0);
+			manifest("2.0.0");
+			lock("2.0.0");
+			await fresh.prepareBinariesForOwner(binaries, context, noCommands, { onSourceStatPass: () => passes++ });
+			assert.ok(passes > 0, "new package version requires a fresh source identity mapping");
+			passes = 0;
+			await fresh.prepareBinariesForOwner(binaries, context, noCommands, { onSourceStatPass: () => passes++ });
+			assert.equal(passes, 0, "the new package version retains its own fast-path mapping");
+			vi.stubEnv("ATOMIC_POSTGRES_RUNTIME_DIR", native);
+			passes = 0;
+			await fresh.prepareBinariesForOwner(binaries, context, noCommands, { onSourceStatPass: () => passes++ });
+			assert.ok(passes > 0, "explicit runtime overrides use the stat index");
+		} finally {
+			vi.unstubAllEnvs();
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("replacement refreshes an incomplete cached package repaired in place", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-package-repair-"));
+		try {
+			const modules = join(scratch, "node_modules");
+			const pkg = join(modules, "@embedded-postgres", "example");
+			const native = join(pkg, "native");
+			const timezone = join(native, "share", "postgresql", "timezonesets", "Default");
+			mkdirSync(dirname(timezone), { recursive: true });
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["initdb", "postgres", "pg_ctl"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			writeFileSync(
+				join(pkg, "package.json"),
+				JSON.stringify({ name: "@embedded-postgres/example", version: "1.0.0" }),
+			);
+			writeFileSync(
+				join(modules, ".package-lock.json"),
+				JSON.stringify({
+					packages: { "node_modules/@embedded-postgres/example": { version: "1.0.0", integrity: "sha512-same" } },
+				}),
+			);
+			const binaries = {
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+				pg_ctl: join(native, "bin", "pg_ctl"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			await assert.rejects(
+				prepareBinariesForOwner(binaries, context, noCommands, {
+					afterInitialSourceSnapshot: () => {
+						throw new Error("snapshot cached");
+					},
+				}),
+				/snapshot cached/,
+			);
+			const indexPath = join(context.baseDir, "pg-runtime", ".atomic-source-index.json");
+			const previous = readFileSync(indexPath, "utf8");
+			writeFileSync(timezone, "repaired timezone\n");
+			let passes = 0;
+			const prepared = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "repair", refresh: () => true },
+				onSourceStatPass: () => passes++,
+			});
+			assert.ok(passes > 0, "replacement must inspect the repaired source");
+			assert.notEqual(readFileSync(indexPath, "utf8"), previous);
+			assert.equal(
+				readFileSync(
+					join(dirname(dirname(prepared.postgres)), "share", "postgresql", "timezonesets", "Default"),
+					"utf8",
+				),
+				"repaired timezone\n",
+			);
+			assert.equal(await fingerprintPreparedRuntime(prepared), prepared.sealedIdentity);
+			vi.resetModules();
+			const fresh = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			passes = 0;
+			const reused = await fresh.prepareBinariesForOwner(binaries, context, noCommands, {
+				onSourceStatPass: () => passes++,
+			});
+			assert.equal(passes, 0, "healthy startup retains the persisted package fast path");
+			assert.equal(reused.sealedIdentity, prepared.sealedIdentity);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("attach uses required files while start and damage check the full manifest", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-validation-memo-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["initdb", "postgres", "pg_ctl"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+				pg_ctl: join(native, "bin", "pg_ctl"),
+			};
+			const prepared = await prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "cluster"), runAsOwner: noCommands },
+				noCommands,
+			);
+			vi.resetModules();
+			const fresh = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			let validations = 0;
+			const onValidation = () => validations++;
+			assert.equal(
+				await fresh.fingerprintPreparedRuntime(prepared, { quickValidation: true, onValidation }),
+				prepared.sealedIdentity,
+			);
+			assert.equal(validations, 0);
+			for (let repeat = 0; repeat < 3; repeat++)
+				assert.equal(
+					await fresh.fingerprintPreparedRuntime(prepared, { memoizedValidation: true, onValidation }),
+					prepared.sealedIdentity,
+				);
+			assert.equal(validations, 1);
+			assert.equal(
+				await fresh.fingerprintPreparedRuntime(prepared, { fullValidation: true, onValidation }),
+				prepared.sealedIdentity,
+			);
+			assert.equal(validations, 2);
+			chmodSync(prepared.postgres, 0o755);
+			writeFileSync(prepared.postgres, "damaged runtime");
+			await assert.rejects(
+				fresh.fingerprintPreparedRuntime(prepared, { fullValidation: true, onValidation }),
+				/manifest mismatch/,
+			);
+			assert.equal(validations, 3);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+	test("publishes a complete read-only marker once before rename and permits concurrent reuse", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-atomic-marker-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const markerName = ".atomic-runtime-complete.json";
+			let stagedText = "";
+			let markerCtime = 0;
+			let readerIdentity = "";
+			const published = await prepareBinariesForOwner(binaries, context, noCommands, {
+				renameStage: async (source, destination) => {
+					const marker = join(source, markerName);
+					stagedText = readFileSync(marker, "utf8");
+					assert.equal(lstatSync(marker).mode & 0o222, 0);
+					assert.equal(
+						(JSON.parse(stagedText) as { entries: readonly (readonly unknown[])[] }).entries[0]?.length,
+						6,
+					);
+					renameSync(source, destination);
+					markerCtime = lstatSync(join(destination, markerName)).ctimeMs;
+					readerIdentity = await fingerprintPreparedRuntime({
+						pg_ctl: join(destination, "bin", "pg_ctl"),
+						initdb: join(destination, "bin", "initdb"),
+						postgres: join(destination, "bin", "postgres"),
+					});
+				},
+			});
+			const marker = join(dirname(dirname(published.postgres)), markerName);
+			assert.equal(readFileSync(marker, "utf8"), stagedText);
+			assert.equal(lstatSync(marker).ctimeMs, markerCtime, "publication must not rewrite the marker after rename");
+			assert.equal(readerIdentity, published.sealedIdentity);
+			let reads = 0;
+			assert.equal(
+				await fingerprintPreparedRuntime(published, { onContentRead: () => reads++ }),
+				published.sealedIdentity,
+			);
+			assert.equal(reads, 0, "rename changes root ctime without requiring runtime content reads");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("staging preserves Windows executable suffixes", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-exe-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const binary of ["pg_ctl.exe", "initdb.exe", "postgres.exe"]) {
+				writeFileSync(join(native, "bin", binary), binary, { mode: 0o755 });
+			}
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl.exe"),
+				initdb: join(native, "bin", "initdb.exe"),
+				postgres: join(native, "bin", "postgres.exe"),
+			};
+			const selected = await prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "cluster"), runAsOwner: noCommands },
+				noCommands,
+			);
+			for (const key of ["pg_ctl", "initdb", "postgres"] as const) {
+				assert.ok(selected[key].endsWith(`${key}.exe`));
+				assert.equal(readFileSync(selected[key], "utf8"), `${key}.exe`);
+			}
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("non-root generation reuse fails closed on corruption", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-reuse-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const binary of ["pg_ctl", "initdb", "postgres"]) {
+				writeFileSync(join(native, "bin", binary), `source ${binary}\n`, { mode: 0o755 });
+			}
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const first = await prepareBinariesForOwner(binaries, context, noCommands);
+			assert.equal((await prepareBinariesForOwner(binaries, context, noCommands)).postgres, first.postgres);
+			chmodSync(first.postgres, 0o755);
+			writeFileSync(first.postgres, "corrupt generation\n");
+			await assert.rejects(
+				prepareBinariesForOwner(binaries, context, noCommands),
+				/runtime generation is corrupt and cannot be replaced/,
+			);
+			assert.equal(readFileSync(first.postgres, "utf8"), "corrupt generation\n");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("reuses one immutable repair generation after canonical corruption", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-reuse-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			chmodSync(original.postgres, 0o755);
+			writeFileSync(original.postgres, "corrupt");
+			const options = {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			};
+			const replacement = await prepareBinariesForOwner(binaries, context, noCommands, options);
+			assert.notEqual(replacement.postgres, original.postgres);
+			assert.equal(readFileSync(original.postgres, "utf8"), "corrupt");
+			assert.equal(readFileSync(replacement.postgres, "utf8"), "postgres");
+			assert.equal(
+				(await prepareBinariesForOwner(binaries, context, noCommands, options)).postgres,
+				replacement.postgres,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("damaged timezone candidate skips full validation and remains retained during repair", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-timezone-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			mkdirSync(join(native, "share", "postgresql", "timezonesets"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			writeFileSync(join(native, "share", "postgresql", "timezonesets", "Default"), "timezone");
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			const canonical = dirname(dirname(original.postgres));
+			const timezone = join(canonical, "share", "postgresql", "timezonesets", "Default");
+			chmodSync(dirname(timezone), 0o755);
+			rmSync(timezone);
+			let validations = 0;
+			const options = {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+				onValidation: () => validations++,
+			};
+			const replacement = await prepareBinariesForOwner(binaries, context, noCommands, options);
+			assert.equal(validations, 0, "damaged candidate is rejected before any full-tree stat pass");
+			assert.notEqual(replacement.postgres, original.postgres);
+			assert.equal(existsSync(timezone), false, "corrupt evidence remains untouched");
+			validations = 0;
+			assert.equal(
+				(await prepareBinariesForOwner(binaries, context, noCommands, options)).postgres,
+				replacement.postgres,
+			);
+			assert.equal(validations, 1, "the healthy candidate is fully validated on reuse");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("corrupt generation is memoized until its marker identity changes", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-memo-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			chmodSync(original.postgres, 0o755);
+			writeFileSync(original.postgres, "damaged!");
+			let validations = 0;
+			const options = {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+				onValidation: () => validations++,
+			};
+			const replacement = await prepareBinariesForOwner(binaries, context, noCommands, options);
+			assert.equal(validations, 1, "initial damaged candidate gets a full validation");
+			validations = 0;
+			assert.equal(
+				(await prepareBinariesForOwner(binaries, context, noCommands, options)).postgres,
+				replacement.postgres,
+			);
+			assert.equal(validations, 1, "only healthy replacement gets full validation again");
+			const marker = join(dirname(dirname(original.postgres)), ".atomic-runtime-complete.json");
+			chmodSync(marker, 0o644);
+			writeFileSync(marker, `${readFileSync(marker, "utf8")} `);
+			chmodSync(marker, 0o444);
+			validations = 0;
+			assert.equal(
+				(await prepareBinariesForOwner(binaries, context, noCommands, options)).postgres,
+				replacement.postgres,
+			);
+			assert.equal(validations, 2, "changed marker causes damaged generation to be re-evaluated");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("repairs a canonical runtime replaced with a regular file without altering it", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-file-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			const canonical = dirname(dirname(original.postgres));
+			removeSealedScratch(canonical);
+			writeFileSync(canonical, "retained evidence");
+			await assert.rejects(prepareBinariesForOwner(binaries, context, noCommands), /corrupt and cannot be replaced/);
+			const options = {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			};
+			const replacement = await prepareBinariesForOwner(binaries, context, noCommands, options);
+			assert.notEqual(dirname(dirname(replacement.postgres)), canonical);
+			assert.equal(readFileSync(canonical, "utf8"), "retained evidence");
+			assert.equal(
+				(await prepareBinariesForOwner(binaries, context, noCommands, options)).postgres,
+				replacement.postgres,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test.skipIf(process.platform === "win32")("repairs a canonical symlink loop without following it", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-root-loop-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			const canonical = dirname(dirname(original.postgres));
+			removeSealedScratch(canonical);
+			symlinkSync(basename(canonical), canonical);
+			const replacement = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			});
+			assert.notEqual(dirname(dirname(replacement.postgres)), canonical);
+			assert.equal(readlinkSync(canonical), basename(canonical));
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test.skipIf(process.platform === "win32")(
+		"repairs a candidate containing a cyclic link without following it",
+		async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-loop-"));
+			try {
+				const native = join(scratch, "pkg", "native");
+				mkdirSync(join(native, "bin"), { recursive: true });
+				for (const name of ["pg_ctl", "initdb", "postgres"])
+					writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+				const binaries = {
+					pg_ctl: join(native, "bin", "pg_ctl"),
+					initdb: join(native, "bin", "initdb"),
+					postgres: join(native, "bin", "postgres"),
+				};
+				const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+				const original = await prepareBinariesForOwner(binaries, context, noCommands);
+				const canonical = dirname(dirname(original.postgres));
+				chmodSync(canonical, 0o755);
+				symlinkSync("loop", join(canonical, "loop"));
+				await assert.rejects(
+					prepareBinariesForOwner(binaries, context, noCommands),
+					/corrupt and cannot be replaced/,
+				);
+				const replacement = await prepareBinariesForOwner(binaries, context, noCommands, {
+					repairCorruptGeneration: true,
+					publicationLease: { ownerToken: "test", refresh: () => true },
+				});
+				assert.notEqual(replacement.postgres, original.postgres);
+				assert.equal(readlinkSync(join(canonical, "loop")), "loop");
+			} finally {
+				removeSealedScratch(scratch);
+			}
+		},
+	);
+
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"repairs an unreadable candidate subtree without changing its permissions",
+		async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-permission-"));
+			try {
+				const native = join(scratch, "pkg", "native");
+				mkdirSync(join(native, "bin"), { recursive: true });
+				for (const name of ["pg_ctl", "initdb", "postgres"])
+					writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+				const binaries = {
+					pg_ctl: join(native, "bin", "pg_ctl"),
+					initdb: join(native, "bin", "initdb"),
+					postgres: join(native, "bin", "postgres"),
+				};
+				const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+				const original = await prepareBinariesForOwner(binaries, context, noCommands);
+				const canonical = dirname(dirname(original.postgres));
+				chmodSync(join(canonical, "bin"), 0o000);
+				await assert.rejects(
+					prepareBinariesForOwner(binaries, context, noCommands),
+					/corrupt and cannot be replaced/,
+				);
+				const replacement = await prepareBinariesForOwner(binaries, context, noCommands, {
+					repairCorruptGeneration: true,
+					publicationLease: { ownerToken: "test", refresh: () => true },
+				});
+				assert.notEqual(replacement.postgres, original.postgres);
+				assert.equal(lstatSync(join(canonical, "bin")).mode & 0o777, 0);
+			} finally {
+				removeSealedScratch(scratch);
+			}
+		},
+	);
+
+	test("staged traversal keeps synchronous lease refreshes bounded by publication boundaries", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-lease-refresh-count-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			for (let index = 0; index < 128; index++) writeFileSync(join(native, `entry-${index}`), String(index));
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			let refreshes = 0;
+			let yields = 0;
+			await prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "cluster"), runAsOwner: noCommands },
+				noCommands,
+				{
+					publicationLease: {
+						ownerToken: "owner",
+						refresh: () => {
+							refreshes++;
+							return true;
+						},
+						isLost: () => false,
+					},
+					yieldToEventLoop: async () => {
+						yields++;
+					},
+				},
+			);
+			assert.ok(yields > 16, `expected substantial staged traversal, got ${yields} yields`);
+			assert.equal(refreshes, 3, "only pre-rename, post-rename, and final selection fence the generation");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("displacement immediately before rename is fenced without publishing", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-rename-lease-loss-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			let ownsLease = true;
+			let renames = 0;
+			const baseDir = join(scratch, "cluster");
+			await assert.rejects(
+				prepareBinariesForOwner(binaries, { baseDir, runAsOwner: noCommands }, noCommands, {
+					publicationLease: { ownerToken: "owner", refresh: () => ownsLease, isLost: () => false },
+					beforePublish: () => {
+						ownsLease = false;
+					},
+					renameStage: async (source, destination) => {
+						renames++;
+						renameSync(source, destination);
+					},
+				}),
+				/lost its setup lease/,
+			);
+			assert.equal(renames, 0);
+			assert.equal(
+				readdirSync(join(baseDir, "pg-runtime")).some((name) => name.startsWith("native-")),
+				false,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("a lost setup lease cannot publish a repair over corrupt evidence", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-lease-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			chmodSync(original.postgres, 0o755);
+			writeFileSync(original.postgres, "corrupt");
+			await assert.rejects(
+				prepareBinariesForOwner(binaries, context, noCommands, {
+					repairCorruptGeneration: true,
+					publicationLease: { ownerToken: "lost", refresh: () => false },
+				}),
+				/setup lease/,
+			);
+			assert.deepEqual(
+				readdirSync(join(context.baseDir, "pg-runtime")).filter((name) => name.startsWith("native-")),
+				[basename(dirname(dirname(original.postgres)))],
+			);
+			assert.equal(readFileSync(original.postgres, "utf8"), "corrupt");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("reuses a healthy repair when the canonical slot disappears", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-peer-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const canonical = await prepareBinariesForOwner(binaries, context, noCommands);
+			chmodSync(canonical.postgres, 0o755);
+			writeFileSync(canonical.postgres, "corrupt");
+			const options = {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			};
+			const repair = await prepareBinariesForOwner(binaries, context, noCommands, options);
+			removeSealedScratch(dirname(dirname(canonical.postgres)));
+			const selected = await prepareBinariesForOwner(binaries, context, noCommands, options);
+			assert.equal(selected.postgres, repair.postgres);
+			assert.equal(existsSync(dirname(dirname(canonical.postgres))), false);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("reserves a deleted running generation and does not republish at its path", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-repair-reserved-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context: EmbeddedPostgresRunContext = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const first = await prepareBinariesForOwner(binaries, context, noCommands);
+			const reservedGeneration = dirname(dirname(first.postgres));
+			const reused = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				reservedGeneration,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			});
+			assert.equal(reused.postgres, first.postgres, "a healthy live generation permits read-only reuse");
+			removeSealedScratch(reservedGeneration);
+			const replacement = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				reservedGeneration,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			});
+			assert.notEqual(dirname(dirname(replacement.postgres)), reservedGeneration);
+			assert.equal(existsSync(reservedGeneration), false);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("owner-accessible binaries are staged rather than used in place", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-accessible-runtime-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const binary of ["initdb", "pg_ctl", "postgres"]) {
+				writeFileSync(join(native, "bin", binary), `source ${binary}\n`, { mode: 0o755 });
+			}
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const result = await prepareBinariesForOwner(
+				binaries,
+				contextWith(
+					join(scratch, "cluster"),
+					fakeRunner(() => ({ exitCode: 0, stdout: "initdb 18.0" })),
+				),
+				fakeRunner(() => ({ exitCode: 0 })),
+			);
+			assert.notEqual(result.postgres, binaries.postgres);
+			assert.equal(readFileSync(result.postgres, "utf8"), "source postgres\n");
+		} finally {
+			removeSealedScratch(scratch);
+		}
 	});
 
 	test("inaccessible binaries are copied and sealed under the privileged publisher", async () => {
@@ -974,7 +1711,7 @@ describe("embedded Postgres binaries under a drop-privilege owner", () => {
 				},
 			});
 			assert.equal(dirname(dirname(selected.initdb)), deterministicGeneration);
-			assert.ok(yields < 4, `selection traversed unexpected legacy candidates (${yields} yields)`);
+			assert.ok(yields < 8, `selection traversed unexpected legacy candidates (${yields} yields)`);
 			assert.equal(
 				readdirSync(runtimeDir).filter((entry) => entry.startsWith(`${generationName}-legacy-`)).length,
 				256,
@@ -1062,6 +1799,489 @@ describe("embedded Postgres binaries under a drop-privilege owner", () => {
 				),
 				/Could not seal the copied embedded Postgres runtime/,
 			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+	test("a shared cache override retains one generation for two cluster homes", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-shared-cache-"));
+		try {
+			const cache = join(scratch, "cache");
+			vi.stubEnv("ATOMIC_POSTGRES_RUNTIME_CACHE_DIR", cache);
+			const native = join(scratch, "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			await assert.rejects(
+				prepareBinariesForOwner(
+					binaries,
+					{ baseDir: join(scratch, "unpublished"), runAsOwner: noCommands },
+					noCommands,
+					{
+						reuseOnly: true,
+						repairCorruptGeneration: true,
+						publicationLease: { ownerToken: "fixture", refresh: () => true },
+					},
+				),
+				RuntimeGenerationMissingError,
+			);
+			assert.equal(readdirSync(cache).filter((name) => name.startsWith("native-")).length, 0);
+			const [first, second] = await Promise.all([
+				prepareBinariesForOwner(binaries, { baseDir: join(scratch, "first"), runAsOwner: noCommands }),
+				prepareBinariesForOwner(binaries, { baseDir: join(scratch, "second"), runAsOwner: noCommands }),
+			]);
+			assert.equal(first.postgres, second.postgres);
+			assert.ok(first.postgres.startsWith(cache));
+			assert.equal(readdirSync(cache).filter((name) => name.startsWith("native-")).length, 1);
+			const reused = await prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "existing"), runAsOwner: noCommands },
+				noCommands,
+				{
+					reuseOnly: true,
+					repairCorruptGeneration: true,
+					publicationLease: { ownerToken: "fixture", refresh: () => true },
+				},
+			);
+			assert.equal(reused.postgres, first.postgres);
+			const indexPath = join(cache, ".atomic-source-index.json");
+			const indexed = JSON.parse(readFileSync(indexPath, "utf8")) as Record<string, { indexWrittenAt: number }>;
+			for (const entry of Object.values(indexed)) entry.indexWrittenAt = Date.now() + 3000;
+			writeFileSync(indexPath, JSON.stringify(indexed));
+			let reads = 0;
+			vi.resetModules();
+			const fresh = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			await fresh.prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "third"), runAsOwner: noCommands },
+				noCommands,
+				{
+					onContentRead: () => reads++,
+				},
+			);
+			assert.equal(reads, 0, "old source index and unchanged completion manifest avoid content reads");
+			for (const entry of Object.values(indexed)) entry.indexWrittenAt = Date.now();
+			writeFileSync(indexPath, JSON.stringify(indexed));
+			vi.resetModules();
+			let racyReads = 0;
+			const racy = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			await racy.prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "racy"), runAsOwner: noCommands },
+				noCommands,
+				{
+					onContentRead: () => racyReads++,
+				},
+			);
+			assert.ok(racyReads > 0, "racy source index entries force a full source hash");
+			if (process.platform !== "win32") {
+				const index = join(cache, ".atomic-source-index.json");
+				chmodSync(index, 0o000);
+				try {
+					vi.resetModules();
+					let unreadableReads = 0;
+					const unreadable = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+					await unreadable.prepareBinariesForOwner(
+						binaries,
+						{ baseDir: join(scratch, "unreadable"), runAsOwner: noCommands },
+						noCommands,
+						{ onContentRead: () => unreadableReads++ },
+					);
+					assert.ok(unreadableReads > 0, "unreadable source indexes require a full hash");
+				} finally {
+					chmodSync(index, 0o600);
+				}
+			}
+			writeFileSync(join(cache, ".atomic-source-index.json"), "{invalid");
+			vi.resetModules();
+			const uncached = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			await uncached.prepareBinariesForOwner(
+				binaries,
+				{ baseDir: join(scratch, "fourth"), runAsOwner: noCommands },
+				noCommands,
+				{
+					onContentRead: () => reads++,
+				},
+			);
+			assert.ok(reads > 0, "corrupt indexes require a full source hash");
+			if (process.platform !== "win32") {
+				const insecure = join(scratch, "insecure-cache");
+				mkdirSync(insecure, { mode: 0o777 });
+				chmodSync(insecure, 0o777);
+				vi.stubEnv("ATOMIC_POSTGRES_RUNTIME_CACHE_DIR", insecure);
+
+				await assert.rejects(
+					prepareBinariesForOwner(binaries, { baseDir: join(scratch, "fifth"), runAsOwner: noCommands }),
+					/Untrusted embedded Postgres runtime cache directory/,
+				);
+				vi.stubEnv("ATOMIC_POSTGRES_RUNTIME_CACHE_DIR", cache);
+			}
+			assert.equal(process.env.ATOMIC_POSTGRES_RUNTIME_CACHE_DIR, cache);
+		} finally {
+			vi.unstubAllEnvs();
+			removeSealedScratch(scratch);
+		}
+	});
+	test("cache override validates absolute paths, sticky ancestors, and dropped-owner traversal", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-cache-trust-"));
+		try {
+			await assert.rejects(ensureRuntimeCacheDirectory("relative-cache"), /must be absolute/);
+			if (process.platform === "win32") return;
+			const ancestor = join(scratch, "parent");
+			const cache = join(ancestor, "cache");
+			mkdirSync(cache, { recursive: true });
+			chmodSync(ancestor, 0o777);
+			await assert.rejects(ensureRuntimeCacheDirectory(cache), /Untrusted.*ancestor/);
+			chmodSync(ancestor, 0o1777);
+			await ensureRuntimeCacheDirectory(cache);
+			const publisher = { uid: 0, gid: 0 };
+			const realAncestor = realpathSync(ancestor);
+			const inspect = async (path: string) => {
+				const info = lstatSync(path);
+				return Object.assign(Object.create(Object.getPrototypeOf(info)), info, {
+					uid: 0,
+					mode: path === realAncestor ? 0o40700 : (info.mode & ~0o777) | 0o755,
+				}) as typeof info;
+			};
+			await assert.rejects(
+				ensureRuntimeCacheDirectory(cache, publisher, true, { uid: 65534, gid: 65534, name: "nobody" }, inspect),
+				/cannot traverse/,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("source replacement with identical size and mtime invalidates the sealed source memo", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-memo-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), "first", { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const first = await prepareBinariesForOwner(binaries, context, noCommands);
+			const original = statSync(binaries.postgres);
+			const replacement = join(native, "bin", "replacement");
+			writeFileSync(replacement, "other", { mode: 0o755 });
+			utimesSync(replacement, original.atime, original.mtime);
+			renameSync(replacement, binaries.postgres);
+			vi.resetModules();
+			let reads = 0;
+			const fresh = await import("../../packages/workflows/src/durable/dbos-embedded-postgres-root.js");
+			const second = await fresh.prepareBinariesForOwner(binaries, context, noCommands, {
+				onContentRead: () => reads++,
+			});
+			assert.notEqual(second.sealedIdentity, first.sealedIdentity);
+			assert.ok(reads > 0, "new inode or ctime invalidates the persisted stat index");
+			assert.equal(readFileSync(second.postgres, "utf8"), "other");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("reuse checks metadata without reading runtime contents and legacy marker-less generations are verified once", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-marker-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			writeFileSync(join(native, "large.dat"), Buffer.alloc(1024 * 1024));
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			let coldYields = 0;
+			let sourceChunks = 0;
+			let stagedChunks = 0;
+			const first = await prepareBinariesForOwner(binaries, context, noCommands, {
+				yieldToEventLoop: async () => {
+					coldYields++;
+				},
+				onContentRead: (path) => {
+					if (!path.endsWith("large.dat")) return;
+					if (path === join(native, "large.dat")) sourceChunks++;
+					else stagedChunks++;
+				},
+			});
+			const generation = dirname(dirname(first.postgres));
+			let reuseYields = 0;
+			let reusedChunks = 0;
+			assert.equal(
+				(
+					await prepareBinariesForOwner(binaries, context, noCommands, {
+						yieldToEventLoop: async () => {
+							reuseYields++;
+						},
+						onContentRead: () => {
+							reusedChunks++;
+						},
+					})
+				).postgres,
+				first.postgres,
+			);
+			assert.ok(coldYields > reuseYields + 4, `cold ${coldYields} vs reuse ${reuseYields} traversal yields`);
+			assert.ok(sourceChunks >= 16, "racy source entries require full content hashes");
+			assert.equal(stagedChunks, 16, "publication hashes the sealed staged tree once");
+			assert.ok(reusedChunks >= 16, "racy source entries remain hashed on reuse");
+			assert.equal(await fingerprintPreparedRuntime(first), first.sealedIdentity);
+			if (process.platform !== "win32") {
+				chmodSync(first.postgres, statSync(first.postgres).mode & 0o777);
+				let runtimeReads = 0;
+				await prepareBinariesForOwner(binaries, context, noCommands, {
+					onContentRead: (path) => {
+						if (path.startsWith(generation)) runtimeReads++;
+					},
+				});
+				assert.ok(runtimeReads > 0, "ctime changes with identical content rehash the sealed runtime");
+			}
+			if (process.platform === "win32") {
+				const mode = statSync(first.postgres).mode & 0o777;
+				chmodSync(first.postgres, 0o666);
+				writeFileSync(first.postgres, "x");
+				await assert.rejects(fingerprintPreparedRuntime(first), /manifest mismatch/);
+				writeFileSync(first.postgres, "postgres");
+				chmodSync(first.postgres, mode);
+			} else {
+				chmodSync(first.postgres, 0o000);
+				await assert.rejects(fingerprintPreparedRuntime(first), /manifest mismatch/);
+				chmodSync(first.postgres, 0o555);
+			}
+			const marker = join(generation, ".atomic-runtime-complete.json");
+			assert.ok(existsSync(marker));
+			rmSync(marker);
+			const legacy = await prepareBinariesForOwner(binaries, context, noCommands);
+			assert.equal(legacy.postgres, first.postgres);
+			assert.equal(existsSync(marker), false);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("same-size sealed content mutation is detected and repaired without replacing the corrupt generation", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-ctime-repair-"));
+		try {
+			const native = join(scratch, "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = Object.fromEntries(
+				["pg_ctl", "initdb", "postgres"].map((name) => [name, join(native, "bin", name)]),
+			) as { pg_ctl: string; initdb: string; postgres: string };
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const first = await prepareBinariesForOwner(binaries, context, noCommands);
+			const original = statSync(first.postgres);
+			const mode = original.mode & 0o777;
+			// Windows can publish and mutate within one NTFS timestamp tick; make the
+			// metadata change observable before exercising the stat-index repair path.
+			if (process.platform === "win32") await new Promise((resolve) => setTimeout(resolve, 1_100));
+			chmodSync(first.postgres, 0o600);
+			writeFileSync(first.postgres, "altered!", { mode: 0o600 });
+			chmodSync(first.postgres, mode);
+			assert.notEqual(statSync(first.postgres).ctimeMs, original.ctimeMs, "mutation must change sealed file ctime");
+			await assert.rejects(fingerprintPreparedRuntime(first), /manifest mismatch/);
+			const repaired = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "repair", refresh: () => true },
+			});
+			assert.notEqual(repaired.postgres, first.postgres);
+			assert.equal(readFileSync(first.postgres, "utf8"), "altered!");
+			assert.equal(readFileSync(repaired.postgres, "utf8"), "postgres");
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("concurrent runtime publishers converge without replacing the first generation", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-concurrent-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			let releaseBoth!: () => void;
+			const bothStaged = new Promise<void>((resolve) => {
+				releaseBoth = resolve;
+			});
+			let releasePeer!: () => void;
+			const peerMayPublish = new Promise<void>((resolve) => {
+				releasePeer = resolve;
+			});
+			let staged = 0;
+			let peerValidated = false;
+			let peerPublisher!: ReturnType<typeof prepareBinariesForOwner>;
+			const beforePublish = async () => {
+				staged++;
+				if (staged === 2) releaseBoth();
+				await bothStaged;
+			};
+			const publisher = prepareBinariesForOwner(binaries, context, noCommands, {
+				beforePublish,
+				afterPublish: async () => {
+					releasePeer();
+					await peerPublisher;
+					const peer = await prepareBinariesForOwner(binaries, context, noCommands);
+					peerValidated = (await fingerprintPreparedRuntime(peer)) === peer.sealedIdentity;
+				},
+			});
+			peerPublisher = prepareBinariesForOwner(binaries, context, noCommands, {
+				beforePublish: async () => {
+					await beforePublish();
+					await peerMayPublish;
+				},
+			});
+			const results = await Promise.all([publisher, peerPublisher]);
+			assert.equal(staged, 2);
+			assert.equal(peerValidated, true);
+			assert.equal(results[0].postgres, results[1].postgres);
+			assert.equal(
+				readdirSync(join(context.baseDir, "pg-runtime")).filter((name) => name.startsWith("native-")).length,
+				1,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("Windows EPERM when a peer publishes the same generation reuses its sealed runtime", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-eperm-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			let published!: Awaited<ReturnType<typeof prepareBinariesForOwner>>;
+			const loser = await prepareBinariesForOwner(binaries, context, noCommands, {
+				beforePublish: async () => {
+					published = await prepareBinariesForOwner(binaries, context, noCommands);
+				},
+				renameStage: async () => {
+					throw Object.assign(new Error("peer destination exists"), { code: "EPERM" });
+				},
+			});
+			assert.equal(loser.postgres, published.postgres);
+			assert.equal(await fingerprintPreparedRuntime(loser), published.sealedIdentity);
+			assert.equal(
+				readdirSync(join(context.baseDir, "pg-runtime")).filter((entry) => entry.startsWith(".native-staged-"))
+					.length,
+				0,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test.each(["EPERM", "EACCES"])("%s without a peer destination propagates the publication error", async (code) => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-denied-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			await assert.rejects(
+				prepareBinariesForOwner(binaries, context, noCommands, {
+					renameStage: async () => {
+						throw Object.assign(new Error("permission denied"), { code });
+					},
+				}),
+				/permission denied/,
+			);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+
+	test("EPERM with a corrupt peer destination repairs without overwriting it", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-corrupt-peer-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			let peer!: Awaited<ReturnType<typeof prepareBinariesForOwner>>;
+			await assert.rejects(
+				prepareBinariesForOwner(binaries, context, noCommands, {
+					beforePublish: async () => {
+						peer = await prepareBinariesForOwner(binaries, context, noCommands);
+						chmodSync(peer.postgres, 0o755);
+						writeFileSync(peer.postgres, "x");
+					},
+					renameStage: async () => {
+						throw Object.assign(new Error("peer destination exists"), { code: "EPERM" });
+					},
+				}),
+				/runtime completion manifest mismatch/,
+			);
+			const repaired = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			});
+			assert.notEqual(repaired.postgres, peer.postgres);
+			assert.equal(readFileSync(peer.postgres, "utf8"), "x");
+			assert.equal(await fingerprintPreparedRuntime(repaired), repaired.sealedIdentity);
+		} finally {
+			removeSealedScratch(scratch);
+		}
+	});
+	test("a truncated runtime file is retained and repaired in a new slot", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "atomic-pg-runtime-truncated-"));
+		try {
+			const native = join(scratch, "pkg", "native");
+			mkdirSync(join(native, "bin"), { recursive: true });
+			for (const name of ["pg_ctl", "initdb", "postgres"])
+				writeFileSync(join(native, "bin", name), name, { mode: 0o755 });
+			const binaries = {
+				pg_ctl: join(native, "bin", "pg_ctl"),
+				initdb: join(native, "bin", "initdb"),
+				postgres: join(native, "bin", "postgres"),
+			};
+			const context = { baseDir: join(scratch, "cluster"), runAsOwner: noCommands };
+			const original = await prepareBinariesForOwner(binaries, context, noCommands);
+			chmodSync(original.postgres, 0o755);
+			writeFileSync(original.postgres, "x");
+			const repaired = await prepareBinariesForOwner(binaries, context, noCommands, {
+				repairCorruptGeneration: true,
+				publicationLease: { ownerToken: "test", refresh: () => true },
+			});
+			assert.notEqual(repaired.postgres, original.postgres);
+			assert.equal(readFileSync(original.postgres, "utf8"), "x");
 		} finally {
 			removeSealedScratch(scratch);
 		}

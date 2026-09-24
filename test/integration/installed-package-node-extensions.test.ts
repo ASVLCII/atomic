@@ -19,6 +19,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterAll, test } from "vitest";
+import {
+	preserveSharedPostgresRuntimeCache,
+	registerSharedPostgresRuntimeHome,
+	sharedPostgresRuntimeCache,
+} from "../helpers/real-postgres.js";
 import { bunExecutable, moduleDir, spawnSyncCollect } from "../helpers/runtime.js";
 
 const repoRoot = resolve(moduleDir(import.meta.url), "../..");
@@ -81,10 +86,43 @@ if (!distBuilt || !nodeExe) {
 
 let tmpRoot: string | undefined;
 let packedRoot: string | undefined;
+let releasePackedRuntimeCache: (() => void) | undefined;
 
 afterAll(() => {
-	if (tmpRoot) fs.rmSync(tmpRoot, { recursive: true, force: true });
-	if (packedRoot) fs.rmSync(packedRoot, { recursive: true, force: true });
+	if (tmpRoot) fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+	if (!packedRoot) return;
+	const consumer = join(packedRoot, "consumer");
+	const home = join(consumer, "atomic-real-postgres-home");
+	const postgres = join(home, ".atomic", "postgres");
+	if (fs.existsSync(postgres)) {
+		assert.ok(nodeExe);
+		const cleanup = spawnSync(nodeExe, [join(consumer, "consumer-parity.mjs"), "cleanup"], {
+			cwd: consumer,
+			encoding: "utf8",
+			timeout: 30_000,
+			env: {
+				...process.env,
+				HOME: home,
+				USERPROFILE: home,
+				ATOMIC_POSTGRES_RUNTIME_CACHE_DIR: sharedPostgresRuntimeCache(),
+			},
+		});
+		if (cleanup.status !== 0) preserveSharedPostgresRuntimeCache();
+		assert.equal(
+			cleanup.status,
+			0,
+			`cleanup failed; preserving ${packedRoot}: ${cleanup.error ?? ""}\n${cleanup.stdout}\n${cleanup.stderr}`,
+		);
+		const makeRemovable = (path: string) => {
+			const stat = fs.lstatSync(path, { throwIfNoEntry: false });
+			if (!stat || stat.isSymbolicLink()) return;
+			fs.chmodSync(path, stat.isDirectory() ? 0o700 : 0o600);
+			if (stat.isDirectory()) for (const name of fs.readdirSync(path)) makeRemovable(join(path, name));
+		};
+		if (fs.existsSync(join(postgres, "pg-runtime"))) makeRemovable(join(postgres, "pg-runtime"));
+	}
+	fs.rmSync(packedRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+	releasePackedRuntimeCache?.();
 });
 
 /** Symlink (junction on Windows, so no elevation is needed) a real directory. */
@@ -258,6 +296,9 @@ runTest(
 	() => {
 		assert.ok(nodeExe);
 		packedRoot = fs.mkdtempSync(join(os.tmpdir(), "atomic-packed-consumer-"));
+		releasePackedRuntimeCache = registerSharedPostgresRuntimeHome(
+			join(packedRoot, "consumer", "atomic-real-postgres-home"),
+		);
 		const consumer = join(packedRoot, "consumer");
 		fs.mkdirSync(consumer);
 		fs.writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
@@ -271,11 +312,12 @@ runTest(
 				maxBuffer: 64 * 1024 * 1024,
 				env: {
 					...process.env,
-					HOME: join(consumer, "home"),
-					USERPROFILE: join(consumer, "home"),
-					ATOMIC_CODING_AGENT_DIR: join(consumer, "home", ".atomic", "agent"),
+					HOME: join(consumer, "atomic-real-postgres-home"),
+					USERPROFILE: join(consumer, "atomic-real-postgres-home"),
+					ATOMIC_CODING_AGENT_DIR: join(consumer, "atomic-real-postgres-home", ".atomic", "agent"),
 					DBOS_SYSTEM_DATABASE_URL: undefined,
 					ATOMIC_POSTGRES_RUNTIME_DIR: undefined,
+					ATOMIC_POSTGRES_RUNTIME_CACHE_DIR: sharedPostgresRuntimeCache(),
 					ATOMIC_INTERCOM_SESSION_ID: undefined,
 				},
 			});

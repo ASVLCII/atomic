@@ -10,8 +10,9 @@
  * The cluster lives under `~/.atomic/postgres/v<major>` on a dedicated port.
  * Atomic starts Postgres directly and retains an opaque native process lease;
  * releasing that lease does not kill the server, so it survives abrupt exits
- * and can be shared by concurrent sessions. Orderly shutdown also detaches once
- * ready; only failed, unpublished startup may stop its exact retained process.
+ * and can be shared by concurrent sessions. Only an unpublished startup or a
+ * verified managed server whose runtime has disappeared may be stopped; a
+ * shared runtime restart is elected under the cluster setup lock.
  *
  * On Windows, Administrative accounts run PostgreSQL through a restricted
  * access token (mirroring pg_ctl), because the server refuses to start for a
@@ -27,13 +28,17 @@
 import {
 	chmodSync,
 	chownSync,
+	closeSync,
 	copyFileSync,
 	existsSync,
+	fstatSync,
 	lstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	readlinkSync,
+	readSync,
 	realpathSync,
 	renameSync,
 	rmdirSync,
@@ -44,13 +49,18 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir, uptime } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { RetainedPostgres, RetainedPostgresSpawnOptions } from "@bastani/atomic-natives";
 import { DbosDependencyError } from "./dbos-admission.js";
 import {
 	cleanupAbandonedRuntimeStages,
+	defaultEmbeddedBaseDir,
 	type EmbeddedPostgresRunContext,
+	ensureRuntimeCacheDirectory,
+	fingerprintPreparedRuntime,
+	isCorruptRuntimeGeneration,
 	prepareBinariesForOwner,
+	RuntimeGenerationMissingError,
 	type RuntimePublicationLease,
 	resolveEmbeddedRunContext,
 } from "./dbos-embedded-postgres-root.js";
@@ -62,11 +72,18 @@ import {
 import { PostgresHealth } from "./dbos-postgres-health.js";
 import {
 	availablePostgresPort,
+	managedPostgresLaunchExecutable,
+	managedPostgresRuntimeHealthy,
 	managedPostmaster,
 	POSTGRES_IDENTITY_SQL,
+	POSTGRES_TIMEZONE_SQL,
 	type PostgresIdentityProbe,
 	type PostgresIdentityRow,
+	postgresRuntimeFilesExist,
 	preferredPostgresPort,
+	probePostgresIdentity,
+	probePostgresTimezoneData,
+	verifyManagedPostmasterProcess,
 	verifyPostgresIdentity,
 } from "./dbos-postgres-identity.js";
 import {
@@ -102,9 +119,18 @@ interface EmbeddedPostgresBinaries {
 	readonly pg_ctl: string;
 	readonly initdb: string;
 	readonly postgres: string;
+	readonly sealedIdentity?: string;
 }
 
 type RetainedPostgresSpawner = (options: RetainedPostgresSpawnOptions) => RetainedPostgres;
+
+interface WindowsPostgresProcessGuard {
+	readonly status: "live" | "absent" | "mismatch";
+	exited(): boolean;
+	close(): void;
+}
+
+type WindowsPostgresGuardFactory = (pid: number, expectedStartTime: number) => WindowsPostgresProcessGuard;
 
 interface ActiveEmbeddedPostgres {
 	readonly lease: RetainedPostgres;
@@ -126,34 +152,14 @@ export class EmbeddedPostgresCleanupPendingError extends AggregateError {
 let activeCluster: ActiveEmbeddedPostgres | undefined;
 let ensureOperation: EnsureOperation = ensure;
 let retainedPostgresSpawnerOverride: RetainedPostgresSpawner | undefined;
+let windowsPostgresGuardOverride: WindowsPostgresGuardFactory | undefined;
 
 let ensured: Promise<void> | undefined;
 let consumer: PostgresConsumerLease | undefined;
 let initializing = false;
 let health: PostgresHealth | undefined;
-let lastFailure: Error | undefined;
-
-export function embeddedPostgresLastFailure(): Error | undefined {
-	return health?.lastFailure ?? lastFailure;
-}
-
 export function embeddedPostgresHealth(): PostgresHealth | undefined {
 	return health;
-}
-
-/** Explicit repair only for an existing registered cluster, never initial provisioning. */
-export async function recoverEmbeddedPostgres(
-	context: EmbeddedPostgresRunContext,
-	metadata: ManagedPostgresMetadata,
-): Promise<void> {
-	if (activeCluster && !activeCluster.shared)
-		throw new EmbeddedPostgresCleanupPendingError([], "Managed Postgres cleanup is still pending.");
-	// Detach only the old native handle; a published server is never signaled.
-	activeCluster?.lease.release();
-	activeCluster = undefined;
-	await ensureCluster({ context, recovery: metadata });
-	// Subsequent provisioning must health-check the published recovery, not treat it as failed startup.
-	ensured ??= Promise.resolve();
 }
 
 /** Start once, then verify the live shared identity on subsequent requests. */
@@ -171,7 +177,6 @@ export function ensureEmbeddedDbosPostgres(): Promise<void> {
 	ensured ??= ensureOperation()
 		.catch((error: unknown) => {
 			ensured = undefined;
-			lastFailure = error instanceof Error ? error : new Error(String(error));
 			throw error;
 		})
 		.finally(() => {
@@ -200,6 +205,8 @@ async function ensureCluster(
 		probeIdentity?: PostgresIdentityProbe;
 		recovery?: ManagedPostgresMetadata;
 		prepared?: boolean;
+		runtimeIdentity?: string;
+		shutdownWait?: DelayOperation;
 	} = {},
 ): Promise<void> {
 	const isReachable = options.isReachable ?? tcpReachable;
@@ -269,30 +276,188 @@ async function ensureCluster(
 				);
 			}
 			let verified: ManagedPostgresServer | undefined;
+			const existingServerProbe = (): PostgresIdentityProbe => options.probeIdentity ?? probePostgresIdentity;
 			let prepared = options.prepared ? options.binaries : undefined;
-			if (existing) {
+			let selectedIdentity = options.runtimeIdentity;
+			let reservedLiveGeneration: string | undefined;
+			const verifyReplacementSource = async (source: EmbeddedPostgresBinaries): Promise<void> => {
+				if (!postgresRuntimeFilesExist(source.postgres)) {
+					throw new Error(
+						"Replacement managed Postgres source runtime is incomplete; preserving the running server.",
+					);
+				}
+				if (options.probeIdentity !== undefined) return;
+				hydrateBinaryLibraryLinks(source.pg_ctl);
+				for (const binary of [source.postgres, source.pg_ctl, source.initdb]) {
+					const result = await runLocalCommand(binary, ["--version"]);
+					const version = /\(PostgreSQL\)\s+(\d+)\b/.exec(result.stdout);
+					if (result.exitCode !== 0 || Number(version?.[1]) !== EMBEDDED_PG_MAJOR)
+						throw new Error(
+							`incompatible PostgreSQL runtime: ${binary} --version expected major ${EMBEDDED_PG_MAJOR}: ${commandFailureDetail(result)}`,
+						);
+				}
+			};
+			const prepareRetainedRuntime = async (
+				source: EmbeddedPostgresBinaries,
+				reservedGeneration: string | undefined,
+				quickValidation = false,
+				fullValidation = false,
+				refreshSourceSnapshot = false,
+			): Promise<EmbeddedPostgresBinaries> => {
+				const cacheDir = process.env.ATOMIC_POSTGRES_RUNTIME_CACHE_DIR;
+				if (cacheDir === undefined)
+					return prepareBinariesForOwner(source, context, undefined, {
+						publicationLease: setup.runtimePublicationLease,
+						repairCorruptGeneration: true,
+						refreshSourceSnapshot,
+						reservedGeneration,
+						quickValidation,
+						memoizedValidation: true,
+						fullValidation,
+					});
+				await ensureRuntimeCacheDirectory(cacheDir, undefined, context.owner !== undefined);
+				try {
+					return await prepareBinariesForOwner(source, context, undefined, {
+						publicationLease: setup.runtimePublicationLease,
+						repairCorruptGeneration: true,
+						refreshSourceSnapshot,
+						reservedGeneration,
+						quickValidation,
+						fullValidation,
+						memoizedValidation: true,
+						reuseOnly: true,
+					});
+				} catch (error) {
+					if (!(error instanceof RuntimeGenerationMissingError)) throw error;
+				}
+				let result: EmbeddedPostgresBinaries | undefined;
+				await withSetupLock(
+					join(cacheDir, ".publication-lock"),
+					async (cache) => {
+						await cleanupAbandonedRuntimeStages(cacheDir, cache.abandonedRuntimeStageOwnerTokens);
+						result = await prepareBinariesForOwner(source, context, undefined, {
+							publicationLease: {
+								ownerToken: cache.runtimePublicationLease.ownerToken,
+								refresh: () =>
+									cache.runtimePublicationLease.refresh() && setup.runtimePublicationLease.refresh(),
+								isLost: () =>
+									cache.runtimePublicationLease.isLost?.() === true ||
+									setup.runtimePublicationLease.isLost?.() === true,
+							},
+							repairCorruptGeneration: true,
+							refreshSourceSnapshot,
+							reservedGeneration,
+							quickValidation,
+							fullValidation,
+							memoizedValidation: true,
+						});
+					},
+					{ attempts: READY_ATTEMPTS * 4 },
+				);
+				if (result === undefined) throw new Error("Embedded Postgres runtime publication did not complete.");
+				return result;
+			};
+			const chooseRuntime = async (
+				mode: "attach" | "start" | "damage" = "start",
+			): Promise<EmbeddedPostgresBinaries> => {
+				if (prepared !== undefined && selectedIdentity !== undefined) {
+					let retainedValid = false;
+					try {
+						retainedValid =
+							(await fingerprintPreparedRuntime(prepared, {
+								publicationLease: setup.runtimePublicationLease,
+								quickValidation: mode === "attach",
+								memoizedValidation: mode !== "damage",
+								fullValidation: mode === "damage",
+							})) === selectedIdentity;
+					} catch (error) {
+						if (!isCorruptRuntimeGeneration(error, dirname(dirname(prepared.postgres)))) throw error;
+					}
+					if (retainedValid) return prepared;
+					const source = await loadEmbeddedPostgresBinaries();
+					await verifyReplacementSource(source);
+					const reservedGeneration = reservedLiveGeneration ?? dirname(dirname(prepared.postgres));
+					prepared = await prepareRetainedRuntime(
+						source,
+						reservedGeneration,
+						mode === "attach",
+						mode === "damage",
+						true,
+					);
+					selectedIdentity = prepared.sealedIdentity;
+				} else {
+					if (prepared === undefined) {
+						const source = options.binaries ?? (await loadEmbeddedPostgresBinaries());
+						await verifyReplacementSource(source);
+						prepared = await prepareRetainedRuntime(
+							source,
+							reservedLiveGeneration,
+							mode === "attach",
+							mode === "damage",
+							mode === "damage",
+						);
+					}
+				}
+				if (
+					!postgresRuntimeFilesExist(prepared.postgres) ||
+					![prepared.pg_ctl, prepared.initdb].every((binary) =>
+						lstatSync(binary, { throwIfNoEntry: false })?.isFile(),
+					) ||
+					(prepared.sealedIdentity !== undefined &&
+						(await fingerprintPreparedRuntime(prepared, {
+							publicationLease: setup.runtimePublicationLease,
+							quickValidation: mode === "attach",
+							memoizedValidation: true,
+						})) !== prepared.sealedIdentity)
+				) {
+					throw new Error(
+						"Replacement managed Postgres runtime is incomplete or changed; preserving the running server.",
+					);
+				}
+				return prepared;
+			};
+			if (existing && !managedPostgresRuntimeHealthy(metadata!, port)) {
+				reservedLiveGeneration = dirname(dirname(managedPostgresLaunchExecutable(metadata!, existing.port)));
+				prepared = await chooseRuntime("damage");
+				if (adoptedRegistry !== undefined) {
+					if (verifyManagedPostmasterProcess({ ...metadata!, server: existing }, existing).status === "live") {
+						if (!setup.runtimePublicationLease.refresh())
+							throw new Error("Postgres setup lease lost before legacy adoption.");
+						publishPostgresServer(root, metadata!, existing);
+					}
+					adoptedRegistry = undefined;
+				}
+				if (
+					await stopBrokenManagedPostmaster(
+						metadata!,
+						existing,
+						prepared.pg_ctl,
+						context,
+						setup.runtimePublicationLease,
+						options.shutdownWait,
+					)
+				) {
+					activeCluster?.lease.release();
+					activeCluster = undefined;
+				}
+			} else if (existing) {
 				await waitForClusterReadiness(
 					logFile,
 					undefined,
 					async () => {
-						verified = await verifyPostgresIdentity(metadata!, port, existing.pid, options.probeIdentity);
-						// A shutdown can overlap the SQL probe. Once that postmaster is gone,
-						// leave the attach wait and start under this same setup lease instead
-						// of polling the captured PID until the readiness deadline expires.
+						verified = await verifyPostgresIdentity(metadata!, port, existing.pid, existingServerProbe());
 						return verified !== undefined || managedPostmaster(metadata!) === undefined;
 					},
 					READY_ATTEMPTS,
 					delay,
 					port,
+					dataDir,
 				);
 			}
+			if (verified)
+				reservedLiveGeneration = dirname(dirname(managedPostgresLaunchExecutable(metadata!, verified.port)));
 			if (!verified) {
-				const loaded = options.binaries ?? (await loadEmbeddedPostgresBinaries());
-				const binaries =
-					prepared ??
-					(await prepareBinariesForOwner(loaded, context, undefined, {
-						publicationLease: setup.runtimePublicationLease,
-					}));
+				const binaries = await chooseRuntime();
 				prepared = binaries;
 				if (!existsSync(join(dataDir, "PG_VERSION"))) {
 					if (options.recovery) throw new Error("Managed Postgres recovery must not initialize data.");
@@ -311,7 +476,9 @@ async function ensureCluster(
 					port = await availablePostgresPort(attempt === 0 ? port : 0);
 					if (!setup.runtimePublicationLease.refresh()) throw new Error("Postgres setup lease lost before start.");
 					try {
-						const lease = await startCluster(binaries.postgres, dataDir, logFile, context, port);
+						const lease = await startCluster(binaries.postgres, dataDir, logFile, context, port, {
+							unsafeDurability: process.env.ATOMIC_POSTGRES_TEST_UNSAFE_DURABILITY === "1",
+						});
 						startedCluster = { lease };
 						activeCluster = startedCluster;
 						await waitForClusterReadiness(
@@ -324,6 +491,7 @@ async function ensureCluster(
 							READY_ATTEMPTS,
 							delay,
 							port,
+							dataDir,
 						);
 						break;
 					} catch (error) {
@@ -342,13 +510,13 @@ async function ensureCluster(
 				}
 			}
 			if (!metadata || !verified) throw new Error("Managed Postgres identity was not verified.");
+			if (options.probeIdentity === undefined) await probePostgresTimezoneData(verified.port);
+			let runtimeIdentity: string | undefined;
 			if (health === undefined) {
-				prepared ??= await prepareBinariesForOwner(
-					options.binaries ?? (await loadEmbeddedPostgresBinaries()),
-					context,
-					undefined,
-					{ publicationLease: setup.runtimePublicationLease },
-				);
+				prepared = await chooseRuntime(verified && startedCluster === undefined ? "attach" : "start");
+				runtimeIdentity =
+					prepared.sealedIdentity ??
+					(await fingerprintPreparedRuntime(prepared, { publicationLease: setup.runtimePublicationLease }));
 			}
 			if (!setup.runtimePublicationLease.refresh()) throw new Error("Postgres setup lease lost before attach.");
 			publishPostgresServer(root, metadata, verified);
@@ -358,9 +526,20 @@ async function ensureCluster(
 			const nextConsumer = acquirePostgresConsumer(root, metadata, `${process.execPath} | ${import.meta.url}`);
 			consumer?.release();
 			consumer = nextConsumer;
+			if (health !== undefined && options.recovery !== undefined && prepared?.sealedIdentity !== undefined) {
+				options.binaries = prepared;
+				options.runtimeIdentity = selectedIdentity ?? prepared.sealedIdentity;
+			}
 			if (health === undefined) {
 				const pinned = { ...metadata, server: verified };
-				const recoveryOptions = { ...options, context, binaries: prepared, prepared: true, recovery: pinned };
+				const recoveryOptions = {
+					...options,
+					context,
+					binaries: prepared,
+					prepared: true,
+					recovery: pinned,
+					runtimeIdentity,
+				};
 				const inspect = async (probe = options.probeIdentity) => {
 					const current = managedPostgresMetadata(root, EMBEDDED_PG_MAJOR, false);
 					if (
@@ -374,10 +553,20 @@ async function ensureCluster(
 					}
 					const server = current.server;
 					if (!server) throw new Error("Managed Postgres published identity is missing.");
-					const live = await verifyPostgresIdentity(current, server.port, server.pid, probe);
+					if (!managedPostgresRuntimeHealthy(current, server.port)) {
+						verifyManagedPostmasterProcess(current, server);
+						return undefined;
+					}
+					const live = await verifyPostgresIdentity(
+						current,
+						server.port,
+						server.pid,
+						probe ?? existingServerProbe(),
+					);
 					if (!live) return undefined;
 					if (live.started !== server.started)
 						throw new Error("Managed Postgres published start identity mismatch.");
+					if (probe === undefined) await probePostgresTimezoneData(live.port);
 					actualPort = live.port;
 					return { url: embeddedDbosSystemDatabaseUrl(), identity: JSON.stringify(live) };
 				};
@@ -392,11 +581,16 @@ async function ensureCluster(
 							return result.rows[0];
 						});
 						if (!identity) throw new DbosDependencyError();
+						if (options.probeIdentity === undefined) {
+							const query = { text: POSTGRES_TIMEZONE_SQL, query_timeout: 1000 };
+							await client.query(query);
+						}
 					},
 					recover: async () => {
 						if (activeCluster && !activeCluster.shared)
 							throw new Error("Managed Postgres cleanup is still pending.");
-						// Drop only the native handle. A published process is never signaled, even when health fails.
+						// The elected setup operation may gracefully stop only an exact verified
+						// server whose runtime is missing. Other published servers are never signaled.
 						activeCluster?.lease.release();
 						activeCluster = undefined;
 						await ensureCluster(recoveryOptions);
@@ -414,6 +608,96 @@ async function ensureCluster(
 			});
 		}
 	});
+}
+
+async function stopBrokenManagedPostmaster(
+	metadata: ManagedPostgresMetadata,
+	verified: ManagedPostgresServer,
+	pgCtl: string,
+	context: EmbeddedPostgresRunContext,
+	lease: RuntimePublicationLease,
+	wait: DelayOperation = delay,
+	platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+	const check = () => {
+		const current = managedPostgresMetadata(context.baseDir, metadata.major, false);
+		if (current.clusterId !== metadata.clusterId || current.directoryIdentity !== metadata.directoryIdentity) {
+			throw new Error("Managed Postgres restart identity changed. Preserve the server and data directory.");
+		}
+		return { current, process: verifyManagedPostmasterProcess(current, verified) };
+	};
+	const { current, process: state } = check();
+	if (state.status === "absent") return true;
+	if (managedPostgresRuntimeHealthy(current, verified.port)) return false;
+	const binding = createRequire(import.meta.url)("@bastani/atomic-natives") as {
+		signalVerifiedPostgres(
+			pid: number,
+			expectedStartTime: number,
+			mode: "fast" | "immediate",
+		): "signaled" | "absent" | "mismatch";
+		postgresProcessStartTime(pid: number): { found: boolean; startTime?: number };
+		guardWindowsPostgresProcess(pid: number, expectedStartTime: number): WindowsPostgresProcessGuard;
+	};
+	const released = async () => {
+		const identity = binding.postgresProcessStartTime(verified.pid);
+		if (identity.found || managedPostmaster(current) !== undefined) return false;
+		if (activeCluster?.lease.pid === verified.pid) await activeCluster.lease.wait(0);
+		return true;
+	};
+	const signal = (mode: "fast" | "immediate", observedCreateTime: number) => {
+		if (!lease.refresh()) throw new Error("Postgres setup lease lost before stopping the verified managed server.");
+		const result = binding.signalVerifiedPostgres(verified.pid, observedCreateTime, mode);
+		if (result === "mismatch")
+			throw new Error(
+				"Managed Postgres OS process start identity mismatch. Preserve the server and data directory.",
+			);
+	};
+	const waitForExit = async (guard?: WindowsPostgresProcessGuard) => {
+		for (let attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
+			if (guard?.exited() && (await released())) return true;
+			if (guard === undefined && (await released())) return true;
+			await wait(READY_DELAY_MS);
+		}
+		return (guard === undefined || guard.exited()) && released();
+	};
+	const stop = async (mode: "fast" | "immediate", observedCreateTime: number) => {
+		if (platform !== "win32") {
+			signal(mode, observedCreateTime);
+			return waitForExit();
+		}
+		if (!lease.refresh()) throw new Error("Postgres setup lease lost before stopping the verified managed server.");
+		const guard =
+			windowsPostgresGuardOverride?.(verified.pid, observedCreateTime) ??
+			binding.guardWindowsPostgresProcess(verified.pid, observedCreateTime);
+		try {
+			if (guard.status === "mismatch")
+				throw new Error(
+					"Managed Postgres OS process start identity mismatch. Preserve the server and data directory.",
+				);
+			if (guard.status === "absent") {
+				if (await released()) return true;
+				throw new Error("Managed Postgres shutdown did not release its postmaster file.");
+			}
+			const killed = await context.runAsOwner(pgCtl, [
+				"kill",
+				mode === "fast" ? "INT" : "QUIT",
+				String(verified.pid),
+			]);
+			if (killed.exitCode !== 0)
+				throw new Error(`Could not signal the verified managed Postgres server: ${commandFailureDetail(killed)}`);
+			return await waitForExit(guard);
+		} finally {
+			guard.close();
+		}
+	};
+	if (await stop("fast", state.observedCreateTime)) return true;
+	const fresh = check();
+	if (fresh.process.status === "absent") {
+		if (await released()) return true;
+		throw new Error("Managed Postgres shutdown did not release its postmaster file.");
+	}
+	if (await stop("immediate", fresh.process.observedCreateTime)) return true;
+	throw new Error("Could not stop the verified managed Postgres server within the shutdown budget.");
 }
 
 async function rollbackStartedCluster(
@@ -440,15 +724,16 @@ async function waitForClusterReadiness(
 	attempts = READY_ATTEMPTS,
 	wait: DelayOperation = delay,
 	port = EMBEDDED_PORT,
+	dataDir = join(dirname(logFile), "v18"),
 ): Promise<void> {
 	const deadline = performance.now() + READY_ATTEMPTS * READY_DELAY_MS;
 	try {
 		for (let attempt = 0; attempt < attempts && performance.now() < deadline; attempt += 1) {
-			await assertRetainedPostgresRunning(rollbackCluster, logFile, port);
+			await assertRetainedPostgresRunning(rollbackCluster, logFile, port, dataDir);
 			if (await isReachable(EMBEDDED_HOST, port)) {
 				// The owned process can exit while the asynchronous TCP probe connects
 				// to another listener. Observe it again before accepting readiness.
-				await assertRetainedPostgresRunning(rollbackCluster, logFile, port);
+				await assertRetainedPostgresRunning(rollbackCluster, logFile, port, dataDir);
 				if (rollbackCluster !== undefined) rollbackCluster.shared = true;
 				return;
 			}
@@ -466,6 +751,7 @@ async function assertRetainedPostgresRunning(
 	cluster: ActiveEmbeddedPostgres | undefined,
 	logFile: string,
 	port = EMBEDDED_PORT,
+	dataDir = join(dirname(logFile), "v18"),
 ): Promise<void> {
 	if (cluster === undefined) return;
 	// Native wait(0) has no typed timeout code: match only its exact live-child
@@ -478,7 +764,7 @@ async function assertRetainedPostgresRunning(
 	});
 	if (observed?.exited) {
 		throw new Error(
-			`The embedded Postgres process exited early before accepting connections on ${EMBEDDED_HOST}:${port}; see ${logFile}.${logTail(logFile)}`,
+			`The embedded Postgres process exited early before accepting connections on ${EMBEDDED_HOST}:${port}; see ${logFile}.${logTail(logFile, dataDir)}`,
 		);
 	}
 }
@@ -570,18 +856,69 @@ async function startCluster(
 	logFile: string,
 	context: EmbeddedPostgresRunContext,
 	port = EMBEDDED_PORT,
+	options: { unsafeDurability?: boolean } = {},
 ): Promise<RetainedPostgres> {
 	try {
+		let unsafeDurability = false;
+		if (options.unsafeDurability) {
+			const canonical = (path: string) => {
+				const resolved = realpathSync.native(path);
+				return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+			};
+			const canonicalManagedBase = (path: string): string => {
+				try {
+					return canonical(path);
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+					return join(
+						canonicalManagedBase(dirname(path)),
+						process.platform === "win32" ? basename(path).toLowerCase() : basename(path),
+					);
+				}
+			};
+			const realDataDir = canonical(dataDir);
+			const realTempDir = canonical(tmpdir());
+			const withinTemp = relative(realTempDir, realDataDir);
+			const withinManagedHome = relative(canonicalManagedBase(defaultEmbeddedBaseDir()), realDataDir);
+			unsafeDurability =
+				withinTemp !== "" &&
+				withinTemp !== ".." &&
+				!withinTemp.startsWith(`..${sep}`) &&
+				!isAbsolute(withinTemp) &&
+				(withinManagedHome === ".." || withinManagedHome.startsWith(`..${sep}`) || isAbsolute(withinManagedHome));
+		}
 		return retainedPostgresSpawner()({
 			executable: postgres,
-			args: ["-D", dataDir, "-p", String(port), "-c", `listen_addresses=${EMBEDDED_HOST}`],
+			args: [
+				"-D",
+				dataDir,
+				"-p",
+				String(port),
+				"-c",
+				`listen_addresses=${EMBEDDED_HOST}`,
+				"-c",
+				"logging_collector=on",
+				"-c",
+				"log_directory=log",
+				"-c",
+				"log_filename=postgresql-%a.log",
+				"-c",
+				"log_truncate_on_rotation=on",
+				"-c",
+				"log_rotation_age=1d",
+				"-c",
+				"log_rotation_size=0",
+				...(unsafeDurability
+					? ["-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+					: []),
+			],
 			cwd: dataDir,
 			logFile,
 			...(context.owner === undefined ? {} : { uid: context.owner.uid, gid: context.owner.gid }),
 		});
 	} catch (error) {
 		const detail = error instanceof Error ? error.message : String(error);
-		throw new Error(`Could not start the embedded Postgres cluster: ${detail}${logTail(logFile)}`);
+		throw new Error(`Could not start the embedded Postgres cluster: ${detail}${logTail(logFile, dataDir)}`);
 	}
 }
 
@@ -974,7 +1311,7 @@ async function withSetupLock(
 	const isProcessAlive = options.isProcessAlive ?? processIsAlive;
 	let lease: SetupLockLease | undefined;
 	for (let attempt = 0; attempt < attempts; attempt += 1) {
-		lease = acquireSetupLock(lockDir, clock(), staleMs, isProcessAlive, options.beforeOwnerMarkerWrite);
+		lease = acquireSetupLock(lockDir, clock, staleMs, isProcessAlive, options.beforeOwnerMarkerWrite);
 		if (lease !== undefined) break;
 		if (attempt === attempts - 1) {
 			throw new Error(`Timed out waiting for another Atomic process to finish Postgres setup (${lockDir}).`);
@@ -983,11 +1320,16 @@ async function withSetupLock(
 	}
 	if (lease === undefined) throw new Error(`Could not acquire the embedded Postgres setup lock (${lockDir}).`);
 
-	const refresh = () => refreshSetupLockLease(lease, clock(), options.beforeHeartbeatReplace);
+	let lost = false;
+	const refresh = () => {
+		if (lost) return false;
+		if (!refreshSetupLockLease(lease, clock(), staleMs, options.beforeHeartbeatReplace)) lost = true;
+		return !lost;
+	};
 	const stopHeartbeat = scheduleHeartbeat(refresh, heartbeatMs);
 	try {
 		await fn({
-			runtimePublicationLease: { ownerToken: lease.token, refresh },
+			runtimePublicationLease: { ownerToken: lease.token, refresh, isLost: () => lost },
 			abandonedRuntimeStageOwnerTokens: lease.abandonedOwnerTokens,
 		});
 	} finally {
@@ -998,7 +1340,7 @@ async function withSetupLock(
 
 function acquireSetupLock(
 	lockDir: string,
-	now: HostLeaseTime,
+	clock: () => HostLeaseTime,
 	staleMs: number,
 	isProcessAlive: (pid: number) => boolean,
 	beforeOwnerMarkerWrite?: (lockDir: string) => void,
@@ -1008,13 +1350,16 @@ function acquireSetupLock(
 		const token = `${process.pid}-${crypto.randomUUID()}`;
 		if (createSetupLockDirectory(lockDir)) {
 			beforeOwnerMarkerWrite?.(lockDir);
-			const lease = claimCreatedSetupLock(lockDir, token, now, abandonedOwnerTokens);
+			const lease = claimCreatedSetupLock(lockDir, token, clock(), abandonedOwnerTokens);
 			if (lease !== undefined) return lease;
 		}
 
 		const observation = observeSetupLock(lockDir);
-		if (observation === undefined || !setupLockIsStale(observation, now, staleMs, isProcessAlive)) return undefined;
-		const abandoned = breakStaleSetupLock(lockDir, observation, now, staleMs, token, isProcessAlive);
+		// Sample time after reading the marker: a concurrent renewal can be newer
+		// than a timestamp captured before observation, without any reboot.
+		if (observation === undefined || !setupLockIsStale(observation, clock(), staleMs, isProcessAlive))
+			return undefined;
+		const abandoned = breakStaleSetupLock(lockDir, observation, clock, staleMs, token, isProcessAlive);
 		if (abandoned === undefined) return undefined;
 		for (const abandonedToken of abandoned) abandonedOwnerTokens.add(abandonedToken);
 	}
@@ -1098,9 +1443,11 @@ function errorCode(error: unknown): string | undefined {
 function refreshSetupLockLease(
 	lease: SetupLockLease,
 	now: HostLeaseTime,
+	staleMs: number,
 	beforeReplace?: (temporaryMarkerPath: string) => void,
 ): boolean {
-	if (!ownsSetupLock(lease)) return false;
+	const deadline = performance.now() + Math.min(100, staleMs / 4);
+	if (!ownsSetupLock(lease, deadline)) return false;
 	const record = { token: lease.token, pid: lease.ownerPid, heartbeatMonotonicMs: now.monotonicMs };
 	const temporaryMarkerPath = join(lease.lockDir, `.owner-${lease.token}.tmp-${crypto.randomUUID()}`);
 	try {
@@ -1110,16 +1457,22 @@ function refreshSetupLockLease(
 			flush: true,
 		});
 		beforeReplace?.(temporaryMarkerPath);
-		if (!ownsSetupLock(lease)) {
+		if (!ownsSetupLock(lease, deadline)) {
 			removeMarkerIfOwned(temporaryMarkerPath, record);
 			return false;
 		}
-		// Same-directory rename is the record's atomic commit on every supported
-		// platform. Node's Windows implementation requests replace-existing; if a
-		// platform or scanner still rejects it, retain the intact old marker and
-		// fail ownership rather than falling back to an in-place write.
-		renameSync(temporaryMarkerPath, lease.markerPath);
-		return ownsSetupLock(lease);
+		// Windows readers/scanners can briefly deny replace-existing rename.
+		// Retry only sharing errors, within a fraction of the lease budget, and
+		// recheck the unique owner before every commit attempt. Never overwrite
+		// in place or interpret a displaced owner as a transient I/O failure.
+		return retrySetupLockSharingViolation(() => {
+			if (!ownsSetupLock(lease, deadline)) {
+				removeMarkerIfOwned(temporaryMarkerPath, record);
+				return false;
+			}
+			renameSync(temporaryMarkerPath, lease.markerPath);
+			return ownsSetupLock(lease, deadline);
+		}, deadline);
 	} catch {
 		removeMarkerIfOwned(temporaryMarkerPath, record);
 		return false;
@@ -1142,10 +1495,28 @@ function removeMarkerIfOwned(path: string, expected: LockOwnerRecord): void {
 	}
 }
 
-function ownsSetupLock(lease: SetupLockLease): boolean {
+function retrySetupLockSharingViolation<T>(operation: () => T, deadline: number): T {
+	let backoffMs = 1;
+	for (;;) {
+		try {
+			return operation();
+		} catch (error) {
+			const remainingMs = deadline - performance.now();
+			if (!["EPERM", "EACCES", "EBUSY"].includes(errorCode(error) ?? "") || remainingMs <= 0) throw error;
+			// refresh() is synchronous because callers fence publication with its
+			// result. This bounded sleep yields the CPU to the competing reader.
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(backoffMs, remainingMs));
+			backoffMs = Math.min(10, backoffMs * 2);
+		}
+	}
+}
+
+function ownsSetupLock(lease: SetupLockLease, deadline = performance.now()): boolean {
 	try {
-		const record = parseLockOwner(readFileSync(lease.markerPath, "utf8"));
-		return record?.token === lease.token && record.pid === lease.ownerPid && lstatSync(lease.markerPath).isFile();
+		return retrySetupLockSharingViolation(() => {
+			const record = parseLockOwner(readFileSync(lease.markerPath, "utf8"));
+			return record?.token === lease.token && record.pid === lease.ownerPid && lstatSync(lease.markerPath).isFile();
+		}, deadline);
 	} catch {
 		return false;
 	}
@@ -1167,7 +1538,7 @@ function releaseSetupLock(lease: SetupLockLease): void {
 function breakStaleSetupLock(
 	lockDir: string,
 	observed: LockObservation,
-	now: HostLeaseTime,
+	clock: () => HostLeaseTime,
 	staleMs: number,
 	token: string,
 	isProcessAlive: (pid: number) => boolean,
@@ -1182,7 +1553,7 @@ function breakStaleSetupLock(
 	if (
 		displaced === undefined ||
 		displaced.fingerprint !== observed.fingerprint ||
-		!setupLockIsStale(displaced, now, staleMs, isProcessAlive)
+		!setupLockIsStale(displaced, clock(), staleMs, isProcessAlive)
 	) {
 		try {
 			renameSync(breakPath, lockDir);
@@ -1324,14 +1695,48 @@ function scheduleSetupLockHeartbeat(heartbeat: () => boolean, intervalMs: number
 	return () => clearInterval(timer);
 }
 
-function logTail(logFile: string): string {
+function readLogSuffix(file: string): string {
+	const fd = openSync(file, "r");
 	try {
-		const lines = readFileSync(logFile, "utf8").trimEnd().split("\n");
-		return `\nPostgres log tail:\n${lines.slice(-5).join("\n")}`;
-	} catch {
-		return "";
+		const size = fstatSync(fd).size;
+		const buffer = Buffer.alloc(Math.min(size, 64 * 1024));
+		const bytesRead = readSync(fd, buffer, 0, buffer.length, size - buffer.length);
+		return buffer.toString("utf8", 0, bytesRead);
+	} finally {
+		closeSync(fd);
 	}
 }
+
+function logTail(logFile: string, dataDir: string): string {
+	const tails: string[] = [];
+	const appendTail = (file: string, label: string) => {
+		try {
+			const lines = readLogSuffix(file).trimEnd().split("\n");
+			tails.push(`${label}:\n${lines.slice(-5).join("\n")}`);
+		} catch {}
+	};
+	appendTail(logFile, "Postgres log tail");
+	try {
+		const current = readLogSuffix(join(dataDir, "current_logfiles")).match(/^stderr\s+(.+)$/m)?.[1];
+		if (current) {
+			const logDir = join(dataDir, "log");
+			const realDataDir = realpathSync(dataDir);
+			const realLogDir = realpathSync(logDir);
+			const candidate = join(dataDir, current.trim());
+			const lexical = relative(logDir, candidate);
+			const resolved = relative(realLogDir, realpathSync(candidate));
+			if (
+				realLogDir === join(realDataDir, "log") &&
+				[lexical, resolved].every(
+					(part) => part !== "" && part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part),
+				)
+			)
+				appendTail(candidate, "Postgres collector log tail");
+		}
+	} catch {}
+	return tails.length ? `\n${tails.join("\n")}` : "";
+}
+
 function setActiveClusterForTests(lease: RetainedPostgres | undefined): ActiveEmbeddedPostgres | undefined {
 	activeCluster = lease === undefined ? undefined : { lease };
 	return activeCluster;
@@ -1339,6 +1744,10 @@ function setActiveClusterForTests(lease: RetainedPostgres | undefined): ActiveEm
 
 function setRetainedPostgresSpawnerForTests(spawner: RetainedPostgresSpawner | undefined): void {
 	retainedPostgresSpawnerOverride = spawner;
+}
+
+function setWindowsPostgresGuardForTests(factory: WindowsPostgresGuardFactory | undefined): void {
+	windowsPostgresGuardOverride = factory;
 }
 
 function setEnsureOperationForTests(operation: EnsureOperation | undefined): void {
@@ -1349,10 +1758,13 @@ function setEnsureOperationForTests(operation: EnsureOperation | undefined): voi
 /** Narrow seams for retained-process lifecycle tests. */
 export const embeddedPostgresTestHooks = {
 	ensureCluster,
+	stopBrokenManagedPostmaster,
 	ensure: ensureEmbeddedDbosPostgres,
 	setActiveCluster: setActiveClusterForTests,
 	setEnsureOperation: setEnsureOperationForTests,
 	setRetainedPostgresSpawner: setRetainedPostgresSpawnerForTests,
+	setWindowsPostgresGuard: setWindowsPostgresGuardForTests,
+	logTail,
 	startCluster,
 	waitForClusterReadiness,
 	withSetupLock,
@@ -1361,7 +1773,6 @@ export const embeddedPostgresTestHooks = {
 export function resetEmbeddedDbosPostgresForTests(): void {
 	void health?.stop();
 	health = undefined;
-	lastFailure = undefined;
 	ensured = undefined;
 	actualPort = EMBEDDED_PORT;
 	consumer?.release();
@@ -1371,4 +1782,5 @@ export function resetEmbeddedDbosPostgresForTests(): void {
 	activeCluster = undefined;
 	ensureOperation = ensure;
 	retainedPostgresSpawnerOverride = undefined;
+	windowsPostgresGuardOverride = undefined;
 }

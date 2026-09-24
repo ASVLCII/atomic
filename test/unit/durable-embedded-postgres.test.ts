@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	statSync,
 	utimesSync,
@@ -13,13 +14,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RetainedPostgres, RetainedPostgresSpawnOptions } from "@bastani/atomic-natives";
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 import {
-	embeddedPostgresLastFailure,
 	embeddedPostgresTestHooks,
 	loadEmbeddedPostgresBinaries,
-	recoverEmbeddedPostgres,
-	resetEmbeddedDbosPostgresForTests,
 	shutdownEmbeddedDbosPostgres,
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres.js";
 import {
@@ -27,6 +25,11 @@ import {
 	type EmbeddedPostgresRunContext,
 	prepareBinariesForOwner,
 } from "../../packages/workflows/src/durable/dbos-embedded-postgres-root.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+	const original = await importOriginal<typeof import("node:fs")>();
+	return { ...original, renameSync: vi.fn(original.renameSync) };
+});
 
 class FakeLease implements RetainedPostgres {
 	readonly pid = 4242;
@@ -69,6 +72,7 @@ const TEST_SETUP_LOCK_STALE_MS = 40;
 const TEST_SETUP_LOCK_HEARTBEAT_MS = 10;
 
 afterEach(() => {
+	vi.restoreAllMocks();
 	embeddedPostgresTestHooks.setEnsureOperation(undefined);
 	embeddedPostgresTestHooks.setRetainedPostgresSpawner(undefined);
 	embeddedPostgresTestHooks.setActiveCluster(undefined);
@@ -94,72 +98,6 @@ test.skipIf(process.platform === "win32")("read-only runtime inspection preserve
 	}
 });
 
-test("embedded test reset clears the recorded startup failure", async () => {
-	embeddedPostgresTestHooks.setEnsureOperation(async () => {
-		throw new Error("fixture startup failure");
-	});
-	await assert.rejects(embeddedPostgresTestHooks.ensure(), /fixture startup failure/);
-	assert.equal(embeddedPostgresLastFailure()?.message, "fixture startup failure");
-	resetEmbeddedDbosPostgresForTests();
-	assert.equal(embeddedPostgresLastFailure(), undefined);
-});
-
-test("explicit recovery releases a published native handle without signaling the server", async () => {
-	const root = mkdtempSync(join(tmpdir(), "atomic-doctor-published-"));
-	const lease = new FakeLease();
-	const cluster = embeddedPostgresTestHooks.setActiveCluster(lease);
-	await embeddedPostgresTestHooks.waitForClusterReadiness("/postgres.log", cluster, async () => true);
-	try {
-		await assert.rejects(
-			recoverEmbeddedPostgres(
-				{ ...context(), baseDir: root },
-				{
-					version: 1,
-					clusterId: "registered",
-					dataDir: join(root, "v18"),
-					directoryIdentity: "identity",
-					major: 18,
-				},
-			),
-			/requires existing ownership records/,
-		);
-		assert.equal(lease.releaseCalls, 1);
-		assert.deepEqual(lease.interruptCalls, []);
-		await shutdownEmbeddedDbosPostgres();
-		assert.equal(lease.releaseCalls, 1);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
-test("explicit recovery preserves an unpublished retained lease for cleanup", async () => {
-	const root = mkdtempSync(join(tmpdir(), "atomic-doctor-retained-"));
-	const lease = new FakeLease();
-	embeddedPostgresTestHooks.setActiveCluster(lease);
-	try {
-		await assert.rejects(
-			recoverEmbeddedPostgres(
-				{ ...context(), baseDir: root },
-				{
-					version: 1,
-					clusterId: "registered",
-					dataDir: join(root, "v18"),
-					directoryIdentity: "identity",
-					major: 18,
-				},
-			),
-			/cleanup is still pending/,
-		);
-		assert.equal(lease.releaseCalls, 0);
-		assert.deepEqual(lease.interruptCalls, []);
-		await shutdownEmbeddedDbosPostgres();
-		assert.equal(lease.releaseCalls, 1);
-		assert.deepEqual(lease.interruptCalls, [60_000]);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 test("Windows command-line fixture preserves Postgres paths and options as direct arguments", async () => {
 	const lease = new FakeLease();
 	let options: RetainedPostgresSpawnOptions | undefined;
@@ -178,7 +116,26 @@ test("Windows command-line fixture preserves Postgres paths and options as direc
 	assert.equal(result, lease);
 	assert.deepEqual(options, {
 		executable: "C:\\Program Files\\Atomic PostgreSQL\\bin\\postgres.exe",
-		args: ["-D", "C:\\Users\\Atomic User\\postgres data\\v18", "-p", "5439", "-c", "listen_addresses=127.0.0.1"],
+		args: [
+			"-D",
+			"C:\\Users\\Atomic User\\postgres data\\v18",
+			"-p",
+			"5439",
+			"-c",
+			"listen_addresses=127.0.0.1",
+			"-c",
+			"logging_collector=on",
+			"-c",
+			"log_directory=log",
+			"-c",
+			"log_filename=postgresql-%a.log",
+			"-c",
+			"log_truncate_on_rotation=on",
+			"-c",
+			"log_rotation_age=1d",
+			"-c",
+			"log_rotation_size=0",
+		],
 		cwd: "C:\\Users\\Atomic User\\postgres data\\v18",
 		logFile: "C:\\Users\\Atomic User\\postgres data\\v18.log",
 	});
@@ -586,6 +543,48 @@ test("heartbeats keep live slow setup work beyond the stale threshold exclusivel
 	}
 });
 
+test("a heartbeat renewed after a contender samples time is not mistaken for a reboot", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-postgres-lock-clock-race-"));
+	const lockDir = join(root, "setup-lock");
+	let now = 1_000;
+	let heartbeat!: () => boolean;
+	try {
+		await embeddedPostgresTestHooks.withSetupLock(
+			lockDir,
+			async ({ runtimePublicationLease }) => {
+				await assert.rejects(
+					embeddedPostgresTestHooks.withSetupLock(
+						lockDir,
+						async () => {
+							throw new Error("live owner was displaced");
+						},
+						{
+							now: () => {
+								const sampled = now;
+								now += 1;
+								assert.equal(heartbeat(), true);
+								return sampled;
+							},
+							attempts: 1,
+						},
+					),
+					/Timed out waiting for another Atomic process/,
+				);
+				assert.equal(runtimePublicationLease.refresh(), true);
+			},
+			{
+				now: () => now,
+				scheduleHeartbeat: (callback) => {
+					heartbeat = callback;
+					return () => {};
+				},
+			},
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("setup heartbeats atomically replace the owner marker in the same directory", async () => {
 	const root = mkdtempSync(join(tmpdir(), "atomic-postgres-lock-atomic-heartbeat-"));
 	const lockDir = join(root, "setup-lock");
@@ -618,6 +617,58 @@ test("setup heartbeats atomically replace the owner marker in the same directory
 		await owner;
 	} finally {
 		release();
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a transient sharing violation during heartbeat replacement retains the setup lease", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-postgres-lock-sharing-"));
+	const lockDir = join(root, "setup-lock");
+	try {
+		await embeddedPostgresTestHooks.withSetupLock(
+			lockDir,
+			async ({ runtimePublicationLease }) => {
+				const rename = vi
+					.mocked(renameSync)
+					.mockClear()
+					.mockImplementationOnce(() => {
+						throw Object.assign(new Error("Windows sharing violation"), { code: "EPERM" });
+					});
+				assert.equal(runtimePublicationLease.refresh(), true);
+				assert.equal(rename.mock.calls.length, 2);
+			},
+			{ staleMs: 1_000 },
+		);
+		assert.equal(existsSync(lockDir), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a sharing violation cannot hide displacement by a different setup owner", async () => {
+	const root = mkdtempSync(join(tmpdir(), "atomic-postgres-lock-displaced-sharing-"));
+	const lockDir = join(root, "setup-lock");
+	try {
+		await embeddedPostgresTestHooks.withSetupLock(
+			lockDir,
+			async ({ runtimePublicationLease }) => {
+				const markerPath = join(lockDir, readdirSync(lockDir)[0]!);
+				const replacement = JSON.stringify({ token: "replacement", pid: process.pid, heartbeatMonotonicMs: 1 });
+				const rename = vi
+					.mocked(renameSync)
+					.mockClear()
+					.mockImplementationOnce(() => {
+						writeFileSync(markerPath, replacement);
+						throw Object.assign(new Error("Windows sharing violation"), { code: "EPERM" });
+					});
+				assert.equal(runtimePublicationLease.refresh(), false);
+				assert.equal(rename.mock.calls.length, 1, "must not retry the commit after ownership changes");
+				assert.equal(readFileSync(markerPath, "utf8"), replacement);
+			},
+			{ staleMs: 1_000 },
+		);
+		assert.equal(existsSync(lockDir), true, "must not release the replacement owner");
+	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
@@ -867,6 +918,8 @@ test("a stale takeover never deletes a scheduler-delayed live publisher stage", 
 	let takeoverRan = false;
 	let stageSurvivedTakeover = false;
 	try {
+		let heartbeat!: () => boolean;
+		let stagedReads = 0;
 		mkdirSync(join(root, "cluster"), { recursive: true });
 		mkdirSync(join(packageNative, "bin"), { recursive: true });
 		for (const binary of ["initdb", "pg_ctl", "postgres"]) {
@@ -893,6 +946,9 @@ test("a stale takeover never deletes a scheduler-delayed live publisher stage", 
 					rootRunner,
 					{
 						publicationLease: setup.runtimePublicationLease,
+						onContentRead: (path) => {
+							if (path.includes(".native-staged-")) stagedReads++;
+						},
 						yieldToEventLoop: async () => {
 							const stage = existsSync(runtimeDir)
 								? readdirSync(runtimeDir).find((entry) => entry.startsWith(".native-staged-"))
@@ -917,6 +973,7 @@ test("a stale takeover never deletes a scheduler-delayed live publisher stage", 
 									scheduleHeartbeat: () => () => {},
 								},
 							);
+							assert.equal(heartbeat(), false, "heartbeat observes the displaced setup owner");
 						},
 					},
 				);
@@ -924,13 +981,17 @@ test("a stale takeover never deletes a scheduler-delayed live publisher stage", 
 			{
 				clock: () => clock,
 				staleMs: TEST_SETUP_LOCK_STALE_MS,
-				scheduleHeartbeat: () => () => {},
+				scheduleHeartbeat: (callback) => {
+					heartbeat = callback;
+					return () => {};
+				},
 			},
 		);
 
 		await assert.rejects(publisher, /lost its setup lease/);
 		assert.equal(takeoverRan, true);
 		assert.equal(stageSurvivedTakeover, true, "stale heartbeat does not prove that a live stage is abandoned");
+		assert.equal(stagedReads, 0, "the next progress check aborts before sealed stage traversal");
 		assert.equal(
 			readdirSync(runtimeDir).some((entry) => entry.startsWith(".native-staged-")),
 			false,

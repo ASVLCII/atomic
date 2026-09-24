@@ -11,10 +11,21 @@ interface PostgresHealthOperations {
 	readonly recover: () => Promise<void>;
 	readonly validate?: (client: PoolClient) => Promise<void>;
 	readonly wait?: (ms: number) => Promise<void>;
+	readonly now?: () => number;
 }
 
 const HEALTH_INTERVAL_MS = 5_000;
 const RECOVERY_ATTEMPTS = 3;
+
+function isMonitoringConnectionFailure(error: unknown): error is Error {
+	if (!(error instanceof Error)) return false;
+	if ("code" in error)
+		return ["ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT", "57P01", "57P02", "57P03"].includes(
+			String(error.code),
+		);
+	// pg's connection timer, not query/statement timeouts or identity/authentication failures.
+	return error.message === "timeout expired" || error.message === "Connection terminated due to connection timeout";
+}
 
 /** One process-local observer. The recover operation must elect under the shared setup lock. */
 export class PostgresHealth {
@@ -23,6 +34,7 @@ export class PostgresHealth {
 	private stopped = false;
 	private available?: PostgresHealthIdentity;
 	private attempts = 0;
+	private nextRecoveryAt = 0;
 	private failure?: Error;
 	private revision = 0;
 	private readonly listeners = new Set<() => void>();
@@ -84,13 +96,28 @@ export class PostgresHealth {
 
 	private async probe(): Promise<string | undefined> {
 		const revision = this.revision;
-		const identity = await this.operations.probe();
+		let identity: PostgresHealthIdentity | undefined;
+		try {
+			identity = await this.operations.probe();
+		} catch (error) {
+			if (!isMonitoringConnectionFailure(error) || this.stopped) throw error;
+			// A busy host can expire a monitoring connection while existing SQL sockets remain healthy.
+			// Retry only this read-only probe, never borrowed-client validation or application SQL.
+			try {
+				identity = await this.operations.probe();
+			} catch (retryError) {
+				if (!isMonitoringConnectionFailure(retryError)) throw retryError;
+				this.failure = retryError;
+				return undefined;
+			}
+		}
 		if (revision !== this.revision) return undefined;
 		if (this.stopped) throw new Error("Managed Postgres health observer is stopped.");
 		if (!identity) return undefined;
 		if (this.available && this.available.identity !== identity.identity) this.invalidate();
 		this.available = identity;
 		this.attempts = 0;
+		this.nextRecoveryAt = 0;
 		return identity.url;
 	}
 
@@ -105,10 +132,12 @@ export class PostgresHealth {
 			if (!(error instanceof Error && "code" in error && error.code === "53300")) this.invalidate();
 			throw error;
 		}
-		// Retain the most recent outage for doctor even after automatic recovery succeeds.
+		// Preserve the latest outage for diagnostics even after automatic recovery.
 		if (this.attempts === 0)
 			this.failure = new DbosDependencyError("Managed PostgreSQL failed its live health check.");
 		this.invalidate();
+		if ((this.operations.now ?? Date.now)() < this.nextRecoveryAt)
+			throw new DbosDependencyError("Managed Postgres recovery is cooling down after bounded attempts.");
 		while (!this.stopped && this.attempts < RECOVERY_ATTEMPTS) {
 			const attempt = this.attempts++;
 			if (attempt > 0)
@@ -124,6 +153,8 @@ export class PostgresHealth {
 				this.failure = error instanceof Error ? error : new Error(String(error));
 			}
 		}
+		this.attempts = 0;
+		this.nextRecoveryAt = (this.operations.now ?? Date.now)() + HEALTH_INTERVAL_MS;
 		throw new DbosDependencyError(
 			"Managed Postgres is unavailable after bounded recovery. Preserve its data and ownership records.",
 		);

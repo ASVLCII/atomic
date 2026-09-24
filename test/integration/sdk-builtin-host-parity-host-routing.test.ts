@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getCurrentTools } from "@bastani/pi-ai";
 import { test, vi } from "vitest";
 import {
@@ -18,8 +17,8 @@ import { run } from "../../packages/workflows/src/engine/run.js";
 import { workflowPolicyFromContext } from "../../packages/workflows/src/extension/workflow-policy.js";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { RealPostgresHome, reserveListener } from "../helpers/real-postgres.js";
-import { spawnSyncCollect } from "../helpers/runtime.js";
 import { attachedCliPresentation, forwardCliDialogs } from "./fixtures/sdk-host-cli.js";
+import { runBuiltNodeFixture } from "./sdk-builtin-host-parity-helpers.js";
 
 // #3105: human input is independent of terminal presentation.
 test("workflow execution policy admits a callback host without a terminal", () => {
@@ -782,12 +781,12 @@ const BUILT_NODE_HOST_PROCESS_TIMEOUT_MS = 60_000;
 test(
 	"built non-TTY Node routes the unchanged workflow and exits after public session disposal",
 	() => {
-		const result = spawnSyncCollect(
-			[process.execPath, fileURLToPath(new URL("../fixtures/sdk-host-built-node.mjs", import.meta.url))],
-			{
-				timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS,
-			},
-		);
+		const result = runBuiltNodeFixture("sdk-host-built-node.mjs", [], [], {
+			...process.env,
+			DBOS_SYSTEM_DATABASE_URL: undefined,
+			ATOMIC_POSTGRES_RUNTIME_DIR: undefined,
+			PGPORT: "0",
+		});
 		assert.equal(result.exitCode, 0, result.stderr.toString());
 		const receipt = JSON.parse(result.stdout.toString().trim());
 		assert.equal(receipt.host, "built-node");
@@ -806,14 +805,12 @@ test(
 test(
 	"built non-TTY Node finalizes a pending workflow when replacement creation rejects before a new session",
 	() => {
-		const result = spawnSyncCollect(
-			[
-				process.execPath,
-				fileURLToPath(new URL("../fixtures/sdk-host-built-node.mjs", import.meta.url)),
-				"--replacement-failure",
-			],
-			{ timeout: BUILT_NODE_HOST_PROCESS_TIMEOUT_MS },
-		);
+		const result = runBuiltNodeFixture("sdk-host-built-node.mjs", ["--replacement-failure"], [], {
+			...process.env,
+			DBOS_SYSTEM_DATABASE_URL: undefined,
+			ATOMIC_POSTGRES_RUNTIME_DIR: undefined,
+			PGPORT: "0",
+		});
 		assert.equal(result.exitCode, 0, result.stderr.toString());
 		assert.deepEqual(JSON.parse(result.stdout.toString().trim()), {
 			host: "built-node",

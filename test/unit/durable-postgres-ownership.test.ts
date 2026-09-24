@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { renameSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, test } from "vitest";
 import {
 	EmbeddedPostgresCleanupPendingError,
@@ -34,7 +34,17 @@ function fixture() {
 	makeDirectorySync(join(data, "global"));
 	writeTextSync(join(data, "global", "pg_control"), "AAAAAAAA");
 	writeTextSync(join(data, "postmaster.pid"), `${process.pid}\n${data}\n1\n5439\n`);
-	return { root, data };
+	const postgres = join(root, "runtime", "native", "bin", "postgres");
+	makeDirectorySync(dirname(postgres), { recursive: true });
+	makeDirectorySync(join(root, "runtime", "native", "share", "postgresql", "timezonesets"), { recursive: true });
+	writeTextSync(join(root, "runtime", "native", "share", "postgresql", "timezonesets", "Default"), "timezone");
+	writeTextSync(postgres, "fixture");
+	writeTextSync(
+		join(data, "postmaster.opts"),
+		`${postgres} "-D" "${data}" "-p" "5439" "-c" "listen_addresses=127.0.0.1"\n`,
+	);
+	const binaries = { pg_ctl: postgres, initdb: postgres, postgres };
+	return { root, data, binaries };
 }
 const identityRow = (data: string) => ({
 	data_dir: data,
@@ -179,9 +189,11 @@ for (const abandon of [false, true]) {
 }
 
 test("managed attach registers a consumer and reattaches after orderly shutdown without reinitializing", async () => {
-	const { root, data } = fixture();
+	const { root, data, binaries } = fixture();
 	managedPostgresMetadata(root, 18, true);
 	const options = {
+		binaries,
+		prepared: true,
 		context: {
 			baseDir: root,
 			runAsOwner: async () => {
@@ -207,6 +219,16 @@ test("failed ensure retains a timed-out startup lease until a later shutdown", a
 	const root = makeTempDirectory("atomic-pg-startup-rollback-");
 	roots.push(root);
 	const data = join(root, "v18");
+	const native = join(root, "runtime", "native");
+	makeDirectorySync(join(native, "bin"), { recursive: true });
+	makeDirectorySync(join(native, "share", "postgresql", "timezonesets"), { recursive: true });
+	writeTextSync(join(native, "share", "postgresql", "timezonesets", "Default"), "timezone");
+	const binaries = {
+		pg_ctl: join(native, "bin", "pg_ctl"),
+		initdb: join(native, "bin", "initdb"),
+		postgres: join(native, "bin", "postgres"),
+	};
+	for (const binary of Object.values(binaries)) writeTextSync(binary, "fixture");
 	const cleanupError = new Error("Timed out waiting for retained Postgres");
 	const interruptCalls: number[] = [];
 	let releaseCalls = 0;
@@ -238,13 +260,14 @@ test("failed ensure retains a timed-out startup lease until a later shutdown", a
 					return { exitCode: 0, stdout: "", stderr: "" };
 				},
 			},
-			binaries: { pg_ctl: "fake-pg_ctl", initdb: "fake-initdb", postgres: "fake-postgres" },
+			binaries,
+			prepared: true,
 			isReachable: async () => false,
 		}),
 	);
 
 	await assert.rejects(hooks.ensure(), (error: unknown) => {
-		assert.ok(error instanceof EmbeddedPostgresCleanupPendingError);
+		assert.ok(error instanceof EmbeddedPostgresCleanupPendingError, String(error));
 		assert.equal(error.errors.length, 2);
 		assert.ok(error.errors[0] instanceof Error);
 		assert.ok(!(error.errors[0] instanceof AggregateError));
@@ -298,7 +321,7 @@ test("missing managed data never triggers initdb over an existing identity", asy
 });
 
 test("shutdown during attachment waits for publication then releases the consumer", async () => {
-	const { root, data } = fixture();
+	const { root, data, binaries } = fixture();
 	managedPostgresMetadata(root, 18, true);
 	let proceed!: () => void;
 	const pending = new Promise<void>((resolve) => {
@@ -306,6 +329,8 @@ test("shutdown during attachment waits for publication then releases the consume
 	});
 	hooks.setEnsureOperation(() =>
 		hooks.ensureCluster({
+			binaries,
+			prepared: true,
 			context: {
 				baseDir: root,
 				runAsOwner: async () => {

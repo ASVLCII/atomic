@@ -1,8 +1,18 @@
+import assert from "node:assert/strict";
 import { test } from "vitest";
-import { expectDrainedFixture, expectVerifiedFixture } from "./sdk-builtin-host-parity-helpers.js";
+import { expectDrainedFixture, expectVerifiedFixture, runBuiltNodeFixture } from "./sdk-builtin-host-parity-helpers.js";
 
 // Declared in-file: the duration guard resolves timeout expressions only from numeric consts in this file.
 const BUILT_NODE_HOST_PROCESS_TIMEOUT_MS = 60_000;
+
+test("retained workflow fixture rejects an unowned home before host initialization", () => {
+	const result = runBuiltNodeFixture("sdk-host-concurrent-replacements.mjs", ["new", "dispose", "workflow"], [], {
+		...process.env,
+		ATOMIC_MANAGED_TEST_HOME: undefined,
+	});
+	assert.notEqual(result.exitCode, 0);
+	assert.match(result.stderr.toString(), /requires a disposable managed HOME/);
+});
 
 // #3105: every admitted successor remains owned through reverse publication and failure.
 // The duration guard expands only literal scalar test.each tables with a %s
@@ -50,8 +60,14 @@ test.each(["acquisition", "shell", "settings"])(
 
 test.each(["success", "failure", "both-fail", "dispose", "cleanup", "startup"])(
 	"built Node overlapping retained workflow %s",
-	(outcome) => {
-		expectDrainedFixture("sdk-host-concurrent-replacements.mjs", ["new", outcome, "workflow"]);
+	async (outcome) => {
+		expectDrainedFixture("sdk-host-concurrent-replacements.mjs", ["new", outcome, "workflow"], {
+			...process.env,
+			DBOS_SYSTEM_DATABASE_URL: undefined,
+			ATOMIC_POSTGRES_RUNTIME_DIR: undefined,
+			// Embedded resolution supplies its own URL. Refuse Docker before it can start a container.
+			PGPORT: "0",
+		});
 	},
 	BUILT_NODE_HOST_PROCESS_TIMEOUT_MS + 5_000,
 );

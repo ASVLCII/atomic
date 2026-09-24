@@ -36,6 +36,13 @@ export declare class RetainedPostgres {
   release(): void
 }
 
+/** Available only on Windows. */
+export declare class WindowsPostgresProcessGuard {
+  get status(): 'live' | 'absent' | 'mismatch'
+  exited(): boolean
+  close(): void
+}
+
 export declare class RunnerLease {}
 
 export declare class StdinLease {}
@@ -631,6 +638,13 @@ export interface OwnerSnapshot {
   cursor: Cursor
 }
 
+export interface PostgresProcessIdentity {
+  found: boolean
+  startTime?: number
+}
+
+export declare function postgresProcessStartTime(pid: number): PostgresProcessIdentity
+
 export interface PromptRoute {
   sessionId: string
   promptId: string
@@ -740,6 +754,8 @@ export interface SettlementReceipt {
   completionId: string
 }
 
+export declare function signalVerifiedPostgres(pid: number, expectedStartTime: number, mode: string): string
+
 export declare function spawnRetainedPostgres(options: RetainedPostgresSpawnOptions): RetainedPostgres
 
 export interface SubscriptionDrain {
@@ -814,3 +830,6 @@ export type WaitOutcome =
   | { kind: 'yielded'; taskId: string; waitId: string; reason: YieldReason }
 
 export type YieldReason = 'explicit' | 'default-background' | 'elapsed' | 'intercom-coordination' | 'input-needed'
+
+/** Available only on Windows. */
+export declare function guardWindowsPostgresProcess(pid: number, expectedStartTime: number): WindowsPostgresProcessGuard
