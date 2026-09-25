@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.20-alpha.12] - 2026-09-24
+
 ### Changed
 
 - Subagent orchestration guidance again makes workflows the default for non-trivial structured work with verifiable objectives, such as implementation, review, or retry pipelines, unless you ask for inline execution.
