@@ -33,6 +33,8 @@ Benchmark results are measurements under named harnesses, dates, models, efforts
 
 Missing evidence is unknown, not zero. A rounded lead is not proof of significance. A result for one provider, model version, effort, agent, fallback setting, or benchmark harness does not transfer to another identity.
 
+Prefer recency. Each row in [Evals](/models/evals) has a release date. When candidates fit the same role tier and price range, choose the most recently released model over an older one from the same provider or family; a newer release usually supersedes it. Do not let an older model win only because it has no evals row: its missing evidence stays unknown, and a recent comparable model with evidence is the safer choice. Recency does not override the role's cost tier or explicit constraints.
+
 ## Role-based thinking effort
 
 Use these starting defaults unless the user requests a level. Higher effort can improve hard reasoning, but it also costs more and can be slower. `max` is an exception, not a default.

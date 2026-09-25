@@ -174,9 +174,10 @@ test("public stage auto uses actual prompt and shipped evals before admission", 
 	assert.deepEqual(Object.keys(state).sort(), ["agent", "evals", "model_selection_guide", "task"]);
 	assert.equal(state.policy, undefined);
 	assert.equal(state.evidence, undefined);
-	assert.match(state.evals, /# Evals/);
-	assert.match(state.evals, /top 26 catalog models/);
-	assert.equal(state.evals, readFileSync("packages/coding-agent/docs/models/evals.md", "utf8"));
+	assert.match(state.evals, /# Evals/u);
+	assert.match(state.evals, /all \d+ models on the Artificial Analysis leaderboard/u);
+	assert.doesNotMatch(state.evals, /top 26|Fifty does not fit/u);
+	assert.doesNotMatch(state.evals, /\| claude-opus-5-5 \|/u);
 	assert.match(state.model_selection_guide, /^## Benchmarks are evidence, not policy\n/);
 	assert.match(state.model_selection_guide, /## Role-based thinking effort/);
 	assert.ok(Buffer.byteLength(JSON.stringify(state)) < 30_000);
