@@ -128,7 +128,6 @@ test("formats the keybindings path ~-relative only inside the home directory (#2
 	expect(formatKeybindingsPath(join("/tmp", "atomic-2814", "custom-agent"), home)).toBe(
 		join("/tmp", "atomic-2814", "custom-agent", "keybindings.json"),
 	);
-	// Non-absolute values (e.g. a Windows-looking fixture on POSIX) pass through untouched.
 	expect(formatKeybindingsPath("C:\\Users\\dev\\custom-atomic-agent", home)).toBe(
 		join("C:\\Users\\dev\\custom-atomic-agent", "keybindings.json"),
 	);

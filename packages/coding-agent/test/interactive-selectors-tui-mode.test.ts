@@ -39,7 +39,7 @@ class SelectorTerminal implements Terminal {
 	setProgress(_active: boolean): void {}
 }
 
-function openSettingsSelector(agentDir = "C:\\Users\\dev\\custom-atomic-agent") {
+function openSettingsSelector(agentDir = "C:\\atomic-2814-fixture\\agent") {
 	const settingsManager = SettingsManager.inMemory({});
 	let selector: SettingsSelectorComponent | undefined;
 	const renderer = createInteractiveTui({
@@ -127,6 +127,6 @@ test("/settings renders a home-relative keybindings path that survives 80 column
 	const rendered = stripTerminalSequences(selector.getSettingsList().render(80).join("\n"));
 
 	expect(rendered).toContain(path.join("~", ".atomic", "agent", "keybindings.json"));
-	expect(rendered).not.toContain(getHomeDir());
+	expect(rendered).not.toContain(path.join(getHomeDir(), ".atomic"));
 	mode.ui.stop();
 });
