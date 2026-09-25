@@ -3,8 +3,21 @@ import { jsonBytes, truncateToBytes } from "./model-routing-task.js";
 /** Bounds the evaluation evidence sent with one routing request. */
 export const MODEL_SELECTION_EVALS_JSON_BYTES = 14_200;
 
-const BEDROCK_PREFIX =
-	/^(?:(?:global|us|us-gov|eu|au|jp|apac|ca)\.)?(?:anthropic|amazon|meta|mistral|cohere|ai21|deepseek|openai|qwen|writer|moonshotai|zai)\./u;
+const VENDOR_OR_REGION_PREFIX = /^(?:[a-z][a-z-]*\.)+/u;
+const SNAPSHOT_TOKEN = /^\d{4}$/u;
+const DEPLOYMENT_TOKENS = new Set([
+	"fast",
+	"highspeed",
+	"ultraspeed",
+	"lightning",
+	"beta",
+	"exp",
+	"free",
+	"it",
+	"instruct",
+	"contributor",
+]);
+const ROW_EDITION_TOKENS = new Set(["preview", "instruct", "it"]);
 const VARIANT_TOKENS = new Set([
 	"off",
 	"minimal",
@@ -18,6 +31,7 @@ const VARIANT_TOKENS = new Set([
 	"reasoning",
 	"non",
 	"effort",
+	"preview",
 ]);
 const CLAUDE_FAMILIES = new Set(["opus", "sonnet", "haiku", "fable"]);
 
@@ -36,17 +50,43 @@ export function modelEvidenceTokens(id: string): string[] {
 	const model = normalized
 		.slice(normalized.lastIndexOf("/") + 1)
 		.replace(/^~/u, "")
-		.replace(BEDROCK_PREFIX, "")
+		.replace(VENDOR_OR_REGION_PREFIX, "")
+		.replace(/(?<=[a-z])-\d+:\d+$/u, "")
 		.replace(/:[a-z0-9]+$/u, "")
 		.replace(/-v\d+$/u, "")
 		.replace(/-\d{8}$/u, "");
-	return canonicalClaudeOrder(model.split(/[-._]/u).filter(Boolean));
+	const tokens = model
+		.split(/[-._]/u)
+		.filter(Boolean)
+		.map((token) => (token === "thinking" ? "reasoning" : token));
+	return canonicalClaudeOrder(tokens);
 }
 
-/** True when `slug` is the candidate model or one of its effort/reasoning variants. */
+/** True when `slug` is the candidate model or one of its effort, edition or snapshot variants. */
 function slugMatchesCandidate(slug: readonly string[], candidate: readonly string[]): boolean {
 	if (slug.length < candidate.length || candidate.some((token, index) => slug[index] !== token)) return false;
-	return slug.slice(candidate.length).every((token) => VARIANT_TOKENS.has(token));
+	return slug
+		.slice(candidate.length)
+		.every((token) => VARIANT_TOKENS.has(token) || ROW_EDITION_TOKENS.has(token) || SNAPSHOT_TOKEN.test(token));
+}
+
+/**
+ * The candidate's own tokens first, then the same model without trailing
+ * deployment, reasoning-mode or snapshot suffixes (`gpt-5.4-fast`,
+ * `grok-4.20-reasoning`, `qwen3.8-max-0902`). A fallback applies only when the
+ * more specific form matched no row, so a model that is itself named `-fast`
+ * keeps its own evidence.
+ */
+function candidateForms(tokens: readonly string[]): string[][] {
+	const forms = [[...tokens]];
+	let current = [...tokens];
+	while (current.length > 1) {
+		const last = current[current.length - 1]!;
+		if (!DEPLOYMENT_TOKENS.has(last) && !VARIANT_TOKENS.has(last) && !SNAPSHOT_TOKEN.test(last)) break;
+		current = current.slice(0, -1);
+		forms.push(current);
+	}
+	return forms;
 }
 
 /**
@@ -54,17 +94,27 @@ function slugMatchesCandidate(slug: readonly string[], candidate: readonly strin
  * candidate model, bounded to the routing evidence budget.
  */
 export function filterModelSelectionEvals(evals: string, candidates: readonly string[]): string {
-	const wanted = [...new Set(candidates)].map(modelEvidenceTokens);
 	const lines = evals.split("\n");
 	const headerIndex = lines.findIndex((line) => /^\|\s*slug\s*\|/u.test(line));
 	if (headerIndex < 0) return truncateToBytes(evals, MODEL_SELECTION_EVALS_JSON_BYTES);
-	const rows = lines.slice(headerIndex + 2).filter((line) => {
-		const slug = line.startsWith("|") ? line.split("|")[1]?.trim() : undefined;
-		if (!slug) return false;
-		const tokens = modelEvidenceTokens(slug);
-		return wanted.some((candidate) => slugMatchesCandidate(tokens, candidate));
-	});
-	const filtered = [...lines.slice(0, headerIndex + 2), ...rows].join("\n");
+	const rows = lines
+		.slice(headerIndex + 2)
+		.map((line, order) => {
+			const slug = line.startsWith("|") ? line.split("|")[1]?.trim() : undefined;
+			return { line, order, tokens: slug ? modelEvidenceTokens(slug) : undefined };
+		})
+		.filter((row): row is { line: string; order: number; tokens: string[] } => row.tokens !== undefined);
+	const selected = new Set<number>();
+	for (const candidate of new Set(candidates)) {
+		for (const form of candidateForms(modelEvidenceTokens(candidate))) {
+			const matches = rows.filter((row) => slugMatchesCandidate(row.tokens, form));
+			if (matches.length === 0) continue;
+			for (const row of matches) selected.add(row.order);
+			break;
+		}
+	}
+	const kept = rows.filter((row) => selected.has(row.order)).map((row) => row.line);
+	const filtered = [...lines.slice(0, headerIndex + 2), ...kept].join("\n");
 	return jsonBytes(filtered) <= MODEL_SELECTION_EVALS_JSON_BYTES
 		? filtered
 		: truncateToBytes(filtered, MODEL_SELECTION_EVALS_JSON_BYTES);

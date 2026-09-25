@@ -19,6 +19,20 @@ const slugs = [
 	"gpt-5-5-high",
 	"gpt-5-5-pro",
 	"gpt-5-5-mini",
+	"gpt-5-4",
+	"grok-4-1",
+	"grok-4-1-fast",
+	"grok-4-6",
+	"gemini-3-1-flash-lite-preview",
+	"gemini-3-5-flash-lite",
+	"qwen3-8-max",
+	"qwen3-8-max-0803",
+	"gpt-oss-120b",
+	"qwen3-32b-instruct",
+	"qwen3-next-80b-a3b-reasoning",
+	"minimax-m2-7",
+	"gemma-3-27b",
+	"glm-5-3",
 ];
 const evals = [
 	"# Evals",
@@ -60,10 +74,35 @@ test("Artificial Analysis version-first Claude slugs match catalog family-first 
 	assert.deepEqual(rowsFor(["anthropic/claude-sonnet-4-6"]), ["claude-sonnet-4-6-non-reasoning-low-effort"]);
 });
 
+test("deployment and snapshot suffixes fall back to the base model only when the exact model has no row", () => {
+	assert.deepEqual(rowsFor(["vercel-ai-gateway/openai/gpt-5.4-fast"]), ["gpt-5-4"]);
+	assert.deepEqual(rowsFor(["spacexai/grok-4.1-fast"]), ["grok-4-1-fast"]);
+	assert.deepEqual(rowsFor(["vercel-ai-gateway/alibaba/qwen3.8-max-0902"]), ["qwen3-8-max", "qwen3-8-max-0803"]);
+	assert.deepEqual(rowsFor(["google/gemini-3.1-flash-lite"]), ["gemini-3-1-flash-lite-preview"]);
+});
+
+test("any Bedrock vendor or region prefix is removed", () => {
+	assert.deepEqual(rowsFor(["amazon-bedrock/us.xai.grok-4.6"]), ["grok-4-6"]);
+	assert.deepEqual(rowsFor(["amazon-bedrock/in.openai.gpt-5.4"]), ["gpt-5-4"]);
+	assert.deepEqual(rowsFor(["amazon-bedrock/openai.gpt-oss-120b-1:0"]), ["gpt-oss-120b"]);
+});
+
+test("catalog naming conventions resolve to Artificial Analysis rows", () => {
+	assert.deepEqual(rowsFor(["vercel-ai-gateway/alibaba/qwen3-next-80b-a3b-thinking"]), [
+		"qwen3-next-80b-a3b-reasoning",
+	]);
+	assert.deepEqual(rowsFor(["amazon-bedrock/qwen.qwen3-32b-v1:0"]), ["qwen3-32b-instruct"]);
+	assert.deepEqual(rowsFor(["minimax/minimax-m2.7-highspeed"]), ["minimax-m2-7"]);
+	assert.deepEqual(rowsFor(["google/gemma-3-27b-it"]), ["gemma-3-27b"]);
+});
+
 test("a shorter version or a different product line never borrows another model's evidence", () => {
 	assert.deepEqual(rowsFor(["anthropic/claude-opus-5"]), ["claude-opus-5"]);
 	assert.deepEqual(rowsFor(["openai/gpt-5.5-pro"]), ["gpt-5-5-pro"]);
 	assert.deepEqual(rowsFor(["anthropic/claude-haiku-4-5"]), []);
+	assert.deepEqual(rowsFor(["anthropic/claude-opus-4-8"]), [], "a neighbouring version is not evidence");
+	assert.deepEqual(rowsFor(["google/gemini-3.1-flash-lite"]).includes("gemini-3-5-flash-lite"), false);
+	assert.deepEqual(rowsFor(["zai/glm-5.3-flashx"]), [], "a differently named sibling is not a suffix variant");
 });
 
 test("filtered evidence keeps the preamble and stays within the routing budget", () => {
