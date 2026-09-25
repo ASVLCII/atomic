@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Automatic model routing (`model: "auto"`) now has benchmark evidence for every model on the Artificial Analysis leaderboard instead of the top 27. Each routing request includes only the rows for your eligible models and their effort variants, matched across providers (for example `claude-opus-4.6` on Copilot and `us.anthropic.claude-opus-4-6-v1` on Bedrock).
+- Automatic model routing now prefers the most recently released model among candidates in the same role tier and price range, so an older model no longer wins just because it has no benchmark row.
+
 ## [0.9.21-alpha.1] - 2026-09-25
 
 ### Fixed

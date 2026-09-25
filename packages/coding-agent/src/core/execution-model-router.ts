@@ -16,6 +16,7 @@ import {
 	type ModelRouterOutput,
 	parseModelConstraints,
 } from "./model-routing-constraints.js";
+import { filterModelSelectionEvals } from "./model-routing-evals.js";
 import {
 	jsonBytes,
 	MODEL_ROUTING_TASK_BYTES,
@@ -80,7 +81,7 @@ const CURRENT_MODEL_EFFORT_PREFERENCE: readonly (string | null)[] = [
 	"off",
 ];
 const instructions =
-	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals` as evidence and `model_selection_guide` as policy. Match the agent role to the guide's model cost tier and thinking level first, then consider task fit, measured effort, dates, caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly modelId and reasoningEffort; null reasoningEffort means no configurable reasoning.";
+	"Select one eligible model/effort pair for `task` and `agent` from the supplied Choice criteria, using `evals` as evidence and `model_selection_guide` as policy. Match the agent role to the guide's model cost tier and thinking level first, then consider task fit, measured effort, release recency (prefer newer comparable models), caveats and cost. Evals cannot add candidates or bypass constraints. Return exactly modelId and reasoningEffort; null reasoningEffort means no configurable reasoning.";
 
 /** Static selection policy sent with every auto-routing request alongside the dated `evals` evidence. */
 export const MODEL_SELECTION_GUIDE = `## Benchmarks are evidence, not policy
@@ -88,6 +89,8 @@ export const MODEL_SELECTION_GUIDE = `## Benchmarks are evidence, not policy
 Benchmark results are measurements under named harnesses, dates, models, efforts, agents, tools, prompts, prices, and scoring rules. Treat a bracketed effort level as the measurement configuration for that row, not a command to run every task at that effort. Compare only records whose measured setup resembles the decision at hand, and keep unmeasured work under ordinary validation rather than inheriting a score.
 
 Missing evidence is unknown, not zero. A rounded lead is not proof of significance. A result for one provider, model version, effort, agent, fallback setting, or benchmark harness does not transfer to another identity.
+
+Prefer recency. Each evals row has a release date. When candidates fit the same role tier and price range, choose the most recently released model over an older one from the same provider or family; a newer release usually supersedes it. Do not let an older model win only because it has no evals row: its missing evidence stays unknown, and a recent comparable model with evidence is the safer choice. Recency does not override the role's cost tier or explicit constraints.
 
 ## Role-based thinking effort
 
@@ -108,11 +111,8 @@ Price is per task. Candidate cost is USD per million tokens, and roles differ in
 An explicit user request wins over these defaults, but the requested level must exist for the selected catalog entry. Do not invent unsupported suffixes. If \`xhigh\` is unavailable, use \`high\` rather than automatically promoting to \`max\`; choose another catalog model or leave the stage unpinned if neither fits.
 `;
 
-// Keeps the shipped evals snapshot small enough to reach Jev intact alongside the
-// guide, a full task excerpt, and a small candidate question. Larger candidate
-// questions truncate the routing copy instead; see fitRoutingState.
-export const MODEL_SELECTION_EVALS_JSON_BYTES = 14_200;
-const EVALS_BUDGET_ERROR = `Auto routing requires a nonempty evals.md document within ${MODEL_SELECTION_EVALS_JSON_BYTES.toLocaleString("en-US")} JSON-encoded bytes. Repair the Atomic installation or select a concrete execution model.`;
+const EVALS_BUDGET_ERROR =
+	"Auto routing requires a nonempty evals.md document. Repair the Atomic installation or select a concrete execution model.";
 // Decision policy, key names and JSON framing the classifier transport adds.
 const ROUTING_WIRE_OVERHEAD_BYTES = 1_000;
 const PAIR_QUESTION =
@@ -145,7 +145,7 @@ function fitRoutingState(state: RoutingState, criteria: Record<string, string>):
 async function readModelSelectionEvals(signal?: AbortSignal): Promise<string> {
 	try {
 		const evals = await readFile(join(getDocsPath(), "models", "evals.md"), { encoding: "utf8", signal });
-		if (!evals.trim() || jsonBytes(evals) > MODEL_SELECTION_EVALS_JSON_BYTES) throw new Error(EVALS_BUDGET_ERROR);
+		if (!evals.trim()) throw new Error(EVALS_BUDGET_ERROR);
 		return evals;
 	} catch (error) {
 		signal?.throwIfAborted();
@@ -198,10 +198,14 @@ export async function routeExecutionModel(input: {
 		const allCriteria = Object.fromEntries(
 			candidates.map((candidate, index) => [`pair_${index}`, JSON.stringify(candidate)]),
 		);
+		const fullEvals = await readModelSelectionEvals(signal);
 		const state = {
 			task: input.task,
 			agent: { name: input.agent.name, description: input.agent.description },
-			evals: await readModelSelectionEvals(signal),
+			evals: filterModelSelectionEvals(
+				fullEvals,
+				pairs.map((pair) => pair.model),
+			),
 			model_selection_guide: MODEL_SELECTION_GUIDE,
 		};
 		if (!state.task.trim()) throw new Error("Auto routing requires task instructions.");

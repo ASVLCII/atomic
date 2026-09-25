@@ -196,10 +196,12 @@ test("explicit classifier routing receives evals, guide, task, and all eligible 
 		cost: { input: 1.25, output: 7.5, cacheRead: 0.2, cacheWrite: 1.5 },
 	}));
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(candidates);
-	const expectedEvals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	const seen = new Set<string>();
 	const classify = mockClassifier(f, (keys, _id, context) => {
-		assert.equal(context.state.evals, expectedEvals);
+		const evals = String(context.state.evals);
+		assert.ok(evals.length < 14_200);
+		assert.ok(evals.includes("| slug | Model | Release date |"));
+		assert.ok(!evals.includes("claude-opus-5-5"));
 		assert.equal(context.state.model_selection_guide, MODEL_SELECTION_GUIDE);
 		for (const question of Object.values(context.questions)) {
 			assert.equal(question.type, "choice");
@@ -279,8 +281,9 @@ test("auto routing receives the shipped evals document verbatim", async () => {
 		/If `xhigh` is unavailable, use `high` rather than automatically promoting to `max`/,
 	);
 	assert.match(state.evals, /# Evals/);
-	assert.match(state.evals, /top 26 catalog models/);
-	assert.equal(state.evals, await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8"));
+	assert.match(state.evals, /all \d+ models on the Artificial Analysis leaderboard/u);
+	assert.doesNotMatch(state.evals, /top 26|Fifty does not fit/u);
+	assert.doesNotMatch(state.evals, /\| claude-opus-5-5 \|/u);
 	assert.ok(Buffer.byteLength(JSON.stringify(context)) < 30_000);
 	assert.equal(options?.maxRetries, 0);
 });
@@ -584,20 +587,27 @@ test("catalog availability is revalidated after inference and immediately before
 	await assert.rejects(f.route(), /no longer eligible/);
 });
 
-for (const evalsCase of ["missing", "empty", "oversized"] as const) {
-	test(`missing, empty and oversized evals fail before inference: ${evalsCase}`, async () => {
+for (const evalsCase of ["missing", "empty"] as const) {
+	test(`missing or empty evals fail before inference: ${evalsCase}`, async () => {
 		const f = await fixture();
 		const read = vi.spyOn(fs, "readFile");
 		if (evalsCase === "missing") read.mockRejectedValueOnce(new Error("missing"));
 		if (evalsCase === "empty") read.mockResolvedValueOnce("");
-		if (evalsCase === "oversized") read.mockResolvedValueOnce("evals ".repeat(3_000));
-		await assert.rejects(
-			f.route(),
-			/Auto routing requires a nonempty evals\.md document within 14,200 JSON-encoded bytes/,
-		);
+		await assert.rejects(f.route(), /Auto routing requires a nonempty evals\.md document/);
 		assert.equal(f.infer.mock.calls.length, 0);
 	});
 }
+
+test("automatic routing accepts an oversized catalog after filtering evidence", async () => {
+	const f = await fixture();
+	vi.spyOn(fs, "readFile").mockResolvedValueOnce(
+		`${"unmatched model ".repeat(3_000)}\n| slug | Model |\n| --- | --- |\n| unrelated | Example |`,
+	);
+	await f.route();
+	const [, context] = f.infer.mock.calls[0]!;
+	const payload = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
+	assert.ok(Buffer.byteLength(JSON.stringify(payload.state.evals), "utf8") <= 14_200);
+});
 
 test("empty catalogs fail before inference", async () => {
 	const f = await fixture();
@@ -830,10 +840,10 @@ test("classifier provider failure cannot return a route without a current chat m
 test("a registered classifier receives a complete short subagent task and its evals", async () => {
 	const f = await fixture();
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue([{ ...decisionModel, id: "gpt-5.6-luna" }]);
-	const expectedEvals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	const classify = mockClassifier(f, (keys, _id, context) => {
 		assert.equal(context.state.task, "Reply with exactly: Hello, world! No tools or file changes.");
-		assert.equal(context.state.evals, expectedEvals);
+		assert.ok(String(context.state.evals).includes("| slug | Model | Release date |"));
+		assert.ok(!String(context.state.evals).includes("| claude-fable-5 |"));
 		assert.equal(context.state.model_selection_guide, MODEL_SELECTION_GUIDE);
 		assert.equal(context.state.policy, undefined);
 		assert.equal(context.state.evidence, undefined);
@@ -853,10 +863,10 @@ test("a classifier receives the intact near-limit task, evals, and two eligible 
 	]);
 	const task = taskNearRoutingLimit();
 	assert.ok(Buffer.byteLength(JSON.stringify(task), "utf8") > MODEL_ROUTING_TASK_BYTES - 200);
-	const expectedEvals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	const classify = mockClassifier(f, (keys, _id, context) => {
 		assert.equal(context.state.task, task);
-		assert.equal(context.state.evals, expectedEvals);
+		assert.ok(String(context.state.evals).includes("| slug | Model | Release date |"));
+		assert.ok(!String(context.state.evals).includes("claude-opus-5-5"));
 		assert.match(String(context.state.task), /{"quoted":"value\\n"}/);
 		assert.match(String(context.state.task), /Ω界/);
 		return keys[1] ?? keys[0]!;
@@ -984,15 +994,14 @@ test("auto routing retains the full benchmark snapshot and distinct provider mod
 		id: "claude-fable-5",
 	}));
 	vi.spyOn(f.ctx.modelRegistry, "getAvailable").mockReturnValue(models);
-	const evals = await fs.readFile("packages/coding-agent/docs/models/evals.md", "utf8");
 	let rank = 0;
 	f.infer.mockImplementation((_model, context) => {
 		const { state } = JSON.parse(context.messages.find((message) => message.role === "user")!.content as string);
 		assert.match(String(state.evals), /## Artificial Analysis Intelligence Index/);
 		assert.match(String(state.evals), /\| claude-fable-5 \| Claude Fable 5 \(/);
-		assert.match(String(state.evals), /`Cod`: Coding Index points/);
-		assert.match(String(state.evals), /`Agt`: Agentic Index points/);
-		assert.equal(state.evals, evals);
+		assert.match(String(state.evals), /Release date/u);
+		assert.doesNotMatch(String(state.evals), /claude-opus-5-5/u);
+		assert.ok(String(state.evals).length < 14_200);
 		assert.equal(state.model_selection_guide, MODEL_SELECTION_GUIDE);
 		return messageStream(
 			decisionMessage({ modelId: `${models[rank++]!.provider}/claude-fable-5`, reasoningEffort: null }),
